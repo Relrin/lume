@@ -1,0 +1,28 @@
+size 40x20
+cursor 19,4 hidden
+screen alternate
+--- text
+00| file.txt
+01|
+02|    ┌────────────────────┐
+03|    │                    │
+04|    │ Hello, editor      │
+05|    │                    │
+06|    │                    │
+07|    └────────────────────┘
+08|
+09|region line 3
+10|region line 4
+11|region line 5
+12|region line 6
+13|
+14|
+15|erase-from-here
+16|ab  cdef
+17|abef
+18|
+19|-- INSERT --
+--- attrs
+00 0..40 inverse
+04 6..19 bold
+19 0..40 inverse

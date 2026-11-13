@@ -1,0 +1,3 @@
+description = "SGR colours and attributes: 16, 256 and direct colour, bold, italic, underline styles"
+cols = 80
+rows = 24

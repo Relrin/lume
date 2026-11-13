@@ -1,0 +1,44 @@
+user@host:~$ seq 1 30
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+user@host:~$ echo hello
+hello
+user@host:~$ ls -lx a
+total 12
+-rw-r--r--  1 user user  512 Nov 14 01:00 Cargo.toml
+-rw-r--r--  1 user user  512 Nov 14 01:00 README.md
+-rw-r--r--  1 user user  512 Nov 14 01:00 src
+user@host:~$ printf 'a\tb\tc\n'
+a	b	c
+user@host:~$ echo wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
+wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
+progress 10%progress 100%
+user@host:~$ 

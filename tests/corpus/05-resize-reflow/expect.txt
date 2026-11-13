@@ -1,0 +1,17 @@
+size 60x12
+cursor 0,6 visible
+screen primary
+--- text
+00|The quick brown fox jumps over the lazy dog. The quick brown
+01| fox jumps over the lazy dog. The quick brown fox jumps over
+02| the lazy dog.
+03|short line
+04|after narrowing: nnnnnnnnnnnnnnnnnnnnnnnnnnnnnn
+05|after widening
+06|
+07|
+08|
+09|
+10|
+11|
+--- attrs

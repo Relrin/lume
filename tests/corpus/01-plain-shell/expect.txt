@@ -1,0 +1,29 @@
+size 80x24
+cursor 13,23 visible
+screen primary
+--- text
+00|22
+01|23
+02|24
+03|25
+04|26
+05|27
+06|28
+07|29
+08|30
+09|user@host:~$ echo hello
+10|hello
+11|user@host:~$ ls -la
+12|total 12
+13|-rw-r--r--  1 user user  512 Nov 14 01:00 Cargo.toml
+14|-rw-r--r--  1 user user  512 Nov 14 01:00 README.md
+15|-rw-r--r--  1 user user  512 Nov 14 01:00 src
+16|user@host:~$ printf 'a\tb\tc\n'
+17|a       b       c
+18|user@host:~$ echo wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
+19|wwwwwwwwwwwwwwwwwwwwwwwwwwww
+20|wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
+21|wwwwwwwwww
+22|progress 100%
+23|user@host:~$
+--- attrs

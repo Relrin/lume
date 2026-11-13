@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "What the main window's local content may call. Nothing from Tauri's core plugins is granted.",
+  "windows": ["main"],
+  "permissions": ["allow-webview-info", "allow-probe-done"]
+}

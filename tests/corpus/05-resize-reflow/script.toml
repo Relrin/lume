@@ -1,0 +1,13 @@
+description = "Soft-wrapped text reflowed by narrowing and then widening the grid"
+cols = 40
+rows = 12
+
+[[resize]]
+at = 149
+cols = 20
+rows = 12
+
+[[resize]]
+at = 198
+cols = 60
+rows = 12

@@ -1,0 +1,10 @@
+target/
+vendor/
+.tools/
+dist/
+node_modules/
+pnpm-lock.yaml
+Cargo.lock
+crates/lume-app/gen/
+tests/corpus/
+tests/fonts/

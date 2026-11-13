@@ -1,0 +1,17 @@
+size 40x12
+cursor 0,10 visible
+screen primary
+--- text
+00|ascii then 中文 then ascii
+01|日本語のテキスト
+02|emoji: 😀 🚀 done
+03|zwj: 👨‍👩‍👧 end
+04|flag: 🇯🇵 end
+05|combining: é ä ô end
+06|vs16: ❤️ end
+07|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+08|中tail
+09|half-width kana: ｶﾞｷﾞ end
+10|
+11|
+--- attrs

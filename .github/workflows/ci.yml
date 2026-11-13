@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Linux system packages Tauri and bindgen need. Windows and macOS runners have theirs.
+  LINUX_PACKAGES: >-
+    build-essential curl file xz-utils libclang-dev xvfb
+    libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_PACKAGES
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache pinned tools and libghostty-vt builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tools
+            vendor/ghostty
+            target/vt
+            packages/vt/dist
+          key: vt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools.toml') }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo xtask setup
+      - run: cargo xtask vt wasm
+      - run: cargo xtask lint
+
+  build-test:
+    name: Build and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_PACKAGES
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache pinned tools and libghostty-vt builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tools
+            vendor/ghostty
+            target/vt
+            packages/vt/dist
+          key: vt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools.toml') }}
+      - name: Setup (pinned Zig, libghostty-vt source, JS dependencies)
+        run: cargo xtask setup
+      - name: Build
+        run: cargo xtask build
+      - name: Test
+        run: cargo xtask test
+      # Start the app, let the page check the webview, print the report and exit.
+      - name: Probe the webview (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a target/debug/lume-gui --probe
+      - name: Probe the webview (Windows, macOS)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: target/debug/lume-gui --probe

@@ -1,0 +1,30 @@
+[package]
+name = "lume-app"
+description = "The Lume application: windows, webviews, and the commands the web UI may call."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "lume-gui"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Serve the built UI from the binary instead of the Vite dev server. `tauri build` and
+# `cargo xtask build` turn this on; `tauri dev` leaves it off.
+custom-protocol = ["tauri/custom-protocol"]

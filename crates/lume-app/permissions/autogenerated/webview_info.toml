@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-webview-info"
+description = "Enables the webview_info command without any pre-configured scope."
+commands.allow = ["webview_info"]
+
+[[permission]]
+identifier = "deny-webview-info"
+description = "Denies the webview_info command without any pre-configured scope."
+commands.deny = ["webview_info"]

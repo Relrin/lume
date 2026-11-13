@@ -1,0 +1,3 @@
+description = "Wide characters, emoji, joined sequences, combining marks, wide wrap at the margin"
+cols = 40
+rows = 12

@@ -1,0 +1,18 @@
+[package]
+name = "lume-vt-sys"
+description = "Raw FFI bindings to libghostty-vt, generated from the headers of the pinned release."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+links = "ghostty-vt"
+build = "build.rs"
+
+[build-dependencies]
+bindgen.workspace = true
+
+# The generated bindings silence these lints themselves in src/lib.rs.
+[lints]
+workspace = true

@@ -1,0 +1,9 @@
+before the full-screen program
+$ editor file.txt
+[?1049h[2J[H[7m file.txt                               [0m[3;5H┌────────────────────┐[4;5H│[4;26H│[5;5H│[5;26H│[6;5H│[6;26H│[7;5H│[7;26H│[8;5H└────────────────────┘[5;7H[1mHello, editor[0m[10;14r[10;1Hregion line 1
+region line 2
+region line 3
+region line 4
+region line 5
+region line 6
+[r[16;1Herase-from-here>>>>>>>>[16;16H[K[17;1Habcdef[17;3H[2@[18;1Habcdef[18;3H[2P[20;1H[7m-- INSERT --                            [0m[5;20H[?25l

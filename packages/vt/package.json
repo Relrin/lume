@@ -1,0 +1,21 @@
+{
+  "name": "@lume/vt",
+  "version": "0.0.0",
+  "private": true,
+  "description": "libghostty-vt built for WebAssembly, with a TypeScript wrapper",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ghostty-vt.wasm": "./dist/ghostty-vt.wasm"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "~6.0.0",
+    "vitest": "^5.0.0"
+  }
+}
