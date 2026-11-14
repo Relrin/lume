@@ -8,3 +8,4 @@ Cargo.lock
 crates/lume-app/gen/
 tests/corpus/
 tests/fonts/
+crates/lume-proto/tests/vectors/

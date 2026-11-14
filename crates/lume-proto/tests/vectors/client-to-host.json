@@ -1,0 +1,197 @@
+[
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "client_kind": "app",
+          "proto": 1,
+          "proto_min": 1,
+          "type": "hello",
+          "vt_version": "1.0.1"
+        },
+        "id": 1
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "spec": {
+            "cwd": "C:\\Users\\someone",
+            "env": [
+              [
+                "LANG",
+                "en_GB.UTF-8"
+              ]
+            ],
+            "launcher": {
+              "args": [
+                "-NoLogo"
+              ],
+              "login": false,
+              "program": "pwsh.exe",
+              "type": "shell"
+            },
+            "size": {
+              "cols": 80,
+              "rows": 24
+            }
+          },
+          "type": "spawn"
+        },
+        "id": 2
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "type": "list"
+        },
+        "id": 3
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "facts": {
+            "cell_px": {
+              "h": 18,
+              "w": 9
+            },
+            "focused": true,
+            "palette": {
+              "ansi": [
+                "#000000",
+                "#010203",
+                "#020406",
+                "#030609",
+                "#04080c",
+                "#050a0f",
+                "#060c12",
+                "#070e15",
+                "#081018",
+                "#09121b",
+                "#0a141e",
+                "#0b1621",
+                "#0c1824",
+                "#0d1a27",
+                "#0e1c2a",
+                "#0f1e2d"
+              ],
+              "bg": "#101112",
+              "cursor": "#fedcba",
+              "fg": "#d0d1d2"
+            },
+            "scheme": "dark",
+            "size": {
+              "cols": 120,
+              "rows": 40
+            },
+            "visible": false
+          },
+          "session": "0123456789abcdef",
+          "stream": 1,
+          "type": "attach"
+        },
+        "id": 4
+      }
+    },
+    "stream": 0
+  },
+  {
+    "bytes": 1048576,
+    "kind": "credit",
+    "stream": 1
+  },
+  {
+    "cell_px": {
+      "h": 18,
+      "w": 9
+    },
+    "kind": "resize",
+    "size": {
+      "cols": 120,
+      "rows": 40
+    },
+    "stream": 1
+  },
+  {
+    "facts": {
+      "cell_px": {
+        "h": 18,
+        "w": 9
+      },
+      "focused": true,
+      "palette": {
+        "ansi": [
+          "#000000",
+          "#010203",
+          "#020406",
+          "#030609",
+          "#04080c",
+          "#050a0f",
+          "#060c12",
+          "#070e15",
+          "#081018",
+          "#09121b",
+          "#0a141e",
+          "#0b1621",
+          "#0c1824",
+          "#0d1a27",
+          "#0e1c2a",
+          "#0f1e2d"
+        ],
+        "bg": "#101112",
+        "cursor": "#fedcba",
+        "fg": "#d0d1d2"
+      },
+      "scheme": "dark",
+      "size": {
+        "cols": 120,
+        "rows": 40
+      },
+      "visible": false
+    },
+    "kind": "facts",
+    "stream": 1
+  },
+  {
+    "bytes": "6563686f2068656c6c6f0d",
+    "kind": "input",
+    "stream": 1
+  },
+  {
+    "bytes": "",
+    "kind": "input",
+    "stream": 1
+  },
+  {
+    "kind": "detach",
+    "stream": 1
+  },
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "session": "0123456789abcdef",
+          "type": "kill"
+        },
+        "id": 5
+      }
+    },
+    "stream": 0
+  }
+]

@@ -1,0 +1,610 @@
+//! A test client written directly on the wire protocol, and the two ways of running the
+//! host under it.
+//!
+//! The client deliberately shares no code with the real client library: the host is
+//! tested against the wire, not against the code that normally talks to it.
+
+// Each test file compiles this module separately and uses a different part of it.
+#![allow(dead_code)]
+
+use std::collections::VecDeque;
+use std::future::Future;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
+
+use lume_host::{Host, HostConfig};
+use lume_proto::{
+    Body, CONTROL_STREAM, CellPx, ClientFacts, ClientKind, ColorScheme, Control, FrameDecoder,
+    Launcher, Message, Notification, PROTO_VERSION, Palette, ProtoError, Request, RequestBody,
+    ResponseBody, Role, SessionId, SessionInfo, SpawnSpec, TermSize, encode,
+};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+
+/// How long any single step of a test may take before the test fails.
+pub const STEP: Duration = Duration::from_secs(20);
+
+/// The value of `LUME_MARK` in every session these tests start.
+pub const MARK: &str = "k7q";
+
+/// What the shell prints for [`PRINT_MARK`].
+pub const MARK_OUTPUT: &str = "lume-k7q-done";
+
+/// A command line that prints [`MARK_OUTPUT`]. The marker comes from the environment so
+/// that it appears in the output only when the command ran, not when it was echoed.
+#[cfg(windows)]
+pub const PRINT_MARK: &str = "echo lume-%LUME_MARK%-done";
+#[cfg(unix)]
+pub const PRINT_MARK: &str = "echo \"lume-${LUME_MARK}-done\"";
+
+/// A command line that prints the terminal size, columns after rows.
+#[cfg(windows)]
+pub const PRINT_SIZE: &str = "mode con";
+#[cfg(unix)]
+pub const PRINT_SIZE: &str = "stty size";
+
+pub fn size(cols: u16, rows: u16) -> TermSize {
+    TermSize::new(cols, rows).unwrap()
+}
+
+pub fn facts() -> ClientFacts {
+    ClientFacts {
+        size: size(80, 24),
+        cell_px: CellPx { w: 9, h: 18 },
+        palette: Palette::default(),
+        scheme: ColorScheme::Dark,
+        focused: true,
+        visible: true,
+    }
+}
+
+fn spec(program: &str, args: &[&str]) -> SpawnSpec {
+    SpawnSpec {
+        launcher: Launcher::Shell {
+            program: program.to_owned(),
+            args: args.iter().map(|&arg| arg.to_owned()).collect(),
+            login: false,
+        },
+        cwd: None,
+        env: vec![("LUME_MARK".to_owned(), MARK.to_owned())],
+        size: size(80, 24),
+    }
+}
+
+/// An interactive shell.
+pub fn shell() -> SpawnSpec {
+    if cfg!(windows) {
+        spec("cmd.exe", &["/d"])
+    } else {
+        spec("/bin/sh", &[])
+    }
+}
+
+/// A program that prints lines for ever.
+pub fn flood() -> SpawnSpec {
+    if cfg!(windows) {
+        spec(
+            "cmd.exe",
+            &[
+                "/d",
+                "/c",
+                "for /l %i in () do @echo 0123456789abcdefghijklmnopqrstuvwxyz",
+            ],
+        )
+    } else {
+        spec(
+            "/bin/sh",
+            &["-c", "yes 0123456789abcdefghijklmnopqrstuvwxyz"],
+        )
+    }
+}
+
+/// A program that prints `text` and then waits for input.
+pub fn prints_then_waits(text: &str) -> SpawnSpec {
+    if cfg!(windows) {
+        spec(
+            "cmd.exe",
+            &["/d", "/c", &format!("echo {text} & pause >nul")],
+        )
+    } else {
+        spec("/bin/sh", &["-c", &format!("echo {text}; read reply")])
+    }
+}
+
+/// A program that prints `text` and exits with `code`.
+pub fn prints_then_exits(text: &str, code: u32) -> SpawnSpec {
+    if cfg!(windows) {
+        spec(
+            "cmd.exe",
+            &["/d", "/c", &format!("echo {text} & exit {code}")],
+        )
+    } else {
+        spec("/bin/sh", &["-c", &format!("echo {text}; exit {code}")])
+    }
+}
+
+pub fn missing_program() -> SpawnSpec {
+    spec("no-such-program-anywhere", &[])
+}
+
+/// A connection to a host, speaking the protocol by hand.
+pub struct Client {
+    writer: Box<dyn AsyncWrite + Send + Unpin>,
+    /// Decoded messages. An `Err` is a decode failure; the end is the connection closing.
+    incoming: mpsc::UnboundedReceiver<Result<Message, String>>,
+    /// Messages received while waiting for a different one, oldest first.
+    stash: VecDeque<Message>,
+    next_request: u64,
+    reading: JoinHandle<()>,
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        // Stop reading too, so the connection really closes when the client goes.
+        self.reading.abort();
+    }
+}
+
+impl Client {
+    pub fn new<S>(io: S) -> Self
+    where
+        S: AsyncRead + AsyncWrite + Send + 'static,
+    {
+        let (mut reader, writer) = tokio::io::split(io);
+        let (decoded, incoming) = mpsc::unbounded_channel();
+        let reading = tokio::spawn(async move {
+            let mut decoder = FrameDecoder::new(Role::Client);
+            let mut buf = vec![0u8; 64 * 1024];
+            loop {
+                match reader.read(&mut buf).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(read) => decoder.push(&buf[..read]),
+                }
+                loop {
+                    match decoder.next() {
+                        Ok(Some(message)) => {
+                            if decoded.send(Ok(message)).is_err() {
+                                return;
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(error) => {
+                            let _ = decoded.send(Err(error.to_string()));
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        Self {
+            writer: Box::new(writer),
+            incoming,
+            stash: VecDeque::new(),
+            next_request: 1,
+            reading,
+        }
+    }
+
+    pub async fn send(&mut self, message: Message) {
+        let mut frames = Vec::new();
+        encode(&message, &mut frames).unwrap();
+        self.send_raw(&frames).await;
+    }
+
+    /// Writes bytes as they are, valid frames or not.
+    pub async fn send_raw(&mut self, bytes: &[u8]) {
+        self.writer
+            .write_all(bytes)
+            .await
+            .expect("the connection takes bytes");
+        self.writer.flush().await.expect("the connection flushes");
+    }
+
+    /// The next message off the wire, or `None` if the connection closed or `wait` passed.
+    async fn receive(&mut self, wait: Duration) -> Option<Message> {
+        match tokio::time::timeout(wait, self.incoming.recv()).await {
+            Ok(Some(Ok(message))) => Some(message),
+            Ok(Some(Err(error))) => panic!("the host sent something undecodable: {error}"),
+            Ok(None) | Err(_) => None,
+        }
+    }
+
+    /// The oldest message for which `wanted` holds, waiting up to `wait` for one.
+    /// Messages that do not match are kept for later calls, in order.
+    pub async fn find(
+        &mut self,
+        wait: Duration,
+        wanted: impl Fn(&Message) -> bool,
+    ) -> Option<Message> {
+        if let Some(at) = self.stash.iter().position(&wanted) {
+            return self.stash.remove(at);
+        }
+        let deadline = Instant::now() + wait;
+        loop {
+            let left = deadline.checked_duration_since(Instant::now())?;
+            let message = self.receive(left).await?;
+            if wanted(&message) {
+                return Some(message);
+            }
+            self.stash.push_back(message);
+        }
+    }
+
+    /// Like [`find`](Self::find), but the message must arrive.
+    pub async fn expect(&mut self, what: &str, wanted: impl Fn(&Message) -> bool) -> Message {
+        match self.find(STEP, wanted).await {
+            Some(message) => message,
+            None => panic!("{what} never arrived; kept: {:?}", self.stash),
+        }
+    }
+
+    pub async fn request(&mut self, body: RequestBody) -> Result<ResponseBody, ProtoError> {
+        let id = self.next_request;
+        self.next_request += 1;
+        self.send(Message::control(Control::Request(Request { id, body })))
+            .await;
+        let is_answer = |message: &Message| matches!(&message.body, Body::Control(Control::Response(response)) if response.id == id);
+        match self.expect("the response", is_answer).await.body {
+            Body::Control(Control::Response(response)) => response.result,
+            _ => unreachable!("matched as a response"),
+        }
+    }
+
+    /// Says hello with the current protocol version and returns the host's process id.
+    pub async fn hello(&mut self) -> u32 {
+        let hello = RequestBody::Hello {
+            proto: PROTO_VERSION,
+            proto_min: PROTO_VERSION,
+            vt_version: None,
+            client_kind: ClientKind::Test,
+        };
+        match self.request(hello).await {
+            Ok(ResponseBody::HelloAck { pid, .. }) => pid,
+            other => panic!("hello was answered with {other:?}"),
+        }
+    }
+
+    pub async fn spawn(&mut self, spec: SpawnSpec) -> SessionId {
+        match self.request(RequestBody::Spawn { spec }).await {
+            Ok(ResponseBody::Spawned { session }) => session,
+            other => panic!("spawn was answered with {other:?}"),
+        }
+    }
+
+    pub async fn attach(
+        &mut self,
+        session: SessionId,
+        stream: u32,
+    ) -> Result<ResponseBody, ProtoError> {
+        self.request(RequestBody::Attach {
+            session,
+            stream,
+            facts: facts(),
+        })
+        .await
+    }
+
+    /// Attaches and grants a window of credit, as a real client does at once.
+    pub async fn attach_with_credit(&mut self, session: SessionId, stream: u32) {
+        let attached = self.attach(session, stream).await;
+        assert!(
+            matches!(attached, Ok(ResponseBody::Attached { .. })),
+            "{attached:?}"
+        );
+        self.credit(stream, 1024 * 1024).await;
+    }
+
+    pub async fn credit(&mut self, stream: u32, bytes: u32) {
+        self.send(Message::new(stream, Body::Credit(bytes))).await;
+    }
+
+    /// Types `line` and presses Enter.
+    pub async fn type_line(&mut self, stream: u32, line: &str) {
+        self.send(Message::new(
+            stream,
+            Body::Input(format!("{line}\r").into_bytes()),
+        ))
+        .await;
+    }
+
+    pub async fn list(&mut self) -> Vec<SessionInfo> {
+        match self.request(RequestBody::List {}).await {
+            Ok(ResponseBody::Sessions { sessions }) => sessions,
+            other => panic!("list was answered with {other:?}"),
+        }
+    }
+
+    /// The one session the host is expected to have.
+    pub async fn only_session(&mut self) -> SessionInfo {
+        let mut sessions = self.list().await;
+        assert_eq!(sessions.len(), 1, "{sessions:?}");
+        sessions.remove(0)
+    }
+
+    /// The next output bytes on `stream`, if any arrive within `wait`.
+    pub async fn data(&mut self, stream: u32, wait: Duration) -> Option<Vec<u8>> {
+        let is_data =
+            |message: &Message| message.stream == stream && matches!(message.body, Body::Data(_));
+        match self.find(wait, is_data).await?.body {
+            Body::Data(bytes) => Some(bytes),
+            _ => unreachable!("matched as data"),
+        }
+    }
+
+    /// Reads output on `stream` until it contains `needle`, and returns all of it.
+    pub async fn read_until(&mut self, stream: u32, needle: &str) -> String {
+        let deadline = Instant::now() + STEP;
+        let mut text = String::new();
+        while !text.contains(needle) {
+            let left = deadline
+                .checked_duration_since(Instant::now())
+                .unwrap_or_default();
+            match self.data(stream, left).await {
+                Some(bytes) => text.push_str(&String::from_utf8_lossy(&bytes)),
+                None => panic!("`{needle}` never appeared on stream {stream}; got {text:?}"),
+            }
+        }
+        text
+    }
+
+    /// Discards the output on `stream` until none has arrived for a moment.
+    pub async fn discard_output(&mut self, stream: u32) {
+        while self
+            .data(stream, Duration::from_millis(300))
+            .await
+            .is_some()
+        {}
+    }
+
+    /// The next message on `stream` that is not output.
+    pub async fn marker(&mut self, stream: u32) -> Body {
+        let is_marker =
+            |message: &Message| message.stream == stream && !matches!(message.body, Body::Data(_));
+        self.expect("a marker", is_marker).await.body
+    }
+
+    /// The next notification on the control stream.
+    pub async fn notification(&mut self) -> Notification {
+        let is_notification = |message: &Message| {
+            message.stream == CONTROL_STREAM
+                && matches!(message.body, Body::Control(Control::Notify(_)))
+        };
+        match self.expect("a notification", is_notification).await.body {
+            Body::Control(Control::Notify(notification)) => notification,
+            _ => unreachable!("matched as a notification"),
+        }
+    }
+
+    /// Whether the host closes the connection within the step timeout.
+    pub async fn closes(&mut self) -> bool {
+        let deadline = Instant::now() + STEP;
+        loop {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                return false;
+            };
+            match tokio::time::timeout(left, self.incoming.recv()).await {
+                Ok(Some(Ok(message))) => self.stash.push_back(message),
+                Ok(Some(Err(_))) | Ok(None) => return true,
+                Err(_) => return false,
+            }
+        }
+    }
+
+    /// Polls the session list until `settled` holds for it.
+    pub async fn list_until(
+        &mut self,
+        what: &str,
+        settled: impl Fn(&[SessionInfo]) -> bool,
+    ) -> Vec<SessionInfo> {
+        let deadline = Instant::now() + STEP;
+        loop {
+            let sessions = self.list().await;
+            if settled(&sessions) {
+                return sessions;
+            }
+            assert!(Instant::now() < deadline, "{what}: {sessions:?}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+/// A host and a client connected to it.
+///
+/// The client is declared first so that it is dropped first: the host learns the
+/// connection has closed before anything waits for the host to finish.
+pub struct Running {
+    pub client: Client,
+    host: HostRun,
+}
+
+enum HostRun {
+    /// The host serving the connection as a task in this process.
+    Task(JoinHandle<()>),
+    Process(HostProcess),
+}
+
+impl Running {
+    /// Closes the connection and waits for the host to finish with it.
+    ///
+    /// Every case ends with this. The host ends the programs a connection started
+    /// before it stops serving that connection, so once this returns none is running.
+    /// Ending a test without it would leave the last sessions to whatever happens when
+    /// the process exits, and a program in a pseudoconsole outlives a process that
+    /// exits without closing it.
+    pub async fn shutdown(self) {
+        let Running { client, host } = self;
+        drop(client);
+        match host {
+            HostRun::Task(serving) => {
+                let finished = tokio::time::timeout(STEP, serving).await;
+                finished
+                    .expect("the host finishes with a closed connection")
+                    .unwrap();
+            }
+            HostRun::Process(mut process) => {
+                let deadline = Instant::now() + STEP;
+                while !process.exited() {
+                    assert!(Instant::now() < deadline, "the host process did not exit");
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+        }
+    }
+}
+
+/// A way of running the host for a test.
+pub trait Harness {
+    fn start() -> impl Future<Output = Running> + Send;
+}
+
+/// The host as a task in the test's own process, reached over an in-memory pipe.
+pub struct InProcess;
+
+impl Harness for InProcess {
+    async fn start() -> Running {
+        let (client_end, host_end) = tokio::io::duplex(256 * 1024);
+        let serving = tokio::spawn(async move {
+            let _ = Host::new(HostConfig::default()).serve(host_end).await;
+        });
+        Running {
+            client: Client::new(client_end),
+            host: HostRun::Task(serving),
+        }
+    }
+}
+
+/// The host as a separate process, reached over the per-user endpoint.
+pub struct OutOfProcess;
+
+struct HostProcess(std::process::Child);
+
+impl HostProcess {
+    fn exited(&mut self) -> bool {
+        !matches!(self.0.try_wait(), Ok(None))
+    }
+}
+
+impl Drop for HostProcess {
+    fn drop(&mut self) {
+        // After a shutdown the process has already exited. After a failed test it has
+        // not: its connection has just been dropped, so give it the time it needs to
+        // end its programs and exit by itself before it is ended by force, which would
+        // leave those programs running.
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while !self.exited() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+impl Harness for OutOfProcess {
+    async fn start() -> Running {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let name = format!(
+            "host-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        );
+        let endpoint = lume_ipc::Endpoint::named(&name).unwrap();
+
+        let process = std::process::Command::new(env!("CARGO_BIN_EXE_lume-host"))
+            .args(["--endpoint", &name])
+            .stdin(std::process::Stdio::null())
+            .spawn()
+            .expect("the host binary starts");
+        let process = HostProcess(process);
+
+        // The host needs a moment to create its endpoint.
+        let deadline = Instant::now() + STEP;
+        let stream = loop {
+            match lume_ipc::connect(&endpoint).await {
+                Ok(stream) => break stream,
+                Err(error) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "the host never served {endpoint}: {error}"
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+        };
+        Running {
+            client: Client::new(stream),
+            host: HostRun::Process(process),
+        }
+    }
+}
+
+/// The memory a process holds in RAM, in bytes.
+#[cfg(windows)]
+pub fn resident_bytes(pid: u32) -> u64 {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::ProcessStatus::{
+        K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+
+    // SAFETY: takes no pointers. A null result is checked below.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    assert!(!process.is_null(), "process {pid} cannot be opened");
+    // SAFETY: plain data for which all-zero is a valid value.
+    let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+    let size = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    // SAFETY: `process` is open and `counters` is valid for `size` bytes.
+    let ok = unsafe { K32GetProcessMemoryInfo(process, &mut counters, size) };
+    // SAFETY: `process` is open and owned here.
+    unsafe { CloseHandle(process) };
+    assert_ne!(ok, 0, "the memory of process {pid} cannot be read");
+    counters.WorkingSetSize as u64
+}
+
+#[cfg(target_os = "linux")]
+pub fn resident_bytes(pid: u32) -> u64 {
+    let statm = std::fs::read_to_string(format!("/proc/{pid}/statm")).unwrap();
+    let pages: u64 = statm.split_whitespace().nth(1).unwrap().parse().unwrap();
+    // SAFETY: takes no pointers.
+    let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    pages * page as u64
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+pub fn resident_bytes(pid: u32) -> u64 {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    let kib: u64 = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .unwrap();
+    kib * 1024
+}
+
+/// Whether a process with this id is running.
+#[cfg(windows)]
+pub fn process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+    };
+
+    // SAFETY: takes no pointers. A null result is checked below.
+    let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if process.is_null() {
+        return false;
+    }
+    // SAFETY: `process` is open; a zero timeout only asks whether it has ended.
+    let alive = unsafe { WaitForSingleObject(process, 0) } == WAIT_TIMEOUT;
+    // SAFETY: `process` is open and owned here.
+    unsafe { CloseHandle(process) };
+    alive
+}
+
+#[cfg(unix)]
+pub fn process_alive(pid: u32) -> bool {
+    // SAFETY: takes no pointers; signal 0 only checks that the process exists.
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}

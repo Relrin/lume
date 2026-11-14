@@ -1,0 +1,209 @@
+[
+  {
+    "kind": "control",
+    "message": {
+      "response": {
+        "id": 1,
+        "ok": {
+          "caps": {
+            "hydrate": {
+              "snapshot": false,
+              "vt_replay": false
+            },
+            "multi_client": false,
+            "persistent": false,
+            "responder": "client",
+            "server_layout": false
+          },
+          "host_version": "0.0.0",
+          "max_payload": 65536,
+          "pid": 4242,
+          "proto": 1,
+          "type": "hello_ack",
+          "vt_version": null
+        }
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "response": {
+        "id": 2,
+        "ok": {
+          "session": "0123456789abcdef",
+          "type": "spawned"
+        }
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "response": {
+        "id": 3,
+        "ok": {
+          "sessions": [
+            {
+              "attached": false,
+              "created_unix_ms": 1800000000000,
+              "exit": null,
+              "id": "0123456789abcdef",
+              "pid": 1234,
+              "program": "pwsh.exe",
+              "size": {
+                "cols": 80,
+                "rows": 24
+              },
+              "stats": {
+                "paused": true,
+                "pending_bytes": 512,
+                "read_bytes": 512,
+                "sent_bytes": 0
+              }
+            }
+          ],
+          "type": "sessions"
+        }
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "response": {
+        "id": 4,
+        "ok": {
+          "hydrate": "none",
+          "resize_pulls_scrollback": false,
+          "size": {
+            "cols": 80,
+            "rows": 24
+          },
+          "type": "attached"
+        }
+      }
+    },
+    "stream": 0
+  },
+  {
+    "bytes": "deadbeef",
+    "form": "snapshot",
+    "kind": "hydrate",
+    "stream": 1,
+    "vt_version": "1.0.1"
+  },
+  {
+    "bytes": "1b5b324a7265706c61796564",
+    "form": "vt_replay",
+    "kind": "hydrate",
+    "stream": 2
+  },
+  {
+    "bytes": "68656c6c6f0d0a1b5b33316d7265641b5b306d",
+    "kind": "data",
+    "stream": 1
+  },
+  {
+    "kind": "resized",
+    "size": {
+      "cols": 120,
+      "rows": 40
+    },
+    "stream": 1
+  },
+  {
+    "event": {
+      "title": "~/src — vim",
+      "type": "title"
+    },
+    "kind": "event",
+    "stream": 1
+  },
+  {
+    "event": {
+      "type": "cwd",
+      "url": "file://host/home/someone"
+    },
+    "kind": "event",
+    "stream": 1
+  },
+  {
+    "event": {
+      "type": "bell"
+    },
+    "kind": "event",
+    "stream": 1
+  },
+  {
+    "kind": "exit",
+    "status": {
+      "code": 3
+    },
+    "stream": 1
+  },
+  {
+    "kind": "exit",
+    "status": {
+      "signal": 9
+    },
+    "stream": 2
+  },
+  {
+    "kind": "exit",
+    "status": "unknown",
+    "stream": 3
+  },
+  {
+    "kind": "control",
+    "message": {
+      "notify": {
+        "session": "0123456789abcdef",
+        "status": {
+          "code": 3
+        },
+        "type": "session_exited"
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "response": {
+        "id": 5,
+        "ok": {
+          "type": "killed"
+        }
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "response": {
+        "err": {
+          "code": "not_found",
+          "message": "no such session"
+        },
+        "id": 6
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "notify": {
+        "code": "protocol_error",
+        "message": "unknown frame kind 0x7f",
+        "type": "fatal"
+      }
+    },
+    "stream": 0
+  }
+]

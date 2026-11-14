@@ -1,0 +1,138 @@
+//! The interface every session backend offers, and what attaching to a session yields.
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use lume_proto::{
+    BackendCaps, CellPx, ClientFacts, ExitStatus, SessionEvent, SessionId, SessionInfo, SpawnSpec,
+    TermSize,
+};
+use tokio::sync::mpsc;
+
+use crate::Result;
+
+/// Something that runs terminal sessions.
+///
+/// Every call is addressed by id and may cross a process or a network, so every call
+/// that does work is asynchronous. Callers branch on [`caps`](Self::caps), never on
+/// which backend they have.
+#[async_trait]
+pub trait SessionBackend: Send + Sync {
+    /// What this backend can do.
+    fn caps(&self) -> BackendCaps;
+
+    async fn list(&self) -> Result<Vec<SessionInfo>>;
+
+    async fn spawn(&self, spec: SpawnSpec) -> Result<SessionId>;
+
+    /// Attaches to a session. `facts` describes the view the session will be shown in.
+    async fn attach(&self, id: SessionId, facts: ClientFacts) -> Result<Attachment>;
+
+    async fn kill(&self, id: SessionId) -> Result<()>;
+}
+
+/// An open attachment: everything that connects a view to its session.
+pub struct Attachment {
+    /// The terminal's size when the attachment opened.
+    pub size: TermSize,
+    /// Whether the view's terminal should pull lines back out of scrollback when it
+    /// grows taller. It should not when the session's own terminal keeps a copy of the
+    /// screen that knows nothing of the view's scrollback.
+    pub resize_pulls_scrollback: bool,
+    /// The state to start from, before any output is applied.
+    pub hydrate: Hydrate,
+    pub output: FrameStream,
+    pub input: InputSink,
+}
+
+/// How a newly attached view is brought up to date.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Hydrate {
+    /// Nothing: the view starts blank and follows the output from here.
+    None,
+    /// A serialised terminal, loadable only by an engine of the version that wrote it.
+    Snapshot { vt_version: String, bytes: Vec<u8> },
+    /// Terminal output that rebuilds the screen when fed to any engine.
+    VtReplay(Vec<u8>),
+}
+
+/// One thing a session sends to an attached view, in the order it happened.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OutputFrame {
+    /// Terminal output. Counted against the credit the view has granted.
+    Data(Vec<u8>),
+    /// The terminal was resized at this point of the output.
+    Resized(TermSize),
+    Event(SessionEvent),
+    /// The session's program ended. Nothing follows.
+    Exit(ExitStatus),
+}
+
+/// The frames of one attachment.
+///
+/// The stream holds what has arrived and not been taken. That is bounded by the credit
+/// granted through the attachment's [`InputSink`]: a session sends no more output than
+/// it has credit for, so a view that stops granting stops the flow.
+pub struct FrameStream {
+    frames: mpsc::UnboundedReceiver<OutputFrame>,
+}
+
+impl FrameStream {
+    pub(crate) fn new(frames: mpsc::UnboundedReceiver<OutputFrame>) -> Self {
+        Self { frames }
+    }
+
+    /// The next frame, or `None` once the attachment has ended.
+    pub async fn next(&mut self) -> Option<OutputFrame> {
+        self.frames.recv().await
+    }
+}
+
+/// What a backend does with the frames a view sends. One per attachment.
+#[async_trait]
+pub(crate) trait Sink: Send + Sync {
+    async fn write(&self, bytes: &[u8]) -> Result<()>;
+    async fn resize(&self, size: TermSize, cell_px: CellPx) -> Result<()>;
+    async fn facts(&self, facts: &ClientFacts) -> Result<()>;
+    async fn credit(&self, bytes: u32) -> Result<()>;
+    async fn detach(&self) -> Result<()>;
+}
+
+/// The way from a view to its session. Cheap to clone.
+#[derive(Clone)]
+pub struct InputSink {
+    sink: Arc<dyn Sink>,
+}
+
+impl InputSink {
+    pub(crate) fn new(sink: Arc<dyn Sink>) -> Self {
+        Self { sink }
+    }
+
+    /// Sends bytes to the session's program, as if typed.
+    pub async fn write(&self, bytes: &[u8]) -> Result<()> {
+        self.sink.write(bytes).await
+    }
+
+    /// Asks for the terminal to be resized. The session answers with a
+    /// [`OutputFrame::Resized`] at the place in the output where it took effect.
+    pub async fn resize(&self, size: TermSize, cell_px: CellPx) -> Result<()> {
+        self.sink.resize(size, cell_px).await
+    }
+
+    /// Tells the session how the view has changed. This never resizes the terminal.
+    pub async fn facts(&self, facts: &ClientFacts) -> Result<()> {
+        self.sink.facts(facts).await
+    }
+
+    /// Lets the session send `bytes` more of output. A new attachment has no credit,
+    /// so nothing arrives until this is called.
+    pub async fn credit(&self, bytes: u32) -> Result<()> {
+        self.sink.credit(bytes).await
+    }
+
+    /// Ends the attachment. The session carries on.
+    pub async fn detach(&self) -> Result<()> {
+        self.sink.detach().await
+    }
+}
