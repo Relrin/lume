@@ -27,6 +27,12 @@ export function App() {
         This window reports what the webview on this machine can do. There is no terminal yet.
       </p>
       {report ? <Report report={report} /> : <p>Checking the webview…</p>}
+      {/* A development page; the built app does not contain it. */}
+      {import.meta.env.DEV && (
+        <p>
+          <a href="/lab.html">Renderer lab</a>
+        </p>
+      )}
     </main>
   );
 }

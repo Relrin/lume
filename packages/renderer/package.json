@@ -1,0 +1,21 @@
+{
+  "name": "@lume/renderer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Draws terminal cells on WebGPU, WebGL2 or Canvas 2D behind one interface",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  }
+}

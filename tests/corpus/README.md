@@ -1,8 +1,9 @@
 # Golden corpus
 
 Recorded terminal byte streams with the screen each must produce. The recordings are replayed
-through the native build of libghostty-vt (`lume-vt`). The WebAssembly build (`@lume/vt`)
-will replay them too, and both must produce the same dump.
+through the native build of libghostty-vt (`lume-vt`) and through the WebAssembly build
+(`@lume/vt`). Both must produce the dump in `expect.txt`, byte for byte, which is what shows
+the two builds agree.
 
 ## A recording
 
@@ -38,10 +39,14 @@ screen primary
 ## Running
 
 ```sh
-cargo test -p lume-vt --test corpus
+cargo test -p lume-vt --test corpus          # the native build
+pnpm --filter @lume/vt test                  # the WebAssembly build, in Node
 ```
 
-To rewrite the goldens:
+`cargo xtask test` runs both. The WebAssembly side needs the module built first
+(`cargo xtask vt wasm`).
+
+The goldens are written by the native build only. To rewrite them:
 
 ```sh
 UPDATE_GOLDEN=1 cargo test -p lume-vt --test corpus
