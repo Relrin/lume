@@ -62,3 +62,27 @@ pub const BENCH_BACKEND: &str = "bench";
 /// The longest title the window takes from a page. The page cuts titles to the same
 /// length; this holds whatever the page does.
 pub const TITLE_MAX_BYTES: usize = 1024;
+
+/// How long a workspace waits after a change before it is written to its file. Changes
+/// come in bursts: a divider being dragged, a pane closing and the focus moving.
+pub const SAVE_DEBOUNCE: Duration = Duration::from_secs(1);
+
+/// The longest a changed workspace waits to be written, however many more changes
+/// follow.
+pub const SAVE_MAX_DELAY: Duration = Duration::from_secs(5);
+
+/// How long a page may take to say how large a pane that is about to be made will be.
+/// It measures nothing new to answer; a page that takes longer is busy, and the session
+/// is started at a size that is put right when the pane is drawn.
+pub const ESTIMATE_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// The grid a session is started with when nobody could say how large its pane is.
+pub const DEFAULT_SPAWN_COLS: u16 = 80;
+pub const DEFAULT_SPAWN_ROWS: u16 = 24;
+
+/// The workspace the application opens.
+pub const WORKSPACE_NAME: &str = "default";
+
+/// How many notices wait for a page that has not connected yet. More than a start can
+/// have reason to say.
+pub const PENDING_NOTICES_MAX: usize = 16;

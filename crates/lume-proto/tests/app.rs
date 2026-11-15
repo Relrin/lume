@@ -15,6 +15,7 @@ fn request(id: u64, text: String) -> AppMessage {
     AppMessage::Request(AppRequest {
         id,
         body: AppRequestBody::Send {
+            pane: None,
             session: None,
             text,
         },
@@ -80,7 +81,8 @@ fn a_response_survives_the_wire() {
             effect: "started a session".to_owned(),
             body: AppReplyBody::Spawned {
                 session: "00000000000000ab".parse().unwrap(),
-                previous: None,
+                pane: "p4".to_owned(),
+                tab: Some("t3".to_owned()),
             },
         }),
     });

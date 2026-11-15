@@ -178,11 +178,35 @@ fn snapshots(profile: Profile) -> Result<()> {
     Ok(())
 }
 
-/// Runs everything that needs the application's window: the two suites inside its
+fn chrome(profile: Profile) -> Result<()> {
+    let report = run_in_webview(profile, "chrome", &[])?;
+    if !report.passed {
+        bail!(
+            "the window's page does not hold to what it must:
+{}",
+            complaints(&report.json).join(
+                "
+"
+            )
+        );
+    }
+    println!(
+        "chrome: {} renders for {} KiB of output in three panes; a tab off the screen \
+         keeps {} of {} renderers",
+        report.json["outputCommits"],
+        report.json["outputBytes"].as_u64().unwrap_or(0) / 1024,
+        report.json["renderers"]["otherTab"],
+        report.json["renderers"]["firstTab"],
+    );
+    Ok(())
+}
+
+/// Runs everything that needs the application's window: the suites inside its
 /// webview, then the tests that drive it from outside with real shells.
 pub fn end_to_end() -> Result<()> {
     corpus(Profile::Debug)?;
     snapshots(Profile::Debug)?;
+    chrome(Profile::Debug)?;
     run::cargo(&[
         "test",
         "-p",

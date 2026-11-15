@@ -1,7 +1,11 @@
 //! What a command returns when it fails.
 
+use std::borrow::Cow;
 use std::fmt;
 
+use lume_config::ConfigError;
+use lume_layout::LayoutError;
+use lume_proto::app::AppError;
 use lume_session::SessionError;
 use serde::Serialize;
 
@@ -9,16 +13,31 @@ use serde::Serialize;
 /// people. A request a backend refused keeps the backend's own code.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CommandError {
-    pub code: &'static str,
+    pub code: Cow<'static, str>,
     pub message: String,
 }
 
 impl CommandError {
-    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(code: impl Into<Cow<'static, str>>, message: impl Into<String>) -> Self {
         Self {
-            code,
+            code: code.into(),
             message: message.into(),
         }
+    }
+
+    /// What was asked for does not exist.
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new("not_found", message)
+    }
+
+    /// The page may not do this.
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self::new("forbidden", message)
+    }
+
+    /// The application cannot do this yet.
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self::new("unsupported", message)
     }
 
     /// The request is not valid as sent.
@@ -62,6 +81,27 @@ impl From<CommandError> for lume_proto::app::AppError {
     /// The same code and message, for a caller on the control endpoint.
     fn from(error: CommandError) -> Self {
         Self::new(error.code, error.message)
+    }
+}
+
+impl From<AppError> for CommandError {
+    /// The same code and message, for a page that asked what the control endpoint
+    /// also answers.
+    fn from(error: AppError) -> Self {
+        Self::new(error.code, error.message)
+    }
+}
+
+impl From<LayoutError> for CommandError {
+    /// A refused intent keeps the layout's own code.
+    fn from(error: LayoutError) -> Self {
+        Self::new(error.code().to_owned(), error.to_string())
+    }
+}
+
+impl From<ConfigError> for CommandError {
+    fn from(error: ConfigError) -> Self {
+        Self::new("config", error.to_string())
     }
 }
 

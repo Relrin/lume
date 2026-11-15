@@ -1,47 +1,55 @@
 //! The application's control endpoint.
 //!
 //! The application serves a local endpoint that only its user can reach. The command-line
-//! tool drives sessions through it, and a second copy of the application uses it to bring
-//! the first one's window to the front instead of opening another.
+//! tool drives the application through it, and a second copy of the application uses it
+//! to bring the first one's window to the front instead of opening another.
 //!
 //! A connection carries requests one after another, each answered before the next is
-//! read. Every answer says what the request changed. What needs a session's screen is
-//! passed on to the page that shows the session; the rest is answered here.
+//! read. Every answer says what the request changed. What needs a terminal's screen is
+//! passed on to the page that shows the terminal; the rest is answered here.
+//!
+//! A request about one terminal names a pane, a session, or neither, which means the
+//! pane that has the keyboard. A request that arrives while the application is still
+//! starting waits a while for what it needs: a page, a session in the pane.
 
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
 use lume_ipc::{Endpoint, Listener};
+use lume_layout::{Dir, Intent, NewContent, PaneId, SpawnRequest, UNITS, WindowId};
 use lume_proto::app::{
     APP_PROTO_VERSION, AppError, AppMessage, AppReply, AppReplyBody, AppRequest, AppRequestBody,
-    AppResponse, AppSession, PageRequestBody, codes,
+    AppResponse, AppSession, Direction, Focused, PageRequestBody, SpawnPlace, codes,
 };
 use lume_proto::{ClientKind, ControlDecoder, SessionId, negotiate};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::carrier::{Link, SessionKey};
-use crate::state::AppState;
+use crate::services::{Asker, Services};
 use crate::tuning::{PAGE_ANSWER_TIMEOUT, PAGE_OPEN_TIMEOUT, WAIT_MAX, WAIT_SLACK};
+use crate::window::label_of;
 
 /// How many bytes are read from a client at a time.
 const READ_CHUNK: usize = 16 * 1024;
 
-/// What the endpoint can do to the application's window.
+/// What the endpoint, and the application itself, can do to its windows.
 pub trait Shell: Send + Sync + 'static {
-    /// Brings the window to the front.
+    /// Brings the window the user was working in to the front.
     fn activate(&self);
-    /// Closes the application as closing its window would.
+    /// Closes the application as closing its last window would.
     fn quit(&self);
     /// Whether the application serves its own copy of the page.
     fn bundled_ui(&self) -> bool;
+    /// Closes the window with this label.
+    fn close_window(&self, label: &str);
 }
 
 /// What a request needs to be carried out.
 pub struct Control {
-    state: Arc<AppState>,
-    shell: Arc<dyn Shell>,
-    /// How long a request waits for a page that has not connected yet.
+    services: Arc<Services>,
+    /// How long a request waits for a page that has not connected yet, or for a pane
+    /// that has no session yet.
     page_wait: Duration,
 }
 
@@ -72,38 +80,164 @@ fn wait_limit(timeout_ms: u64) -> Duration {
     Duration::from_millis(timeout_ms).min(WAIT_MAX)
 }
 
+fn layout_dir(direction: Direction) -> Dir {
+    match direction {
+        Direction::Left => Dir::Left,
+        Direction::Right => Dir::Right,
+        Direction::Up => Dir::Up,
+        Direction::Down => Dir::Down,
+    }
+}
+
+/// A pane and the window it is in.
+#[derive(Clone, Copy, Debug)]
+struct Place {
+    pane: PaneId,
+    window: WindowId,
+}
+
 impl Control {
     /// `page_wait` is how long a request waits for a page that has not connected yet.
-    pub fn new(state: Arc<AppState>, shell: Arc<dyn Shell>, page_wait: Duration) -> Arc<Self> {
+    pub fn new(services: Arc<Services>, page_wait: Duration) -> Arc<Self> {
         Arc::new(Self {
-            state,
-            shell,
+            services,
             page_wait,
         })
     }
 
-    async fn page(&self) -> Result<Arc<Link>, AppError> {
-        self.state
-            .page_within(self.page_wait)
+    fn focused_window(&self) -> Result<WindowId, AppError> {
+        self.services.panes.focused_window().ok_or_else(no_window)
+    }
+
+    /// The page of a window, waiting a while for one that is still loading.
+    async fn page_of(&self, window: WindowId) -> Result<Arc<Link>, AppError> {
+        let label = label_of(window);
+        self.services
+            .state
+            .soon(self.page_wait, |state| state.page_of(&label))
             .await
             .ok_or_else(no_window)
     }
 
-    /// The session a request means: the one it names, or the one the window shows.
-    async fn session(&self, named: Option<SessionId>) -> Result<SessionKey, AppError> {
-        match named {
-            Some(session) => self.state.find(session).await,
-            None => self
-                .state
-                .shown_within(self.page_wait)
-                .await
-                .ok_or_else(|| {
-                    AppError::new(
-                        codes::NO_WINDOW,
-                        "no session was named and no window is showing one",
-                    )
-                }),
+    /// The pane a request means: the one it names, the one that shows the session it
+    /// names, or the one that has the keyboard.
+    async fn place(
+        &self,
+        pane: Option<&str>,
+        session: Option<SessionId>,
+    ) -> Result<Place, AppError> {
+        let panes = &self.services.panes;
+        if let Some(text) = pane {
+            let pane: PaneId = text
+                .parse()
+                .map_err(|reason: &str| AppError::new(codes::BAD_REQUEST, reason))?;
+            let workspace = panes.workspace();
+            if workspace.pane(pane).is_none() {
+                return Err(AppError::new(
+                    codes::NOT_FOUND,
+                    format!("there is no pane {pane}"),
+                ));
+            }
+            let window = workspace.window_of(pane).ok_or_else(|| {
+                AppError::new(codes::NOT_SHOWN, format!("pane {pane} is in no window"))
+            })?;
+            return Ok(Place { pane, window });
         }
+        if let Some(session) = session {
+            let key = self.services.state.find(session).await?;
+            let pane = panes.pane_of(&key);
+            let window = pane.and_then(|pane| panes.workspace().window_of(pane));
+            return match (pane, window) {
+                (Some(pane), Some(window)) => Ok(Place { pane, window }),
+                _ => Err(AppError::new(
+                    codes::NOT_SHOWN,
+                    format!("session {session} is in no pane of a window"),
+                )),
+            };
+        }
+        let focused = |_: &_| {
+            let window = panes.focused_window()?;
+            let pane = panes.focused_pane(window)?;
+            Some(Place { pane, window })
+        };
+        self.services
+            .state
+            .soon(self.page_wait, focused)
+            .await
+            .ok_or_else(|| {
+                AppError::new(
+                    codes::NO_WINDOW,
+                    "no pane was named and no window has a pane with the keyboard",
+                )
+            })
+    }
+
+    /// The session a request means, and the pane that shows it if one does. A pane
+    /// whose session is still being started is waited for.
+    async fn session(
+        &self,
+        pane: Option<&str>,
+        session: Option<SessionId>,
+    ) -> Result<(SessionKey, Option<Place>), AppError> {
+        if pane.is_none()
+            && let Some(session) = session
+        {
+            let key = self.services.state.find(session).await?;
+            let place = self.place(None, Some(session)).await.ok();
+            return Ok((key, place));
+        }
+        let place = self.place(pane, session).await?;
+        let panes = &self.services.panes;
+        let key = self
+            .services
+            .state
+            .soon(self.page_wait, |_| panes.session_of(place.pane))
+            .await
+            .ok_or_else(|| {
+                AppError::new(
+                    codes::NOT_SHOWN,
+                    format!("pane {} has no session", place.pane),
+                )
+            })?;
+        Ok((key, Some(place)))
+    }
+
+    /// The pane a request about a screen means, and the page that shows it, once the
+    /// page has attached to the pane's session. A pane whose session is still being
+    /// started, or attached to, is waited for: a request sent just after the
+    /// application starts, or just after a pane was made, is early rather than wrong.
+    async fn screen_of(
+        &self,
+        pane: Option<&str>,
+        session: Option<SessionId>,
+    ) -> Result<(Place, Arc<Link>), AppError> {
+        let place = self.place(pane, session).await?;
+        // Without a page there is nobody to ask, whatever state the pane is in.
+        self.page_of(place.window).await?;
+        let state = &self.services.state;
+        let panes = &self.services.panes;
+        let not_shown = || {
+            AppError::new(
+                codes::NOT_SHOWN,
+                format!(
+                    "pane {} shows no session that its window has attached to",
+                    place.pane
+                ),
+            )
+        };
+        let key = state
+            .soon(self.page_wait, |_| panes.session_of(place.pane))
+            .await
+            .ok_or_else(not_shown)?;
+        let label = label_of(place.window);
+        let page = state
+            .soon(self.page_wait, |state| {
+                let page = state.page_of(&label)?;
+                page.input_of(&key).map(|_| page)
+            })
+            .await
+            .ok_or_else(not_shown)?;
+        Ok((place, page))
     }
 
     async fn handle(&self, body: AppRequestBody) -> (Result<AppReply, AppError>, Then) {
@@ -118,63 +252,150 @@ impl Control {
     }
 
     async fn carry_out(&self, body: AppRequestBody) -> Result<AppReply, AppError> {
+        let Services {
+            state,
+            panes,
+            registry,
+            shell,
+            ..
+        } = self.services.as_ref();
         match body {
             AppRequestBody::Hello { .. } => Err(AppError::new(
                 codes::BAD_REQUEST,
                 "hello has been said on this connection",
             )),
             AppRequestBody::Activate {} => {
-                self.shell.activate();
+                shell.activate();
                 reply(
                     "brought the window to the front",
                     AppReplyBody::Activated {},
                 )
             }
             AppRequestBody::Quit {} => reply("closing the application", AppReplyBody::Quitting {}),
-            AppRequestBody::Status {} => reply(
-                "read the application's status",
-                AppReplyBody::Status {
-                    app_version: env!("CARGO_PKG_VERSION").to_owned(),
-                    pid: std::process::id(),
-                    bundled_ui: self.shell.bundled_ui(),
-                    window: self.state.page().is_some(),
-                    shown: self.state.shown().map(|key| key.session),
-                    marks: self.state.marks().read(),
-                },
-            ),
-            AppRequestBody::Spawn { spec } => {
-                let page = self.page().await?;
-                let opened = page
-                    .ask(PageRequestBody::Open { spec }, PAGE_OPEN_TIMEOUT)
-                    .await?;
-                let effect = match &opened {
-                    AppReplyBody::Spawned {
-                        session,
-                        previous: Some(previous),
-                    } => format!(
-                        "started session {session} and showed it in the window; \
-                         session {previous} keeps running"
-                    ),
-                    AppReplyBody::Spawned { session, .. } => {
-                        format!("started session {session} and showed it in the window")
+            AppRequestBody::Status {} => {
+                let focused = panes.focused_window().and_then(|window| {
+                    let pane = panes.focused_pane(window)?;
+                    Some(Focused {
+                        pane: pane.to_string(),
+                        session: panes.session_of(pane).map(|key| key.session),
+                    })
+                });
+                reply(
+                    "read the application's status",
+                    AppReplyBody::Status {
+                        app_version: env!("CARGO_PKG_VERSION").to_owned(),
+                        pid: std::process::id(),
+                        bundled_ui: shell.bundled_ui(),
+                        window: state.page().is_some(),
+                        focused,
+                        marks: state.marks().read(),
+                    },
+                )
+            }
+            AppRequestBody::Spawn { spec, place } => {
+                let window = self.focused_window()?;
+                // The page says how large the pane will be and shows what is started.
+                let page = self.page_of(window).await?;
+                let size = spec.size;
+                let content = NewContent::Terminal(SpawnRequest {
+                    backend: None,
+                    profile: None,
+                    launcher: spec.launcher,
+                    cwd: spec.cwd,
+                    env: spec.env,
+                    size,
+                });
+                let intent = match place {
+                    SpawnPlace::Tab {} => Intent::TabNew {
+                        window,
+                        content,
+                        index: None,
+                        activate: true,
+                    },
+                    SpawnPlace::Split { dir } => Intent::Split {
+                        pane: self.place(None, None).await?.pane,
+                        dir: layout_dir(dir),
+                        ratio: UNITS / 2,
+                        content,
+                    },
+                    SpawnPlace::Window {} => {
+                        return Err(AppError::new(
+                            codes::UNSUPPORTED,
+                            "the application has one window; more cannot be opened yet",
+                        ));
                     }
-                    _ => return Err(unexpected("spawn")),
                 };
-                reply(effect, opened)
+                let applied = panes.apply(intent).await?;
+                let made = applied
+                    .created
+                    .pane
+                    .and_then(|pane| Some((pane, panes.session_of(pane)?)));
+                let Some((pane, key)) = made else {
+                    return Err(AppError::new(
+                        codes::INTERNAL,
+                        "the pane that was made has no session",
+                    ));
+                };
+                // Typing into the session, or reading its screen, needs the page to
+                // have attached to it. The answer waits for that, so a script's next
+                // request finds the terminal ready.
+                let label = label_of(window);
+                let attached = state
+                    .soon(PAGE_OPEN_TIMEOUT, |state| {
+                        state.page_of(&label)?.input_of(&key)
+                    })
+                    .await;
+                if attached.is_none() {
+                    return Err(AppError::new(
+                        codes::TIMEOUT,
+                        format!(
+                            "session {} was started in pane {pane}, but the window did not \
+                             show it in time",
+                            key.session
+                        ),
+                    ));
+                }
+                if let Some(size) = size {
+                    // The caller chose the size: it holds, whatever fits the pane.
+                    let pinned = PageRequestBody::Resize {
+                        pane: Some(pane.to_string()),
+                        session: None,
+                        size,
+                    };
+                    page.ask(pinned, PAGE_ANSWER_TIMEOUT).await?;
+                }
+                let tab = applied.created.tab.map(|tab| tab.to_string());
+                let effect = match &tab {
+                    Some(tab) => format!(
+                        "started session {} in pane {pane} of the new tab {tab}",
+                        key.session
+                    ),
+                    None => format!("started session {} in the new pane {pane}", key.session),
+                };
+                reply(
+                    effect,
+                    AppReplyBody::Spawned {
+                        session: key.session,
+                        pane: pane.to_string(),
+                        tab,
+                    },
+                )
             }
             AppRequestBody::List {} => {
-                let shown = self.state.shown();
-                let sessions: Vec<AppSession> = self
-                    .state
+                let sessions: Vec<AppSession> = state
                     .list_all()
                     .await?
                     .into_iter()
-                    .map(|listed| AppSession {
-                        shown: shown.as_ref().is_some_and(|key| {
-                            key.backend == listed.backend && key.session == listed.info.id
-                        }),
-                        backend: listed.backend,
-                        info: listed.info,
+                    .map(|listed| {
+                        let key = SessionKey {
+                            backend: listed.backend.clone(),
+                            session: listed.info.id,
+                        };
+                        AppSession {
+                            pane: panes.pane_of(&key).map(|pane| pane.to_string()),
+                            backend: listed.backend,
+                            info: listed.info,
+                        }
                     })
                     .collect();
                 reply(
@@ -183,22 +404,34 @@ impl Control {
                 )
             }
             AppRequestBody::Kill { session } => {
-                let key = self.state.find(session).await?;
-                self.state.end(&key).await?;
+                let key = state.find(session).await?;
+                state.end(&key).await?;
                 reply(format!("ended session {session}"), AppReplyBody::Killed {})
             }
-            AppRequestBody::Send { session, text } => {
-                let key = self.session(session).await?;
-                let input = self.page().await?.input_of(&key).ok_or_else(|| {
+            AppRequestBody::Send {
+                pane,
+                session,
+                text,
+            } => {
+                let (key, place) = self.session(pane.as_deref(), session).await?;
+                let not_shown = || {
                     AppError::new(
                         codes::NOT_SHOWN,
                         format!(
-                            "session {} is not shown in a window, and only a shown \
-                             session can be typed into",
+                            "session {} is not shown in a window, and only a shown session \
+                             can be typed into",
                             key.session
                         ),
                     )
-                })?;
+                };
+                let label = label_of(place.ok_or_else(not_shown)?.window);
+                // A session that has just been started is attached to a moment later.
+                let input = state
+                    .soon(self.page_wait, |state| {
+                        state.page_of(&label)?.input_of(&key)
+                    })
+                    .await
+                    .ok_or_else(not_shown)?;
                 let bytes = text.into_bytes();
                 if !bytes.is_empty() {
                     input
@@ -213,61 +446,85 @@ impl Control {
                     },
                 )
             }
-            AppRequestBody::Resize { session, size } => {
-                let resized = self
-                    .page()
-                    .await?
+            AppRequestBody::Resize {
+                pane,
+                session,
+                size,
+            } => {
+                let (place, page) = self.screen_of(pane.as_deref(), session).await?;
+                let resized = page
                     .ask(
-                        PageRequestBody::Resize { session, size },
+                        PageRequestBody::Resize {
+                            pane: Some(place.pane.to_string()),
+                            session: None,
+                            size,
+                        },
                         PAGE_ANSWER_TIMEOUT,
                     )
                     .await?;
                 match &resized {
                     AppReplyBody::Resized { size } => reply(
-                        format!("the terminal is now {} by {}", size.cols(), size.rows()),
+                        format!(
+                            "the terminal in pane {} is now {} by {}",
+                            place.pane,
+                            size.cols(),
+                            size.rows()
+                        ),
                         resized,
                     ),
                     _ => Err(unexpected("resize")),
                 }
             }
             AppRequestBody::WaitExit {
+                pane,
                 session,
                 timeout_ms,
             } => {
-                let key = self.session(session).await?;
-                let status = self.state.wait_exit(&key, wait_limit(timeout_ms)).await?;
+                let (key, _) = self.session(pane.as_deref(), session).await?;
+                let status = state.wait_exit(&key, wait_limit(timeout_ms)).await?;
                 reply(
                     format!("session {} has ended", key.session),
                     AppReplyBody::Exited { status },
                 )
             }
-            AppRequestBody::Screen { session } => {
-                let screen = self
-                    .page()
-                    .await?
-                    .ask(PageRequestBody::Screen { session }, PAGE_ANSWER_TIMEOUT)
+            AppRequestBody::Screen { pane, session } => {
+                let (place, page) = self.screen_of(pane.as_deref(), session).await?;
+                let screen = page
+                    .ask(
+                        PageRequestBody::Screen {
+                            pane: Some(place.pane.to_string()),
+                            session: None,
+                        },
+                        PAGE_ANSWER_TIMEOUT,
+                    )
                     .await?;
                 match &screen {
-                    AppReplyBody::Screen { lines, .. } => {
-                        reply(format!("read {} lines of the screen", lines.len()), screen)
-                    }
+                    AppReplyBody::Screen { lines, .. } => reply(
+                        format!(
+                            "read {} lines of the screen of pane {}",
+                            lines.len(),
+                            place.pane
+                        ),
+                        screen,
+                    ),
                     _ => Err(unexpected("screen")),
                 }
             }
             AppRequestBody::WaitText {
+                pane,
                 session,
                 text,
                 timeout_ms,
             } => {
+                let (place, page) = self.screen_of(pane.as_deref(), session).await?;
                 // The page keeps the time. It is asked for a little longer, so that its
                 // own answer that the time ran out arrives before this gives up on it.
                 let limit = wait_limit(timeout_ms);
-                let found = self
-                    .page()
-                    .await?
+                let found = page
                     .ask(
                         PageRequestBody::WaitText {
-                            session,
+                            pane: Some(place.pane.to_string()),
+                            session: None,
                             text,
                             timeout_ms: u64::try_from(limit.as_millis()).unwrap_or(u64::MAX),
                         },
@@ -280,6 +537,79 @@ impl Control {
                     }
                     _ => Err(unexpected("wait_text")),
                 }
+            }
+            AppRequestBody::Layout {} => {
+                let snapshot = panes.snapshot();
+                let workspace = serde_json::to_value(&snapshot.workspace)
+                    .map_err(|error| AppError::new(codes::INTERNAL, error.to_string()))?;
+                reply(
+                    format!("read the layout at revision {}", snapshot.revision),
+                    AppReplyBody::Layout {
+                        window: panes.focused_window().map(|window| window.to_string()),
+                        epoch: snapshot.epoch,
+                        revision: snapshot.revision,
+                        workspace,
+                    },
+                )
+            }
+            AppRequestBody::LayoutApply { intent } => {
+                let intent: Intent = serde_json::from_value(intent).map_err(|error| {
+                    AppError::new(codes::BAD_REQUEST, format!("not an intent: {error}"))
+                })?;
+                let before = panes.snapshot().revision;
+                let applied = panes.apply(intent).await?;
+                let created = serde_json::to_value(applied.created)
+                    .map_err(|error| AppError::new(codes::INTERNAL, error.to_string()))?;
+                let effect = if applied.revision == before {
+                    "the layout is as it was: the intent changed nothing".to_owned()
+                } else {
+                    format!("the layout is now at revision {}", applied.revision)
+                };
+                reply(
+                    effect,
+                    AppReplyBody::Applied {
+                        epoch: applied.epoch,
+                        revision: applied.revision,
+                        created,
+                    },
+                )
+            }
+            AppRequestBody::Commands {} => {
+                let commands = registry.list();
+                let count = commands.len();
+                let commands = serde_json::to_value(commands)
+                    .map_err(|error| AppError::new(codes::INTERNAL, error.to_string()))?;
+                reply(
+                    format!("listed {count} commands"),
+                    AppReplyBody::Commands { commands },
+                )
+            }
+            AppRequestBody::Command { id, args, window } => {
+                let window = match window {
+                    Some(text) => {
+                        let window: WindowId = text
+                            .parse()
+                            .map_err(|reason: &str| AppError::new(codes::BAD_REQUEST, reason))?;
+                        if panes.workspace().window(window).is_none() {
+                            return Err(AppError::new(
+                                codes::NOT_FOUND,
+                                format!("there is no window {window}"),
+                            ));
+                        }
+                        window
+                    }
+                    None => self.focused_window()?,
+                };
+                // A command that runs in a page needs the page; one that starts a
+                // session wants it too, to say how large the pane will be.
+                let _ = self.page_of(window).await;
+                self.services
+                    .run_command(window, &id, &args, Asker::Outside)
+                    .await?;
+                reply(
+                    format!("ran {id} in window {window}"),
+                    AppReplyBody::Ran { command: id },
+                )
             }
         }
     }
@@ -419,7 +749,7 @@ where
         let (result, then) = control.handle(body).await;
         write_response(&mut io, id, result).await?;
         if then == Then::Quit {
-            control.shell.quit();
+            control.services.shell.quit();
             return Ok(());
         }
     }
@@ -474,44 +804,31 @@ pub async fn activate_running(endpoint: &Endpoint) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
+    use lume_layout::Store;
     use lume_proto::app::OpenSpec;
+    use lume_proto::{Body, Message};
     use lume_session::{ExitStatus, HostConfig, LocalBackend, Router};
     use tokio::io::DuplexStream;
     use tokio::runtime::Handle;
     use tokio::time::timeout;
 
     use super::*;
+    use crate::builtins;
+    use crate::configsvc::ConfigService;
     use crate::marks::Marks;
-    use crate::testing::{CREDIT, RecordingCarrier, STEP, client_frames, facts, shell};
-
-    const WINDOW: &str = "main";
-
-    #[derive(Default)]
-    struct FakeShell {
-        activated: AtomicUsize,
-        quit: AtomicUsize,
-    }
-
-    impl Shell for FakeShell {
-        fn activate(&self) {
-            self.activated.fetch_add(1, Ordering::Relaxed);
-        }
-
-        fn quit(&self) {
-            self.quit.fetch_add(1, Ordering::Relaxed);
-        }
-
-        fn bundled_ui(&self) -> bool {
-            true
-        }
-    }
+    use crate::panes::{PaneStart, Panes};
+    use crate::state::AppState;
+    use crate::testing::{
+        CREDIT, FakeShell, RecordingCarrier, STEP, TempDir, client_frames, facts, size,
+    };
+    use crate::tuning::WORKSPACE_NAME;
 
     struct Running {
-        state: Arc<AppState>,
+        services: Arc<Services>,
         shell: Arc<FakeShell>,
         client: Client,
+        window: WindowId,
+        _dir: TempDir,
     }
 
     /// A client of the endpoint, speaking over an in-memory connection.
@@ -562,7 +879,22 @@ mod tests {
         }
     }
 
-    async fn running() -> Running {
+    async fn running(name: &str) -> Running {
+        let dir = TempDir::new(name);
+        // A shell that starts fast and keeps no history, with a mark a command can print
+        // that does not appear in the command's own echo.
+        let (shell, args) = if cfg!(windows) {
+            ("cmd.exe", "[\"/d\"]")
+        } else {
+            ("/bin/sh", "[]")
+        };
+        std::fs::create_dir_all(&dir.dirs().config).unwrap();
+        std::fs::write(
+            dir.dirs().config_file(),
+            format!("[terminal]\nshell = \"{shell}\"\nshell-args = {args}\n"),
+        )
+        .unwrap();
+
         let local = Arc::new(
             LocalBackend::in_process(HostConfig::default())
                 .await
@@ -577,51 +909,112 @@ mod tests {
             Duration::from_secs(600),
             Arc::new(Marks::start()),
         );
+        let config = ConfigService::load(dir.dirs(), Some(WORKSPACE_NAME));
+        let store = Store::new(dir.dirs().state_workspaces_dir());
+        let panes = Panes::open(&state, Arc::clone(&config), store, WORKSPACE_NAME).await;
+        state.set_panes(Arc::clone(&panes));
         let shell = Arc::new(FakeShell::default());
-        let control = Control::new(Arc::clone(&state), shell.clone(), Duration::from_millis(50));
+        panes.run(shell.clone());
+        let window = panes.focused_window().unwrap();
+        let services = Arc::new(Services {
+            state,
+            panes,
+            config,
+            registry: Arc::new(builtins::registry()),
+            shell: shell.clone(),
+        });
+        let control = Control::new(Arc::clone(&services), Duration::from_millis(200));
         let (ours, theirs) = tokio::io::duplex(64 * 1024);
         tokio::spawn(async move {
             let _ = serve_client(theirs, &control).await;
         });
         Running {
-            state,
+            services,
             shell,
             client: Client {
                 io: ours,
                 decoder: ControlDecoder::new(),
                 next_id: 1,
             },
+            window,
+            _dir: dir,
         }
     }
 
-    /// Opens a carrier as a page would, starts a shell and attaches to it.
-    async fn shown(state: &Arc<AppState>) -> (Arc<RecordingCarrier>, u32, SessionId) {
-        let carrier = RecordingCarrier::new();
-        let id = state.open(WINDOW, carrier.clone()).await;
-        let session = state
-            .spawn(WINDOW, id, &Router::local_id(), shell())
-            .await
-            .unwrap();
-        state
-            .attach(WINDOW, id, &Router::local_id(), session, 1, facts())
-            .await
-            .unwrap();
-        let credit = client_frames(&[lume_proto::Message::new(
-            1,
-            lume_proto::Body::Credit(CREDIT),
-        )]);
-        state.send(WINDOW, id, &credit).await.unwrap();
-        (carrier, id, session)
+    /// What stands in for the window's page: a carrier, and the streams it has used.
+    struct Page {
+        carrier: Arc<RecordingCarrier>,
+        id: u32,
+        label: String,
+        next_stream: u32,
     }
 
-    fn text_of(carrier: &RecordingCarrier) -> String {
-        let mut text = String::new();
-        for message in carrier.messages() {
-            if let lume_proto::Body::Data(bytes) = &message.body {
-                text.push_str(&String::from_utf8_lossy(bytes));
+    impl Page {
+        async fn open(app: &Running) -> Self {
+            let carrier = RecordingCarrier::new();
+            let label = label_of(app.window);
+            let id = app.services.state.open(&label, carrier.clone()).await;
+            Self {
+                carrier,
+                id,
+                label,
+                next_stream: 1,
             }
         }
-        text
+
+        /// Attaches to a session and lets its output flow.
+        async fn attach(&mut self, state: &Arc<AppState>, key: &SessionKey) -> u32 {
+            let stream = self.next_stream;
+            self.next_stream += 1;
+            state
+                .attach(
+                    &self.label,
+                    self.id,
+                    &key.backend,
+                    key.session,
+                    stream,
+                    facts(),
+                )
+                .await
+                .unwrap();
+            let credit = client_frames(&[Message::new(stream, Body::Credit(CREDIT))]);
+            state.send(&self.label, self.id, &credit).await.unwrap();
+            stream
+        }
+
+        fn text(&self) -> String {
+            let mut text = String::new();
+            for message in self.carrier.messages() {
+                if let Body::Data(bytes) = &message.body {
+                    text.push_str(&String::from_utf8_lossy(bytes));
+                }
+            }
+            text
+        }
+    }
+
+    /// Opens the window's page, starts the session of its one pane and attaches to it.
+    async fn shown(app: &Running) -> (Page, PaneId, SessionKey) {
+        let mut page = Page::open(app).await;
+        let pane = app.services.panes.workspace().panes()[0].id;
+        let outcome = app
+            .services
+            .panes
+            .start_sessions(
+                app.window,
+                vec![PaneStart {
+                    pane,
+                    size: size(80, 24),
+                }],
+            )
+            .await;
+        let started = &outcome.started[0];
+        let key = SessionKey {
+            backend: started.backend.clone(),
+            session: started.session,
+        };
+        page.attach(&app.services.state, &key).await;
+        (page, pane, key)
     }
 
     async fn until(what: &str, mut done: impl FnMut() -> bool) {
@@ -635,17 +1028,21 @@ mod tests {
         }
     }
 
+    async fn stop(app: Running) {
+        app.services.state.shutdown().await;
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_client_must_say_hello_first() {
-        let mut app = running().await;
+        let mut app = running("hello").await;
         let refused = app.client.ask(AppRequestBody::List {}).await.unwrap_err();
         assert_eq!(refused.code, codes::HELLO_REQUIRED);
-        app.state.shutdown().await;
+        stop(app).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_client_of_another_version_is_refused() {
-        let mut app = running().await;
+        let mut app = running("version").await;
         let refused = app
             .client
             .ask(AppRequestBody::Hello {
@@ -656,49 +1053,53 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(refused.code, codes::VERSION_MISMATCH);
-        app.state.shutdown().await;
+        stop(app).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn activate_and_quit_reach_the_window() {
-        let mut app = running().await;
+        let mut app = running("quit").await;
         app.client.hello().await;
 
         let activated = app.client.ask(AppRequestBody::Activate {}).await.unwrap();
         assert_eq!(activated.body, AppReplyBody::Activated {});
-        assert_eq!(app.shell.activated.load(Ordering::Relaxed), 1);
-        assert_eq!(app.shell.quit.load(Ordering::Relaxed), 0);
+        assert_eq!(app.shell.activations(), 1);
+        assert_eq!(app.shell.quits(), 0);
 
         let quitting = app.client.ask(AppRequestBody::Quit {}).await.unwrap();
         assert_eq!(quitting.body, AppReplyBody::Quitting {});
         // The window is told once the answer is on its way.
         let shell = app.shell.clone();
-        until("quit", || shell.quit.load(Ordering::Relaxed) == 1).await;
-        app.state.shutdown().await;
+        until("quit", || shell.quits() == 1).await;
+        stop(app).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn sessions_are_listed_typed_into_and_ended_without_a_page_answering() {
-        let mut app = running().await;
+    async fn the_focused_pane_is_listed_typed_into_and_ended() {
+        let mut app = running("focused").await;
         app.client.hello().await;
-        let (carrier, _, session) = shown(&app.state).await;
+        let (page, pane, key) = shown(&app).await;
 
         let listed = app.client.ask(AppRequestBody::List {}).await.unwrap();
         let AppReplyBody::Sessions { sessions } = listed.body else {
             panic!("not a session list");
         };
         assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].info.id, session);
-        assert!(sessions[0].shown);
-        assert_eq!(listed.effect, "listed 1 sessions");
+        assert_eq!(sessions[0].info.id, key.session);
+        assert_eq!(sessions[0].pane, Some(pane.to_string()));
 
-        // No session named: the one the window shows.
-        let command = String::from_utf8(crate::testing::PRINT_MARK.to_vec()).unwrap();
+        // Nothing named: the pane that has the keyboard.
+        let command = if cfg!(windows) {
+            "echo lume-%OS:~0,0%k7q-done\r"
+        } else {
+            "echo \"lume-\"\"k7q-done\"\r"
+        };
         let sent = app
             .client
             .ask(AppRequestBody::Send {
+                pane: None,
                 session: None,
-                text: command.clone(),
+                text: command.to_owned(),
             })
             .await
             .unwrap();
@@ -709,14 +1110,14 @@ mod tests {
             }
         );
         until("the command's output", || {
-            text_of(&carrier).contains("lume-k7q-done")
+            page.text().contains("lume-k7q-done")
         })
         .await;
 
         let status = app.client.ask(AppRequestBody::Status {}).await.unwrap();
         let AppReplyBody::Status {
             window,
-            shown,
+            focused,
             marks,
             ..
         } = status.body
@@ -724,14 +1125,20 @@ mod tests {
             panic!("not a status");
         };
         assert!(window);
-        assert_eq!(shown, Some(session));
+        assert_eq!(
+            focused,
+            Some(Focused {
+                pane: pane.to_string(),
+                session: Some(key.session)
+            })
+        );
         assert!(marks.carrier_ms.is_some() && marks.attached_ms.is_some());
-        assert!(marks.output_ms.is_some());
 
         let waiting = app
             .client
             .ask(AppRequestBody::WaitExit {
-                session: Some(session),
+                pane: Some(pane.to_string()),
+                session: None,
                 timeout_ms: 50,
             })
             .await
@@ -739,29 +1146,33 @@ mod tests {
         assert_eq!(waiting.code, codes::TIMEOUT);
 
         app.client
-            .ask(AppRequestBody::Kill { session })
+            .ask(AppRequestBody::Kill {
+                session: key.session,
+            })
             .await
             .unwrap();
         let exited = app
             .client
             .ask(AppRequestBody::WaitExit {
-                session: Some(session),
+                pane: None,
+                session: Some(key.session),
                 timeout_ms: 20_000,
             })
             .await
             .unwrap();
         assert!(matches!(exited.body, AppReplyBody::Exited { .. }));
-        app.state.shutdown().await;
+        stop(app).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_exit_code_is_reported_to_whoever_waits() {
-        let mut app = running().await;
+        let mut app = running("code").await;
         app.client.hello().await;
-        let (_carrier, _, session) = shown(&app.state).await;
+        let (_page, pane, key) = shown(&app).await;
         app.client
             .ask(AppRequestBody::Send {
-                session: Some(session),
+                pane: Some(pane.to_string()),
+                session: None,
                 text: "exit 7\r".to_owned(),
             })
             .await
@@ -769,7 +1180,8 @@ mod tests {
         let exited = app
             .client
             .ask(AppRequestBody::WaitExit {
-                session: Some(session),
+                pane: None,
+                session: Some(key.session),
                 timeout_ms: 20_000,
             })
             .await
@@ -780,17 +1192,20 @@ mod tests {
                 status: ExitStatus::Code(7)
             }
         );
-        app.state.shutdown().await;
+        stop(app).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn what_needs_a_page_is_refused_without_one_and_passed_on_with_one() {
-        let mut app = running().await;
+        let mut app = running("page").await;
         app.client.hello().await;
 
         let refused = app
             .client
-            .ask(AppRequestBody::Screen { session: None })
+            .ask(AppRequestBody::Screen {
+                pane: None,
+                session: None,
+            })
             .await
             .unwrap_err();
         assert_eq!(refused.code, codes::NO_WINDOW);
@@ -798,22 +1213,33 @@ mod tests {
             .client
             .ask(AppRequestBody::Spawn {
                 spec: OpenSpec::default(),
+                place: SpawnPlace::Tab {},
             })
             .await
             .unwrap_err();
         assert_eq!(refused.code, codes::NO_WINDOW);
 
-        let (carrier, id, session) = shown(&app.state).await;
+        let (page, pane, key) = shown(&app).await;
         // The page answers as soon as it is asked.
-        let state = Arc::clone(&app.state);
-        let page = tokio::spawn(async move {
-            until("the request to the page", || !carrier.requests().is_empty()).await;
-            let request = carrier.requests().remove(0);
+        let state = Arc::clone(&app.services.state);
+        let (carrier, id, label) = (page.carrier.clone(), page.id, page.label.clone());
+        let answering = tokio::spawn(async move {
+            // Notices arrive on the same stream; the request is among them.
+            let asked = || {
+                carrier
+                    .requests()
+                    .into_iter()
+                    .find(|message| message.get("request").is_some())
+            };
+            until("the request to the page", || asked().is_some()).await;
+            let request = asked().unwrap();
             assert_eq!(request["request"]["body"]["type"], "screen");
+            assert_eq!(request["request"]["body"]["pane"], pane.to_string());
             let asked = request["request"]["id"].as_u64().unwrap();
             let answer = AppReplyBody::Screen {
-                session,
-                size: crate::testing::size(4, 1),
+                pane: pane.to_string(),
+                session: key.session,
+                size: size(4, 1),
                 cursor: lume_proto::app::ScreenCursor {
                     col: 2,
                     row: 0,
@@ -822,33 +1248,252 @@ mod tests {
                 alternate: false,
                 lines: vec!["$ ".to_owned()],
             };
-            state.answer(WINDOW, id, asked, Ok(answer)).unwrap();
+            state.answer(&label, id, asked, Ok(answer)).unwrap();
         });
         let screen = app
             .client
-            .ask(AppRequestBody::Screen { session: None })
+            .ask(AppRequestBody::Screen {
+                pane: None,
+                session: None,
+            })
             .await
             .unwrap();
-        page.await.unwrap();
-        assert_eq!(screen.effect, "read 1 lines of the screen");
+        answering.await.unwrap();
+        assert_eq!(
+            screen.effect,
+            format!("read 1 lines of the screen of pane {pane}")
+        );
         assert!(matches!(screen.body, AppReplyBody::Screen { .. }));
-        app.state.shutdown().await;
+        stop(app).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_session_that_is_not_shown_cannot_be_typed_into() {
-        let mut app = running().await;
+    async fn a_session_is_started_in_a_new_tab_or_beside_the_focused_pane() {
+        let mut app = running("spawn").await;
         app.client.hello().await;
-        let (_carrier, id, _) = shown(&app.state).await;
-        let hidden = app
+        let (mut page, first, _) = shown(&app).await;
+
+        for place in [
+            SpawnPlace::Tab {},
+            SpawnPlace::Split {
+                dir: Direction::Down,
+            },
+        ] {
+            let before = app.services.panes.workspace().panes().len();
+            let asking = app.client.ask(AppRequestBody::Spawn {
+                spec: OpenSpec::default(),
+                place,
+            });
+            // The page attaches to the new pane's session when the layout tells it of
+            // the pane, as the real page does.
+            let panes = Arc::clone(&app.services.panes);
+            let state = Arc::clone(&app.services.state);
+            let attaching = async {
+                until("the new pane", || panes.workspace().panes().len() > before).await;
+                let workspace = panes.workspace();
+                let made = workspace.panes().into_iter().last().unwrap().id;
+                let key = panes.session_of(made).unwrap();
+                page.attach(&state, &key).await;
+                (made, key)
+            };
+            let (answer, (made, key)) = tokio::join!(asking, attaching);
+            let tab = match place {
+                SpawnPlace::Tab {} => app.services.panes.workspace().windows[0]
+                    .centre
+                    .active
+                    .map(|tab| tab.to_string()),
+                _ => None,
+            };
+            assert_eq!(
+                answer.unwrap().body,
+                AppReplyBody::Spawned {
+                    session: key.session,
+                    pane: made.to_string(),
+                    tab,
+                }
+            );
+            assert_ne!(made, first);
+        }
+        let workspace = app.services.panes.workspace();
+        assert_eq!(workspace.windows[0].centre.tabs.len(), 2);
+        assert_eq!(workspace.panes().len(), 3);
+
+        let refused = app
+            .client
+            .ask(AppRequestBody::Spawn {
+                spec: OpenSpec::default(),
+                place: SpawnPlace::Window {},
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, codes::UNSUPPORTED);
+        stop(app).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_layout_is_read_and_changed_and_commands_are_listed_and_run() {
+        let mut app = running("layout").await;
+        app.client.hello().await;
+        let pane = app.services.panes.workspace().panes()[0].id;
+
+        let read = app.client.ask(AppRequestBody::Layout {}).await.unwrap();
+        let AppReplyBody::Layout {
+            window,
+            epoch,
+            revision,
+            workspace,
+        } = read.body
+        else {
+            panic!("not a layout");
+        };
+        assert_eq!(window, Some(app.window.to_string()));
+        assert_eq!(epoch, 1);
+        assert_eq!(workspace["name"], WORKSPACE_NAME);
+
+        let renamed = app
+            .client
+            .ask(AppRequestBody::LayoutApply {
+                intent: serde_json::json!({
+                    "type": "pane_rename", "pane": pane.to_string(), "title": "logs"
+                }),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            renamed.body,
+            AppReplyBody::Applied {
+                epoch: 1,
+                revision: revision + 1,
+                created: serde_json::json!({"pane": null, "tab": null, "window": null}),
+            }
+        );
+        let again = app
+            .client
+            .ask(AppRequestBody::LayoutApply {
+                intent: serde_json::json!({
+                    "type": "pane_rename", "pane": pane.to_string(), "title": "logs"
+                }),
+            })
+            .await
+            .unwrap();
+        assert!(again.effect.contains("changed nothing"), "{}", again.effect);
+
+        for (intent, code) in [
+            (
+                serde_json::json!({"type": "no_such_intent"}),
+                codes::BAD_REQUEST,
+            ),
+            (
+                serde_json::json!({"type": "close", "pane": "p999"}),
+                codes::NOT_FOUND,
+            ),
+            (
+                serde_json::json!({"type": "window_focus", "window": app.window.to_string()}),
+                "forbidden",
+            ),
+        ] {
+            let refused = app
+                .client
+                .ask(AppRequestBody::LayoutApply { intent })
+                .await
+                .unwrap_err();
+            assert_eq!(refused.code, code);
+        }
+
+        let listed = app.client.ask(AppRequestBody::Commands {}).await.unwrap();
+        let AppReplyBody::Commands { commands } = listed.body else {
+            panic!("not a list of commands");
+        };
+        assert!(
+            commands
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|command| command["id"] == "lume.pane.zoom" && command["runs"] == "core")
+        );
+
+        let ran = app
+            .client
+            .ask(AppRequestBody::Command {
+                id: "lume.pane.zoom".to_owned(),
+                args: serde_json::Value::Null,
+                window: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            ran.body,
+            AppReplyBody::Ran {
+                command: "lume.pane.zoom".to_owned()
+            }
+        );
+        assert!(app.services.panes.is_zoomed(pane));
+
+        let unknown = app
+            .client
+            .ask(AppRequestBody::Command {
+                id: "lume.pane.fly".to_owned(),
+                args: serde_json::Value::Null,
+                window: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(unknown.code, codes::NOT_FOUND);
+        // A command that runs in the page needs the window's page, and there is none.
+        let pageless = app
+            .client
+            .ask(AppRequestBody::Command {
+                id: "lume.terminal.copy".to_owned(),
+                args: serde_json::Value::Null,
+                window: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(pageless.code, codes::NO_WINDOW);
+        stop(app).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_pane_or_session_that_is_not_there_is_said_to_be_missing() {
+        let mut app = running("missing").await;
+        app.client.hello().await;
+        let (_page, _pane, _key) = shown(&app).await;
+
+        let unknown = app
+            .client
+            .ask(AppRequestBody::Send {
+                pane: Some("p999".to_owned()),
+                session: None,
+                text: "x".to_owned(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(unknown.code, codes::NOT_FOUND);
+        let malformed = app
+            .client
+            .ask(AppRequestBody::Screen {
+                pane: Some("nine".to_owned()),
+                session: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(malformed.code, codes::BAD_REQUEST);
+
+        // A session in no pane has no screen and no keyboard.
+        let stray = app
+            .services
             .state
-            .spawn(WINDOW, id, &Router::local_id(), shell())
+            .router()
+            .get(&Router::local_id())
+            .unwrap()
+            .spawn(crate::testing::shell())
             .await
             .unwrap();
         let refused = app
             .client
             .ask(AppRequestBody::Send {
-                session: Some(hidden),
+                pane: None,
+                session: Some(stray),
                 text: "x".to_owned(),
             })
             .await
@@ -863,6 +1508,6 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(unknown.code, codes::NOT_FOUND);
-        app.state.shutdown().await;
+        stop(app).await;
     }
 }

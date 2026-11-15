@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
@@ -14,7 +15,7 @@ const page = (name: string) => fileURLToPath(new URL(name, import.meta.url));
 
 // Tauri loads this dev server at a fixed address (tauri.conf.json, build.devUrl).
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   clearScreen: false,
   server: {
     port: 1420,

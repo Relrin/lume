@@ -212,8 +212,13 @@ impl Start {
 /// shell was handed to the page, by the application's own account, and until the
 /// screen showed a prompt, by the clock here.
 fn time_one_start(app: &Path, lume: &Path, endpoint: &str) -> Result<Start> {
+    // Each start is a first start: nothing of the user's is read, and no workspace is
+    // there to be brought back.
+    let dirs = paths::PrivateDirs::fresh(endpoint)?;
+    let mut command = Command::new(app);
+    dirs.apply(&mut command);
     let started = Instant::now();
-    let mut child = Command::new(app)
+    let mut child = command
         .args(["--endpoint", endpoint])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

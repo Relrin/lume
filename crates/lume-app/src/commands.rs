@@ -1,8 +1,13 @@
 //! The commands the web UI may call.
 //!
-//! Each is declared in the build script and granted to the main window in the
-//! capability file; a command missing from either cannot be called. The functions here
-//! only take arguments apart and put results together: what they do lives in the state.
+//! Each is declared in the build script and granted to the windows that may call it
+//! in a capability file; a command missing from either cannot be called. The functions
+//! here only take arguments apart and put results together: what they do lives in the
+//! state.
+//!
+//! A terminal window's page is not granted the commands that start, end and list
+//! sessions: the sessions of its panes are the application's to start. Those three are
+//! for the page of a test suite, which measures sessions of its own.
 
 use std::sync::Arc;
 

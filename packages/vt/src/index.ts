@@ -19,6 +19,7 @@ export {
   type ClipboardLocation,
   type ColorScheme,
   type Cursor,
+  type CursorStyle,
   type OutputKind,
   type Rgb,
   type Scrollbar,
@@ -49,7 +50,7 @@ export {
   type MouseGeometry,
   type MouseInput,
 } from "./mouse.ts";
-export { encodeFocus, encodePaste, isPasteSafe } from "./input.ts";
+export { encodeColorScheme, encodeFocus, encodePaste, isPasteSafe } from "./input.ts";
 export {
   clearSelection,
   extendSelection,

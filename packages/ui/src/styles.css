@@ -1,267 +1,661 @@
-/* Temporary styles for the window. They will be replaced by design tokens. */
-
-:root {
-  color-scheme: dark;
-  --surface: #14161d;
-  --card: #1c1f2a;
-  --border: #2c3142;
-  --text: #dfe3ee;
-  --muted: #9097ab;
-  --yes: #7ee0a0;
-  --no: #f0908a;
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-html,
-body {
-  margin: 0;
-  min-height: 100%;
-  background: var(--surface);
-  color: var(--text);
-}
-
-.hello {
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 32px 24px;
-}
-
-h1 {
-  margin: 0 0 4px;
-  font-size: 24px;
-  font-weight: 600;
-}
-
-.lead {
-  margin: 0 0 24px;
-  color: var(--muted);
-}
-
-.facts {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0;
-  margin: 0;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.facts dt,
-.facts dd {
-  margin: 0;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.facts dt {
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.facts dd {
-  overflow-wrap: anywhere;
-}
-
-.facts dt:last-of-type,
-.facts dd:last-of-type {
-  border-bottom: none;
-}
-
-.yes {
-  color: var(--yes);
-}
-
-.no {
-  color: var(--no);
-}
-
-/* The terminal fills the window. Its picture is a canvas; the rest lies on top. */
-
-.terminal {
-  position: fixed;
-  inset: 0;
-  overflow: hidden;
-  cursor: text;
-  user-select: none;
-  touch-action: none;
-}
-
-.terminal-over-link {
-  cursor: pointer;
-}
-
-.terminal-surface {
-  position: absolute;
-  inset: 0;
-}
-
 /*
- * The element that takes the keyboard. It is never seen, but it is laid out at the
- * cursor, because an input method opens its window where the element is.
+ * The window's styles.
+ *
+ * Every colour, radius, gap and size here is a design token: a CSS variable the page
+ * sets from the theme and the settings the application sends, starting from the
+ * built-in theme's values. Nothing is styled with a value of its own, so changing a
+ * theme or a setting restyles the window without anything being rendered again.
  */
-.terminal-input {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 2em;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  outline: none;
-  resize: none;
-  overflow: hidden;
-  white-space: pre;
-  color: transparent;
-  background: transparent;
-  caret-color: transparent;
-  opacity: 0;
-  pointer-events: none;
+
+@import "tailwindcss";
+@import "@lume/tokens/defaults.css";
+@import "./fonts/fonts.css";
+
+/* The tokens under the names Tailwind's utilities are made from. */
+@theme inline {
+  --color-surface: var(--lume-color-surface);
+  --color-card: var(--lume-color-card);
+  --color-card-header: var(--lume-color-card-header);
+  --color-line: var(--lume-color-border);
+  --color-line-focus: var(--lume-color-border-focus);
+  --color-ink: var(--lume-color-text);
+  --color-ink-muted: var(--lume-color-text-muted);
+  --color-ink-inverse: var(--lume-color-text-inverse);
+  --color-accent: var(--lume-color-accent);
+  --color-accent-ink: var(--lume-color-accent-text);
+  --color-control: var(--lume-color-control);
+  --color-control-hover: var(--lume-color-control-hover);
+  --color-control-active: var(--lume-color-control-active);
+  --color-popover: var(--lume-color-popover);
+  --color-overlay: var(--lume-color-overlay);
+  --color-info: var(--lume-color-status-info);
+  --color-success: var(--lume-color-status-success);
+  --color-warning: var(--lume-color-status-warning);
+  --color-danger: var(--lume-color-status-danger);
+  --radius-card: var(--lume-radius-card);
+  --radius-control: var(--lume-radius-control);
+  --shadow-card: var(--lume-shadow-card);
+  --shadow-card-focus: var(--lume-shadow-card-focus);
+  --shadow-floating: var(--lume-shadow-floating);
+  --shadow-popover: var(--lume-shadow-popover);
+  --font-ui: var(--lume-font-ui-family), system-ui, sans-serif;
+  --font-mono: var(--lume-font-family), var(--lume-font-fallback);
 }
 
-.terminal-preedit {
-  position: absolute;
-  top: 0;
-  left: 0;
-  white-space: pre;
-  text-decoration: underline;
-  pointer-events: none;
+@layer base {
+  :root {
+    color-scheme: dark;
+    font-family: var(--font-ui);
+    font-size: var(--lume-font-ui-size);
+    line-height: 1.5;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-surface text-ink;
+    overflow: hidden;
+  }
 }
 
-.terminal-scrollbar {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 6px;
-  pointer-events: none;
-}
+@layer components {
+  /* The window. */
 
-.terminal-scroll-thumb {
-  position: absolute;
-  right: 1px;
-  width: 4px;
-  min-height: 12px;
-  border-radius: 2px;
-  background: var(--muted);
-  opacity: 0.5;
-}
+  .shell {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    /* A faint glow of the accent behind the top left corner, over the surface. */
+    background:
+      radial-gradient(
+        1200px 600px at 12% -10%,
+        color-mix(in srgb, var(--lume-color-accent) 9%, transparent) 0%,
+        transparent 60%
+      ),
+      var(--lume-color-surface);
+    user-select: none;
+  }
 
-.terminal-status {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  max-width: 80%;
-  padding: 2px 10px;
-  overflow: hidden;
-  font-size: 12px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--text);
-  background: var(--card);
-  border-top: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  border-top-right-radius: 6px;
-  pointer-events: none;
-}
+  .top-bar {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 10px;
+    height: var(--lume-size-topbar);
+    padding: 0 var(--lume-space-gap) 0 12px;
+  }
 
-.terminal-restart {
-  position: absolute;
-  right: 12px;
-  bottom: 0;
-  padding: 2px 12px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--text);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-bottom: 0;
-  border-radius: 6px 6px 0 0;
-  cursor: pointer;
-}
+  .top-mark {
+    @apply text-accent;
+    display: flex;
+    flex-shrink: 0;
+  }
 
-.terminal-restart:hover {
-  border-color: var(--muted);
-}
+  /* Anything small that is pressed: it lights up under the pointer. */
+  .control {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
 
-.prompt-backdrop {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  cursor: default;
-  background: rgb(0 0 0 / 0.45);
-}
+  .control:hover,
+  .control[aria-pressed="true"] {
+    @apply bg-control-hover text-ink;
+  }
 
-.prompt {
-  width: min(560px, 100%);
-  max-height: 100%;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 20px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-}
+  .control:focus-visible,
+  .tab-label:focus-visible,
+  .empty-action:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
 
-.prompt h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
+  /* The tabs. */
 
-.prompt p {
-  margin: 0;
-  color: var(--muted);
-}
+  .tab-strip {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    gap: 4px;
+  }
 
-.prompt-preview {
-  margin: 0;
-  padding: 10px 12px;
-  min-height: 0;
-  max-height: 240px;
-  overflow: auto;
-  font-family: "Cascadia Mono", Consolas, Menlo, "DejaVu Sans Mono", monospace;
-  font-size: 12px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  user-select: text;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
+  .tab-list {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
 
-.prompt-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
+  .tab {
+    @apply text-ink-muted;
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 48px;
+    max-width: 210px;
+    height: var(--lume-size-tab);
+    border-radius: var(--lume-radius-control);
+    touch-action: pan-y;
+    transition: background-color 120ms ease;
+  }
 
-.prompt-actions button {
-  padding: 6px 16px;
-  font: inherit;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
+  .tab:hover {
+    @apply bg-control-hover;
+  }
 
-.prompt-actions button:focus-visible {
-  outline: 2px solid var(--text);
-  outline-offset: 1px;
-}
+  .tab[data-active="true"] {
+    @apply bg-control-active text-ink;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
 
-.prompt-actions .prompt-proceed {
-  color: var(--surface);
-  background: var(--text);
+  .tab[data-dragging="true"] {
+    opacity: var(--lume-opacity-disabled);
+  }
+
+  .tab-label {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    gap: 7px;
+    padding: 0 4px 0 10px;
+    border-radius: var(--lume-radius-control);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .tab-icon {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .tab-title {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .tab-close {
+    width: 20px;
+    height: 20px;
+    margin-right: 5px;
+    opacity: 0;
+  }
+
+  .tab:hover .tab-close,
+  .tab[data-active="true"] .tab-close,
+  .tab-close:focus-visible {
+    opacity: 1;
+  }
+
+  .tab-rename {
+    @apply bg-control text-ink;
+    flex: 1;
+    min-width: 0;
+    height: 24px;
+    margin: 0 4px;
+    padding: 0 8px;
+    border: var(--lume-size-border) solid var(--lume-color-border-focus);
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    outline: none;
+    user-select: text;
+  }
+
+  .tab-new {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--lume-radius-control);
+  }
+
+  /* The panes. Each card and divider is placed by a transform and a size set on it. */
+
+  .tab-area {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .pane-card {
+    @apply bg-card;
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-card);
+    box-shadow: var(--lume-shadow-card);
+    will-change: transform;
+  }
+
+  .pane-card[data-focused="true"] {
+    border-color: var(--lume-color-border-focus);
+    box-shadow: var(--lume-shadow-card-focus);
+  }
+
+  /* A card that does not have the keyboard is dimmed towards the surface. */
+  .pane-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--lume-color-surface);
+    opacity: var(--lume-opacity-dim);
+    pointer-events: none;
+  }
+
+  .pane-card[data-focused="true"]::after {
+    opacity: 0;
+  }
+
+  /*
+   * A header is as wide as its card, and a card can be narrow. The title and the
+   * directory give way first; then the header does without the directory, and then
+   * without the buttons there are keys for, so the ones that are left are whole.
+   */
+  .pane-header {
+    @apply bg-card-header;
+    container-type: inline-size;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    gap: 8px;
+    height: var(--lume-size-header);
+    padding: 0 6px 0 12px;
+    border-bottom: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 80%, transparent);
+  }
+
+  .pane-icon {
+    @apply text-accent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--lume-color-accent) 16%, transparent);
+  }
+
+  .pane-title {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* The directory gives way to the title when there is not room for both. */
+  .pane-cwd {
+    @apply text-ink-muted;
+    flex: 0 1000 auto;
+    /* Never squeezed to a sliver: it shows a few characters or, narrower still, is left out. */
+    min-width: 5ch;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .pane-spacer {
+    flex: 1;
+  }
+
+  .pane-buttons {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 2px;
+  }
+
+  .pane-button {
+    width: 26px;
+    height: 26px;
+  }
+
+  @container (max-width: 320px) {
+    .pane-cwd {
+      display: none;
+    }
+  }
+
+  @container (max-width: 210px) {
+    .pane-button-spare {
+      display: none;
+    }
+  }
+
+  @container (max-width: 130px) {
+    .pane-icon {
+      display: none;
+    }
+  }
+
+  .divider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 2;
+    touch-action: none;
+  }
+
+  .divider[data-axis="row"] {
+    cursor: col-resize;
+  }
+
+  .divider[data-axis="column"] {
+    cursor: row-resize;
+  }
+
+  /* A thin line down the middle of the gap, which shows when the gap is in use. */
+  .divider::after {
+    content: "";
+    position: absolute;
+    border-radius: 2px;
+    background: transparent;
+    transition: background-color 120ms ease;
+  }
+
+  .divider[data-axis="row"]::after {
+    top: 10px;
+    bottom: 10px;
+    left: calc(50% - 1px);
+    width: 2px;
+  }
+
+  .divider[data-axis="column"]::after {
+    right: 10px;
+    left: 10px;
+    top: calc(50% - 1px);
+    height: 2px;
+  }
+
+  .divider:hover::after {
+    background: color-mix(in srgb, var(--lume-color-accent) 55%, transparent);
+  }
+
+  .divider[data-dragging="true"]::after {
+    background: var(--lume-color-accent);
+  }
+
+  .empty-window {
+    @apply text-ink-muted;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .empty-action {
+    @apply bg-control-active text-ink;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 14px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    cursor: pointer;
+  }
+
+  .empty-action:hover {
+    border-color: var(--lume-color-border-focus);
+  }
+
+  /* A terminal fills its card under the header. Its picture is a canvas; the rest lies on top. */
+
+  .terminal {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    cursor: text;
+    touch-action: none;
+  }
+
+  .terminal-over-link {
+    cursor: pointer;
+  }
+
+  .terminal-surface {
+    position: absolute;
+    inset: 0;
+  }
+
+  /*
+   * The element that takes the keyboard. It is never seen, but it is laid out at the
+   * cursor, because an input method opens its window where the element is.
+   */
+  .terminal-input {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 2em;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    outline: none;
+    resize: none;
+    overflow: hidden;
+    white-space: pre;
+    color: transparent;
+    background: transparent;
+    caret-color: transparent;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .terminal-preedit {
+    position: absolute;
+    top: 0;
+    left: 0;
+    white-space: pre;
+    text-decoration: underline;
+    pointer-events: none;
+  }
+
+  .terminal-scrollbar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 6px;
+    pointer-events: none;
+  }
+
+  .terminal-scroll-thumb {
+    @apply bg-ink-muted;
+    position: absolute;
+    right: 1px;
+    width: 4px;
+    min-height: 12px;
+    border-radius: 2px;
+    opacity: 0.5;
+  }
+
+  /* One line along the bottom of a terminal, for what the terminal cannot show itself. */
+  .terminal-status {
+    @apply bg-popover text-ink;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    max-width: 100%;
+    padding: 2px 10px;
+    overflow: hidden;
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+    border-right: var(--lume-size-border) solid var(--lume-color-border);
+    border-top-right-radius: 6px;
+    pointer-events: none;
+  }
+
+  /* A question or a notice, over everything. */
+
+  .prompt-backdrop {
+    @apply bg-overlay;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    cursor: default;
+  }
+
+  .prompt {
+    @apply bg-popover;
+    width: min(560px, 100%);
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + 2px);
+    box-shadow: var(--lume-shadow-popover);
+  }
+
+  .prompt h2 {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .prompt p {
+    @apply text-ink-muted;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+
+  .prompt-preview {
+    @apply bg-control;
+    padding: 10px 12px;
+    min-height: 0;
+    max-height: 240px;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+  }
+
+  .prompt-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .prompt-actions button {
+    @apply bg-control text-ink;
+    padding: 6px 16px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    cursor: pointer;
+  }
+
+  .prompt-actions button:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
+
+  .prompt-actions .prompt-proceed {
+    @apply bg-accent text-accent-ink;
+    border-color: transparent;
+  }
+
+  /* What the window shows when it cannot start, or is asked only to report on the webview. */
+
+  .start-failure,
+  .hello {
+    max-width: 760px;
+    height: 100%;
+    margin: 0 auto;
+    padding: 32px 24px;
+    overflow: auto;
+    user-select: text;
+  }
+
+  .start-failure h1,
+  .hello h1 {
+    margin-bottom: 4px;
+    font-size: 24px;
+    font-weight: 600;
+  }
+
+  .start-failure p,
+  .lead {
+    @apply text-ink-muted;
+    margin-bottom: 24px;
+  }
+
+  .hello a {
+    @apply text-accent;
+  }
+
+  .facts {
+    @apply bg-card;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    overflow: hidden;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-card);
+  }
+
+  .facts dt,
+  .facts dd {
+    padding: 10px 16px;
+    border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+  }
+
+  .facts dt {
+    @apply text-ink-muted;
+    white-space: nowrap;
+  }
+
+  .facts dd {
+    overflow-wrap: anywhere;
+  }
+
+  .facts dt:last-of-type,
+  .facts dd:last-of-type {
+    border-bottom: none;
+  }
+
+  .yes {
+    @apply text-success;
+  }
+
+  .no {
+    @apply text-danger;
+  }
 }

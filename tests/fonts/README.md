@@ -1,8 +1,9 @@
 # Test fonts
 
 `JetBrainsMono-Regular.ttf` is the font used for renderer snapshot tests, so that
-results do not depend on the fonts installed on a machine. It is not the app's default font
-and is not shipped in the app.
+results do not depend on the fonts installed on a machine. This file is not shipped in the
+app. The app ships the same version of the font as web fonts of its own, in
+`packages/ui/src/fonts`.
 
 - Font: JetBrains Mono Regular, version 2.305
 - Source: https://github.com/JetBrains/JetBrainsMono (`fonts/ttf/JetBrainsMono-Regular.ttf`)

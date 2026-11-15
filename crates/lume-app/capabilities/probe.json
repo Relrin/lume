@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "probe",
+  "description": "What the page of the window that reports on the webview, or runs a test suite, may call. A test suite is granted more when the application is started to run one.",
+  "windows": ["main"],
+  "permissions": ["allow-webview-info", "allow-probe-done"]
+}

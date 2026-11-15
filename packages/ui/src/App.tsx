@@ -7,10 +7,11 @@ import {
   runProbe,
   webviewInfo,
 } from "./probe.ts";
-import { Terminal } from "./Terminal.tsx";
+import { shellApp, type ShellApp } from "./shell/boot.ts";
+import { Shell } from "./shell/Shell.tsx";
 
 /**
- * What the window shows. Inside the application it is the terminal. Started only to be
+ * What the window shows. Inside the application it is the terminals. Started only to be
  * checked, or opened in a browser with no core behind it, it reports what the webview
  * can do instead.
  */
@@ -35,9 +36,40 @@ export function App() {
     };
   }, []);
 
-  if (showing === "terminal") return <Terminal />;
+  if (showing === "terminal") return <Terminals />;
   if (showing === "report") return <WebviewReport />;
   return null;
+}
+
+/** The window's terminals, once the page has started; if it cannot start, the reason. */
+function Terminals() {
+  const [app, setApp] = useState<ShellApp | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    // The page is started once however often this mounts.
+    shellApp().then(
+      (started) => {
+        if (current) setApp(started);
+      },
+      (error: unknown) => {
+        if (current) setFailure(error instanceof Error ? error.message : String(error));
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  if (app) return <Shell app={app} />;
+  if (failure === null) return null;
+  return (
+    <main className="start-failure" role="alert">
+      <h1>Lume could not start</h1>
+      <p>{failure}</p>
+    </main>
+  );
 }
 
 // The checks run once per page load, not once per mount: React's strict mode mounts twice

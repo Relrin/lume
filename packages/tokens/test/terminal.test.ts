@@ -26,14 +26,14 @@ describe("a terminal's look", () => {
   it("is the built-in dark theme by default", () => {
     const look = terminalAppearance(DEFAULT_TOKENS, DEFAULT_SCHEME);
     expect(look.scheme).toBe("dark");
-    expect(look.background).toEqual({ r: 0x14, g: 0x16, b: 0x1d });
-    expect(look.foreground).toEqual({ r: 0xdf, g: 0xe3, b: 0xee });
-    expect(look.cursorText).toEqual(look.background);
-    expect(look.selectionBackground).toEqual({ r: 0x2f, g: 0x4f, b: 0x8f });
+    expect(look.background).toEqual({ r: 0x17, g: 0x1a, b: 0x1e });
+    expect(look.foreground).toEqual({ r: 0xd7, g: 0xda, b: 0xdd });
+    expect(look.cursorText).toEqual({ r: 0x0f, g: 0x11, b: 0x13 });
+    expect(look.selectionBackground).toEqual({ r: 0x2b, g: 0x4a, b: 0x40 });
     expect(look.searchMatch.a).toBe(0x66);
     expect(look.searchActive.a).toBe(255);
     expect(look.ansi).toHaveLength(16);
-    expect(look.ansi[1]).toEqual({ r: 0xf0, g: 0x90, b: 0x8a });
+    expect(look.ansi[1]).toEqual({ r: 0xff, g: 0x8b, b: 0x82 });
     expect(look.ansi[15]).toEqual({ r: 255, g: 255, b: 255 });
     expect(look.fontFamily).toBe(
       '"JetBrains Mono", "Cascadia Mono", "Consolas", "Menlo", "DejaVu Sans Mono", monospace',
@@ -42,7 +42,7 @@ describe("a terminal's look", () => {
     expect(look.lineHeight).toBe(1.2);
     expect(look.fontWeight).toBe(400);
     expect(look.boldWeight).toBe(700);
-    expect(look.padding).toBe(4);
+    expect(look.padding).toBe(8);
   });
 
   it("follows the tokens it is given", () => {

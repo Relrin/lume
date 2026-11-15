@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sessions-start"
+description = "Enables the sessions_start command without any pre-configured scope."
+commands.allow = ["sessions_start"]
+
+[[permission]]
+identifier = "deny-sessions-start"
+description = "Denies the sessions_start command without any pre-configured scope."
+commands.deny = ["sessions_start"]

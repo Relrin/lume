@@ -25,6 +25,9 @@ export class WebGpuBackend implements TierBackend {
   readonly #context: GPUCanvasContext;
   readonly #uniforms: GPUBuffer;
   readonly #uniformData = new Float32Array(UNIFORM_BYTES / 4);
+  /** The key of the shared atlas this pane holds, and that atlas and its pages. */
+  #atlasKey: string | undefined;
+  #atlas: GlyphAtlas | undefined;
   #pages: GpuPages | undefined;
   #bindGroup: GPUBindGroup | undefined;
   /** The pages and the version of them the bind group was made for. */
@@ -53,7 +56,12 @@ export class WebGpuBackend implements TierBackend {
   }
 
   atlas(key: string, create: (sink: AtlasSink) => GlyphAtlas): GlyphAtlas {
-    const { atlas, pages } = this.#shared.atlas(key, create);
+    if (this.#atlas && this.#atlasKey === key) return this.#atlas;
+    const { atlas, pages } = this.#shared.acquireAtlas(key, create);
+    // Glyphs of the font shown before are of no further use to this pane.
+    this.#releaseAtlas();
+    this.#atlasKey = key;
+    this.#atlas = atlas;
     this.#pages = pages;
     return atlas;
   }
@@ -163,8 +171,16 @@ export class WebGpuBackend implements TierBackend {
     this.#stopListening?.();
     this.#destroyBuffers();
     this.#uniforms.destroy();
-    // The device and the atlas textures belong to the window and stay.
+    // The device belongs to the window and stays. The atlas goes with its last pane.
+    this.#releaseAtlas();
     this.#context.unconfigure();
+  }
+
+  #releaseAtlas(): void {
+    if (this.#atlasKey !== undefined) this.#shared.releaseAtlas(this.#atlasKey);
+    this.#atlasKey = undefined;
+    this.#atlas = undefined;
+    this.#pages = undefined;
   }
 
   #destroyBuffers(): void {

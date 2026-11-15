@@ -1,9 +1,10 @@
 //! `lume-gui`: the Lume application.
 //!
-//! It opens one window whose webview shows a terminal. The session behind the terminal
-//! runs on a session host inside this process, reached through the session protocol
-//! like any other host would be; the webview reaches it through the commands in
-//! [`commands`] and a byte carrier.
+//! It opens a window whose webview shows terminals in tabs and panes. The sessions
+//! behind them run on a session host inside this process, reached through the session
+//! protocol like any other host would be. Which panes there are is the layout's to say,
+//! the application starts and ends their sessions, and the webview follows both through
+//! commands and a byte carrier.
 //!
 //! `lume-gui --probe` starts no session. The page reports which webview engine it runs
 //! on and what GPU paths the engine offers, the findings are printed to standard output
@@ -22,9 +23,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
+mod builtins;
 mod carrier;
 mod clipboard;
 mod commands;
+mod commands_config;
+mod commands_layout;
+mod configsvc;
 mod control;
 mod error;
 mod fonts;
@@ -32,6 +37,9 @@ mod harness;
 mod log;
 mod marks;
 mod opener;
+mod panes;
+mod registry;
+mod services;
 mod state;
 mod synthetic;
 #[cfg(test)]
@@ -42,16 +50,21 @@ mod window;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use lume_config::{ColorScheme, Dirs};
 use lume_ipc::Listener;
+use lume_layout::{Intent, Store};
 use lume_session::{BackendId, HostConfig, LocalBackend, Router};
 use tauri::webview::PageLoadEvent;
-use tauri::{RunEvent, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 use crate::args::{Args, Mode, Suite};
 use crate::clipboard::ClipboardThread;
-use crate::control::Control;
+use crate::configsvc::ConfigService;
+use crate::control::{Control, Shell};
 use crate::fonts::Fonts;
 use crate::marks::Marks;
+use crate::panes::Panes;
+use crate::services::Services;
 use crate::state::AppState;
 use crate::synthetic::SyntheticPty;
 use crate::window::WindowShell;
@@ -92,6 +105,39 @@ fn bench_sessions(router: &Router) -> Option<Arc<LocalBackend>> {
             tracing::error!(%error, "the benchmark's session host did not start");
             None
         }
+    }
+}
+
+/// What an application that shows terminals has besides its sessions.
+struct Terminals {
+    panes: Arc<Panes>,
+    config: Arc<ConfigService>,
+}
+
+/// Reads the configuration and the workspace, and puts the workspace's panes in the
+/// application's charge.
+fn terminals(state: &Arc<AppState>) -> Result<Terminals, String> {
+    let dirs = Dirs::resolve().ok_or_else(|| {
+        "the folders for the configuration and the saved workspaces could not be found".to_owned()
+    })?;
+    let config = ConfigService::load(dirs.clone(), Some(tuning::WORKSPACE_NAME));
+    config.ensure_default_file();
+    let store = Store::new(dirs.state_workspaces_dir());
+    let panes = tauri::async_runtime::block_on(Panes::open(
+        state,
+        Arc::clone(&config),
+        store,
+        tuning::WORKSPACE_NAME,
+    ));
+    state.set_panes(Arc::clone(&panes));
+    Ok(Terminals { panes, config })
+}
+
+/// The colour scheme a window's theme is.
+fn scheme_of(theme: tauri::Theme) -> ColorScheme {
+    match theme {
+        tauri::Theme::Light => ColorScheme::Light,
+        _ => ColorScheme::Dark,
     }
 }
 
@@ -179,6 +225,20 @@ fn main() -> ExitCode {
         Arc::clone(&marks),
     );
 
+    let terminals = match mode {
+        Mode::Terminal => match terminals(&state) {
+            Ok(terminals) => Some(terminals),
+            Err(problem) => {
+                eprintln!("lume-gui: {problem}");
+                return ExitCode::FAILURE;
+            }
+        },
+        Mode::Probe | Mode::Harness(_) => None,
+    };
+    let config = terminals
+        .as_ref()
+        .map(|terminals| Arc::clone(&terminals.config));
+
     let loading = Arc::clone(&state);
     let serving = Arc::clone(&state);
     let app = tauri::Builder::default()
@@ -190,11 +250,34 @@ fn main() -> ExitCode {
             if matches!(mode, Mode::Harness(_)) {
                 harness::start(app)?;
             }
-            window::open(app, mode)?;
+            let shown = terminals
+                .as_ref()
+                .and_then(|terminals| terminals.panes.focused_window());
+            let window = window::open(app, mode, shown)?;
             marks.window();
+            let Some(Terminals { panes, config }) = terminals else {
+                return Ok(());
+            };
+            let shell: Arc<dyn Shell> = Arc::new(WindowShell::new(app.handle().clone()));
+            let services = Arc::new(Services {
+                state: Arc::clone(&serving),
+                panes,
+                config,
+                registry: Arc::new(builtins::registry()),
+                shell: Arc::clone(&shell),
+            });
+            app.manage(Arc::clone(&services));
+            // The theme follows the system's scheme, which only a window can tell.
+            if let Ok(theme) = window.theme() {
+                services.config.set_scheme(scheme_of(theme));
+            }
+            let telling = Arc::clone(&serving);
+            services
+                .config
+                .watch(move |notice| telling.broadcast(&notice));
+            services.panes.run(shell);
             if let Some(listener) = listener {
-                let shell = Arc::new(WindowShell::new(app.handle().clone()));
-                let control = Control::new(serving, shell, tuning::PAGE_START_TIMEOUT);
+                let control = Control::new(services, tuning::PAGE_START_TIMEOUT);
                 tauri::async_runtime::spawn(control::serve(listener, control));
             }
             Ok(())
@@ -220,6 +303,15 @@ fn main() -> ExitCode {
             commands::open_link,
             commands::font_families,
             commands::page_reply,
+            commands_layout::layout_view,
+            commands_layout::layout_apply,
+            commands_layout::sessions_start,
+            commands_layout::commands_list,
+            commands_layout::command_run,
+            commands_config::config_view,
+            commands_config::config_set,
+            commands_config::config_unset,
+            commands_config::config_open,
             harness::harness_done,
             harness::harness_save,
             harness::harness_read,
@@ -233,9 +325,38 @@ fn main() -> ExitCode {
             event: WindowEvent::Destroyed,
             ..
         } => state.retire(&label),
-        // A program in a terminal can outlive a process that exits without closing the
-        // terminal, so the sessions are ended before the process is.
-        RunEvent::Exit => tauri::async_runtime::block_on(state.shutdown()),
+        RunEvent::WindowEvent {
+            event: WindowEvent::ThemeChanged(theme),
+            ..
+        } => {
+            if let Some(config) = &config {
+                config.set_scheme(scheme_of(theme));
+            }
+        }
+        // The layout remembers which window the user is working in: a request that
+        // names no window means that one.
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::Focused(true),
+            ..
+        } => {
+            if let (Some(panes), Some(window)) = (state.panes(), window::window_of(&label)) {
+                let panes = Arc::clone(panes);
+                tauri::async_runtime::spawn(async move {
+                    let _ = panes.apply_core(Intent::WindowFocus { window }).await;
+                });
+            }
+        }
+        RunEvent::Exit => {
+            // The workspace is written while its panes are all still there: the
+            // sessions that end next end because the application is closing.
+            if let Some(panes) = state.panes() {
+                panes.close();
+            }
+            // A program in a terminal can outlive a process that exits without closing
+            // the terminal, so the sessions are ended before the process is.
+            tauri::async_runtime::block_on(state.shutdown());
+        }
         _ => {}
     });
     ExitCode::SUCCESS

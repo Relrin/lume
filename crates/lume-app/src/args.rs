@@ -32,6 +32,10 @@ pub enum Suite {
     Snapshots,
     /// Times drawing and the path bytes take from a session to the screen.
     Bench,
+    /// Runs the window's own page against a stand-in for the core, and checks what a
+    /// page must hold to: nothing renders for a terminal's output, and a pane that is
+    /// not on show draws nothing.
+    Chrome,
 }
 
 impl Suite {
@@ -41,11 +45,12 @@ impl Suite {
             Suite::Corpus => "corpus",
             Suite::Snapshots => "snapshots",
             Suite::Bench => "bench",
+            Suite::Chrome => "chrome",
         }
     }
 
     fn named(name: &str) -> Option<Self> {
-        [Suite::Corpus, Suite::Snapshots, Suite::Bench]
+        [Suite::Corpus, Suite::Snapshots, Suite::Bench, Suite::Chrome]
             .into_iter()
             .find(|suite| suite.name() == name)
     }
@@ -212,7 +217,7 @@ mod tests {
 
     #[test]
     fn every_suite_is_found_by_its_name() {
-        for suite in [Suite::Corpus, Suite::Snapshots, Suite::Bench] {
+        for suite in [Suite::Corpus, Suite::Snapshots, Suite::Bench, Suite::Chrome] {
             let args = parsed(&["--harness", suite.name()]).unwrap();
             assert_eq!(args.mode, Mode::Harness(suite));
         }

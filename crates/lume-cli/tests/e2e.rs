@@ -4,6 +4,10 @@
 //! built beside it, and closes it by asking it to quit. Nothing here reaches into the
 //! application: what a test can see is what a script could.
 //!
+//! The application is given folders of its own for its configuration and its saved
+//! workspaces, so a test reads and writes nothing of the user's, and a shell that keeps
+//! no history to start in its first pane.
+//!
 //! The tests need a display and the application built with its page inside it, so they
 //! are ignored by default. `cargo xtask e2e` builds what they need and runs them, one at
 //! a time.
@@ -51,6 +55,21 @@ struct App {
     child: Option<Child>,
     endpoint: String,
     log: PathBuf,
+    /// Where the application keeps its configuration and its saved workspaces.
+    home: PathBuf,
+    /// Whether the folder is removed when the application has closed.
+    keep_home: bool,
+}
+
+/// The configuration the tests' applications run with: a shell for the first pane that
+/// starts fast and keeps no history of what is typed.
+fn configuration() -> String {
+    let (shell, args) = if cfg!(windows) {
+        ("cmd.exe", "[\"/d\"]")
+    } else {
+        ("/bin/sh", "[]")
+    };
+    format!("[terminal]\nshell = \"{shell}\"\nshell-args = {args}\n")
 }
 
 fn lume() -> &'static Path {
@@ -69,7 +88,19 @@ fn application() -> PathBuf {
 }
 
 impl App {
+    /// Starts an application that has never run before.
     fn start() -> Self {
+        let number = NEXT.fetch_add(1, Ordering::Relaxed);
+        let home = std::env::temp_dir().join(format!("lume-e2e-{}-{number}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join("config")).expect("a folder for the configuration");
+        std::fs::write(home.join("config").join("config.toml"), configuration())
+            .expect("the configuration is written");
+        Self::start_in(home, false)
+    }
+
+    /// Starts an application whose configuration and saved workspaces are in `home`.
+    fn start_in(home: PathBuf, keep_home: bool) -> Self {
         let number = NEXT.fetch_add(1, Ordering::Relaxed);
         let endpoint = format!("e2e-{}-{number}", std::process::id());
         let log = std::env::temp_dir().join(format!("lume-{endpoint}.log"));
@@ -78,6 +109,8 @@ impl App {
             .args(["--endpoint", &endpoint])
             .env("LUME_LOG", "trace")
             .env("LUME_LOG_FILE", &log)
+            .env("LUME_CONFIG_DIR", home.join("config"))
+            .env("LUME_STATE_DIR", home.join("state"))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -87,6 +120,8 @@ impl App {
             child: Some(child),
             endpoint,
             log,
+            home,
+            keep_home,
         };
 
         // The endpoint is served before the window is up; the first answer is the sign
@@ -123,33 +158,62 @@ impl App {
         }
     }
 
-    /// The application's status once its window shows a session. The endpoint answers
-    /// before the page has started its shell, so a status read straight after the start
-    /// may name no session yet.
+    /// The application's status once the pane that has the keyboard has a session. The
+    /// endpoint answers before the page has had the session started, so a status read
+    /// straight after the start may name none yet.
     fn status_with_session(&self) -> Value {
         let deadline = Instant::now() + START;
         loop {
             let status = self.ctl(&["status"]).ok("status");
-            if status["shown"].is_string() {
+            if status["focused"]["session"].is_string() {
                 return status;
             }
             assert!(
                 Instant::now() < deadline,
-                "the window never showed a session: {status}"
+                "the focused pane never had a session: {status}"
             );
             std::thread::sleep(Duration::from_millis(100));
         }
     }
 
-    /// Types a line into the session shown.
+    /// Types a line into the pane that has the keyboard.
     fn type_line(&self, line: &str) {
         self.ctl(&["send", "--enter", "--", line]).ok("send");
     }
 
-    /// Waits until `text` is on the screen of the session shown.
+    /// Waits until `text` is on the screen of the pane that has the keyboard.
     fn wait_text(&self, text: &str) -> Value {
         self.ctl(&["wait", "--text", text])
             .ok(&format!("waiting for {text:?}"))
+    }
+
+    /// Types a line into a pane, whether or not its tab is on show.
+    fn type_line_in(&self, pane: &str, line: &str) {
+        self.ctl(&["send", "--pane", pane, "--enter", "--", line])
+            .ok("send");
+    }
+
+    /// Waits until `text` is on the screen of a pane.
+    fn wait_text_in(&self, pane: &str, text: &str) -> Value {
+        self.ctl(&["wait", "--pane", pane, "--text", text])
+            .ok(&format!("waiting for {text:?} in {pane}"))
+    }
+
+    /// The layout: its windows, their tabs, and the panes in them.
+    fn layout(&self) -> Value {
+        self.ctl(&["layout", "view"]).ok("layout view")
+    }
+
+    /// The process behind the session a pane shows.
+    fn pid_of(&self, pane: &str) -> u32 {
+        let listed = self.ctl(&["list"]).ok("list");
+        listed["sessions"]
+            .as_array()
+            .expect("a list of sessions")
+            .iter()
+            .find(|session| session["pane"] == pane)
+            .and_then(|session| session["info"]["pid"].as_u64())
+            .unwrap_or_else(|| panic!("pane {pane} shows no session: {listed}")) as u32
     }
 
     /// The ids of the operating-system processes behind the sessions.
@@ -177,6 +241,9 @@ impl App {
             assert!(Instant::now() < deadline, "the application did not close");
             std::thread::sleep(Duration::from_millis(50));
         }
+        if !self.keep_home {
+            let _ = std::fs::remove_dir_all(&self.home);
+        }
         self.log.clone()
     }
 }
@@ -198,6 +265,57 @@ impl Drop for App {
         }
         let _ = child.kill();
         let _ = child.wait();
+    }
+}
+
+/// The ids of the panes of a tab's tree, in the order they are laid out.
+fn panes_of(node: &Value) -> Vec<String> {
+    match node["type"].as_str() {
+        Some("pane") => vec![node["id"].as_str().expect("a pane id").to_owned()],
+        _ => node["children"]
+            .as_array()
+            .expect("a split's children")
+            .iter()
+            .flat_map(panes_of)
+            .collect(),
+    }
+}
+
+/// The panes of each tab of a layout's first window.
+fn tabs_of(layout: &Value) -> Vec<Vec<String>> {
+    layout["workspace"]["windows"][0]["centre"]["tabs"]
+        .as_array()
+        .expect("the window's tabs")
+        .iter()
+        .map(|tab| panes_of(&tab["root"]))
+        .collect()
+}
+
+/// What a pane of a layout shows.
+fn content_of(layout: &Value, pane: &str) -> Value {
+    fn find(node: &Value, pane: &str) -> Option<Value> {
+        match node["type"].as_str() {
+            Some("pane") => (node["id"] == pane).then(|| node["content"].clone()),
+            _ => node["children"]
+                .as_array()?
+                .iter()
+                .find_map(|child| find(child, pane)),
+        }
+    }
+    layout["workspace"]["windows"][0]["centre"]["tabs"]
+        .as_array()
+        .expect("the window's tabs")
+        .iter()
+        .find_map(|tab| find(&tab["root"], pane))
+        .unwrap_or_else(|| panic!("the layout has no pane {pane}: {layout}"))
+}
+
+/// Waits until a process is gone, and fails if it outlives `limit`.
+fn until_gone(pid: u32, limit: Duration, what: &str) {
+    let deadline = Instant::now() + limit;
+    while process_alive(pid) {
+        assert!(Instant::now() < deadline, "{what}");
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -312,24 +430,32 @@ fn shells() -> Vec<Shell> {
         .collect()
 }
 
-/// Starts `shell` in the window, with `mark` in its environment, and returns the
-/// session's id.
-fn start(app: &App, shell: &Shell, mark: &str) -> String {
+/// Starts `shell` with `mark` in its environment, in a new tab or wherever `place`
+/// says, and returns what the application answered: the session and its pane.
+fn start_at(app: &App, shell: &Shell, mark: &str, place: &[&str]) -> Value {
     let mark = format!("LUME_MARK={mark}");
-    let mut spawn = vec!["spawn", "--size", "100x30", "--env", &mark];
+    let mut spawn = vec!["spawn"];
+    spawn.extend_from_slice(place);
+    spawn.extend_from_slice(&["--env", &mark]);
     for variable in shell.env {
         spawn.extend_from_slice(&["--env", variable]);
     }
     spawn.extend_from_slice(&["--", shell.program]);
     spawn.extend_from_slice(shell.args);
-    let spawned = app.ctl(&spawn).ok(&format!("starting {}", shell.program));
+    app.ctl(&spawn).ok(&format!("starting {}", shell.program))
+}
+
+/// Starts `shell` in a new tab, 100 columns by 30 rows, with `mark` in its
+/// environment, and returns the session's id.
+fn start(app: &App, shell: &Shell, mark: &str) -> String {
+    let spawned = start_at(app, shell, mark, &["--size", "100x30"]);
     spawned["session"]
         .as_str()
         .expect("a session id")
         .to_owned()
 }
 
-/// Starts `shell` in the window and runs it through everything a session does.
+/// Starts `shell` in a new tab and runs it through everything a session does.
 fn exercise(app: &App, shell: &Shell) {
     let program = shell.program;
     let session = start(app, shell, MARK);
@@ -456,9 +582,165 @@ fn a_second_start_shows_the_first_and_exits() {
         "before: {before}, after: {after}"
     );
     assert_eq!(
-        after["shown"], before["shown"],
+        after["focused"], before["focused"],
         "before: {before}, after: {after}"
     );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn panes_and_tabs_are_made_driven_and_closed_by_id() {
+    let shell = shells().into_iter().next().expect("a shell to test with");
+    let app = App::start();
+    let first = app.status_with_session()["focused"]["pane"]
+        .as_str()
+        .expect("a pane has the keyboard")
+        .to_owned();
+
+    // A pane beside the first, then a tab, which takes the first tab off the screen.
+    let beside = start_at(&app, &shell, MARK, &["--split", "right"]);
+    let beside = beside["pane"].as_str().expect("a pane id").to_owned();
+    assert!(start_at(&app, &shell, MARK, &["--tab"])["tab"].is_string());
+    let layout = app.layout();
+    let tabs = tabs_of(&layout);
+    assert_eq!(tabs.len(), 2, "{layout}");
+    assert_eq!(tabs[0], [first.clone(), beside.clone()], "{layout}");
+    assert_eq!(tabs[1].len(), 1, "{layout}");
+    let third = tabs[1][0].clone();
+    assert_eq!(app.status_with_session()["focused"]["pane"], third.as_str());
+
+    // A pane in a tab that is not on show is typed into and read all the same.
+    app.type_line_in(&beside, &(shell.say)("hidden"));
+    let found = app.wait_text_in(&beside, &format!("lume-{MARK}-hidden"));
+    assert_eq!(found["pane"], beside.as_str());
+    let screen = app.ctl(&["capture", "--pane", &beside]).ok("capture");
+    assert_eq!(screen["pane"], beside.as_str());
+    assert!(
+        screen["lines"]
+            .as_array()
+            .expect("lines")
+            .iter()
+            .any(|line| line
+                .as_str()
+                .is_some_and(|line| line.contains("lume-k7q-hidden"))),
+        "{screen}"
+    );
+    // What was typed there did not reach the pane on show.
+    let shown = app.ctl(&["capture"]).ok("capture");
+    assert_eq!(shown["pane"], third.as_str());
+    assert!(!shown.to_string().contains("lume-k7q-hidden"), "{shown}");
+
+    // A command switches tabs, and the keyboard goes with it.
+    app.ctl(&["command", "lume.tab.activate", r#"{"index":1}"#])
+        .ok("activating the first tab");
+    assert_eq!(
+        app.ctl(&["status"]).ok("status")["focused"]["pane"],
+        beside.as_str()
+    );
+
+    // Closing a pane ends the shell in it and nothing else.
+    let closing = app.pid_of(&beside);
+    let staying = app.pid_of(&first);
+    let close = format!(r#"{{"type":"close","pane":"{beside}"}}"#);
+    app.ctl(&["layout", "apply", &close]).ok("closing a pane");
+    until_gone(
+        closing,
+        Duration::from_secs(15),
+        "the shell of a closed pane was not ended",
+    );
+    assert!(process_alive(staying));
+    assert_eq!(tabs_of(&app.layout())[0], std::slice::from_ref(&first));
+
+    // A shell that ends without an error takes its pane with it.
+    app.type_line_in(&first, "exit");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while tabs_of(&app.layout()).len() != 1 {
+        assert!(
+            Instant::now() < deadline,
+            "the pane of a shell that ended stayed"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(tabs_of(&app.layout()), [[third]]);
+
+    // An intent that cannot be applied is refused with its reason.
+    let refused = app.ctl(&["layout", "apply", &close]);
+    assert_eq!(refused.status, 1);
+    assert_eq!(refused.json["code"], "not_found");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_restart_brings_the_tabs_and_their_directories_back() {
+    let shell = shells().into_iter().next().expect("a shell to test with");
+    let app = App::start();
+    app.status_with_session();
+    // A folder with a name nothing else has, for a pane to be started in.
+    let folder = app.home.join(format!("lume-here-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).expect("a folder to start a shell in");
+    let folder_text = folder.to_string_lossy().into_owned();
+
+    let tabbed = start_at(&app, &shell, MARK, &["--tab", "--cwd", &folder_text]);
+    let tabbed = tabbed["pane"].as_str().expect("a pane id").to_owned();
+    let beside = start_at(&app, &shell, MARK, &["--split", "down"]);
+    let beside = beside["pane"].as_str().expect("a pane id").to_owned();
+    let before = app.layout();
+    let old_pid = app.pid_of(&tabbed);
+
+    let home = app.home.clone();
+    let mut app = app;
+    app.keep_home = true;
+    app.quit();
+    until_gone(
+        old_pid,
+        Duration::from_secs(15),
+        "a shell outlived the application",
+    );
+
+    // The application again, with what the first one left.
+    let app = App::start_in(home, false);
+    app.status_with_session();
+    let after = app.layout();
+    assert_eq!(tabs_of(&after), tabs_of(&before), "{after}");
+    assert_eq!(
+        after["workspace"]["windows"][0]["focus"],
+        before["workspace"]["windows"][0]["focus"]
+    );
+    assert_eq!(content_of(&after, &tabbed)["cwd"], folder_text.as_str());
+    assert_eq!(
+        content_of(&after, &tabbed)["launcher"],
+        content_of(&before, &tabbed)["launcher"]
+    );
+
+    // Every pane has a shell again, and the one that was started in the folder is
+    // started there.
+    let panes: Vec<String> = tabs_of(&after).into_iter().flatten().collect();
+    assert_eq!(panes.len(), 3);
+    assert!(panes.contains(&beside));
+    let print_directory = if cfg!(windows) { "cd" } else { "pwd" };
+    let named = folder
+        .file_name()
+        .expect("the folder has a name")
+        .to_string_lossy()
+        .into_owned();
+    // The restored panes run the shell they ran before, started afresh.
+    let deadline = Instant::now() + START;
+    while app.ctl(&["list"]).ok("list")["sessions"]
+        .as_array()
+        .map_or(0, Vec::len)
+        != 3
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the panes' shells were not started again"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_ne!(app.pid_of(&tabbed), old_pid);
+    app.type_line_in(&tabbed, print_directory);
+    app.wait_text_in(&tabbed, &named);
     app.quit();
 }
 
@@ -467,9 +749,9 @@ fn a_second_start_shows_the_first_and_exits() {
 fn closing_ends_every_shell_and_the_log_holds_nothing_that_was_typed() {
     let shell = shells().into_iter().next().expect("a shell to test with");
     let app = App::start();
-    // A second session, so that one is shown and one is in the background. The shell
-    // is told a secret through its environment and prints it, so the screen holds what
-    // was never typed; what is typed holds a word of its own.
+    // A second session, in a tab of its own, so that one is on show and one is not. The
+    // shell is told a secret through its environment and prints it, so the screen holds
+    // what was never typed; what is typed holds a word of its own.
     let secret = format!("s3cr3t{}", std::process::id());
     let typed = format!("typ3d{}", std::process::id());
     start(&app, &shell, &secret);

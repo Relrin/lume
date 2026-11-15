@@ -117,6 +117,12 @@ export interface Exports {
   ghostty_mouse_event_set_position(event: number, position: number): number;
 
   ghostty_focus_encode(event: number, buf: number, bufLen: number, outWritten: number): number;
+  ghostty_color_scheme_report_encode(
+    scheme: number,
+    buf: number,
+    bufLen: number,
+    outWritten: number,
+  ): number;
   ghostty_paste_is_safe(data: number, len: number): number;
   ghostty_paste_encode(
     data: number,
@@ -229,6 +235,7 @@ const REQUIRED_EXPORTS: Readonly<Record<keyof Exports, true>> = {
   ghostty_mouse_event_set_mods: true,
   ghostty_mouse_event_set_position: true,
   ghostty_focus_encode: true,
+  ghostty_color_scheme_report_encode: true,
   ghostty_paste_is_safe: true,
   ghostty_paste_encode: true,
   ghostty_selection_gesture_new: true,

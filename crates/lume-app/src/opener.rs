@@ -83,6 +83,43 @@ pub fn open(link: &str) -> Result<(), CommandError> {
     }
 }
 
+/// The extension of the files a user configures the application with.
+const SETTINGS_EXTENSION: &str = "toml";
+
+/// Decides whether `file` is one of the user's settings files in `dir`, and returns
+/// its full path. Nothing outside that folder and nothing but a settings file is ever
+/// opened for editing, whatever a page asks for.
+pub fn settings_file(dir: &Path, file: &Path) -> Result<PathBuf, CommandError> {
+    let missing = |_| CommandError::not_found(format!("{} does not exist", file.display()));
+    let dir = dir.canonicalize().map_err(missing)?;
+    let found = file.canonicalize().map_err(missing)?;
+    let settings = found.is_file()
+        && found.starts_with(&dir)
+        && found
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case(SETTINGS_EXTENSION));
+    if settings {
+        Ok(found)
+    } else {
+        Err(CommandError::forbidden(format!(
+            "{} is not one of the settings files",
+            file.display()
+        )))
+    }
+}
+
+/// Opens one of the user's settings files in `dir` for editing, in whatever the system
+/// edits such a file with.
+pub fn open_settings_file(dir: &Path, file: &Path) -> Result<(), CommandError> {
+    let found = settings_file(dir, file)?;
+    edit_file(&found).map_err(|error| {
+        CommandError::internal(format!(
+            "{} could not be opened for editing: {error}",
+            found.display()
+        ))
+    })
+}
+
 /// Starts a helper program and lets it go. It is waited for on a thread of its own, so
 /// that it leaves nothing behind when it ends.
 fn launch(mut command: Command) -> std::io::Result<()> {
@@ -93,30 +130,26 @@ fn launch(mut command: Command) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Has the shell carry out `verb` on `target`: an address or a file, never a command.
 #[cfg(windows)]
-fn open_in_browser(url: &Url) -> std::io::Result<()> {
+fn shell_execute(verb: &str, target: &std::ffi::OsStr) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
 
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-    let wide = |text: &str| -> Vec<u16> {
-        std::ffi::OsStr::new(text)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect()
+    let wide = |text: &std::ffi::OsStr| -> Vec<u16> {
+        text.encode_wide().chain(std::iter::once(0)).collect()
     };
-    let verb = wide("open");
-    // The address as the parser wrote it back: it starts with `http:` or `https:`, so
-    // the shell can only take it for an address, never for a program or a path.
-    let address = wide(url.as_str());
+    let verb = wide(std::ffi::OsStr::new(verb));
+    let target = wide(target);
     // SAFETY: both strings are NUL-terminated and outlive the call; the other pointers
     // are optional and null.
     let result = unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
             verb.as_ptr(),
-            address.as_ptr(),
+            target.as_ptr(),
             std::ptr::null(),
             std::ptr::null(),
             SW_SHOWNORMAL,
@@ -128,6 +161,40 @@ fn open_in_browser(url: &Url) -> std::io::Result<()> {
     } else {
         Err(std::io::Error::last_os_error())
     }
+}
+
+#[cfg(windows)]
+fn open_in_browser(url: &Url) -> std::io::Result<()> {
+    // The address as the parser wrote it back: it starts with `http:` or `https:`, so
+    // the shell can only take it for an address, never for a program or a path.
+    shell_execute("open", std::ffi::OsStr::new(url.as_str()))
+}
+
+/// Opens a settings file in the program the user edits such files with, or in the
+/// system's own plain editor when no program is set for them.
+#[cfg(windows)]
+fn edit_file(path: &Path) -> std::io::Result<()> {
+    shell_execute("open", path.as_os_str()).or_else(|_| {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let mut command = Command::new(Path::new(&root).join("System32").join("notepad.exe"));
+        command.arg(path);
+        launch(command)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn edit_file(path: &Path) -> std::io::Result<()> {
+    let mut command = Command::new(OPEN);
+    // As text, in the editor the user has chosen for text.
+    command.arg("-t").arg(path);
+    launch(command)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn edit_file(path: &Path) -> std::io::Result<()> {
+    let mut command = Command::new("xdg-open");
+    command.arg(path);
+    launch(command)
 }
 
 /// The file manager, by its full path: a program of the same name elsewhere on the
@@ -204,8 +271,11 @@ fn reveal_file(path: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
-    fn refusal(link: &str) -> &'static str {
-        resolve(link).expect_err("the link was accepted").code
+    fn refusal(link: &str) -> String {
+        resolve(link)
+            .expect_err("the link was accepted")
+            .code
+            .into_owned()
     }
 
     #[test]
@@ -264,7 +334,7 @@ mod tests {
         ] {
             // A path with a drive letter parses as a link of an unknown kind.
             assert!(
-                matches!(refusal(link), "bad_request" | "unsupported"),
+                matches!(refusal(link).as_str(), "bad_request" | "unsupported"),
                 "{link}"
             );
         }

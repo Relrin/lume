@@ -10,15 +10,18 @@
 //! go straight to the session, which sends no more than it was granted. What waits in
 //! a link is therefore bounded by the credit the webview handed out.
 //!
-//! The carrier's stream 0 carries requests from the core to the page: what is on a
-//! session's screen is known only to the terminal in the page, so the core asks. The
-//! page answers through a command, which names the request it answers.
+//! The carrier's stream 0 carries what the core has to say to the page itself. Some of
+//! it is requests: what is on a session's screen is known only to the terminal in the
+//! page, so the core asks, and the page answers through a command that names the
+//! request it answers. The rest is notices, which tell the page that something it keeps
+//! a copy of has changed. Both leave through the one writer, so a page receives them in
+//! the order they were sent.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use lume_proto::app::{AppError, AppReplyBody, PageRequest, PageRequestBody, codes};
+use lume_proto::app::{AppError, AppReplyBody, PageRequest, PageRequestBody, codes, encode_notice};
 use lume_proto::{Body, FrameDecoder, Header, HydratePayload, Kind, Message, Role, encode};
 use lume_session::{
     Attachment, BackendId, ExitStatus, Hydrate, InputSink, OutputFrame, SessionError, SessionId,
@@ -252,12 +255,19 @@ impl Link {
         Ok(())
     }
 
-    /// The session the page shows: the one it attached to last. While a page changes
-    /// from one session to another it is attached to both for a moment.
-    pub fn shown(&self) -> Option<SessionKey> {
-        let state = self.state();
-        let (_, stream) = state.streams.iter().max_by_key(|(id, _)| **id)?;
-        Some(stream.session.clone())
+    /// Tells the page something it did not ask for. A notice for a page that has gone
+    /// is dropped: its successor asks for the whole of whatever the notice was about.
+    pub fn notify(&self, notice: &serde_json::Value) {
+        if self.state().retired {
+            return;
+        }
+        let mut frames = Vec::new();
+        match encode_notice(notice, &mut frames) {
+            Ok(()) => {
+                let _ = self.outgoing.send(Queued::Control(frames));
+            }
+            Err(error) => tracing::error!(%error, "a notice could not be encoded"),
+        }
     }
 
     /// The way to type into a session, if the page is attached to it.
@@ -584,7 +594,10 @@ mod tests {
             let link = Arc::clone(&link);
             tokio::spawn(async move {
                 link.ask(
-                    PageRequestBody::Screen { session: None },
+                    PageRequestBody::Screen {
+                        pane: None,
+                        session: None,
+                    },
                     Duration::from_secs(20),
                 )
                 .await
@@ -609,7 +622,10 @@ mod tests {
         let link = link(carrier.clone());
         let answer = link
             .ask(
-                PageRequestBody::Screen { session: None },
+                PageRequestBody::Screen {
+                    pane: None,
+                    session: None,
+                },
                 Duration::from_millis(30),
             )
             .await;
@@ -626,7 +642,10 @@ mod tests {
             let link = Arc::clone(&link);
             tokio::spawn(async move {
                 link.ask(
-                    PageRequestBody::Screen { session: None },
+                    PageRequestBody::Screen {
+                        pane: None,
+                        session: None,
+                    },
                     Duration::from_secs(20),
                 )
                 .await
@@ -638,11 +657,35 @@ mod tests {
 
         let answer = link
             .ask(
-                PageRequestBody::Screen { session: None },
+                PageRequestBody::Screen {
+                    pane: None,
+                    session: None,
+                },
                 Duration::from_secs(20),
             )
             .await;
         assert_eq!(answer.unwrap_err().code, codes::NO_WINDOW);
+    }
+
+    #[tokio::test]
+    async fn notices_reach_the_page_in_the_order_they_were_sent() {
+        let carrier = RecordingCarrier::new();
+        let link = link(carrier.clone());
+        for number in 0..3 {
+            link.notify(&serde_json::json!({"type": "notice", "number": number}));
+        }
+        let received = asked(&carrier, 3).await;
+        let numbers: Vec<u64> = received
+            .iter()
+            .map(|message| message["notify"]["number"].as_u64().unwrap())
+            .collect();
+        assert_eq!(numbers, vec![0, 1, 2]);
+
+        // A page that has gone is told nothing more.
+        link.retire().await;
+        link.notify(&serde_json::json!({"type": "notice", "number": 3}));
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(carrier.requests().len(), 3);
     }
 
     #[test]

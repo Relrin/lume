@@ -381,6 +381,169 @@ describe("the cursor", () => {
   });
 });
 
+describe("the default cursor", () => {
+  /** Run `body` with a terminal created with `options` and its render state. */
+  function withCursor(
+    options: Parameters<Vt["createTerminal"]>[2],
+    body: (term: Terminal, state: RenderState) => void,
+  ): void {
+    const term = vt.createTerminal(10, 4, options);
+    const state = new RenderState(term);
+    try {
+      body(term, state);
+    } finally {
+      state.free();
+      term.free();
+    }
+  }
+
+  it("is a block that does not blink unless the terminal is created with another", () => {
+    withCursor({}, (_term, state) => {
+      expect(state.update().cursor).toMatchObject({ shape: CursorShape.Block, blinking: false });
+    });
+    withCursor({ defaultCursorStyle: "bar", defaultCursorBlink: true }, (_term, state) => {
+      expect(state.update().cursor).toMatchObject({ shape: CursorShape.Bar, blinking: true });
+    });
+    withCursor({ defaultCursorStyle: "underline" }, (_term, state) => {
+      expect(state.update().cursor).toMatchObject({
+        shape: CursorShape.Underline,
+        blinking: false,
+      });
+    });
+    withCursor({ defaultCursorBlink: true }, (_term, state) => {
+      expect(state.update().cursor).toMatchObject({ shape: CursorShape.Block, blinking: true });
+    });
+  });
+
+  it("changes at once while the program has left the cursor alone", () => {
+    withCursor({}, (term, state) => {
+      term.write("ab");
+      const frame = state.update();
+      state.markDrawn();
+      term.setDefaultCursor("underline", true);
+      state.update();
+      expect(frame.dirty).not.toBe(DirtyState.None);
+      expect(frame.cursor).toMatchObject({
+        x: 2,
+        shape: CursorShape.Underline,
+        blinking: true,
+      });
+      term.setDefaultCursor("block", false);
+      state.update();
+      expect(frame.cursor).toMatchObject({ shape: CursorShape.Block, blinking: false });
+    });
+  });
+
+  it("leaves a shape the program chose until the program resets it", () => {
+    withCursor({ defaultCursorStyle: "bar", defaultCursorBlink: true }, (term, state) => {
+      // A steady underline, by the program's choice.
+      term.write(`${ESC}[4 q`);
+      const frame = state.update();
+      expect(frame.cursor).toMatchObject({ shape: CursorShape.Underline, blinking: false });
+
+      term.setDefaultCursor("block", true);
+      state.update();
+      expect(frame.cursor).toMatchObject({ shape: CursorShape.Underline, blinking: false });
+
+      term.write(`${ESC}[0 q`);
+      state.update();
+      expect(frame.cursor).toMatchObject({ shape: CursorShape.Block, blinking: true });
+    });
+  });
+
+  it("is what a program's reset of the cursor's shape comes back to", () => {
+    withCursor({ defaultCursorStyle: "bar", defaultCursorBlink: true }, (term, state) => {
+      term.write(`${ESC}[2 q`);
+      const frame = state.update();
+      expect(frame.cursor).toMatchObject({ shape: CursorShape.Block, blinking: false });
+      term.write(`${ESC}[0 q`);
+      state.update();
+      expect(frame.cursor).toMatchObject({ shape: CursorShape.Bar, blinking: true });
+    });
+  });
+
+  it("is kept across a full reset", () => {
+    withCursor({}, (term, state) => {
+      term.setDefaultCursor("bar", true);
+      term.write(`${ESC}[2 q`);
+      term.reset();
+      const frame = state.update();
+      expect(frame.cursor).toMatchObject({ shape: CursorShape.Bar, blinking: true });
+      term.write(`${ESC}[4 q${ESC}c`);
+      state.update();
+      expect(frame.cursor).toMatchObject({ shape: CursorShape.Bar, blinking: true });
+    });
+  });
+});
+
+describe("colours changed on a live terminal", () => {
+  const newForeground: Rgb = { r: 1, g: 2, b: 3 };
+  const newBackground: Rgb = { r: 250, g: 240, b: 230 };
+  const newCursor: Rgb = { r: 9, g: 99, b: 199 };
+  const newPalette = palette.map((c): Rgb => ({ r: c.g, g: c.b, b: c.r }));
+
+  it("reach the next frame, with every row to be drawn again", () => {
+    withState(6, 3, (term, state) => {
+      // Default colours on the first row, palette colours on the second.
+      term.write(`ab\r\n${ESC}[31;44mcd${ESC}[0m`);
+      const frame = state.update();
+      state.markDrawn();
+      expect(frame.foreground).toBe(pack(foreground));
+      expect(frame.background).toBe(pack(background));
+      expect(frame.fg[6]).toBe(pack(palette[1]!));
+      expect(frame.bg[6]).toBe(pack(palette[4]!));
+      expect(frame.cursor.hasColor).toBe(false);
+      expect(state.update().dirty).toBe(DirtyState.None);
+
+      term.setColors({
+        foreground: newForeground,
+        background: newBackground,
+        cursor: newCursor,
+        palette: newPalette,
+      });
+      state.update();
+      expect(frame.dirty).toBe(DirtyState.Full);
+      expect(frame.foreground).toBe(pack(newForeground));
+      expect(frame.background).toBe(pack(newBackground));
+      expect(frame.fg[0]).toBe(pack(newForeground));
+      expect(frame.fg[6]).toBe(pack(newPalette[1]!));
+      expect(frame.bg[6]).toBe(pack(newPalette[4]!));
+      expect(frame.cursor.hasColor).toBe(true);
+      expect(frame.cursor.color).toBe(pack(newCursor));
+    });
+  });
+
+  it("change only the colours that are given", () => {
+    withState(6, 3, (term, state) => {
+      term.write(`${ESC}[32ma`);
+      const frame = state.update();
+      state.markDrawn();
+      term.setColors({ background: newBackground });
+      state.update();
+      expect(frame.dirty).toBe(DirtyState.Full);
+      expect(frame.background).toBe(pack(newBackground));
+      expect(frame.foreground).toBe(pack(foreground));
+      expect(frame.fg[0]).toBe(pack(palette[2]!));
+    });
+  });
+
+  it("are what a program is told when it asks afterwards", () => {
+    withState(6, 3, (term) => {
+      const replies: string[] = [];
+      const decoder = new TextDecoder();
+      term.handlers = { output: (bytes) => replies.push(decoder.decode(bytes)) };
+      term.setColors({ foreground: newForeground, palette: newPalette });
+      term.write(`${ESC}]10;?${ESC}\\${ESC}]4;1;?${ESC}\\`);
+      const one = newPalette[1]!;
+      const hex = (value: number) => value.toString(16).padStart(2, "0").repeat(2);
+      expect(replies).toEqual([
+        `${ESC}]10;rgb:0101/0202/0303${ESC}\\`,
+        `${ESC}]4;1;rgb:${hex(one.r)}/${hex(one.g)}/${hex(one.b)}${ESC}\\`,
+      ]);
+    });
+  });
+});
+
 describe("lifetime", () => {
   it("refuses use after free and frees twice safely", () => {
     const term = vt.createTerminal(4, 2);

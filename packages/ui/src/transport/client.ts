@@ -139,18 +139,18 @@ export class TransportClient {
 
   /** Starts a session and returns its id. */
   spawn(backend: string, request: SpawnRequest): Promise<string> {
-    return this.#command("session_spawn", { backend, spec: spawnToWire(request) });
+    return this.command("session_spawn", { backend, spec: spawnToWire(request) });
   }
 
   /** Every session of every backend. */
   async list(): Promise<SessionInfo[]> {
-    const listed = await this.#command<unknown[]>("session_list", {});
+    const listed = await this.command<unknown[]>("session_list", {});
     return listed.map(sessionFromWire);
   }
 
   /** Ends a session. */
   async kill(backend: string, session: string): Promise<void> {
-    await this.#command("session_kill", { backend, session });
+    await this.command("session_kill", { backend, session });
   }
 
   /**
@@ -158,7 +158,7 @@ export class TransportClient {
    * `result` is `{ ok: … }` with what it yielded or `{ err: { code, message } }`.
    */
   async answer(id: number, result: unknown): Promise<void> {
-    await this.#command("page_reply", { id, result });
+    await this.command("page_reply", { id, result });
   }
 
   /** Attaches to a session. `facts` describes the view it will be shown in. */
@@ -174,7 +174,7 @@ export class TransportClient {
     this.#streams.set(id, stream);
     let attached: WireAttached;
     try {
-      attached = await this.#command<WireAttached>("session_attach", {
+      attached = await this.command<WireAttached>("session_attach", {
         backend,
         session,
         stream: id,
@@ -221,7 +221,11 @@ export class TransportClient {
     };
   }
 
-  async #command<T>(name: string, args: Record<string, unknown>): Promise<T> {
+  /**
+   * Calls one of the core's commands as this page's carrier. A refusal rejects with a
+   * {@link CommandError}.
+   */
+  async command<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
     if (this.#failed) throw this.#failed;
     try {
       return await this.#carrier.command<T>(name, { carrier: this.#opened.carrier, ...args });

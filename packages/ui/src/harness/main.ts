@@ -16,6 +16,7 @@ import wasmUrl from "@lume/vt/ghostty-vt.wasm?url";
 
 import { checkFrameContract } from "../frame-contract.ts";
 import { runBench } from "./bench.ts";
+import { runChrome } from "./chrome.ts";
 import { runCorpus } from "./corpus.ts";
 import "./harness.css";
 import { done, harnessInfo, type HarnessInfo } from "./host.ts";
@@ -35,6 +36,8 @@ function progress(text: string): void {
 
 async function runSuite(suite: string, info: HarnessInfo | null): Promise<SuiteReport> {
   checkFrameContract();
+  // The window's own page starts its engine itself.
+  if (suite === "chrome") return runChrome(progress);
   const vt = await Vt.instantiate(fetch(wasmUrl));
   switch (suite) {
     case "corpus":

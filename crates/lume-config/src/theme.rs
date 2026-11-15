@@ -776,9 +776,9 @@ mod tests {
         for token in TOKENS {
             assert!(tokens.get(token.name).is_some(), "{}", token.name);
         }
-        assert_eq!(color(&tokens, "color.surface"), "#0e1015");
-        assert_eq!(color(&tokens, "terminal.bg"), "#14161d");
-        assert_eq!(color(&tokens, "terminal.palette.9"), "#ff9d94");
+        assert_eq!(color(&tokens, "color.surface"), "#121416");
+        assert_eq!(color(&tokens, "terminal.bg"), "#171a1e");
+        assert_eq!(color(&tokens, "terminal.palette.9"), "#ffa59e");
         assert_eq!(
             tokens.get("font.family"),
             Some(&TokenValue::FontFamily("JetBrains Mono".to_owned()))
@@ -858,7 +858,7 @@ background-blur = 10\nbackground-opacity = 0.5\n\
         assert_eq!(color(&tokens, "color.status.danger"), "#ff000080");
         assert_eq!(color(&tokens, "terminal.palette.1"), "#020202");
         // The colours the short list leaves out are still the theme's.
-        assert_eq!(color(&tokens, "terminal.palette.2"), "#7ee0a0");
+        assert_eq!(color(&tokens, "terminal.palette.2"), "#8fd694");
         assert_eq!(
             tokens.get("font.family"),
             Some(&TokenValue::FontFamily("Iosevka".to_owned()))
@@ -874,7 +874,7 @@ background-blur = 10\nbackground-opacity = 0.5\n\
 [appearance.tokens.color]\nacent = \"#ff8800\"\nsurface = \"blue\"\n\
 [appearance.tokens.colour]\ntext = \"#000000\"\n";
         let (tokens, problems) = resolve(text, &Themes::builtin(), ColorScheme::Dark);
-        assert_eq!(color(&tokens, "color.surface"), "#0e1015");
+        assert_eq!(color(&tokens, "color.surface"), "#121416");
         assert_eq!(problems.len(), 3, "{problems:?}");
 
         let unknown = &problems[0];
@@ -1057,7 +1057,7 @@ scheme = \"dusk\"\nname = 7\n\n[color]\nsurfase = \"#000000\"\ncard = \"black\"\
         assert_eq!(ids, [DARK, LIGHT, "sea"]);
         assert_eq!(
             themes.get(DARK).unwrap().values["color.accent"],
-            TokenValue::Color(Color::parse("#7fb4f0").unwrap())
+            TokenValue::Color(Color::parse("#7fe3b8").unwrap())
         );
         assert_eq!(problems.len(), 2, "{problems:?}");
         assert_eq!(problems[0].kind, ProblemKind::Syntax);

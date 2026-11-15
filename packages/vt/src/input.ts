@@ -1,9 +1,9 @@
 /**
- * Focus reports and pasted text.
+ * Focus reports, colour-scheme reports and pasted text.
  */
 
 import type { Vt } from "./module.ts";
-import { Mode, type Terminal } from "./terminal.ts";
+import { Mode, type ColorScheme, type Terminal } from "./terminal.ts";
 
 /**
  * The bytes that tell a program the terminal gained or lost focus. Send them only while
@@ -14,6 +14,20 @@ export function encodeFocus(vt: Vt, focused: boolean): Uint8Array {
   const event = core.manifest.enumValue("GhosttyFocusEvent", focused ? "GAINED" : "LOST");
   return core.encode("ghostty_focus_encode", (buf, cap, written) =>
     core.x.ghostty_focus_encode(event, buf, cap, written),
+  );
+}
+
+/**
+ * The bytes that tell a program the interface turned light or dark. Send them when the
+ * scheme changes, and only while the program has asked to be told
+ * (`terminal.mode(Mode.ColorSchemeReport)`). A program that asks what the scheme is gets
+ * its answer from the terminal itself.
+ */
+export function encodeColorScheme(vt: Vt, scheme: ColorScheme): Uint8Array {
+  const core = vt.core;
+  const value = core.manifest.enumValue("GhosttyColorScheme", scheme === "dark" ? "DARK" : "LIGHT");
+  return core.encode("ghostty_color_scheme_report_encode", (buf, cap, written) =>
+    core.x.ghostty_color_scheme_report_encode(value, buf, cap, written),
   );
 }
 

@@ -16,7 +16,7 @@ import { collectDirtyRows, rowRuns } from "./dirty.ts";
 import { NO_SELECTION, type RenderFrame } from "./frame.ts";
 import { buildOverlay, buildRow, type OverlayCounts } from "./instances.ts";
 import { createPlanes, type PlaneName, type Planes } from "./layout.ts";
-import { cellMetrics, fontKey, gridSize } from "./metrics.ts";
+import { fontKey, gridSize, themeMetrics } from "./metrics.ts";
 import type {
   CellMetrics,
   CellRenderer,
@@ -256,8 +256,7 @@ export class GridRenderer implements CellRenderer {
   #ensureMetrics(): CellMetrics {
     if (this.#metrics) return this.#metrics;
     const font = this.#theme.font;
-    const raw = this.#fonts.measure(font, this.#dpr);
-    const metrics = cellMetrics(raw, font, this.#theme.padding, this.#dpr);
+    const metrics = themeMetrics(this.#fonts, this.#theme, this.#dpr);
     this.#metrics = metrics;
     this.#atlas = this.#backend.atlas(
       fontKey(font, this.#dpr, metrics),

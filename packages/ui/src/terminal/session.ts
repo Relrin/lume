@@ -10,6 +10,7 @@
 import {
   RenderState,
   type ClipboardLocation,
+  type CursorStyle,
   type Terminal,
   type TerminalColors,
   type Vt,
@@ -40,6 +41,10 @@ export interface SessionOptions {
   readonly scheme: ColorScheme;
   /** The size of one cell in device pixels, for programs that ask. */
   readonly cellPx: CellPx;
+  /** How many lines that scrolled off the top are kept. Left out, the most allowed. */
+  readonly scrollbackLines?: number;
+  /** The cursor's shape and whether it blinks, until the program says otherwise. */
+  readonly cursor?: { readonly style: CursorStyle; readonly blink: boolean };
   readonly hooks?: SessionHooks;
 }
 
@@ -62,8 +67,14 @@ export class TerminalSession {
       colorScheme: options.scheme,
       cellWidthPx: options.cellPx.w,
       cellHeightPx: options.cellPx.h,
-      scrollbackMaxLines: SCROLLBACK_MAX_LINES,
+      scrollbackMaxLines: Math.min(
+        Math.max(0, options.scrollbackLines ?? SCROLLBACK_MAX_LINES),
+        SCROLLBACK_MAX_LINES,
+      ),
       scrollbackMaxBytes: SCROLLBACK_MAX_BYTES,
+      ...(options.cursor
+        ? { defaultCursorStyle: options.cursor.style, defaultCursorBlink: options.cursor.blink }
+        : {}),
       resizePullsScrollback: attachment.resizePullsScrollback,
       clipboardWriteMaxBytes: OSC52_WRITE_MAX_BYTES,
       handlers: {

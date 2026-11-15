@@ -8,6 +8,7 @@
  */
 
 import type { GlyphAtlas } from "../atlas/atlas.ts";
+import { SharedAtlases, type SharedAtlas } from "../atlas/shared.ts";
 import { ATLAS_PAGE_SIZE, WEBGPU_POWER_PREFERENCE } from "../constants.ts";
 import { GLYPH, RECT } from "../layout.ts";
 import type { AtlasSink, PageKind } from "../types.ts";
@@ -120,7 +121,7 @@ export class GpuShared {
   readonly bindGroupLayout: GPUBindGroupLayout;
   readonly rectPipeline: GPURenderPipeline;
   readonly glyphPipeline: GPURenderPipeline;
-  readonly #atlases = new Map<string, { atlas: GlyphAtlas; pages: GpuPages }>();
+  readonly #atlases = new SharedAtlases<GpuPages>();
   readonly #lostListeners = new Set<(reason: string) => void>();
   /** Set once the device is gone, by loss or by `dispose`. */
   lost: string | undefined;
@@ -174,18 +175,22 @@ export class GpuShared {
     });
   }
 
-  /** The atlas for a font key and the pages it draws into, shared by every pane. */
-  atlas(
-    key: string,
-    create: (sink: AtlasSink) => GlyphAtlas,
-  ): { atlas: GlyphAtlas; pages: GpuPages } {
-    let entry = this.#atlases.get(key);
-    if (!entry) {
-      const pages = new GpuPages(this.device);
-      entry = { atlas: create(pages), pages };
-      this.#atlases.set(key, entry);
-    }
-    return entry;
+  /**
+   * Takes the atlas for a font key and the pages it draws into, shared by every pane
+   * that asks for the key. Each call must be matched by one `releaseAtlas`.
+   */
+  acquireAtlas(key: string, create: (sink: AtlasSink) => GlyphAtlas): SharedAtlas<GpuPages> {
+    return this.#atlases.acquire(key, () => new GpuPages(this.device), create);
+  }
+
+  /** Lets go of the atlas for a font key. Its textures are freed with its last user. */
+  releaseAtlas(key: string): void {
+    this.#atlases.release(key);
+  }
+
+  /** How many atlases are alive on the device. */
+  get atlasCount(): number {
+    return this.#atlases.size;
   }
 
   /** Hear about the loss of the device. Returns how to stop listening. */
@@ -197,7 +202,6 @@ export class GpuShared {
   dispose(): void {
     if (this.lost === undefined) this.lost = "disposed";
     this.#lostListeners.clear();
-    for (const { pages } of this.#atlases.values()) pages.dispose();
     this.#atlases.clear();
     this.device.destroy();
   }

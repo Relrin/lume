@@ -147,3 +147,99 @@ pub const PRINT_MARK: &[u8] = if cfg!(windows) {
 } else {
     b"echo \"lume-${LUME_MARK}-done\"\r"
 };
+
+/// A directory for one test's configuration and state, removed when the test is done.
+pub struct TempDir {
+    root: std::path::PathBuf,
+    /// Whether this value made the directory, and so removes it.
+    owned: bool,
+}
+
+impl TempDir {
+    /// A new, empty directory. `name` tells the tests' directories apart.
+    pub fn new(name: &str) -> Self {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let number = NEXT.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "lume-app-test-{}-{number}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("a directory for the test");
+        Self { root, owned: true }
+    }
+
+    /// The directory another [`TempDir`] gave out, for a second application that
+    /// starts where the first left off. The directory outlives this value.
+    pub fn at(dirs: lume_config::Dirs) -> Self {
+        let root = dirs
+            .config
+            .parent()
+            .expect("the directories are inside a test's directory")
+            .to_owned();
+        Self { root, owned: false }
+    }
+
+    /// Where the configuration and the state of the test's application go.
+    pub fn dirs(&self) -> lume_config::Dirs {
+        lume_config::Dirs {
+            config: self.root.join("config"),
+            state: self.root.join("state"),
+        }
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        if self.owned {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+}
+
+/// A window shell that only counts what it is asked.
+#[derive(Default)]
+pub struct FakeShell {
+    activated: std::sync::atomic::AtomicUsize,
+    quit: std::sync::atomic::AtomicUsize,
+    closed: Mutex<Vec<String>>,
+}
+
+impl FakeShell {
+    pub fn activations(&self) -> usize {
+        self.activated.load(Ordering::Relaxed)
+    }
+
+    pub fn quits(&self) -> usize {
+        self.quit.load(Ordering::Relaxed)
+    }
+
+    /// The labels of the windows that were closed, in order.
+    pub fn closed(&self) -> Vec<String> {
+        self.closed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl crate::control::Shell for FakeShell {
+    fn activate(&self) {
+        self.activated.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn quit(&self) {
+        self.quit.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn bundled_ui(&self) -> bool {
+        true
+    }
+
+    fn close_window(&self, label: &str) {
+        self.closed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(label.to_owned());
+    }
+}

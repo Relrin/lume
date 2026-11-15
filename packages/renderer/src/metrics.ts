@@ -12,7 +12,14 @@ import {
   STRIKETHROUGH_POSITION_RATIO,
   UNDERLINE_POSITION_RATIO,
 } from "./constants.ts";
-import type { CellMetrics, FontSpec, RawFontMetrics, Size } from "./types.ts";
+import type {
+  CellMetrics,
+  FontBackend,
+  FontSpec,
+  RawFontMetrics,
+  Size,
+  TerminalTheme,
+} from "./types.ts";
 
 /** The cell geometry for a measured font. `padding` is in CSS pixels. */
 export function cellMetrics(
@@ -45,6 +52,15 @@ export function cellMetrics(
     strikethroughTop,
     padding: Math.max(0, Math.round(padding * dpr)),
   };
+}
+
+/**
+ * The cell geometry of a theme at a device pixel ratio, with the font measured by
+ * `fonts`. A renderer and whoever asks what a renderer would measure both go through
+ * here, so the two cannot disagree.
+ */
+export function themeMetrics(fonts: FontBackend, theme: TerminalTheme, dpr: number): CellMetrics {
+  return cellMetrics(fonts.measure(theme.font, dpr), theme.font, theme.padding, dpr);
 }
 
 /** The whole cells that fit a surface, at least one each way. `surface` is in device pixels. */

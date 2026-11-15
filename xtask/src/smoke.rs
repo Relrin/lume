@@ -41,6 +41,9 @@ impl Drop for Driver {
 
 fn start_driver() -> Result<Driver> {
     let mut command = Command::new("tauri-driver");
+    // The application is started by the driver and takes the driver's environment: it
+    // is given folders of its own, so the test touches nothing of the user's.
+    crate::paths::PrivateDirs::fresh("smoke")?.apply(&mut command);
     // On Windows the webview's driver is found through the variable the runner images
     // set, when it is not on the search path.
     if let Some(dir) = std::env::var_os("EdgeWebDriver") {

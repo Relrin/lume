@@ -1,52 +1,28 @@
 /**
- * How a terminal looks until the user can choose: the built-in colours and font.
+ * A terminal's look, in the three forms it is needed in.
  *
- * The same colours go to three places that must agree: the terminal, which answers a
- * program that asks what its colours are; the renderer, which draws with them; and the
- * session, which is told what the view looks like.
+ * The look comes from the design tokens the core resolves: a theme with the user's
+ * settings laid over. The same colours go to three places that must agree: the
+ * terminal, which answers a program that asks what its colours are; the renderer, which
+ * draws with them; and the session, which is told what the view looks like.
  */
 
 import { rgba, type TerminalTheme } from "@lume/renderer";
+import {
+  DEFAULT_SCHEME,
+  DEFAULT_TOKENS,
+  terminalAppearance,
+  type TerminalAppearance,
+} from "@lume/tokens";
 import type { Rgb, TerminalColors } from "@lume/vt";
 
-import type { ColorScheme, Palette } from "./transport/types.ts";
+import type { Palette } from "./transport/types.ts";
 
 /** Everything about a terminal's look that does not come from the program in it. */
-export interface Appearance {
-  readonly scheme: ColorScheme;
-  readonly foreground: Rgb;
-  readonly background: Rgb;
-  readonly cursor: Rgb;
-  readonly selectionBackground: Rgb;
-  /** The sixteen ANSI colours: eight normal, then eight bright. */
-  readonly ansi: readonly Rgb[];
-  /** A CSS font-family list, most preferred first. */
-  readonly fontFamily: string;
-  /** Space between the edge of the view and the grid, in CSS pixels. */
-  readonly padding: number;
-}
+export type Appearance = TerminalAppearance;
 
-function hex(value: number): Rgb {
-  return { r: (value >> 16) & 0xff, g: (value >> 8) & 0xff, b: value & 0xff };
-}
-
-/**
- * The built-in look. The fonts are ones the three platforms install themselves, so
- * nothing has to be shipped: the first that exists is used.
- */
-export const DEFAULT_APPEARANCE: Appearance = {
-  scheme: "dark",
-  foreground: hex(0xdfe3ee),
-  background: hex(0x14161d),
-  cursor: hex(0xdfe3ee),
-  selectionBackground: hex(0x2f4f8f),
-  ansi: [
-    0x1c1f2a, 0xf0908a, 0x7ee0a0, 0xe6c384, 0x7fb4f0, 0xc4a0f0, 0x6fd3d6, 0xc5cada, 0x596079,
-    0xff9d94, 0x98ecb4, 0xf2d49b, 0x9cc7ff, 0xd6b8ff, 0x8ce4e6, 0xffffff,
-  ].map(hex),
-  fontFamily: '"Cascadia Mono", Consolas, Menlo, "DejaVu Sans Mono", monospace',
-  padding: 4,
-};
+/** The look of the built-in dark theme, which a page has before the core has told it more. */
+export const DEFAULT_APPEARANCE: Appearance = terminalAppearance(DEFAULT_TOKENS, DEFAULT_SCHEME);
 
 /** The levels of the six-step colour cube that follows the ANSI colours in a palette. */
 const CUBE_LEVELS = [0, 95, 135, 175, 215, 255];
@@ -89,18 +65,30 @@ export function factsPalette(appearance: Appearance): Palette {
   };
 }
 
-/** What the renderer draws with, at a font size. */
+/**
+ * What the renderer draws with. `fontSizePx` is the size in use, which is the look's
+ * own unless the window's text has been made larger or smaller.
+ */
 export function rendererTheme(appearance: Appearance, fontSizePx: number): TerminalTheme {
   const pack = (color: Rgb) => rgba(color.r, color.g, color.b);
   return {
-    font: { family: appearance.fontFamily, sizePx: fontSizePx },
+    font: {
+      family: appearance.fontFamily,
+      sizePx: fontSizePx,
+      lineHeight: appearance.lineHeight,
+      weight: appearance.fontWeight,
+      boldWeight: appearance.boldWeight,
+    },
     cursor: pack(appearance.cursor),
+    cursorText: pack(appearance.cursorText),
     selectionBackground: pack(appearance.selectionBackground),
+    selectionForeground: pack(appearance.selectionForeground),
     padding: appearance.padding,
   };
 }
 
 /** A colour as CSS writes it. */
 export function cssColor(color: Rgb): string {
-  return `rgb(${color.r} ${color.g} ${color.b})`;
+  const channel = (value: number) => value.toString(16).padStart(2, "0");
+  return `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`;
 }

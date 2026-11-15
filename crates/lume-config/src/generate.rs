@@ -119,6 +119,6 @@ mod tests {
             assert!(!file.text.contains('\r'), "{}", file.path);
         }
         assert!(files[2].text.contains("export const TOKEN_KINDS = {"));
-        assert!(files[3].text.contains("--lume-color-surface: #0e1015;"));
+        assert!(files[3].text.contains("--lume-color-surface: #121416;"));
     }
 }

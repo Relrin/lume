@@ -1,10 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
+  encodeColorScheme,
   encodeFocus,
   encodePaste,
   isPasteSafe,
   Mod,
+  Mode,
   MouseEncoder,
   type MouseInput,
   type Terminal,
@@ -34,6 +36,21 @@ describe("focus reports", () => {
   it("encodes gaining and losing focus", () => {
     expect(text(encodeFocus(vt, true))).toBe(`${ESC}[I`);
     expect(text(encodeFocus(vt, false))).toBe(`${ESC}[O`);
+  });
+});
+
+describe("colour-scheme reports", () => {
+  it("encodes dark and light as a program that asked would be answered", () => {
+    expect(text(encodeColorScheme(vt, "dark"))).toBe(`${ESC}[?997;1n`);
+    expect(text(encodeColorScheme(vt, "light"))).toBe(`${ESC}[?997;2n`);
+  });
+
+  it("are wanted only by a program that asked to be told", () => {
+    withTerminal("", (term) => {
+      expect(term.mode(Mode.ColorSchemeReport)).toBe(false);
+      term.write(`${ESC}[?2031h`);
+      expect(term.mode(Mode.ColorSchemeReport)).toBe(true);
+    });
   });
 });
 

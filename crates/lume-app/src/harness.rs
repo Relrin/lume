@@ -36,6 +36,14 @@ pub fn start(app: &App) -> tauri::Result<()> {
     app.add_capability(
         CapabilityBuilder::new("harness")
             .window(crate::window::LABEL)
+            // A suite's page starts and ends the sessions it measures itself.
+            .permission("allow-carrier-open")
+            .permission("allow-carrier-send")
+            .permission("allow-session-spawn")
+            .permission("allow-session-attach")
+            .permission("allow-session-kill")
+            .permission("allow-session-list")
+            .permission("allow-page-reply")
             .permission("allow-harness-done")
             .permission("allow-harness-save")
             .permission("allow-harness-read"),

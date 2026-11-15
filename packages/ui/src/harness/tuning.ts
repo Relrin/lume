@@ -67,3 +67,15 @@ export const ECHO_SHELL_SAMPLES = 200;
 
 /** How long one echo may take before the measurement gives up on it. */
 export const ECHO_TIMEOUT_MS = 5000;
+
+/** How long the panes of the window's page are flooded while its renders are counted. */
+export const COMMIT_TEST_MS = 2000;
+
+/** How long the page is given to follow a change before its state is looked at. */
+export const CHROME_SETTLE_MS = 300;
+
+/** How long the page may take to start and attach to its panes' sessions. */
+export const CHROME_START_TIMEOUT_MS = 20_000;
+
+/** How much output each pane is sent at a time while it is flooded. */
+export const CHROME_FLOOD_CHUNK_BYTES = 4096;

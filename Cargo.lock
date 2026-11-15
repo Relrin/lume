@@ -2101,8 +2101,11 @@ name = "lume-app"
 version = "0.0.0"
 dependencies = [
  "arboard",
+ "async-trait",
  "fontdb",
+ "lume-config",
  "lume-ipc",
+ "lume-layout",
  "lume-proto",
  "lume-pty",
  "lume-session",
@@ -2110,6 +2113,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
  "tracing-subscriber",

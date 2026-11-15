@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use lume_config::Platform;
-use lume_proto::app::{AppRequestBody, OpenSpec};
+use lume_proto::app::{AppRequestBody, Direction, OpenSpec, SpawnPlace};
 use lume_proto::{Launcher, SessionId, TermSize};
 
 /// What the arguments may be, shown on request and when they are not understood.
@@ -20,25 +20,30 @@ it is running.
 
 Commands of lume ctl, which drive the running application:
   status                         what the application is and how far its start has come
-  list                           every session
-  spawn [--cwd <dir>] [--size <cols>x<rows>] [--env <name>=<value>]... [-- <program> [<arg>...]]
-                                 start a session and show it in the window; the session
-                                 shown before keeps running
-  send [--session <id>] [--enter] [--escapes] <text>...
-                                 type text into a session; --enter ends it with a
+  list                           every session, and the pane that shows it
+  spawn [--tab | --split left|right|up|down] [--cwd <dir>] [--size <cols>x<rows>]
+        [--env <name>=<value>]... [-- <program> [<arg>...]]
+                                 start a session in a new tab, or in a new pane beside
+                                 the focused one
+  send [<target>] [--enter] [--escapes] <text>...
+                                 type text into a terminal; --enter ends it with a
                                  carriage return, --escapes reads \\r \\n \\t \\e \\\\ \\xHH
-  wait --text <text> [--session <id>]
-                                 wait until the text is on the session's screen
-  wait --exit [--session <id>]   wait until the session's program has ended
-  capture [--session <id>] [--plain]
-                                 read the session's screen; --plain prints its lines
-  resize [--session <id>] <cols>x<rows>
-                                 give the session's terminal this size
+  wait --text <text> [<target>]  wait until the text is on the terminal's screen
+  wait --exit [<target>]         wait until the terminal's program has ended
+  capture [<target>] [--plain]   read the terminal's screen; --plain prints its lines
+  resize [<target>] <cols>x<rows>
+                                 give the terminal this size, whatever fits its pane
   kill <id>                      end a session
+  layout view                    print the layout: windows, tabs, splits and panes
+  layout apply <intent> | -      change the layout; the intent is JSON, read from
+                                 standard input when given as -
+  commands                       list the commands there are
+  command <id> [<arguments>]     run a command; its arguments are a JSON object
   quit                           close the application
 
-A command that names no session means the one the window shows. Each prints one JSON
-object. --timeout is how long a wait may last, in seconds (10 if not given).
+A <target> is --pane <id> (as in p12) or --session <id>. A command that names neither
+means the pane that has the keyboard. Each prints one JSON object. --timeout is how
+long a wait may last, in seconds (10 if not given).
 
 Commands on the configuration, which need no application running:
   config schema                  print the JSON Schema of config.toml, for an editor
@@ -105,6 +110,37 @@ pub struct Ctl {
     pub timeout: Duration,
     /// Print a captured screen as its lines instead of as JSON.
     pub plain: bool,
+    /// The request's intent is to be read from standard input.
+    pub intent_from_input: bool,
+}
+
+/// The terminal a request is about, as far as its arguments say.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Target {
+    pane: Option<String>,
+    session: Option<SessionId>,
+}
+
+impl Target {
+    /// Reads `option` and its value if it is one of the two that name a terminal.
+    fn take(&mut self, option: &str, words: &mut Words) -> Result<bool, String> {
+        match option {
+            "--pane" => {
+                let id = value(words, "--pane", "a pane id")?;
+                let digits = id.strip_prefix('p').unwrap_or_default();
+                if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return Err(format!("{id} is not a pane id (p and a number, as in p12)"));
+                }
+                self.pane = Some(id);
+            }
+            "--session" => self.session = Some(session(words, "--session")?),
+            _ => return Ok(false),
+        }
+        if self.pane.is_some() && self.session.is_some() {
+            return Err("name a pane or a session, not both".to_owned());
+        }
+        Ok(true)
+    }
 }
 
 type Words = std::iter::Peekable<std::vec::IntoIter<String>>;
@@ -173,10 +209,32 @@ fn timeout_ms(timeout: Duration) -> u64 {
     u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX)
 }
 
+fn direction(text: &str) -> Result<Direction, String> {
+    match text {
+        "left" => Ok(Direction::Left),
+        "right" => Ok(Direction::Right),
+        "up" => Ok(Direction::Up),
+        "down" => Ok(Direction::Down),
+        other => Err(format!(
+            "{other} is not a side to split on (left, right, up or down)"
+        )),
+    }
+}
+
 fn spawn(words: &mut Words) -> Result<AppRequestBody, String> {
     let mut spec = OpenSpec::default();
+    let mut place = None;
+    let mut placed = |place_given: SpawnPlace| match place.replace(place_given) {
+        None => Ok(()),
+        Some(_) => Err("spawn takes one of --tab, --split and --window".to_owned()),
+    };
     while let Some(word) = words.next() {
         match word.as_str() {
+            "--tab" => placed(SpawnPlace::Tab {})?,
+            "--split" => placed(SpawnPlace::Split {
+                dir: direction(&value(words, "--split", "a side")?)?,
+            })?,
+            "--window" => placed(SpawnPlace::Window {})?,
             "--cwd" => spec.cwd = Some(value(words, "--cwd", "a directory")?),
             "--size" => spec.size = Some(size(&value(words, "--size", "a size")?)?),
             "--env" => {
@@ -198,17 +256,22 @@ fn spawn(words: &mut Words) -> Result<AppRequestBody, String> {
             other => return Err(format!("spawn does not take {other}")),
         }
     }
-    Ok(AppRequestBody::Spawn { spec })
+    Ok(AppRequestBody::Spawn {
+        spec,
+        place: place.unwrap_or_default(),
+    })
 }
 
 fn send(words: &mut Words) -> Result<AppRequestBody, String> {
-    let mut named = None;
+    let mut target = Target::default();
     let mut enter = false;
     let mut escapes = false;
     let mut text: Vec<String> = Vec::new();
     while let Some(word) = words.next() {
+        if text.is_empty() && target.take(&word, words)? {
+            continue;
+        }
         match word.as_str() {
-            "--session" if text.is_empty() => named = Some(session(words, "--session")?),
             "--enter" if text.is_empty() => enter = true,
             "--escapes" if text.is_empty() => escapes = true,
             // What follows is text, whatever it looks like.
@@ -227,18 +290,21 @@ fn send(words: &mut Words) -> Result<AppRequestBody, String> {
         return Err("send needs text to type, or --enter".to_owned());
     }
     Ok(AppRequestBody::Send {
-        session: named,
+        pane: target.pane,
+        session: target.session,
         text,
     })
 }
 
 fn wait(words: &mut Words, timeout: Duration) -> Result<AppRequestBody, String> {
-    let mut named = None;
+    let mut target = Target::default();
     let mut text = None;
     let mut exit = false;
     while let Some(word) = words.next() {
+        if target.take(&word, words)? {
+            continue;
+        }
         match word.as_str() {
-            "--session" => named = Some(session(words, "--session")?),
             "--text" => text = Some(value(words, "--text", "the text to wait for")?),
             "--exit" => exit = true,
             other => return Err(format!("wait does not take {other}")),
@@ -247,16 +313,23 @@ fn wait(words: &mut Words, timeout: Duration) -> Result<AppRequestBody, String> 
     let timeout_ms = timeout_ms(timeout);
     match (text, exit) {
         (Some(text), false) if !text.is_empty() => Ok(AppRequestBody::WaitText {
-            session: named,
+            pane: target.pane,
+            session: target.session,
             text,
             timeout_ms,
         }),
         (None, true) => Ok(AppRequestBody::WaitExit {
-            session: named,
+            pane: target.pane,
+            session: target.session,
             timeout_ms,
         }),
         _ => Err("wait needs exactly one of --text <text> and --exit".to_owned()),
     }
+}
+
+/// Reads text as JSON, saying what it was meant to be when it is not.
+fn json(text: &str, what: &str) -> Result<serde_json::Value, String> {
+    serde_json::from_str(text).map_err(|error| format!("{what} is not JSON: {error}"))
 }
 
 fn nothing_more(words: &mut Words, command: &str) -> Result<(), String> {
@@ -279,6 +352,7 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
     };
 
     let mut plain = false;
+    let mut intent_from_input = false;
     let request = match command.as_str() {
         "status" => {
             nothing_more(words, "status")?;
@@ -296,29 +370,83 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
         "send" => send(words)?,
         "wait" => wait(words, timeout)?,
         "capture" => {
-            let mut named = None;
+            let mut target = Target::default();
             while let Some(word) = words.next() {
+                if target.take(&word, words)? {
+                    continue;
+                }
                 match word.as_str() {
-                    "--session" => named = Some(session(words, "--session")?),
                     "--plain" => plain = true,
                     other => return Err(format!("capture does not take {other}")),
                 }
             }
-            AppRequestBody::Screen { session: named }
+            AppRequestBody::Screen {
+                pane: target.pane,
+                session: target.session,
+            }
         }
         "resize" => {
-            let mut named = None;
+            let mut target = Target::default();
             let mut wanted = None;
             while let Some(word) = words.next() {
+                if target.take(&word, words)? {
+                    continue;
+                }
                 match word.as_str() {
-                    "--session" => named = Some(session(words, "--session")?),
                     other if wanted.is_none() => wanted = Some(size(other)?),
                     other => return Err(format!("resize does not take {other}")),
                 }
             }
             AppRequestBody::Resize {
-                session: named,
+                pane: target.pane,
+                session: target.session,
                 size: wanted.ok_or("resize needs a size, as in 100x30")?,
+            }
+        }
+        "layout" => match words.next().as_deref() {
+            Some("view") => {
+                nothing_more(words, "layout view")?;
+                AppRequestBody::Layout {}
+            }
+            Some("apply") => {
+                let written = value(words, "layout apply", "an intent as JSON, or -")?;
+                nothing_more(words, "layout apply")?;
+                let intent = if written == "-" {
+                    intent_from_input = true;
+                    serde_json::Value::Null
+                } else {
+                    json(&written, "the intent")?
+                };
+                AppRequestBody::LayoutApply { intent }
+            }
+            Some(other) => {
+                return Err(format!(
+                    "{other} is not something ctl layout does (view or apply)"
+                ));
+            }
+            None => return Err("ctl layout needs a command: view or apply".to_owned()),
+        },
+        "commands" => {
+            nothing_more(words, "commands")?;
+            AppRequestBody::Commands {}
+        }
+        "command" => {
+            let id = value(words, "command", "a command's id")?;
+            let args = match words.next() {
+                Some(written) => {
+                    let args = json(&written, "the command's arguments")?;
+                    if !args.is_object() {
+                        return Err("a command's arguments are a JSON object".to_owned());
+                    }
+                    args
+                }
+                None => serde_json::Value::Null,
+            };
+            nothing_more(words, "command")?;
+            AppRequestBody::Command {
+                id,
+                args,
+                window: None,
             }
         }
         "kill" => {
@@ -337,6 +465,7 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
         request,
         timeout,
         plain,
+        intent_from_input,
     })
 }
 
@@ -494,9 +623,28 @@ mod tests {
         assert_eq!(
             request(&["ctl", "spawn"]),
             AppRequestBody::Spawn {
-                spec: OpenSpec::default()
+                spec: OpenSpec::default(),
+                place: SpawnPlace::Tab {},
             }
         );
+        assert_eq!(
+            request(&["ctl", "spawn", "--split", "down"]),
+            AppRequestBody::Spawn {
+                spec: OpenSpec::default(),
+                place: SpawnPlace::Split {
+                    dir: Direction::Down
+                },
+            }
+        );
+        assert_eq!(
+            request(&["ctl", "spawn", "--window"]),
+            AppRequestBody::Spawn {
+                spec: OpenSpec::default(),
+                place: SpawnPlace::Window {},
+            }
+        );
+        assert!(parsed(&["ctl", "spawn", "--split", "sideways"]).is_err());
+        assert!(parsed(&["ctl", "spawn", "--tab", "--split", "up"]).is_err());
         let spawned = request(&[
             "ctl", "spawn", "--cwd", "/tmp", "--size", "100x30", "--env", "A=1", "--env", "B=x=y",
             "--", "bash", "-l", "--norc",
@@ -516,7 +664,8 @@ mod tests {
                         ("B".to_owned(), "x=y".to_owned())
                     ],
                     size: Some(TermSize::new(100, 30).unwrap()),
-                }
+                },
+                place: SpawnPlace::Tab {},
             }
         );
         assert!(parsed(&["ctl", "spawn", "--size", "0x30"]).is_err());
@@ -530,9 +679,32 @@ mod tests {
         assert_eq!(
             request(&["ctl", "send", "echo", "hello"]),
             AppRequestBody::Send {
+                pane: None,
                 session: None,
                 text: "echo hello".to_owned()
             }
+        );
+        assert_eq!(
+            request(&["ctl", "send", "--pane", "p12", "x"]),
+            AppRequestBody::Send {
+                pane: Some("p12".to_owned()),
+                session: None,
+                text: "x".to_owned()
+            }
+        );
+        assert!(parsed(&["ctl", "send", "--pane", "12", "x"]).is_err());
+        assert!(parsed(&["ctl", "send", "--pane", "p1x", "x"]).is_err());
+        assert!(
+            parsed(&[
+                "ctl",
+                "send",
+                "--pane",
+                "p1",
+                "--session",
+                "00000000000000ab",
+                "x"
+            ])
+            .is_err()
         );
         assert_eq!(
             request(&[
@@ -544,6 +716,7 @@ mod tests {
                 "ls"
             ]),
             AppRequestBody::Send {
+                pane: None,
                 session: Some(id()),
                 text: "ls\r".to_owned()
             }
@@ -551,6 +724,7 @@ mod tests {
         assert_eq!(
             request(&["ctl", "send", "--escapes", r"a\tb\x03\e[A\\"]),
             AppRequestBody::Send {
+                pane: None,
                 session: None,
                 text: "a\tb\x03\x1b[A\\".to_owned()
             }
@@ -560,6 +734,7 @@ mod tests {
         assert_eq!(
             request(&["ctl", "send", r"a\tb", "--enter"]),
             AppRequestBody::Send {
+                pane: None,
                 session: None,
                 text: r"a\tb --enter".to_owned()
             }
@@ -567,6 +742,7 @@ mod tests {
         assert_eq!(
             request(&["ctl", "send", "--", "--enter"]),
             AppRequestBody::Send {
+                pane: None,
                 session: None,
                 text: "--enter".to_owned()
             }
@@ -574,6 +750,7 @@ mod tests {
         assert_eq!(
             request(&["ctl", "send", "--enter"]),
             AppRequestBody::Send {
+                pane: None,
                 session: None,
                 text: "\r".to_owned()
             }
@@ -589,6 +766,7 @@ mod tests {
         assert_eq!(
             request(&["ctl", "--timeout", "3", "wait", "--text", "$ "]),
             AppRequestBody::WaitText {
+                pane: None,
                 session: None,
                 text: "$ ".to_owned(),
                 timeout_ms: 3000
@@ -597,7 +775,16 @@ mod tests {
         assert_eq!(
             request(&["ctl", "wait", "--exit", "--session", "00000000000000ab"]),
             AppRequestBody::WaitExit {
+                pane: None,
                 session: Some(id()),
+                timeout_ms: 10_000
+            }
+        );
+        assert_eq!(
+            request(&["ctl", "wait", "--pane", "p3", "--exit"]),
+            AppRequestBody::WaitExit {
+                pane: Some("p3".to_owned()),
+                session: None,
                 timeout_ms: 10_000
             }
         );
@@ -610,7 +797,17 @@ mod tests {
     fn capture_resize_and_kill_name_their_session() {
         assert_eq!(
             request(&["ctl", "capture"]),
-            AppRequestBody::Screen { session: None }
+            AppRequestBody::Screen {
+                pane: None,
+                session: None
+            }
+        );
+        assert_eq!(
+            request(&["ctl", "capture", "--pane", "p2"]),
+            AppRequestBody::Screen {
+                pane: Some("p2".to_owned()),
+                session: None
+            }
         );
         let Ok(Command::Ctl(ctl)) = parsed(&["ctl", "capture", "--plain"]) else {
             panic!("not a request");
@@ -619,6 +816,7 @@ mod tests {
         assert_eq!(
             request(&["ctl", "resize", "120x40"]),
             AppRequestBody::Resize {
+                pane: None,
                 session: None,
                 size: TermSize::new(120, 40).unwrap()
             }
@@ -626,6 +824,7 @@ mod tests {
         assert_eq!(
             request(&["ctl", "resize", "--session", "00000000000000ab", "90X20"]),
             AppRequestBody::Resize {
+                pane: None,
                 session: Some(id()),
                 size: TermSize::new(90, 20).unwrap()
             }
@@ -638,6 +837,57 @@ mod tests {
         assert!(parsed(&["ctl", "resize", "wide"]).is_err());
         assert!(parsed(&["ctl", "kill"]).is_err());
         assert!(parsed(&["ctl", "kill", "zz"]).is_err());
+    }
+
+    #[test]
+    fn the_layout_is_viewed_or_given_an_intent() {
+        assert_eq!(
+            request(&["ctl", "layout", "view"]),
+            AppRequestBody::Layout {}
+        );
+        assert_eq!(
+            request(&["ctl", "layout", "apply", r#"{"type":"close","pane":"p3"}"#]),
+            AppRequestBody::LayoutApply {
+                intent: serde_json::json!({"type": "close", "pane": "p3"})
+            }
+        );
+        let Ok(Command::Ctl(ctl)) = parsed(&["ctl", "layout", "apply", "-"]) else {
+            panic!("not a request");
+        };
+        assert!(ctl.intent_from_input);
+        let Ok(Command::Ctl(ctl)) = parsed(&["ctl", "layout", "view"]) else {
+            panic!("not a request");
+        };
+        assert!(!ctl.intent_from_input);
+        assert!(parsed(&["ctl", "layout"]).is_err());
+        assert!(parsed(&["ctl", "layout", "apply"]).is_err());
+        assert!(parsed(&["ctl", "layout", "apply", "{not json"]).is_err());
+        assert!(parsed(&["ctl", "layout", "undo"]).is_err());
+        assert!(parsed(&["ctl", "layout", "view", "all"]).is_err());
+    }
+
+    #[test]
+    fn a_command_is_run_by_its_id_with_arguments_as_json() {
+        assert_eq!(request(&["ctl", "commands"]), AppRequestBody::Commands {});
+        assert_eq!(
+            request(&["ctl", "command", "lume.tab.new"]),
+            AppRequestBody::Command {
+                id: "lume.tab.new".to_owned(),
+                args: serde_json::Value::Null,
+                window: None,
+            }
+        );
+        assert_eq!(
+            request(&["ctl", "command", "lume.tab.activate", r#"{"index":2}"#]),
+            AppRequestBody::Command {
+                id: "lume.tab.activate".to_owned(),
+                args: serde_json::json!({"index": 2}),
+                window: None,
+            }
+        );
+        assert!(parsed(&["ctl", "command"]).is_err());
+        assert!(parsed(&["ctl", "command", "lume.tab.activate", "2"]).is_err());
+        assert!(parsed(&["ctl", "command", "lume.tab.new", "{}", "more"]).is_err());
     }
 
     fn offline(args: &[&str]) -> Offline {

@@ -78,7 +78,7 @@ describe("applying tokens", () => {
   it("sets one variable for each token", () => {
     const set = applied(DEFAULT_TOKENS);
     expect(set.size).toBe(TOKEN_NAMES.length);
-    expect(set.get("--lume-color-surface")).toBe("#0e1015");
+    expect(set.get("--lume-color-surface")).toBe("#121416");
     expect(set.get("--lume-font-size")).toBe("14px");
     expect(set.get("--lume-background-image")).toBe("none");
   });
@@ -93,6 +93,6 @@ describe("applying tokens", () => {
     const set = applied(changed);
     expect(set.get("--lume-space-gap")).toBe("2px");
     expect(set.get("--lume-color-accent")).toBe("#ff8800");
-    expect(set.get("--lume-radius-card")).toBe("12px");
+    expect(set.get("--lume-radius-card")).toBe("10px");
   });
 });

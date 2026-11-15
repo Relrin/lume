@@ -27,7 +27,7 @@ use crate::frame::{Kind, encode_control_json};
 use crate::types::{BackendId, ExitStatus, Launcher, SessionId, SessionInfo, TermSize};
 
 /// The version of the control endpoint's messages this crate speaks.
-pub const APP_PROTO_VERSION: u32 = 1;
+pub const APP_PROTO_VERSION: u32 = 2;
 
 /// The name the control endpoint is served under, and looked for, when none is given.
 ///
@@ -56,8 +56,11 @@ pub mod codes {
     pub const TIMEOUT: &str = "timeout";
     /// The application has no window with a page that could answer.
     pub const NO_WINDOW: &str = "no_window";
-    /// The session is not the one a window shows, and the request needs its screen.
+    /// The session is in no pane of a window whose page could answer for it, and the
+    /// request needs its screen or its keyboard.
     pub const NOT_SHOWN: &str = "not_shown";
+    /// What was asked for is not something this version of the application can do.
+    pub const UNSUPPORTED: &str = "unsupported";
     /// The session's program has ended.
     pub const SESSION_EXITED: &str = "session_exited";
     /// The application failed in a way the client could not have caused.
@@ -121,9 +124,44 @@ pub struct OpenSpec {
     pub size: Option<TermSize>,
 }
 
+/// A direction on the screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// Where the pane of a new session goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SpawnPlace {
+    /// In a new tab of the window the user is working in.
+    Tab {},
+    /// Beside the pane that has the keyboard, on the side named.
+    Split { dir: Direction },
+    /// In a new window.
+    Window {},
+}
+
+impl Default for SpawnPlace {
+    fn default() -> Self {
+        SpawnPlace::Tab {}
+    }
+}
+
+impl SpawnPlace {
+    fn is_tab(&self) -> bool {
+        matches!(self, SpawnPlace::Tab {})
+    }
+}
+
 /// What a client may ask of the application.
 ///
-/// Where a request names no session, it means the one the window shows.
+/// A request about one terminal names its pane, its session, or neither, which means
+/// the pane that has the keyboard. A pane is named as the layout names it, as in `p12`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AppRequestBody {
@@ -142,44 +180,71 @@ pub enum AppRequestBody {
     Quit {},
     /// Asks what the application is and how far its start has come.
     Status {},
-    /// Starts a session and shows it in the window, in place of the one shown before,
-    /// which keeps running.
+    /// Starts a session in a new pane.
     Spawn {
         spec: OpenSpec,
+        #[serde(default, skip_serializing_if = "SpawnPlace::is_tab")]
+        place: SpawnPlace,
     },
     List {},
     Kill {
         session: SessionId,
     },
-    /// Types `text` into the session, as bytes of UTF-8.
+    /// Types `text` into the terminal, as bytes of UTF-8.
     Send {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
         text: String,
     },
-    /// Gives the session's terminal this size, whatever the window's size is.
+    /// Gives the terminal this size, whatever the size of its pane is.
     Resize {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
         size: TermSize,
     },
-    /// Waits for the session's program to end.
+    /// Waits for the terminal's program to end.
     WaitExit {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
         timeout_ms: u64,
     },
-    /// Reads the text on the session's screen.
+    /// Reads the text on the terminal's screen.
     Screen {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
     },
-    /// Waits until `text` is on the session's screen.
+    /// Waits until `text` is on the terminal's screen.
     WaitText {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
         text: String,
         timeout_ms: u64,
+    },
+    /// Reads the layout: the windows, their tabs, and the panes in them.
+    Layout {},
+    /// Changes the layout. `intent` is one of the layout's intents, as JSON.
+    LayoutApply {
+        intent: serde_json::Value,
+    },
+    /// Lists the commands there are.
+    Commands {},
+    /// Runs a command, in the window named or the one the user is working in.
+    Command {
+        id: String,
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        args: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        window: Option<String>,
     },
 }
 
@@ -279,9 +344,18 @@ pub struct StartMarks {
 #[serde(deny_unknown_fields)]
 pub struct AppSession {
     pub backend: BackendId,
-    /// Whether a window is showing the session.
-    pub shown: bool,
+    /// The pane that shows the session, if one does.
+    pub pane: Option<String>,
     pub info: SessionInfo,
+}
+
+/// The pane that has the keyboard in the window the user is working in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Focused {
+    pub pane: String,
+    /// The session the pane shows, once it has one.
+    pub session: Option<SessionId>,
 }
 
 /// Where the cursor is on a screen. Columns and rows count from zero.
@@ -313,14 +387,16 @@ pub enum AppReplyBody {
         bundled_ui: bool,
         /// Whether a window's page is connected and can answer for its sessions.
         window: bool,
-        /// The session the window shows.
-        shown: Option<SessionId>,
+        /// The pane that has the keyboard.
+        focused: Option<Focused>,
         marks: StartMarks,
     },
     Spawned {
         session: SessionId,
-        /// The session the window showed before, which is still running.
-        previous: Option<SessionId>,
+        /// The pane that was made for the session.
+        pane: String,
+        /// The tab that was made for it, if one was.
+        tab: Option<String>,
     },
     Sessions {
         sessions: Vec<AppSession>,
@@ -338,6 +414,7 @@ pub enum AppReplyBody {
     },
     /// The visible screen, one string for each row with the blanks at its end removed.
     Screen {
+        pane: String,
         session: SessionId,
         size: TermSize,
         cursor: ScreenCursor,
@@ -347,11 +424,41 @@ pub enum AppReplyBody {
     },
     /// The text waited for is on the screen.
     Matched {
+        pane: String,
         session: SessionId,
         /// The first row that holds it.
         row: u16,
         /// That row's text.
         line: String,
+    },
+    /// The layout as it stands.
+    Layout {
+        /// The window the user is working in.
+        window: Option<String>,
+        epoch: u32,
+        revision: u64,
+        /// The workspace, as the layout writes it.
+        workspace: serde_json::Value,
+    },
+    /// An intent was applied.
+    Applied {
+        epoch: u32,
+        /// The layout's revision afterwards. An intent that changed nothing leaves it
+        /// as it was.
+        revision: u64,
+        /// The ids of what the intent made: `pane`, `tab`, `window`.
+        created: serde_json::Value,
+    },
+    Commands {
+        commands: serde_json::Value,
+    },
+    /// A command was run.
+    Ran {
+        command: String,
+    },
+    /// The grid a pane that is about to be made will have. Only a page answers this.
+    Estimated {
+        size: TermSize,
     },
 }
 
@@ -376,20 +483,32 @@ impl PageRequest {
     }
 }
 
-/// What the application may ask of a page. A request that names no session means the
-/// one the page shows; one that names another is refused.
+/// What the application may ask of a page. A request about a terminal names its pane,
+/// its session, or neither, which means the pane that has the keyboard.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PageRequestBody {
-    /// Start a session and show it. Answered with [`AppReplyBody::Spawned`].
-    Open { spec: OpenSpec },
+    /// How large the pane an intent would make is going to be: only the page knows
+    /// the window's pixels and the font's. Answered with [`AppReplyBody::Estimated`].
+    Estimate { intent: serde_json::Value },
+    /// Run a command that is carried out in the page. Answered with
+    /// [`AppReplyBody::Ran`].
+    Command {
+        id: String,
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        args: serde_json::Value,
+    },
     /// Answered with [`AppReplyBody::Screen`].
     Screen {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
     },
     /// Answered with [`AppReplyBody::Matched`], or with a `timeout` error.
     WaitText {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
         text: String,
@@ -398,9 +517,23 @@ pub enum PageRequestBody {
     /// Answered with [`AppReplyBody::Resized`] once the terminal has that size.
     Resize {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
         size: TermSize,
     },
+}
+
+/// Appends something the application tells a page without being asked to `out`, as the
+/// frames of one control message: `{"notify": …}`. The value is whatever there is to
+/// say, with a `type` naming what it is.
+pub fn encode_notice(notice: &serde_json::Value, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    enum Envelope<'a> {
+        Notify(&'a serde_json::Value),
+    }
+    encode_json(&Envelope::Notify(notice), out)
 }
 
 /// A page's answer to a [`PageRequest`]: `{"ok": …}` or `{"err": …}`.
@@ -449,8 +582,18 @@ mod tests {
             (
                 AppRequestBody::Spawn {
                     spec: OpenSpec::default(),
+                    place: SpawnPlace::Tab {},
                 },
                 r#"{"type":"spawn","spec":{}}"#,
+            ),
+            (
+                AppRequestBody::Spawn {
+                    spec: OpenSpec::default(),
+                    place: SpawnPlace::Split {
+                        dir: Direction::Down,
+                    },
+                },
+                r#"{"type":"spawn","spec":{},"place":{"type":"split","dir":"down"}}"#,
             ),
             (AppRequestBody::List {}, r#"{"type":"list"}"#),
             (
@@ -459,13 +602,23 @@ mod tests {
             ),
             (
                 AppRequestBody::Send {
+                    pane: None,
                     session: None,
                     text: "ls\r".to_owned(),
                 },
                 r#"{"type":"send","text":"ls\r"}"#,
             ),
             (
+                AppRequestBody::Send {
+                    pane: Some("p3".to_owned()),
+                    session: None,
+                    text: "x".to_owned(),
+                },
+                r#"{"type":"send","pane":"p3","text":"x"}"#,
+            ),
+            (
                 AppRequestBody::Resize {
+                    pane: None,
                     session: Some(session()),
                     size: TermSize::new(100, 30).unwrap(),
                 },
@@ -473,22 +626,51 @@ mod tests {
             ),
             (
                 AppRequestBody::WaitExit {
+                    pane: None,
                     session: None,
                     timeout_ms: 5000,
                 },
                 r#"{"type":"wait_exit","timeout_ms":5000}"#,
             ),
             (
-                AppRequestBody::Screen { session: None },
+                AppRequestBody::Screen {
+                    pane: None,
+                    session: None,
+                },
                 r#"{"type":"screen"}"#,
             ),
             (
                 AppRequestBody::WaitText {
+                    pane: None,
                     session: None,
                     text: "$ ".to_owned(),
                     timeout_ms: 250,
                 },
                 r#"{"type":"wait_text","text":"$ ","timeout_ms":250}"#,
+            ),
+            (AppRequestBody::Layout {}, r#"{"type":"layout"}"#),
+            (
+                AppRequestBody::LayoutApply {
+                    intent: serde_json::json!({"type": "focus_dir"}),
+                },
+                r#"{"type":"layout_apply","intent":{"type":"focus_dir"}}"#,
+            ),
+            (AppRequestBody::Commands {}, r#"{"type":"commands"}"#),
+            (
+                AppRequestBody::Command {
+                    id: "lume.tab.new".to_owned(),
+                    args: serde_json::Value::Null,
+                    window: None,
+                },
+                r#"{"type":"command","id":"lume.tab.new"}"#,
+            ),
+            (
+                AppRequestBody::Command {
+                    id: "lume.tab.activate".to_owned(),
+                    args: serde_json::json!({"index": 2}),
+                    window: Some("w1".to_owned()),
+                },
+                r#"{"type":"command","id":"lume.tab.activate","args":{"index":2},"window":"w1"}"#,
             ),
         ];
         for (body, json) in cases {
@@ -558,6 +740,7 @@ mod tests {
     #[test]
     fn a_screen_is_rows_of_text_with_the_cursor() {
         let screen = AppReplyBody::Screen {
+            pane: "p1".to_owned(),
             session: session(),
             size: TermSize::new(4, 2).unwrap(),
             cursor: ScreenCursor {
@@ -569,7 +752,7 @@ mod tests {
             lines: vec!["ab".to_owned(), "$ ".to_owned()],
         };
         let json = concat!(
-            r#"{"type":"screen","session":"00000000000000ab","size":{"cols":4,"rows":2},"#,
+            r#"{"type":"screen","pane":"p1","session":"00000000000000ab","size":{"cols":4,"rows":2},"#,
             r#""cursor":{"col":2,"row":1,"visible":true},"alternate":false,"lines":["ab","$ "]}"#
         );
         assert_eq!(serde_json::to_string(&screen).unwrap(), json);
@@ -595,6 +778,7 @@ mod tests {
         let request = PageRequest {
             id: 9,
             body: PageRequestBody::WaitText {
+                pane: None,
                 session: None,
                 text: "ready".to_owned(),
                 timeout_ms: 1000,
@@ -607,6 +791,39 @@ mod tests {
             std::str::from_utf8(json).unwrap(),
             r#"{"request":{"id":9,"body":{"type":"wait_text","text":"ready","timeout_ms":1000}}}"#
         );
+    }
+
+    #[test]
+    fn a_notice_travels_in_the_notify_envelope() {
+        let notice = serde_json::json!({"type": "notice", "level": "info", "message": "m"});
+        let mut frames = Vec::new();
+        encode_notice(&notice, &mut frames).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_slice(&frames[crate::Header::LEN..]).unwrap();
+        assert_eq!(json, serde_json::json!({ "notify": notice }));
+    }
+
+    #[test]
+    fn a_page_is_asked_for_a_size_and_to_run_a_command() {
+        let cases = [
+            (
+                PageRequestBody::Estimate {
+                    intent: serde_json::json!({"type": "scratch_hide"}),
+                },
+                r#"{"type":"estimate","intent":{"type":"scratch_hide"}}"#,
+            ),
+            (
+                PageRequestBody::Command {
+                    id: "lume.terminal.copy".to_owned(),
+                    args: serde_json::Value::Null,
+                },
+                r#"{"type":"command","id":"lume.terminal.copy"}"#,
+            ),
+        ];
+        for (body, json) in cases {
+            assert_eq!(serde_json::to_string(&body).unwrap(), json);
+            assert_eq!(serde_json::from_str::<PageRequestBody>(json).unwrap(), body);
+        }
     }
 
     #[test]

@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use lume_proto::app::{AppReply, AppReplyBody, AppRequestBody, codes};
+use lume_proto::app::{AppError, AppReply, AppReplyBody, AppRequestBody, codes};
 use serde_json::{Value, json};
 
 use crate::args::Ctl;
@@ -49,12 +49,29 @@ fn answer_limit(request: &AppRequestBody, timeout: Duration) -> Duration {
     }
 }
 
+/// The request to send: the one the arguments gave, with the intent read from
+/// standard input put in if that is where it was said to be.
+fn request(ctl: &Ctl) -> Result<AppRequestBody, Failure> {
+    if !ctl.intent_from_input {
+        return Ok(ctl.request.clone());
+    }
+    let mut written = String::new();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut written).map_err(Failure::Broken)?;
+    let intent = serde_json::from_str(&written).map_err(|error| {
+        Failure::Refused(AppError::new(
+            codes::BAD_REQUEST,
+            format!("the intent on standard input is not JSON: {error}"),
+        ))
+    })?;
+    Ok(AppRequestBody::LayoutApply { intent })
+}
+
 async fn ask(ctl: &Ctl) -> Result<AppReply, Failure> {
+    let request = request(ctl)?;
     let endpoint = endpoint(ctl.endpoint.as_deref()).map_err(Failure::Broken)?;
     let mut client = Client::connect(&endpoint).await?;
-    client
-        .ask(ctl.request.clone(), answer_limit(&ctl.request, ctl.timeout))
-        .await
+    let limit = answer_limit(&request, ctl.timeout);
+    client.ask(request, limit).await
 }
 
 /// Sends the request, prints the answer and returns the exit status.
@@ -132,6 +149,7 @@ mod tests {
     #[test]
     fn a_wait_is_given_its_own_time_and_a_little_more() {
         let wait = AppRequestBody::WaitExit {
+            pane: None,
             session: None,
             timeout_ms: 0,
         };

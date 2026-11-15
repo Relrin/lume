@@ -1,0 +1,365 @@
+/**
+ * The terminals of this window's panes.
+ *
+ * Every terminal pane of the window has a view for as long as the pane exists, whether
+ * or not its tab is on show. This follows the layout: a pane that appears gets a view,
+ * a pane that goes has its view disposed of, and a view is attached to whatever session
+ * the layout says its pane shows. A pane without a session has one started by the core,
+ * at the grid the pane has.
+ *
+ * Views are made and kept outside the component tree. A card that is rendered hands its
+ * elements to its pane's view and takes them back when it goes; the view, its terminal
+ * and its session carry on without them.
+ */
+
+import type { CoreClient } from "../core/client.ts";
+import type { ConfigView } from "../core/types.ts";
+import type { TabAreaController } from "../layout/controller.ts";
+import { gridFor, shapeOf } from "../layout/estimate.ts";
+import { computeRects, unitRectToPx } from "../layout/geometry.ts";
+import { panesOf, selectFocus, selectWindowPanes } from "../layout/selectors.ts";
+import type { LayoutState, LayoutStore } from "../layout/store.ts";
+import type { PaneId } from "../layout/types.ts";
+import { rendererTheme, type Appearance } from "../theme.ts";
+import { CommandError, type TermSize } from "../transport/types.ts";
+import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX } from "../tuning.ts";
+import {
+  TerminalView,
+  type ViewElements,
+  type ViewServices,
+  type ViewSettings,
+} from "../terminal/view.ts";
+import type { PaneTitles } from "./titles.ts";
+
+/** What every view of the window shares. */
+export type SharedServices = Omit<ViewServices, "shortcut" | "title" | "focused" | "restart">;
+
+/** What the views need from their surroundings. */
+export interface ViewsServices {
+  readonly shared: SharedServices;
+  readonly layout: LayoutStore;
+  readonly client: CoreClient;
+  readonly area: TabAreaController;
+  readonly titles: PaneTitles;
+  /** The configuration in use, or nothing before the core has sent one. */
+  config(): ConfigView | null;
+  /** The look the configuration comes to. */
+  appearance(): Appearance;
+  /** Offers a key pressed in a pane's terminal to the shell's own bindings. */
+  shortcut(pane: PaneId, event: KeyboardEvent, alternateScreen: boolean): boolean;
+}
+
+/** One pane's view and what is known of its session. */
+interface Entry {
+  readonly view: TerminalView;
+  /** The session the view shows, or is being attached to. */
+  session: string | null;
+  /** The core has been asked to start a session for the pane, or could not. */
+  asked: boolean;
+  /** Settles when the view has attached to its session, or could not. */
+  attaching: Promise<void> | undefined;
+}
+
+/** Why a session cannot be attached to for good: it is gone, not busy. */
+const GONE = new Set(["not_found", "session_exited", "forbidden"]);
+
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** The views of this window's terminal panes. */
+export class PaneViews {
+  readonly #services: ViewsServices;
+  readonly #entries = new Map<PaneId, Entry>();
+  /** How much larger than the configured size the window's text is, in CSS pixels. */
+  #zoomPx = 0;
+  /** A pass over the layout is wanted once the one in progress is done. */
+  #scheduled = false;
+
+  constructor(services: ViewsServices) {
+    this.#services = services;
+    services.layout.subscribe(() => this.#schedule());
+    services.area.onBox(() => {
+      this.#plan();
+      this.#schedule();
+    });
+  }
+
+  /** The view of a pane, if the pane is a terminal of this window. */
+  get(pane: PaneId): TerminalView | undefined {
+    return this.#entries.get(pane)?.view;
+  }
+
+  /** The pane that has the keyboard, and its view. */
+  focused(): { readonly pane: PaneId; readonly view: TerminalView } | undefined {
+    const pane = selectFocus(this.#services.layout.getState());
+    const view = pane === null ? undefined : this.get(pane);
+    return pane !== null && view ? { pane, view } : undefined;
+  }
+
+  /** The pane that shows a session, and its view. */
+  bySession(session: string): { readonly pane: PaneId; readonly view: TerminalView } | undefined {
+    for (const [pane, entry] of this.#entries) {
+      if (entry.view.session === session) return { pane, view: entry.view };
+    }
+    return undefined;
+  }
+
+  /**
+   * Resolves once the view of a pane is no longer in the middle of attaching to its
+   * session. The core counts a session as shown from the moment it has attached this
+   * page to it, which is a moment before the page has heard so.
+   */
+  async settled(pane: PaneId): Promise<void> {
+    for (;;) {
+      const attaching = this.#entries.get(pane)?.attaching;
+      if (!attaching) return;
+      await attaching;
+    }
+  }
+
+  // The elements.
+
+  /** Hands a pane's view the elements of its card. */
+  mount(pane: PaneId, elements: ViewElements): void {
+    // A card can be rendered a moment before the views have followed the layout.
+    this.reconcile();
+    const view = this.get(pane);
+    if (!view) return;
+    view.mount(elements);
+    if (selectFocus(this.#services.layout.getState()) === pane) view.focus();
+  }
+
+  /** Takes the elements of a pane's card back. The view and its session carry on. */
+  unmount(pane: PaneId): void {
+    this.get(pane)?.unmount();
+  }
+
+  /** Gives the keyboard to the pane the layout says has it, if its card is rendered. */
+  focus(): void {
+    this.focused()?.view.focus();
+  }
+
+  // How the views are set up.
+
+  #settings(): ViewSettings {
+    const terminal = this.#services.config()?.config.terminal;
+    return {
+      appearance: this.#services.appearance(),
+      cursor: {
+        style: terminal?.["cursor-style"] ?? "block",
+        blink: terminal?.["cursor-blink"] ?? true,
+      },
+      scrollbackLines: terminal?.["scrollback-lines"] ?? 10_000,
+      zoomPx: this.#zoomPx,
+    };
+  }
+
+  /** Sets every view up again: the configuration or the zoom changed. */
+  configure(): void {
+    const settings = this.#settings();
+    for (const entry of this.#entries.values()) entry.view.configure(settings);
+    this.#plan();
+  }
+
+  /** How much larger than the configured size the window's text is, in CSS pixels. */
+  get zoomPx(): number {
+    return this.#zoomPx;
+  }
+
+  /**
+   * Makes the window's text larger or smaller than configured by `px`, within what a
+   * font size may be. Nought is the configured size.
+   */
+  setZoom(px: number): void {
+    const base = this.#services.appearance().fontSizePx;
+    const size = Math.min(Math.max(base + px, FONT_SIZE_MIN_PX), FONT_SIZE_MAX_PX);
+    if (size - base === this.#zoomPx) return;
+    this.#zoomPx = size - base;
+    this.configure();
+  }
+
+  // Following the layout.
+
+  #schedule(): void {
+    if (this.#scheduled) return;
+    this.#scheduled = true;
+    // Several changes arrive in one notice; they are followed together.
+    queueMicrotask(() => {
+      this.#scheduled = false;
+      this.reconcile();
+    });
+  }
+
+  /** Brings the views in line with the layout as it is now. */
+  reconcile(): void {
+    const { layout, titles } = this.#services;
+    const state = layout.getState();
+    if (!state.ready) return;
+    const panes = new Set(selectWindowPanes(state));
+    for (const [pane, entry] of this.#entries) {
+      if (panes.has(pane)) continue;
+      entry.view.dispose();
+      this.#entries.delete(pane);
+      titles.forget(pane);
+    }
+
+    const sessionless: PaneId[] = [];
+    for (const pane of panes) {
+      const content = state.panes[pane]?.content;
+      if (content?.type !== "terminal") continue;
+      const entry = this.#entries.get(pane) ?? this.#create(pane);
+      if (content.session === null) {
+        if (!entry.asked) sessionless.push(pane);
+      } else if (entry.session !== content.session) {
+        entry.session = content.session;
+        entry.asked = false;
+        const attaching = this.#attach(pane, entry, content.backend, content.session).then(() => {
+          if (entry.attaching === attaching) entry.attaching = undefined;
+        });
+        entry.attaching = attaching;
+      }
+    }
+    // A session is started at the grid its pane has, which is not known before the
+    // window's contents have been laid out.
+    if (sessionless.length > 0 && this.#services.area.box()) this.#start(sessionless);
+  }
+
+  #create(pane: PaneId): Entry {
+    const { shared, titles } = this.#services;
+    const view = new TerminalView(
+      {
+        ...shared,
+        shortcut: (event, context) => this.#services.shortcut(pane, event, context.alternateScreen),
+        title: (title) => titles.set(pane, title),
+        focused: () => this.#tookFocus(pane),
+        restart: () => this.restart(pane),
+      },
+      this.#settings(),
+    );
+    const entry: Entry = { view, session: null, asked: false, attaching: undefined };
+    this.#entries.set(pane, entry);
+    const planned = this.#plannedSize(this.#services.layout.getState(), pane);
+    if (planned) view.setPlannedSize(planned);
+    return entry;
+  }
+
+  async #attach(
+    pane: PaneId,
+    entry: Entry,
+    backend: string | null,
+    session: string,
+  ): Promise<void> {
+    const { client } = this.#services;
+    try {
+      await entry.view.attach(
+        client.transport,
+        backend ?? client.transport.defaultBackend,
+        session,
+      );
+      if (this.#entries.get(pane) !== entry) entry.view.dispose();
+    } catch (error) {
+      // The pane has moved on to another session, or gone, while this was tried.
+      if (this.#entries.get(pane) !== entry || entry.session !== session) return;
+      if (error instanceof CommandError && GONE.has(error.code)) {
+        entry.view.showLost("The program in this pane has ended.");
+      } else {
+        entry.view.showMessage(`The pane's session cannot be shown: ${reason(error)}`);
+      }
+    }
+  }
+
+  /** Has the core start sessions for panes that have none. */
+  #start(panes: readonly PaneId[]): void {
+    const state = this.#services.layout.getState();
+    const asked = panes.flatMap((pane) => {
+      const entry = this.#entries.get(pane);
+      if (!entry) return [];
+      entry.asked = true;
+      return [{ pane, size: this.#sizeOf(state, pane, entry.view) }];
+    });
+    if (asked.length === 0) return;
+    this.#services.client.sessionsStart(asked).then(
+      (outcome) => {
+        // A session that was started arrives as a change to its pane.
+        for (const failed of outcome.failed) {
+          this.#entries
+            .get(failed.pane)
+            ?.view.showLost(`A session could not be started: ${failed.message}`);
+        }
+      },
+      (error: unknown) => {
+        for (const { pane } of asked) {
+          this.#entries
+            .get(pane)
+            ?.view.showLost(`A session could not be started: ${reason(error)}`);
+        }
+      },
+    );
+  }
+
+  /** Starts a new session in a pane whose program has ended. */
+  restart(pane: PaneId): void {
+    const entry = this.#entries.get(pane);
+    if (!entry) return;
+    this.#start([pane]);
+  }
+
+  #tookFocus(pane: PaneId): void {
+    const { layout, client } = this.#services;
+    if (selectFocus(layout.getState()) === pane) return;
+    client.layoutApply({ type: "focus", target: { type: "pane", pane } }).catch(() => undefined);
+  }
+
+  // The grid a pane has, or will have.
+
+  #sizeOf(state: LayoutState, pane: PaneId, view: TerminalView): TermSize {
+    return (view.mounted ? undefined : this.#plannedSize(state, pane)) ?? view.gridSize();
+  }
+
+  /** Tells every view without elements what grid its pane's place in its tab gives it. */
+  #plan(): void {
+    const state = this.#services.layout.getState();
+    for (const [pane, entry] of this.#entries) {
+      if (entry.view.mounted) continue;
+      const planned = this.#plannedSize(state, pane);
+      if (planned) entry.view.setPlannedSize(planned);
+    }
+  }
+
+  /**
+   * The grid a pane has by its place in its tab, worked out the way its card and its
+   * renderer would arrive at it, for a pane that has neither.
+   */
+  #plannedSize(state: LayoutState, pane: PaneId): TermSize | undefined {
+    const { area, shared } = this.#services;
+    const box = area.box();
+    if (!box) return undefined;
+    const tab = state.tabs[state.paneTabs[pane] ?? ""];
+    const float = state.floats[pane];
+    let rect;
+    let beside = 1;
+    if (tab) {
+      beside = panesOf(tab.root).length;
+      const placed = computeRects(shapeOf(state, tab.root), box, area.gapPx()).panes;
+      rect = placed.find((candidate) => candidate.pane === pane)?.rect;
+    } else if (float) {
+      rect = unitRectToPx(float.rect, box);
+    }
+    if (!rect) return undefined;
+    const settings = this.#settings();
+    const fontSizePx = Math.min(
+      Math.max(settings.appearance.fontSizePx + settings.zoomPx, FONT_SIZE_MIN_PX),
+      FONT_SIZE_MAX_PX,
+    );
+    const dpr = window.devicePixelRatio;
+    const metrics = shared.host.measureCells(rendererTheme(settings.appearance, fontSizePx), dpr);
+    return gridFor(rect, area.chrome(beside), metrics, dpr);
+  }
+
+  /** Disposes of every view. Their sessions carry on. */
+  dispose(): void {
+    for (const entry of this.#entries.values()) entry.view.dispose();
+    this.#entries.clear();
+  }
+}

@@ -5,7 +5,7 @@
  * performance values are to be confirmed by measurement.
  */
 
-import type { Tier } from "./types.ts";
+import type { PageKind, Tier } from "./types.ts";
 
 /** The order tiers are tried in. The first one that works is used. */
 export const TIER_ORDER: readonly Tier[] = ["webgpu", "webgl2", "canvas2d"];
@@ -18,6 +18,9 @@ export const ATLAS_PAGE_SIZE = 2048;
  * they are full the atlas is emptied and rebuilt from what is on screen.
  */
 export const ATLAS_MAX_PAGES = 4;
+
+/** Bytes one pixel of an atlas page takes: coverage is one byte, colour is four. */
+export const ATLAS_BYTES_PER_PIXEL: Readonly<Record<PageKind, number>> = { mask: 1, color: 4 };
 
 /** Empty pixels kept between glyphs in a page, so neighbours never bleed into each other. */
 export const ATLAS_GLYPH_GAP = 1;
@@ -108,3 +111,10 @@ export const WEBGPU_POWER_PREFERENCE: "low-power" | "high-performance" = "low-po
  * last resort than a software rasteriser pretending to be a GPU.
  */
 export const WEBGL_FAIL_IF_MAJOR_PERFORMANCE_CAVEAT = true;
+
+/**
+ * The most WebGL2 contexts a window keeps alive at once. A browser allows a page only
+ * so many and, past its limit, takes the oldest away without asking. A pane that would
+ * be one too many draws with Canvas 2D instead, and no pane loses its picture.
+ */
+export const WEBGL2_CONTEXTS_MAX = 12;

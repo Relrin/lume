@@ -26,6 +26,9 @@ export interface TerminalColors {
 /** Whether the surrounding interface is light or dark, for programs that ask. */
 export type ColorScheme = "light" | "dark";
 
+/** The shape of the cursor a terminal shows until a program asks for another. */
+export type CursorStyle = "block" | "bar" | "underline";
+
 /** Which clipboard a program addressed. */
 export type ClipboardLocation = "standard" | "selection" | "primary";
 
@@ -82,6 +85,12 @@ export interface TerminalOptions {
    * clipboard write is refused.
    */
   clipboardWriteMaxBytes?: number;
+  /**
+   * The cursor the terminal starts with and goes back to when a program resets the
+   * cursor's shape: a block that does not blink if neither is given.
+   */
+  defaultCursorStyle?: CursorStyle;
+  defaultCursorBlink?: boolean;
   handlers?: TerminalHandlers;
 }
 
@@ -119,6 +128,7 @@ export const Mode = {
   AlternateScreen: 1049,
   BracketedPaste: 2004,
   SynchronizedOutput: 2026,
+  ColorSchemeReport: 2031,
 } as const;
 
 type Effect =
@@ -190,6 +200,13 @@ const OUT_BYTES = 32;
 /** Bytes of scratch memory for values passed to the terminal. */
 const ARG_BYTES = 32;
 const PALETTE_ENTRIES = 256;
+
+/** The library's name for each cursor style. */
+const CURSOR_STYLE_NAMES: Readonly<Record<CursorStyle, string>> = {
+  block: "BLOCK",
+  bar: "BAR",
+  underline: "UNDERLINE",
+};
 
 /** A terminal emulator: screen, scrollback, cursor, styles and modes. */
 export class Terminal {
@@ -343,6 +360,19 @@ export class Terminal {
   /** Tell programs that ask whether the interface is light or dark. */
   setColorScheme(scheme: ColorScheme): void {
     this.#colorScheme = scheme;
+  }
+
+  /**
+   * Set the cursor the terminal shows until a program asks for another, and goes back
+   * to when a program resets the cursor's shape.
+   *
+   * A cursor the program has left alone changes at once. A shape the program chose
+   * stays until the program resets it. The screen that is not showing, of the main and
+   * the alternate one, keeps the shape it had until its cursor is reset.
+   */
+  setDefaultCursor(style: CursorStyle, blink: boolean): void {
+    this.#live();
+    this.#call("input", () => this.#setDefaultCursor(style, blink));
   }
 
   /** The cell at `col`, `row` of the active area (the screen without scrollback). */
@@ -716,6 +746,12 @@ export class Terminal {
     if (options.resizePullsScrollback !== undefined) {
       this.#setBool("RESIZE_PULL_SCROLLBACK", options.resizePullsScrollback);
     }
+    if (options.defaultCursorStyle !== undefined) {
+      this.#setCursorStyle(options.defaultCursorStyle);
+    }
+    if (options.defaultCursorBlink !== undefined) {
+      this.#setBool("DEFAULT_CURSOR_BLINK", options.defaultCursorBlink);
+    }
 
     // Inline images are not drawn, so none are stored. A build without image support
     // does not know the option, which amounts to the same thing.
@@ -750,6 +786,17 @@ export class Terminal {
     const bytes = new Uint8Array(PALETTE_ENTRIES * 3);
     palette.forEach((color, i) => bytes.set([color.r, color.g, color.b], i * 3));
     this.#set("COLOR_PALETTE", this.core.stage(bytes));
+  }
+
+  #setDefaultCursor(style: CursorStyle, blink: boolean): void {
+    this.#setCursorStyle(style);
+    this.#setBool("DEFAULT_CURSOR_BLINK", blink);
+  }
+
+  #setCursorStyle(style: CursorStyle): void {
+    const value = this.core.manifest.enumValue("GhosttyCursorStyle", CURSOR_STYLE_NAMES[style]);
+    this.core.view().setInt32(this.#arg, value, true);
+    this.#set("DEFAULT_CURSOR_STYLE", this.#arg);
   }
 
   #scroll(tag: string, amount: number): void {

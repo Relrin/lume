@@ -1,17 +1,41 @@
-//! The application's window.
+//! The application's windows.
 //!
-//! The window is described in the configuration file but opened here, because what it
+//! A window is described in the configuration file but opened here, because what it
 //! shows depends on how the application was started, and because the handler that keeps
 //! its title can only be given to a window that does not exist yet.
+//!
+//! A window that shows terminals is one window of the layout, and is labelled after it:
+//! the layout's window `w3` is the webview window `w-3`. The commands a terminal's page
+//! may call are granted to every label of that form. The window that only reports on
+//! the webview, or runs a test suite, has a label of its own and is granted less.
 
+use lume_layout::WindowId;
 use tauri::{App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::args::Mode;
 use crate::control::Shell;
 use crate::tuning::TITLE_MAX_BYTES;
 
-/// The window's label, which the capability file grants the commands to.
+/// The label of the window that shows no terminals: the webview report, or a test
+/// suite.
 pub const LABEL: &str = "main";
+
+/// What the label of a window of the layout begins with.
+const LAYOUT_LABEL_PREFIX: &str = "w-";
+
+/// The label of the webview window that shows a window of the layout.
+pub fn label_of(window: WindowId) -> String {
+    format!("{LAYOUT_LABEL_PREFIX}{}", window.get())
+}
+
+/// The window of the layout a webview window shows, if its label is one of a layout's
+/// window.
+pub fn window_of(label: &str) -> Option<WindowId> {
+    let number: u32 = label.strip_prefix(LAYOUT_LABEL_PREFIX)?.parse().ok()?;
+    let window = WindowId::new(number);
+    // One spelling for each window: no sign, no leading zeros.
+    (label_of(window) == label).then_some(window)
+}
 
 /// The window's title when the page has none worth showing.
 const DEFAULT_TITLE: &str = "Lume";
@@ -19,8 +43,13 @@ const DEFAULT_TITLE: &str = "Lume";
 /// The page a harness run shows in place of the terminal.
 const HARNESS_PAGE: &str = "harness.html";
 
-/// Opens the window the configuration describes.
-pub fn open(app: &App, mode: Mode) -> Result<(), Box<dyn std::error::Error>> {
+/// Opens the window the configuration describes. `layout` is the window of the layout
+/// it shows, for a window that shows terminals.
+pub fn open(
+    app: &App,
+    mode: Mode,
+    layout: Option<WindowId>,
+) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error>> {
     let mut described = app
         .config()
         .app
@@ -31,7 +60,10 @@ pub fn open(app: &App, mode: Mode) -> Result<(), Box<dyn std::error::Error>> {
     if matches!(mode, Mode::Harness(_)) {
         described.url = WebviewUrl::App(HARNESS_PAGE.into());
     }
-    WebviewWindowBuilder::from_config(app.handle(), &described)?
+    if let Some(window) = layout {
+        described.label = label_of(window);
+    }
+    let window = WebviewWindowBuilder::from_config(app.handle(), &described)?
         // The page names its document after the terminal's title, and the window follows
         // the document. A program in the terminal chooses that title, so it is checked
         // here as well as in the page.
@@ -41,7 +73,7 @@ pub fn open(app: &App, mode: Mode) -> Result<(), Box<dyn std::error::Error>> {
             }
         })
         .build()?;
-    Ok(())
+    Ok(window)
 }
 
 /// The window as the control endpoint reaches it.
@@ -55,9 +87,20 @@ impl WindowShell {
     }
 }
 
+impl WindowShell {
+    /// The window the user is working in, or any window if none has the keyboard.
+    fn front(&self) -> Option<tauri::WebviewWindow> {
+        let windows = self.app.webview_windows();
+        let focused = windows
+            .values()
+            .find(|window| window.is_focused().unwrap_or(false));
+        focused.or_else(|| windows.values().next()).cloned()
+    }
+}
+
 impl Shell for WindowShell {
     fn activate(&self) {
-        let Some(window) = self.app.get_webview_window(LABEL) else {
+        let Some(window) = self.front() else {
             return;
         };
         // A window that is minimised or hidden is not brought forward by being focused.
@@ -77,6 +120,15 @@ impl Shell for WindowShell {
 
     fn bundled_ui(&self) -> bool {
         !tauri::is_dev()
+    }
+
+    fn close_window(&self, label: &str) {
+        let Some(window) = self.app.get_webview_window(label) else {
+            return;
+        };
+        if let Err(error) = window.destroy() {
+            tracing::debug!(%error, label, "the window could not be closed");
+        }
     }
 }
 
@@ -109,6 +161,16 @@ fn is_direction_mark(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_window_of_the_layout_has_one_label_and_no_other_label_names_it() {
+        let window = WindowId::new(12);
+        assert_eq!(label_of(window), "w-12");
+        assert_eq!(window_of("w-12"), Some(window));
+        for label in ["main", "w-", "w-012", "w-+12", "w12", "w-12 ", "x-12"] {
+            assert_eq!(window_of(label), None, "{label}");
+        }
+    }
 
     #[test]
     fn an_ordinary_title_is_kept() {

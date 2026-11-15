@@ -11,12 +11,17 @@
 //! its place keeps running. When the window's page is replaced, the new page's carrier
 //! takes over everything the old one held, shown or not.
 //!
+//! That is the whole story for a session a page started itself, which only a test
+//! suite's page may do. The sessions of a terminal window belong to the panes of the
+//! layout instead: they are started and ended with their panes, a page may attach only
+//! to those in its own window, and a page going away ends none of them.
+//!
 //! The control endpoint reaches sessions here too, without a carrier of its own. What
 //! it may do without a page is what needs no screen: list, end, and wait for an exit.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use lume_proto::HydrateMode;
@@ -33,7 +38,9 @@ use tokio::task::{AbortHandle, JoinHandle};
 use crate::carrier::{Carrier, Link, OnExit, PageAnswer, SessionKey};
 use crate::error::CommandError;
 use crate::marks::Marks;
+use crate::panes::Panes;
 use crate::tuning::{EXIT_POLL_INTERVAL, EXITS_KEPT};
+use crate::window;
 
 /// Who is responsible for a session.
 enum Holder {
@@ -114,9 +121,13 @@ pub struct AppState {
     exits: Arc<Mutex<Exits>>,
     /// Wakes whoever waits for a session to end.
     exited: Arc<Notify>,
-    /// Wakes whoever waits for a page to connect or to show a session.
+    /// Wakes whoever waits for a page to connect, for a page to attach to a session,
+    /// or for the layout to change.
     shown: Notify,
     marks: Arc<Marks>,
+    /// The panes of the terminal windows. An application that shows no terminals, such
+    /// as one started to run a test suite, has none.
+    panes: OnceLock<Arc<Panes>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -147,7 +158,28 @@ impl AppState {
             exited: Arc::new(Notify::new()),
             shown: Notify::new(),
             marks,
+            panes: OnceLock::new(),
         })
+    }
+
+    /// Gives the application its panes. Done once, before any window opens.
+    pub fn set_panes(&self, panes: Arc<Panes>) {
+        let _ = self.panes.set(panes);
+    }
+
+    /// The panes of the terminal windows, if the application shows terminals.
+    pub fn panes(&self) -> Option<&Arc<Panes>> {
+        self.panes.get()
+    }
+
+    /// The session backends.
+    pub fn router(&self) -> &Router {
+        &self.router
+    }
+
+    /// The runtime the application's tasks run on.
+    pub fn runtime(&self) -> &Handle {
+        &self.runtime
     }
 
     /// How far the application's start has come.
@@ -171,10 +203,17 @@ impl AppState {
         let sessions = Arc::clone(&self.sessions);
         let exits = Arc::clone(&self.exits);
         let exited = Arc::clone(&self.exited);
+        let state = Arc::downgrade(self);
         let on_exit: OnExit = Arc::new(move |key, status| match status {
             Some(status) => {
                 lock(&exits).record(key, status);
                 exited.notify_waiters();
+                // A pane whose program has ended closes, or stays to say so.
+                if let Some(state) = state.upgrade()
+                    && let Some(panes) = state.panes()
+                {
+                    panes.exited(key, status);
+                }
             }
             // A session whose output has ended needs no holder and no timer.
             None => {
@@ -248,6 +287,12 @@ impl AppState {
         } else {
             Err(CommandError::stale_carrier())
         }
+    }
+
+    /// Refuses a request that does not come from the webview's current page: one
+    /// that names a carrier a newer one has replaced, or none.
+    pub fn check_carrier(&self, label: &str, carrier: u32) -> Result<(), CommandError> {
+        self.link(label, carrier).map(drop)
     }
 
     /// Makes `carrier` the holder of a session, or leaves the session to the grace
@@ -348,6 +393,28 @@ impl AppState {
         facts: ClientFacts,
     ) -> Result<Attached, CommandError> {
         let link = self.link(label, carrier)?;
+        let key = SessionKey {
+            backend: backend.clone(),
+            session,
+        };
+        // In a terminal window a page shows the sessions of its own window's panes and
+        // no others. A session the page started itself is its own to attach to.
+        let in_pane = match self.panes() {
+            Some(panes) => {
+                let owned = window::window_of(label).is_some_and(|window| panes.owns(window, &key));
+                let held = matches!(
+                    lock(&self.sessions).get(&key),
+                    Some(Holder::Held(id)) if *id == carrier
+                );
+                if !owned && !held {
+                    return Err(CommandError::forbidden(format!(
+                        "session {session} is not in a pane of this window"
+                    )));
+                }
+                owned
+            }
+            None => false,
+        };
         link.reserve(stream)?;
         let backend_id = backend;
         let backend = self.router.get(backend_id)?;
@@ -362,12 +429,11 @@ impl AppState {
             },
             caps: backend.caps(),
         };
-        let key = SessionKey {
-            backend: backend_id.clone(),
-            session,
-        };
         link.bind(stream, key.clone(), attachment).await?;
-        self.claim(label, carrier, key);
+        // A pane's session lives as long as its pane; only a page's own needs a holder.
+        if !in_pane {
+            self.claim(label, carrier, key);
+        }
         self.marks.attached();
         self.shown.notify_waiters();
         Ok(attached)
@@ -423,19 +489,45 @@ impl AppState {
         link.apply(frames).await
     }
 
-    /// The carrier of a window whose page can be asked about its sessions.
+    /// The carrier of the page of the window the user is working in, or of any window
+    /// when none is known to be.
     pub fn page(&self) -> Option<Arc<Link>> {
-        lock(&self.links).values().next().cloned()
+        let focused = self
+            .panes()
+            .and_then(|panes| panes.focused_window())
+            .and_then(|window| self.page_of(&window::label_of(window)));
+        focused.or_else(|| lock(&self.links).values().next().cloned())
     }
 
-    /// The session a window shows.
-    pub fn shown(&self) -> Option<SessionKey> {
-        self.page()?.shown()
+    /// The carrier of the page of the webview called `label`, if its page has connected.
+    pub fn page_of(&self, label: &str) -> Option<Arc<Link>> {
+        lock(&self.links).get(label).cloned()
+    }
+
+    /// Every connected page's carrier, with its webview's label.
+    pub fn links(&self) -> Vec<(String, Arc<Link>)> {
+        lock(&self.links)
+            .iter()
+            .map(|(label, link)| (label.clone(), Arc::clone(link)))
+            .collect()
+    }
+
+    /// Tells every connected page something.
+    pub fn broadcast(&self, notice: &serde_json::Value) {
+        for (_, link) in self.links() {
+            link.notify(notice);
+        }
+    }
+
+    /// Wakes whoever waits in [`soon`](Self::soon): something they may be waiting for
+    /// has changed.
+    pub fn wake(&self) {
+        self.shown.notify_waiters();
     }
 
     /// Waits for `find` to find something, for `limit` at most, looking again each time
-    /// a page connects or attaches to a session.
-    async fn soon<T>(&self, limit: Duration, find: impl Fn(&Self) -> Option<T>) -> Option<T> {
+    /// a page connects, a page attaches to a session, or the layout changes.
+    pub async fn soon<T>(&self, limit: Duration, find: impl Fn(&Self) -> Option<T>) -> Option<T> {
         let waiting = async {
             loop {
                 // Asked for before looking, so a change in between wakes it.
@@ -449,19 +541,6 @@ impl AppState {
             }
         };
         tokio::time::timeout(limit, waiting).await.ok()
-    }
-
-    /// The carrier of a window's page, waiting up to `limit` for a page that is still
-    /// loading: a request that arrives just after the application starts, or while its
-    /// page reloads, is early rather than wrong.
-    pub async fn page_within(&self, limit: Duration) -> Option<Arc<Link>> {
-        self.soon(limit, Self::page).await
-    }
-
-    /// The session a window shows, waiting up to `limit` for a page that has not shown
-    /// its session yet.
-    pub async fn shown_within(&self, limit: Duration) -> Option<SessionKey> {
-        self.soon(limit, Self::shown).await
     }
 
     /// Finds the backend a session runs on.

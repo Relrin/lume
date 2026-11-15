@@ -9,7 +9,7 @@
  * A window creates one `RenderHost` and asks it for a renderer per pane.
  */
 
-export { TIER_ORDER } from "./constants.ts";
+export { TIER_ORDER, WEBGL2_CONTEXTS_MAX } from "./constants.ts";
 export {
   CellFlag,
   CursorShape,
@@ -25,11 +25,14 @@ export {
 } from "./frame.ts";
 export { RenderHost, type RenderHostOptions } from "./host.ts";
 export { FrameLoop, type FrameLoopEnvironment, type FrameView } from "./loop.ts";
+export { cellMetrics, gridSize } from "./metrics.ts";
+export type { RenderStats } from "./pool.ts";
 export { TierUnavailableError, type RendererOptions } from "./select.ts";
 export type {
   CellMetrics,
   CellRenderer,
   FontSpec,
+  RawFontMetrics,
   Size,
   TerminalTheme,
   Tier,

@@ -9,11 +9,16 @@
  * what a key event means, what the pointer is for, what counts as a link and what may be
  * pasted are small modules beside this one, written without the DOM so they can be
  * tested without it. What is left here is wiring.
+ *
+ * A view outlives its elements. A pane in a tab that is not on show has no elements and
+ * draws nothing, but its terminal still takes its session's output, so the program is
+ * never held up and the screen is there the moment the tab is shown again.
  */
 
 import type { CellRenderer, FrameView, RenderHost } from "@lume/renderer";
 import {
   clearSelection,
+  encodeColorScheme,
   encodeFocus,
   encodePaste,
   extendSelection,
@@ -26,6 +31,7 @@ import {
   SelectionGesture,
   selectionText,
   type Autoscroll,
+  type CursorStyle,
   type FrameCursor,
   type KeyEncoder,
   type KeyInput,
@@ -47,7 +53,6 @@ import {
   MAX_DIMENSION,
   type CellPx,
   type ClientFacts,
-  type ExitStatus,
   type TermSize,
 } from "../transport/types.ts";
 import {
@@ -55,10 +60,8 @@ import {
   CLICK_REPEAT_DISTANCE_CELLS,
   CLICK_REPEAT_INTERVAL_MS,
   CURSOR_BLINK_INTERVAL_MS,
-  FONT_SIZE_DEFAULT_PX,
   FONT_SIZE_MAX_PX,
   FONT_SIZE_MIN_PX,
-  FONT_ZOOM_STEP_PX,
   MAC_OPTION_AS_ALT,
   PINNED_SIZE_TIMEOUT_MS,
   REPORT_INTERVAL_MS,
@@ -78,7 +81,7 @@ import {
   type KeyMapping,
   type Platform,
 } from "./keyboard.ts";
-import { keyPurpose, type AppAction } from "./keymap.ts";
+import { systemKey, unboundSystemKey, type TerminalAction } from "./keymap.ts";
 import { addressUnder, linkScheme, markedRun, type LinkHit } from "./links.ts";
 import {
   gridPoint,
@@ -90,7 +93,6 @@ import {
   type GridPoint,
 } from "./mouse.ts";
 import type { PromptStore } from "./prompts.ts";
-import type { Match, Screen } from "./remote.ts";
 import { TerminalSession } from "./session.ts";
 import { sanitizeTitle } from "./title.ts";
 
@@ -106,10 +108,27 @@ export interface ViewElements {
   readonly scrollThumb: HTMLElement;
   /** Shows text an input method is still composing. */
   readonly preedit: HTMLElement;
-  /** One line of text about the terminal: where a link leads, that the program ended. */
+  /**
+   * One line of text about the terminal, for what the terminal cannot show itself:
+   * where a link leads, or why its session could not be started.
+   */
   readonly status: HTMLElement;
-  /** Starts a new session once the program has ended. Shown only then. */
-  readonly restart: HTMLButtonElement;
+}
+
+/** The cursor a terminal has until the program in it chooses one. */
+export interface CursorDefault {
+  readonly style: CursorStyle;
+  readonly blink: boolean;
+}
+
+/** How a view is set up, and may be set up again while it runs. */
+export interface ViewSettings {
+  readonly appearance: Appearance;
+  readonly cursor: CursorDefault;
+  /** How many lines that scrolled off the top a terminal keeps. */
+  readonly scrollbackLines: number;
+  /** How much larger than the look's own the text is, in CSS pixels; negative for smaller. */
+  readonly zoomPx: number;
 }
 
 /** What a view needs from its surroundings. */
@@ -119,15 +138,41 @@ export interface ViewServices {
   readonly keys: KeyEncoder;
   readonly platform: Platform;
   readonly layout: KeyLayout;
-  readonly appearance: Appearance;
   readonly clipboard: ClipboardService;
   readonly prompts: PromptStore;
   /** Opens a link the user asked for. The core checks it again before it does. */
   openLink(target: string): Promise<void>;
   /** Whether the key that opens the webview's developer tools is left to the webview. */
   readonly developerTools: boolean;
+  /**
+   * Offers a key to the shell before the program gets it. Returns whether the shell
+   * took it: it ran a command, or the key begins a sequence that may.
+   */
+  shortcut(event: KeyboardEvent, context: { readonly alternateScreen: boolean }): boolean;
+  /** Told the title the program gave its terminal, with nothing unsafe left in it. */
+  title(title: string): void;
+  /** Told that the view's terminal has taken the keyboard. */
+  focused(): void;
   /** Starts a new session in place of one whose program has ended. */
   restart(): void;
+}
+
+/** The visible screen of a view's terminal. Columns and rows count from zero. */
+export interface ViewScreen {
+  readonly session: string;
+  readonly size: TermSize;
+  readonly cursor: { readonly col: number; readonly row: number; readonly visible: boolean };
+  /** Whether a full-screen program has switched to the alternate screen. */
+  readonly alternate: boolean;
+  /** One string for each row, without the blanks at its end. */
+  readonly lines: readonly string[];
+}
+
+/** Where text that was waited for is on a view's screen. */
+export interface ViewMatch {
+  readonly session: string;
+  readonly row: number;
+  readonly line: string;
 }
 
 /** A pointer button held down, and what it is doing. */
@@ -137,16 +182,6 @@ interface Drag {
   readonly pointerId: number;
   last: GridPoint;
   rectangle: boolean;
-}
-
-function exitMessage(status: ExitStatus): string {
-  const how =
-    status === "unknown"
-      ? "The program has ended."
-      : "code" in status
-        ? `The program has ended (exit code ${status.code}).`
-        : `The program was ended by signal ${status.signal}.`;
-  return `${how} Press Enter to start a new one.`;
 }
 
 function sameSize(a: TermSize, b: TermSize): boolean {
@@ -178,10 +213,20 @@ export class TerminalView implements FrameView {
   /** Waiting for the view to have a size. */
   #measured: (() => void)[] = [];
   #programClipboard = new ProgramClipboard();
+  /** The grid that last fitted the view's elements, kept for when it has none. */
+  #lastFitted: TermSize | undefined;
+  /** The grid the view is expected to have once it has elements. */
+  #planned: TermSize | undefined;
+  /** There is nothing to show and no session to wait for: the session has gone. */
+  #lost = false;
 
+  #appearance: Appearance;
+  #cursor: CursorDefault;
+  #scrollbackLines: number;
+  #zoomPx: number;
   #dirty = false;
   #focused = false;
-  #fontSizePx = FONT_SIZE_DEFAULT_PX;
+  #fontSizePx: number;
   #dpr = 1;
   #cssSize = { width: 0, height: 0 };
   #reportTimer: number | undefined;
@@ -208,8 +253,13 @@ export class TerminalView implements FrameView {
   #scrollbar = "";
   #inputAt = "";
 
-  constructor(services: ViewServices) {
+  constructor(services: ViewServices, settings: ViewSettings) {
     this.#services = services;
+    this.#appearance = settings.appearance;
+    this.#cursor = settings.cursor;
+    this.#scrollbackLines = settings.scrollbackLines;
+    this.#zoomPx = settings.zoomPx;
+    this.#fontSizePx = this.#fontSize();
     this.#mouse = new MouseEncoder(services.vt);
     this.#mapping = {
       platform: services.platform,
@@ -225,19 +275,12 @@ export class TerminalView implements FrameView {
   mount(elements: ViewElements): void {
     if (this.#elements) this.unmount();
     this.#elements = elements;
-    const { host, appearance } = this.#services;
-
-    // Styles are set through the style object, which a policy that forbids inline
-    // style attributes still allows.
-    elements.root.style.backgroundColor = cssColor(appearance.background);
-    elements.preedit.style.color = cssColor(appearance.foreground);
-    elements.preedit.style.backgroundColor = cssColor(appearance.background);
-    elements.preedit.style.fontFamily = appearance.fontFamily;
-    elements.input.style.fontFamily = appearance.fontFamily;
+    const { host } = this.#services;
+    this.#styleElements();
 
     this.#renderer = host.createRenderer(
       elements.surface,
-      rendererTheme(appearance, this.#fontSizePx),
+      rendererTheme(this.#appearance, this.#fontSizePx),
       {
         onInvalidate: () => this.#markDirty(),
         onTierChange: (tier, reason) => {
@@ -258,7 +301,10 @@ export class TerminalView implements FrameView {
     this.#listen(input, "paste", (event) => this.#onPasteEvent(event));
     this.#listen(input, "copy", (event) => this.#onCopyEvent(event));
     this.#listen(input, "cut", (event) => this.#onCopyEvent(event));
-    this.#listen(input, "focus", () => this.#setFocused(true));
+    this.#listen(input, "focus", () => {
+      this.#setFocused(true);
+      this.#services.focused();
+    });
     this.#listen(input, "blur", () => this.#setFocused(false));
     this.#listen(root, "pointerdown", (event) => this.#onPointerDown(event));
     this.#listen(root, "pointermove", (event) => this.#onPointerMove(event));
@@ -267,10 +313,6 @@ export class TerminalView implements FrameView {
     this.#listen(root, "pointerleave", () => this.#onPointerLeave());
     this.#listen(root, "wheel", (event) => this.#onWheel(event), { passive: false });
     this.#listen(root, "contextmenu", (event) => event.preventDefault());
-    this.#listen(elements.restart, "click", () => {
-      this.#services.restart();
-      this.focus();
-    });
     // A session is told when its view goes out of sight and comes back.
     const visibility = () => this.#scheduleReport();
     document.addEventListener("visibilitychange", visibility);
@@ -317,6 +359,77 @@ export class TerminalView implements FrameView {
     this.#elements?.input.focus({ preventScroll: true });
   }
 
+  /** Whether the view has elements to work on. */
+  get mounted(): boolean {
+    return this.#elements !== undefined;
+  }
+
+  /** Whether the view's terminal has the keyboard. */
+  get hasFocus(): boolean {
+    return this.#focused;
+  }
+
+  // The look.
+
+  /** The text's size in CSS pixels: the look's own, made larger or smaller by the zoom. */
+  #fontSize(): number {
+    const size = this.#appearance.fontSizePx + this.#zoomPx;
+    return Math.min(Math.max(size, FONT_SIZE_MIN_PX), FONT_SIZE_MAX_PX);
+  }
+
+  /**
+   * Gives the elements the look's colours and font. Styles are set through the style
+   * object, which a policy that forbids inline style attributes still allows.
+   */
+  #styleElements(): void {
+    const elements = this.#elements;
+    if (!elements) return;
+    const appearance = this.#appearance;
+    elements.root.style.backgroundColor = cssColor(appearance.background);
+    elements.preedit.style.color = cssColor(appearance.foreground);
+    elements.preedit.style.backgroundColor = cssColor(appearance.background);
+    elements.preedit.style.fontFamily = appearance.fontFamily;
+    elements.input.style.fontFamily = appearance.fontFamily;
+  }
+
+  /**
+   * Changes how the view is set up while it runs: a new theme, another font, a zoom. The
+   * terminal's colours change at once, and a program that asked to hear of a change
+   * between light and dark is told. The number of lines kept applies to the next
+   * session.
+   */
+  configure(settings: ViewSettings): void {
+    const before = this.#appearance;
+    this.#appearance = settings.appearance;
+    this.#scrollbackLines = settings.scrollbackLines;
+    this.#zoomPx = settings.zoomPx;
+    this.#fontSizePx = this.#fontSize();
+
+    const session = this.#session;
+    const cursorChanged =
+      settings.cursor.style !== this.#cursor.style || settings.cursor.blink !== this.#cursor.blink;
+    this.#cursor = settings.cursor;
+    if (session) {
+      const { terminal } = session;
+      if (settings.appearance !== before) terminal.setColors(terminalColors(settings.appearance));
+      if (settings.appearance.scheme !== before.scheme) {
+        terminal.setColorScheme(settings.appearance.scheme);
+        if (terminal.mode(Mode.ColorSchemeReport)) {
+          session.send(encodeColorScheme(this.#services.vt, settings.appearance.scheme));
+        }
+      }
+      if (cursorChanged) terminal.setDefaultCursor(settings.cursor.style, settings.cursor.blink);
+    }
+
+    this.#styleElements();
+    this.#inputAt = "";
+    this.#renderer?.setTheme(rendererTheme(settings.appearance, this.#fontSizePx));
+    // Cells of another size make another grid, and the session hears of new colours.
+    this.#measure();
+    this.#scheduleReport();
+    this.#markDirty();
+  }
+
   // Size.
 
   /**
@@ -327,13 +440,31 @@ export class TerminalView implements FrameView {
     return this.#pin?.size ?? this.#fitted();
   }
 
-  /** The grid that fits the view at its current size. */
+  /**
+   * The grid that fits the view at its current size. A view without elements, or one
+   * that has not been laid out yet, answers with the grid it is expected to have, or
+   * the one it last had.
+   */
   #fitted(): TermSize {
-    const grid = this.#renderer?.gridSize() ?? { cols: 80, rows: 24 };
-    return {
+    const renderer = this.#renderer;
+    if (!renderer || this.#cssSize.width === 0) {
+      return this.#planned ?? this.#lastFitted ?? { cols: 80, rows: 24 };
+    }
+    const grid = renderer.gridSize();
+    this.#lastFitted = {
       cols: Math.min(Math.max(grid.cols, 1), MAX_DIMENSION),
       rows: Math.min(Math.max(grid.rows, 1), MAX_DIMENSION),
     };
+    return this.#lastFitted;
+  }
+
+  /**
+   * Says what grid the view will have once it has elements, for a view that has none:
+   * a pane in a tab that is not on show still has a place in its tab. A session
+   * attached to meanwhile is told this size.
+   */
+  setPlannedSize(size: TermSize): void {
+    this.#planned = size;
   }
 
   /**
@@ -348,20 +479,27 @@ export class TerminalView implements FrameView {
 
   /** The size of one cell in device pixels. */
   cellPx(): CellPx {
-    const metrics = this.#renderer?.metrics;
-    return metrics ? { w: metrics.cellWidth, h: metrics.cellHeight } : { w: 0, h: 0 };
+    // A view without a renderer measures the font the way its renderer will.
+    const metrics =
+      this.#renderer?.metrics ??
+      this.#services.host.measureCells(
+        rendererTheme(this.#appearance, this.#fontSizePx),
+        window.devicePixelRatio,
+      );
+    return { w: metrics.cellWidth, h: metrics.cellHeight };
   }
 
   /** What a session is told about this view. */
   facts(): ClientFacts {
-    const { appearance } = this.#services;
+    const appearance = this.#appearance;
     return {
       size: this.gridSize(),
       cellPx: this.cellPx(),
       palette: factsPalette(appearance),
       scheme: appearance.scheme,
       focused: this.#focused,
-      visible: document.visibilityState === "visible",
+      // A pane in a tab that is not on show is as hidden as a window that is.
+      visible: this.#elements !== undefined && document.visibilityState === "visible",
     };
   }
 
@@ -482,11 +620,13 @@ export class TerminalView implements FrameView {
     session: string,
     size?: TermSize,
   ): Promise<void> {
-    const { vt, appearance } = this.#services;
+    const { vt } = this.#services;
+    const appearance = this.#appearance;
     const pin = size ? { size, fitted: this.#fitted() } : undefined;
     const facts = { ...this.facts(), ...(size ? { size } : {}) };
     const attachment = await client.attach(backend, session, facts);
     this.#dropSession();
+    this.#lost = false;
     this.#pin = pin;
     this.#shown = session;
     this.#lastFacts = JSON.stringify(facts);
@@ -495,6 +635,8 @@ export class TerminalView implements FrameView {
       colors: terminalColors(appearance),
       scheme: appearance.scheme,
       cellPx: facts.cellPx,
+      scrollbackLines: this.#scrollbackLines,
+      cursor: this.#cursor,
       hooks: {
         changed: () => {
           // What was under the pointer may have moved. It is looked for again when
@@ -507,10 +649,10 @@ export class TerminalView implements FrameView {
           this.#updateGeometry();
           this.#notify();
         },
-        exited: (status) => this.#setMessage(exitMessage(status)),
-        title: (title) => {
-          document.title = sanitizeTitle(title) || "Lume";
-        },
+        // Nothing is said of it: what the program printed last is on the screen, and
+        // that the shell is gone shows there too.
+        exited: () => this.#markDirty(),
+        title: (title) => this.#services.title(sanitizeTitle(title)),
         clipboardWrite: (text, location) => this.#onProgramClipboard(text, location),
       },
     });
@@ -529,6 +671,22 @@ export class TerminalView implements FrameView {
     this.#setMessage(message);
   }
 
+  /**
+   * Says that the session the view was to show has gone and cannot be shown, or could
+   * not be started: there is no screen to tell the user so. Enter starts a new one, as
+   * it does in a view that saw its program end.
+   */
+  showLost(message: string): void {
+    this.#dropSession();
+    this.#lost = true;
+    this.#setMessage(message);
+  }
+
+  /** Whether the view shows nothing that is running: its program ended, or went unseen. */
+  get ended(): boolean {
+    return this.#lost || this.#session?.exit !== undefined;
+  }
+
   #dropSession(): void {
     this.#gesture?.free();
     this.#gesture = undefined;
@@ -543,25 +701,19 @@ export class TerminalView implements FrameView {
 
   // What a caller outside the window may ask of the terminal.
 
-  /** The session a request means, which must be the one shown. */
-  #asked(session: string | undefined): { readonly id: string; readonly open: TerminalSession } {
+  /** The session the view shows, for a request that needs one. */
+  #asked(): { readonly id: string; readonly open: TerminalSession } {
     const open = this.#session;
     const id = this.#shown;
     if (!open || id === undefined) {
-      throw new CommandError("not_shown", "the window is not showing a session");
-    }
-    if (session !== undefined && session !== id) {
-      throw new CommandError(
-        "not_shown",
-        `session ${session} is not the one the window shows, and only that one has a screen`,
-      );
+      throw new CommandError("not_shown", "the pane is not showing a session");
     }
     return { id, open };
   }
 
   /** The visible screen of the session shown, as text. */
-  screen(session?: string): Screen {
-    const { id, open } = this.#asked(session);
+  screen(): ViewScreen {
+    const { id, open } = this.#asked();
     const { terminal } = open;
     const cursor = terminal.cursor();
     return {
@@ -578,8 +730,8 @@ export class TerminalView implements FrameView {
    * holds it. Rejects with `timeout` after `timeoutMs`, and with `not_shown` if the view
    * turns to another session first.
    */
-  waitText(session: string | undefined, text: string, timeoutMs: number): Promise<Match> {
-    const { id, open } = this.#asked(session);
+  waitText(text: string, timeoutMs: number): Promise<ViewMatch> {
+    const { id, open } = this.#asked();
     return this.#until(
       open,
       () => {
@@ -596,8 +748,8 @@ export class TerminalView implements FrameView {
    * Gives the terminal of the session shown `size`, whatever fits the view, and resolves
    * once the terminal has it. The size holds until the view's own size next changes.
    */
-  resizeTo(session: string | undefined, size: TermSize): Promise<TermSize> {
-    const { open } = this.#asked(session);
+  resizeTo(size: TermSize): Promise<TermSize> {
+    const { open } = this.#asked();
     this.#pin = { size, fitted: this.#fitted() };
     this.#report();
     return this.#until(
@@ -628,7 +780,7 @@ export class TerminalView implements FrameView {
       const watch = () => {
         if (this.#session !== open) {
           done();
-          reject(new CommandError("not_shown", "the window turned to another session"));
+          reject(new CommandError("not_shown", "the pane turned to another session"));
           return;
         }
         const now = probe();
@@ -759,30 +911,27 @@ export class TerminalView implements FrameView {
     const text = this.#hover?.target ?? this.#message;
     status.textContent = text;
     status.hidden = text === "";
-    const restart = this.#elements?.restart;
-    if (restart) restart.hidden = this.#session?.exit === undefined;
   }
 
   // The keyboard.
 
   #onKeyDown(event: KeyboardEvent): void {
     const terminal = this.#session?.terminal;
-    const purpose = keyPurpose(event, {
-      platform: this.#services.platform,
-      alternateScreen: terminal?.alternateScreen() ?? false,
-      developerTools: this.#services.developerTools,
-    });
-    if (purpose === "system") return;
-    if (purpose !== null) {
+    const { platform, developerTools } = this.#services;
+    if (systemKey(event, { platform, developerTools })) return;
+    // The shell's own keys come first: a key that runs a command never reaches the
+    // program, and neither does a key that may be the first of a sequence.
+    const alternateScreen = terminal?.alternateScreen() ?? false;
+    if (this.#services.shortcut(event, { alternateScreen })) {
       event.preventDefault();
-      this.#perform(purpose);
       return;
     }
+    if (unboundSystemKey(event)) return;
 
     // Nothing is left to type into. Enter, which would have been the next thing typed
     // at a shell, starts a new session instead.
     if (
-      this.#session?.exit !== undefined &&
+      this.ended &&
       event.key === "Enter" &&
       !event.isComposing &&
       !(event.ctrlKey || event.altKey || event.metaKey || event.shiftKey)
@@ -877,9 +1026,10 @@ export class TerminalView implements FrameView {
     this.#sendText(event.data ?? "");
   }
 
-  // The shell's own actions.
+  // What a command may do to the terminal.
 
-  #perform(action: AppAction): void {
+  /** Carries out one of the commands that act on a terminal. */
+  perform(action: TerminalAction): void {
     const terminal = this.#session?.terminal;
     switch (action) {
       case "copy":
@@ -887,15 +1037,6 @@ export class TerminalView implements FrameView {
         return;
       case "paste":
         void this.#paste();
-        return;
-      case "font-larger":
-        this.#setFontSize(this.#fontSizePx + FONT_ZOOM_STEP_PX);
-        return;
-      case "font-smaller":
-        this.#setFontSize(this.#fontSizePx - FONT_ZOOM_STEP_PX);
-        return;
-      case "font-reset":
-        this.#setFontSize(FONT_SIZE_DEFAULT_PX);
         return;
     }
     if (!terminal) return;
@@ -924,15 +1065,6 @@ export class TerminalView implements FrameView {
         break;
     }
     this.#markDirty();
-  }
-
-  #setFontSize(sizePx: number): void {
-    const size = Math.min(Math.max(sizePx, FONT_SIZE_MIN_PX), FONT_SIZE_MAX_PX);
-    if (size === this.#fontSizePx || !this.#renderer) return;
-    this.#fontSizePx = size;
-    this.#renderer.setTheme(rendererTheme(this.#services.appearance, size));
-    // Cells of another size make another grid.
-    this.#measure();
   }
 
   // The clipboard.

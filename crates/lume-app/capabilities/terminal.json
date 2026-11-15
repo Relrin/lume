@@ -1,0 +1,26 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "terminal",
+  "description": "What the page of a window that shows terminals may call. Nothing from Tauri's core plugins is granted.",
+  "windows": ["w-*"],
+  "permissions": [
+    "allow-webview-info",
+    "allow-carrier-open",
+    "allow-carrier-send",
+    "allow-session-attach",
+    "allow-clipboard-read",
+    "allow-clipboard-write",
+    "allow-open-link",
+    "allow-font-families",
+    "allow-page-reply",
+    "allow-layout-view",
+    "allow-layout-apply",
+    "allow-sessions-start",
+    "allow-commands-list",
+    "allow-command-run",
+    "allow-config-view",
+    "allow-config-set",
+    "allow-config-unset",
+    "allow-config-open"
+  ]
+}
