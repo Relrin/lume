@@ -168,10 +168,50 @@ fn ask(lume: &Path, endpoint: &str, args: &[&str]) -> Option<Value> {
     serde_json::from_slice(&output.stdout).ok()
 }
 
+/// The points of a start the application reports, in the order they are reached, with
+/// the name each has in the report.
+const MARKS: [(&str, &str); 5] = [
+    ("window_ms", "windowMs"),
+    ("page_ms", "pageMs"),
+    ("carrier_ms", "carrierMs"),
+    ("attached_ms", "attachedMs"),
+    ("output_ms", "outputMs"),
+];
+
+/// How far one start had come when its shell's first output reached the page, and when
+/// the screen showed a prompt. All in milliseconds from the start of the process.
+struct Start {
+    /// The application's own marks, as its status reports them.
+    marks: Value,
+    output_ms: f64,
+    prompt_ms: f64,
+}
+
+impl Start {
+    /// One mark of the start, if the application reported it.
+    fn mark(&self, name: &str) -> Option<f64> {
+        self.marks[name].as_f64()
+    }
+
+    /// The start on one line: every mark, then the prompt.
+    fn line(&self) -> String {
+        let mut line = String::new();
+        for (name, _) in MARKS {
+            let label = name.trim_end_matches("_ms");
+            match self.mark(name) {
+                Some(ms) => line.push_str(&format!("{label} {ms:.0}, ")),
+                None => line.push_str(&format!("{label} not reached, ")),
+            }
+        }
+        line.push_str(&format!("prompt {:.0} ms", self.prompt_ms));
+        line
+    }
+}
+
 /// Starts the application once and times its start: until the first output of its
 /// shell was handed to the page, by the application's own account, and until the
 /// screen showed a prompt, by the clock here.
-fn time_one_start(app: &Path, lume: &Path, endpoint: &str) -> Result<(f64, f64)> {
+fn time_one_start(app: &Path, lume: &Path, endpoint: &str) -> Result<Start> {
     let started = Instant::now();
     let mut child = Command::new(app)
         .args(["--endpoint", endpoint])
@@ -181,19 +221,28 @@ fn time_one_start(app: &Path, lume: &Path, endpoint: &str) -> Result<(f64, f64)>
         .spawn()
         .context("starting the application")?;
 
-    let mut output_ms = None;
+    // The application's marks, once the last of them is set.
+    let mut reached: Option<(Value, f64)> = None;
+    // The marks as last reported, to say how far a start that never finished had come.
+    let mut last_marks = Value::Null;
     // The screen as last seen with text at the cursor, and when it was first seen so.
     let mut settling: Option<(Value, Instant)> = None;
     let result = loop {
         if started.elapsed() > START_TIMEOUT {
-            break Err(anyhow::anyhow!("the application showed no prompt in time"));
+            break Err(anyhow::anyhow!(
+                "the application showed no prompt in time; its start had come to {last_marks}"
+            ));
         }
         std::thread::sleep(POLL);
-        if output_ms.is_none() {
-            output_ms = ask(lume, endpoint, &["status"])
-                .and_then(|status| status["marks"]["output_ms"].as_f64());
+        let Some((marks, output_ms)) = &reached else {
+            if let Some(status) = ask(lume, endpoint, &["status"]) {
+                last_marks = status["marks"].clone();
+                if let Some(output_ms) = last_marks["output_ms"].as_f64() {
+                    reached = Some((last_marks.clone(), output_ms));
+                }
+            }
             continue;
-        }
+        };
         let Some(screen) = ask(lume, endpoint, &["capture"]) else {
             continue;
         };
@@ -208,8 +257,11 @@ fn time_one_start(app: &Path, lume: &Path, endpoint: &str) -> Result<(f64, f64)>
         match &settling {
             Some((before, since)) if *before == lines => {
                 if seen.duration_since(*since) >= PROMPT_SETTLED {
-                    let prompt = since.duration_since(started).as_secs_f64() * 1000.0;
-                    break Ok((output_ms.unwrap_or(0.0), prompt));
+                    break Ok(Start {
+                        marks: marks.clone(),
+                        output_ms: *output_ms,
+                        prompt_ms: since.duration_since(started).as_secs_f64() * 1000.0,
+                    });
                 }
             }
             _ => settling = Some((lines, seen)),
@@ -227,22 +279,36 @@ fn time_one_start(app: &Path, lume: &Path, endpoint: &str) -> Result<(f64, f64)>
 fn time_starts(profile: Profile) -> Result<Value> {
     let app = suites::app(profile)?;
     let lume = suites::lume(profile)?;
-    let mut output = Vec::new();
-    let mut prompt = Vec::new();
+    let mut starts = Vec::new();
     for run in 0..=STARTS {
         let endpoint = format!("bench-{}-{run}", std::process::id());
-        let (output_ms, prompt_ms) = time_one_start(&app, &lume, &endpoint)?;
-        // The first start is the cold one.
+        let start = time_one_start(&app, &lume, &endpoint)?;
+        // Every start is shown, so that a slow one can be seen to be slow in the window,
+        // the page or the shell. The first is the cold one and is not counted.
+        let counted = if run > 0 { "" } else { " (cold, not counted)" };
+        println!("bench:   {}{counted}", start.line());
         if run > 0 {
-            output.push(output_ms);
-            prompt.push(prompt_ms.round());
+            starts.push(start);
         }
     }
-    Ok(json!({
+    let output: Vec<f64> = starts.iter().map(|start| start.output_ms).collect();
+    let prompt: Vec<f64> = starts.iter().map(|start| start.prompt_ms.round()).collect();
+    let mut report = json!({
         "starts": STARTS,
         "outputMs": { "p50": median(output.clone()), "all": output },
         "promptMs": { "p50": median(prompt.clone()), "all": prompt },
-    }))
+    });
+    // The marks on the way to the first output, recorded beside it.
+    for (name, key) in MARKS {
+        if report.get(key).is_some() {
+            continue;
+        }
+        let all: Vec<f64> = starts.iter().filter_map(|start| start.mark(name)).collect();
+        if all.len() == starts.len() {
+            report[key] = json!({ "p50": median(all.clone()), "all": all });
+        }
+    }
+    Ok(report)
 }
 
 /// Measures the release build and compares the numbers with the limits of `profile`.

@@ -123,6 +123,24 @@ impl App {
         }
     }
 
+    /// The application's status once its window shows a session. The endpoint answers
+    /// before the page has started its shell, so a status read straight after the start
+    /// may name no session yet.
+    fn status_with_session(&self) -> Value {
+        let deadline = Instant::now() + START;
+        loop {
+            let status = self.ctl(&["status"]).ok("status");
+            if status["shown"].is_string() {
+                return status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the window never showed a session: {status}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
     /// Types a line into the session shown.
     fn type_line(&self, line: &str) {
         self.ctl(&["send", "--enter", "--", line]).ok("send");
@@ -410,7 +428,9 @@ fn a_wait_that_is_not_met_times_out_and_says_so() {
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn a_second_start_shows_the_first_and_exits() {
     let app = App::start();
-    let before = app.ctl(&["status"]).ok("status");
+    // Read once the page has its session: read earlier, the status would name none, and
+    // the one read below would differ from it only because the page had started since.
+    let before = app.status_with_session();
 
     // The application itself, started again on the same endpoint.
     let second = Command::new(application())
@@ -431,8 +451,14 @@ fn a_second_start_shows_the_first_and_exits() {
 
     // The first is still the one answering, with the session it had.
     let after = app.ctl(&["status"]).ok("status");
-    assert_eq!(after["pid"], before["pid"]);
-    assert_eq!(after["shown"], before["shown"]);
+    assert_eq!(
+        after["pid"], before["pid"],
+        "before: {before}, after: {after}"
+    );
+    assert_eq!(
+        after["shown"], before["shown"],
+        "before: {before}, after: {after}"
+    );
     app.quit();
 }
 

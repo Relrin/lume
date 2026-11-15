@@ -15,8 +15,14 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   # Linux system packages Tauri and bindgen need. Windows and macOS runners have theirs.
+  #
+  # The steps that open the application's window on Linux run it on a virtual display
+  # and on a session bus of their own (`xvfb-run -a dbus-run-session --`). The runner's
+  # own session bus offers desktop services that have no desktop to run on; a program
+  # that asks one of them waits until the call times out, which takes far longer than
+  # the application's whole start.
   LINUX_PACKAGES: >-
-    build-essential curl file xz-utils libclang-dev xvfb
+    build-essential curl file xz-utils libclang-dev xvfb dbus
     libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
 jobs:
@@ -85,7 +91,7 @@ jobs:
       # Start the app, let the page check the webview, print the report and exit.
       - name: Probe the webview (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a target/debug/lume-gui --probe
+        run: xvfb-run -a dbus-run-session -- target/debug/lume-gui --probe
       - name: Probe the webview (Windows, macOS)
         if: runner.os != 'Linux'
         shell: bash
@@ -95,7 +101,7 @@ jobs:
       # snapshots inside its webview, then real shells driven through `lume ctl`.
       - name: End to end (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a cargo xtask e2e
+        run: xvfb-run -a dbus-run-session -- cargo xtask e2e
       - name: End to end (Windows, macOS)
         if: runner.os != 'Linux'
         run: cargo xtask e2e
@@ -135,7 +141,7 @@ jobs:
         run: sudo apt-get install -y webkitgtk-webdriver
       - name: Smoke test through WebDriver (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a cargo xtask smoke
+        run: xvfb-run -a dbus-run-session -- cargo xtask smoke
       - name: Smoke test through WebDriver (Windows)
         if: runner.os == 'Windows'
         run: cargo xtask smoke
@@ -172,7 +178,7 @@ jobs:
       # that makes something several times slower, and nothing finer.
       - name: Measure against the CI limits (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a cargo xtask bench --profile ci
+        run: xvfb-run -a dbus-run-session -- cargo xtask bench --profile ci
       - name: Measure against the CI limits (Windows, macOS)
         if: runner.os != 'Linux'
         run: cargo xtask bench --profile ci

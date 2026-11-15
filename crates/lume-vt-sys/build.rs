@@ -43,9 +43,9 @@ fn workspace_root() -> PathBuf {
 
 fn link(vt_dir: &Path, target: &str) {
     let lib_dir = vt_dir.join("lib");
-    println!("cargo:rustc-link-search=native={}", lib_dir.display());
 
     if target.contains("windows") {
+        println!("cargo:rustc-link-search=native={}", lib_dir.display());
         // Upstream builds for the GNU ABI on Windows. An MSVC program links it through the
         // import library and loads `ghostty-vt.dll` at run time (PACKAGING-LIBGHOSTTY.md,
         // "Platform Support").
@@ -58,8 +58,45 @@ fn link(vt_dir: &Path, target: &str) {
         copy_dll_to_profile_dir(&bin_dir.join("ghostty-vt.dll"));
     } else {
         // Elsewhere, link the static library so there is nothing to ship beside the binary.
+        //
+        // The install tree holds a shared library beside the archive. A linker that is
+        // asked for a library by name takes the shared one where it finds both, and
+        // Apple's cannot be told otherwise. A program that links this crate directly,
+        // as its own tests do, would then need the shared library at run time and not
+        // find it. So the linker is shown a directory that holds the archive alone.
+        let alone = archive_alone(&lib_dir.join(STATIC_ARCHIVE));
+        println!("cargo:rustc-link-search=native={}", alone.display());
         println!("cargo:rustc-link-lib=static=ghostty-vt");
     }
+}
+
+/// The static library's file name where it is linked statically.
+const STATIC_ARCHIVE: &str = "libghostty-vt.a";
+
+/// Copies the archive into a directory of its own under `OUT_DIR` and returns the
+/// directory.
+fn archive_alone(archive: &Path) -> PathBuf {
+    if !archive.is_file() {
+        panic!(
+            "{} is missing; run `cargo xtask vt native`",
+            archive.display()
+        );
+    }
+    println!("cargo:rerun-if-changed={}", archive.display());
+
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
+    let alone = out_dir.join("static");
+    fs::create_dir_all(&alone)
+        .unwrap_or_else(|err| panic!("could not create {}: {err}", alone.display()));
+    let dest = alone.join(STATIC_ARCHIVE);
+    fs::copy(archive, &dest).unwrap_or_else(|err| {
+        panic!(
+            "could not copy {} to {}: {err}",
+            archive.display(),
+            dest.display()
+        )
+    });
+    alone
 }
 
 /// Windows also looks for a DLL in the directory of the executable. Final binaries such as
