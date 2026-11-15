@@ -6,33 +6,75 @@
 //! without a holder, and a page that opens a carrier within the grace period may attach
 //! to them again. Sessions nobody claims in that time are ended, so a program is never
 //! left running with no window to show it.
+//!
+//! A window holds more sessions than it shows: one that was shown before another took
+//! its place keeps running. When the window's page is replaced, the new page's carrier
+//! takes over everything the old one held, shown or not.
+//!
+//! The control endpoint reaches sessions here too, without a carrier of its own. What
+//! it may do without a page is what needs no screen: list, end, and wait for an exit.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use lume_proto::HydrateMode;
+use lume_proto::app::{AppError, codes};
 use lume_session::{
-    BackendCaps, BackendId, ClientFacts, Hydrate, LocalBackend, Router, SessionId, SessionInfo,
-    SpawnSpec, TermSize,
+    BackendCaps, BackendId, ClientFacts, ExitStatus, Hydrate, LocalBackend, Router, SessionId,
+    SessionInfo, SpawnSpec, TermSize,
 };
 use serde::Serialize;
 use tokio::runtime::Handle;
+use tokio::sync::Notify;
 use tokio::task::{AbortHandle, JoinHandle};
 
-use crate::carrier::{Carrier, Link, OnExit, SessionKey};
+use crate::carrier::{Carrier, Link, OnExit, PageAnswer, SessionKey};
 use crate::error::CommandError;
+use crate::marks::Marks;
+use crate::tuning::{EXIT_POLL_INTERVAL, EXITS_KEPT};
 
 /// Who is responsible for a session.
 enum Holder {
     /// The carrier with this id spawned it or is attached to it.
     Held(u32),
     /// Its carrier went away. Unless another claims it, the timer ends it.
-    Orphan { token: u64, timer: AbortHandle },
+    Orphan {
+        /// The webview whose carrier held it.
+        label: String,
+        token: u64,
+        timer: AbortHandle,
+    },
 }
 
 type Sessions = Arc<Mutex<HashMap<SessionKey, Holder>>>;
+
+/// How the sessions that ended lately ended. A session is forgotten by its backend soon
+/// after its program ends, and whoever asks afterwards is answered from here.
+#[derive(Default)]
+struct Exits {
+    /// The sessions in the order they ended, oldest first.
+    order: VecDeque<SessionKey>,
+    status: HashMap<SessionKey, ExitStatus>,
+}
+
+impl Exits {
+    fn record(&mut self, key: &SessionKey, status: ExitStatus) {
+        if self.status.insert(key.clone(), status).is_none() {
+            self.order.push_back(key.clone());
+        }
+        while self.order.len() > EXITS_KEPT {
+            if let Some(oldest) = self.order.pop_front() {
+                self.status.remove(&oldest);
+            }
+        }
+    }
+
+    fn of(&self, key: &SessionKey) -> Option<ExitStatus> {
+        self.status.get(key).copied()
+    }
+}
 
 /// What attaching to a session tells the view.
 #[derive(Debug, Serialize)]
@@ -58,8 +100,8 @@ pub struct Listed {
 pub struct AppState {
     runtime: Handle,
     router: Router,
-    /// The backend for sessions on this machine, when the application runs one.
-    local: Option<Arc<LocalBackend>>,
+    /// The backends that run inside this process, which must be shut down with it.
+    locals: Vec<Arc<LocalBackend>>,
     /// The carrier of each webview, by the webview's label.
     links: Mutex<HashMap<String, Arc<Link>>>,
     sessions: Sessions,
@@ -69,6 +111,12 @@ pub struct AppState {
     next_carrier: AtomicU32,
     next_orphan: AtomicU64,
     grace: Duration,
+    exits: Arc<Mutex<Exits>>,
+    /// Wakes whoever waits for a session to end.
+    exited: Arc<Notify>,
+    /// Wakes whoever waits for a page to connect or to show a session.
+    shown: Notify,
+    marks: Arc<Marks>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -76,24 +124,35 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl AppState {
-    /// `grace` is how long a session waits for a new holder once its carrier is gone.
+    /// `locals` are the backends in `router` that run inside this process. `grace` is
+    /// how long a session waits for a new holder once its carrier is gone.
     pub fn new(
         runtime: Handle,
         router: Router,
-        local: Option<Arc<LocalBackend>>,
+        locals: Vec<Arc<LocalBackend>>,
         grace: Duration,
+        marks: Arc<Marks>,
     ) -> Arc<Self> {
         Arc::new(Self {
             runtime,
             router,
-            local,
+            locals,
             links: Mutex::new(HashMap::new()),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             retiring: Mutex::new(Vec::new()),
             next_carrier: AtomicU32::new(1),
             next_orphan: AtomicU64::new(1),
             grace,
+            exits: Arc::new(Mutex::new(Exits::default())),
+            exited: Arc::new(Notify::new()),
+            shown: Notify::new(),
+            marks,
         })
+    }
+
+    /// How far the application's start has come.
+    pub fn marks(&self) -> &Marks {
+        &self.marks
     }
 
     /// Replaces the carrier of the webview called `label` and returns the new one's id,
@@ -110,19 +169,52 @@ impl AppState {
 
         let id = self.next_carrier.fetch_add(1, Ordering::Relaxed);
         let sessions = Arc::clone(&self.sessions);
-        let on_exit: OnExit = Arc::new(move |key| {
-            // A session whose program has ended needs no holder and no timer.
-            if let Some(Holder::Orphan { timer, .. }) = lock(&sessions).remove(key) {
-                timer.abort();
+        let exits = Arc::clone(&self.exits);
+        let exited = Arc::clone(&self.exited);
+        let on_exit: OnExit = Arc::new(move |key, status| match status {
+            Some(status) => {
+                lock(&exits).record(key, status);
+                exited.notify_waiters();
+            }
+            // A session whose output has ended needs no holder and no timer.
+            None => {
+                if let Some(Holder::Orphan { timer, .. }) = lock(&sessions).remove(key) {
+                    timer.abort();
+                }
             }
         });
-        let link = Link::open(id, carrier, &self.runtime, on_exit);
+        let link = Link::open(id, carrier, &self.runtime, on_exit, Arc::clone(&self.marks));
         let replaced = lock(&self.links).insert(label.to_owned(), link);
         if let Some(replaced) = replaced {
             // Another open for the same webview finished in between; the newest wins.
-            self.retire_link(replaced);
+            self.retire_link(label, replaced);
         }
+        self.adopt(label, id);
+        self.marks.carrier();
+        self.shown.notify_waiters();
         id
+    }
+
+    /// Makes `carrier` the holder of every session the webview's earlier carriers left
+    /// behind: the page is new, the window and what runs in it are the same.
+    fn adopt(&self, label: &str, carrier: u32) {
+        // Held across both, as in `claim`: the carrier cannot be retired in between.
+        let links = lock(&self.links);
+        if !links.get(label).is_some_and(|link| link.id() == carrier) {
+            return;
+        }
+        for holder in lock(&self.sessions).values_mut() {
+            if let Holder::Orphan {
+                label: left_by,
+                timer,
+                ..
+            } = holder
+                && left_by == label
+            {
+                timer.abort();
+                *holder = Holder::Held(carrier);
+            }
+        }
     }
 
     /// Retires the carrier of the webview called `label`, if it has one: its page is
@@ -130,18 +222,18 @@ impl AppState {
     pub fn retire(self: &Arc<Self>, label: &str) {
         let link = lock(&self.links).remove(label);
         if let Some(link) = link {
-            self.retire_link(link);
+            self.retire_link(label, link);
         }
     }
 
-    fn retire_link(self: &Arc<Self>, link: Arc<Link>) {
+    fn retire_link(self: &Arc<Self>, label: &str, link: Arc<Link>) {
         let held: Vec<SessionKey> = lock(&self.sessions)
             .iter()
             .filter(|(_, holder)| matches!(holder, Holder::Held(id) if *id == link.id()))
             .map(|(key, _)| key.clone())
             .collect();
         for key in held {
-            self.orphan(key);
+            self.orphan(label, key);
         }
         let detaching = self.runtime.spawn(async move { link.retire().await });
         lock(&self.retiring).push(detaching);
@@ -173,11 +265,11 @@ impl AppState {
                 return;
             }
         }
-        self.orphan(key);
+        self.orphan(label, key);
     }
 
     /// Leaves a session without a holder and starts the timer that ends it.
-    fn orphan(self: &Arc<Self>, key: SessionKey) {
+    fn orphan(self: &Arc<Self>, label: &str, key: SessionKey) {
         let token = self.next_orphan.fetch_add(1, Ordering::Relaxed);
         let state = Arc::downgrade(self);
         let waiting = key.clone();
@@ -191,7 +283,12 @@ impl AppState {
                 }
             })
             .abort_handle();
-        let previous = lock(&self.sessions).insert(key, Holder::Orphan { token, timer });
+        let orphan = Holder::Orphan {
+            label: label.to_owned(),
+            token,
+            timer,
+        };
+        let previous = lock(&self.sessions).insert(key, orphan);
         if let Some(Holder::Orphan { timer, .. }) = previous {
             timer.abort();
         }
@@ -271,6 +368,8 @@ impl AppState {
         };
         link.bind(stream, key.clone(), attachment).await?;
         self.claim(label, carrier, key);
+        self.marks.attached();
+        self.shown.notify_waiters();
         Ok(attached)
     }
 
@@ -287,15 +386,25 @@ impl AppState {
             backend: backend.clone(),
             session,
         };
-        if let Some(Holder::Orphan { timer, .. }) = lock(&self.sessions).remove(&key) {
+        self.end(&key).await
+    }
+
+    /// Ends a session, whoever holds it.
+    pub async fn end(&self, key: &SessionKey) -> Result<(), CommandError> {
+        if let Some(Holder::Orphan { timer, .. }) = lock(&self.sessions).remove(key) {
             timer.abort();
         }
-        Ok(self.router.get(backend)?.kill(session).await?)
+        Ok(self.router.get(&key.backend)?.kill(key.session).await?)
+    }
+
+    /// Every session of every backend, for the page behind `carrier`.
+    pub async fn list(&self, label: &str, carrier: u32) -> Result<Vec<Listed>, CommandError> {
+        self.link(label, carrier)?;
+        self.list_all().await
     }
 
     /// Every session of every backend.
-    pub async fn list(&self, label: &str, carrier: u32) -> Result<Vec<Listed>, CommandError> {
-        self.link(label, carrier)?;
+    pub async fn list_all(&self) -> Result<Vec<Listed>, CommandError> {
         let mut listed = Vec::new();
         for backend in self.router.ids() {
             for info in self.router.get(&backend)?.list().await? {
@@ -314,6 +423,124 @@ impl AppState {
         link.apply(frames).await
     }
 
+    /// The carrier of a window whose page can be asked about its sessions.
+    pub fn page(&self) -> Option<Arc<Link>> {
+        lock(&self.links).values().next().cloned()
+    }
+
+    /// The session a window shows.
+    pub fn shown(&self) -> Option<SessionKey> {
+        self.page()?.shown()
+    }
+
+    /// Waits for `find` to find something, for `limit` at most, looking again each time
+    /// a page connects or attaches to a session.
+    async fn soon<T>(&self, limit: Duration, find: impl Fn(&Self) -> Option<T>) -> Option<T> {
+        let waiting = async {
+            loop {
+                // Asked for before looking, so a change in between wakes it.
+                let woken = self.shown.notified();
+                tokio::pin!(woken);
+                woken.as_mut().enable();
+                if let Some(found) = find(self) {
+                    return found;
+                }
+                woken.await;
+            }
+        };
+        tokio::time::timeout(limit, waiting).await.ok()
+    }
+
+    /// The carrier of a window's page, waiting up to `limit` for a page that is still
+    /// loading: a request that arrives just after the application starts, or while its
+    /// page reloads, is early rather than wrong.
+    pub async fn page_within(&self, limit: Duration) -> Option<Arc<Link>> {
+        self.soon(limit, Self::page).await
+    }
+
+    /// The session a window shows, waiting up to `limit` for a page that has not shown
+    /// its session yet.
+    pub async fn shown_within(&self, limit: Duration) -> Option<SessionKey> {
+        self.soon(limit, Self::shown).await
+    }
+
+    /// Finds the backend a session runs on.
+    pub async fn find(&self, session: SessionId) -> Result<SessionKey, AppError> {
+        let listed = self.list_all().await?;
+        listed
+            .into_iter()
+            .find(|entry| entry.info.id == session)
+            .map(|entry| SessionKey {
+                backend: entry.backend,
+                session,
+            })
+            .ok_or_else(|| AppError::new(codes::NOT_FOUND, format!("no session {session}")))
+    }
+
+    /// Waits until a session's program has ended, for `limit` at most, and says how it
+    /// ended.
+    ///
+    /// A session that has gone from its backend without its exit being seen here ended
+    /// while nothing was attached to it; how is not known.
+    pub async fn wait_exit(
+        &self,
+        key: &SessionKey,
+        limit: Duration,
+    ) -> Result<ExitStatus, AppError> {
+        let deadline = Instant::now() + limit;
+        loop {
+            // Asked for before looking, so an exit between the look and the wait wakes it.
+            let woken = self.exited.notified();
+            tokio::pin!(woken);
+            woken.as_mut().enable();
+
+            if let Some(status) = lock(&self.exits).of(key) {
+                return Ok(status);
+            }
+            let listed = self.list_all().await?;
+            match listed
+                .iter()
+                .find(|entry| entry.backend == key.backend && entry.info.id == key.session)
+            {
+                Some(entry) => {
+                    if let Some(status) = entry.info.exit {
+                        return Ok(status);
+                    }
+                }
+                None => {
+                    // Its exit may be on the way here still.
+                    tokio::time::sleep(EXIT_POLL_INTERVAL).await;
+                    let seen = lock(&self.exits).of(key);
+                    return Ok(seen.unwrap_or(ExitStatus::Unknown));
+                }
+            }
+
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(AppError::new(
+                    codes::TIMEOUT,
+                    format!("session {} is still running", key.session),
+                ));
+            }
+            tokio::select! {
+                () = &mut woken => {}
+                () = tokio::time::sleep(left.min(EXIT_POLL_INTERVAL)) => {}
+            }
+        }
+    }
+
+    /// Takes a page's answer to something it was asked.
+    pub fn answer(
+        &self,
+        label: &str,
+        carrier: u32,
+        id: u64,
+        answer: PageAnswer,
+    ) -> Result<(), CommandError> {
+        self.link(label, carrier)?.answer(id, answer);
+        Ok(())
+    }
+
     /// Retires every carrier and ends every session. Call before the process exits: a
     /// program in a terminal can outlive a process that exits without closing it.
     pub async fn shutdown(self: &Arc<Self>) {
@@ -330,7 +557,7 @@ impl AppState {
         for detaching in retiring {
             let _ = detaching.await;
         }
-        if let Some(local) = &self.local {
+        for local in &self.locals {
             local.shutdown().await;
         }
     }
@@ -361,7 +588,13 @@ mod tests {
         );
         let router = Router::new();
         router.insert(Router::local_id(), local.clone());
-        AppState::new(Handle::current(), router, Some(local), grace)
+        AppState::new(
+            Handle::current(),
+            router,
+            vec![local],
+            grace,
+            Arc::new(Marks::start()),
+        )
     }
 
     fn local() -> BackendId {
@@ -614,6 +847,23 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_new_page_takes_over_every_session_its_window_held() {
+        let state = local_state(Duration::from_millis(200)).await;
+        let (_carrier, id, _shown) = started(&state, 1).await;
+        // A session the window holds and does not show.
+        state.spawn(WINDOW, id, &local(), shell()).await.unwrap();
+        until_listed(&state, id, 2).await;
+
+        // The page reloads and attaches to neither. Both outlive the grace period: they
+        // belong to the window, and the window is still there.
+        let next = state.open(WINDOW, RecordingCarrier::new()).await;
+        sleep(Duration::from_millis(800)).await;
+        assert_eq!(state.list(WINDOW, next).await.unwrap().len(), 2);
+
+        state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutting_down_ends_every_session() {
         let state = local_state(PATIENT).await;
         let (carrier, id, _session) = started(&state, 1).await;
@@ -636,7 +886,7 @@ mod tests {
         let (carrier, _id, _session) = started(&state, 1).await;
 
         // The backend goes away under the carrier.
-        state.local.as_ref().unwrap().shutdown().await;
+        state.locals[0].shutdown().await;
 
         until("the exit", || {
             carrier

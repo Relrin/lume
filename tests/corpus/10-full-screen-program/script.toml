@@ -1,0 +1,3 @@
+description = "An editor starting up: the alternate screen, its questions, the mouse and the keys, a scrolling text area and a status line"
+cols = 80
+rows = 24

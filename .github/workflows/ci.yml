@@ -14,10 +14,12 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Linux system packages Tauri and bindgen need. Windows and macOS runners have theirs.
+  # Linux system packages Tauri and bindgen need, and the webview's WebDriver for the
+  # smoke test. Windows and macOS runners have theirs.
   LINUX_PACKAGES: >-
     build-essential curl file xz-utils libclang-dev xvfb
     libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+    webkit2gtk-driver
 
 jobs:
   lint:
@@ -90,3 +92,135 @@ jobs:
         if: runner.os != 'Linux'
         shell: bash
         run: target/debug/lume-gui --probe
+
+      # The suites that need the application's window: the corpus and the renderer
+      # snapshots inside its webview, then real shells driven through `lume ctl`.
+      - name: End to end (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a cargo xtask e2e
+      - name: End to end (Windows, macOS)
+        if: runner.os != 'Linux'
+        run: cargo xtask e2e
+      # What the suites reported and drew. For a webview engine with no reference
+      # pictures yet, this holds the pictures references would be made from.
+      - name: Keep what the suites produced
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-${{ matrix.os }}
+          path: target/harness
+          if-no-files-found: ignore
+
+      # The control endpoint belongs to one user: another cannot reach it, and the
+      # console command refuses one that another user made.
+      - name: Endpoint against another user (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a sh tests/endpoint/cross-user.sh target/debug/lume-gui target/debug/lume
+      - name: Endpoint against another user (macOS)
+        if: runner.os == 'macOS'
+        run: sh tests/endpoint/cross-user.sh target/debug/lume-gui target/debug/lume
+      - name: Endpoint against another user (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: tests/endpoint/cross-user.ps1 -App target/debug/lume-gui.exe -Lume target/debug/lume.exe
+
+      # Typing through the window itself. WebDriver for the application exists for
+      # Windows and Linux.
+      - name: Install the WebDriver bridge
+        if: runner.os != 'macOS'
+        run: cargo install tauri-driver --locked
+      - name: Smoke test through WebDriver (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a cargo xtask smoke
+      - name: Smoke test through WebDriver (Windows)
+        if: runner.os == 'Windows'
+        run: cargo xtask smoke
+
+  bench:
+    name: Benchmarks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_PACKAGES
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache pinned tools and libghostty-vt builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tools
+            vendor/ghostty
+            target/vt
+            packages/vt/dist
+          key: vt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools.toml') }}
+      - run: cargo xtask setup
+      # Shared runners have no GPU and uneven neighbours: the limits here catch a change
+      # that makes something several times slower, and nothing finer.
+      - name: Measure against the CI limits (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a cargo xtask bench --profile ci
+      - name: Measure against the CI limits (Windows, macOS)
+        if: runner.os != 'Linux'
+        run: cargo xtask bench --profile ci
+      - name: Keep the numbers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.os }}
+          path: target/bench
+          if-no-files-found: ignore
+
+  dist:
+    name: Bundles (${{ matrix.os }})
+    # What a user would be given to run, from every commit that lands on the main branch.
+    if: github.event_name == 'push'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_PACKAGES
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache pinned tools and libghostty-vt builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tools
+            vendor/ghostty
+            target/vt
+            packages/vt/dist
+          key: vt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools.toml') }}
+      - run: cargo xtask setup
+      - name: Build the portable archive and the installers
+        run: cargo xtask dist --installers
+      - name: Keep the bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: lume-${{ matrix.os }}
+          path: |
+            target/dist/*.zip
+            target/dist/*.tar.gz
+            target/dist/*.exe
+            target/dist/*.dmg
+            target/dist/*.AppImage
+            target/dist/*.deb
+          if-no-files-found: error

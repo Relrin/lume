@@ -18,6 +18,7 @@ export function Terminal() {
   const scrollThumb = useRef<HTMLDivElement>(null);
   const preedit = useRef<HTMLDivElement>(null);
   const status = useRef<HTMLDivElement>(null);
+  const restart = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const elements = {
@@ -27,14 +28,16 @@ export function Terminal() {
       scrollThumb: scrollThumb.current,
       preedit: preedit.current,
       status: status.current,
+      restart: restart.current,
     };
     let mounted: TerminalApp | undefined;
     let cancelled = false;
     terminalApp().then(
       (app) => {
-        const { root, surface, input, scrollThumb, preedit, status } = elements;
-        if (cancelled || !root || !surface || !input || !scrollThumb || !preedit || !status) return;
-        app.view.mount({ root, surface, input, scrollThumb, preedit, status });
+        const { root, surface, input, scrollThumb, preedit, status, restart } = elements;
+        if (cancelled || !root || !surface || !input || !scrollThumb || !preedit) return;
+        if (!status || !restart) return;
+        app.view.mount({ root, surface, input, scrollThumb, preedit, status, restart });
         mounted = app;
         app.connect();
         app.view.focus();
@@ -70,6 +73,9 @@ export function Terminal() {
       </div>
       <div className="terminal-preedit" ref={preedit} hidden />
       <div className="terminal-status" ref={status} hidden />
+      <button className="terminal-restart" ref={restart} type="button" tabIndex={-1} hidden>
+        Start a new session
+      </button>
       <Prompts store={prompts} />
     </div>
   );

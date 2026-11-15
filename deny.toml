@@ -11,6 +11,13 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # proc-macro-error is unmaintained and has no release that fixes that. It is a
+  # compile-time dependency of the GTK 3 bindings (glib-macros, gtk3-macros), which Tauri
+  # uses for its window and webview on Linux. Nothing of it runs in the application, and
+  # it goes when Tauri moves off those bindings. Remove this entry then.
+  { id = "RUSTSEC-2024-0370", reason = "build-time only, through Tauri's GTK 3 bindings on Linux; no upgrade exists" },
+]
 
 [licenses]
 version = 2

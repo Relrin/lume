@@ -1,0 +1,3 @@
+description = "Modes for the keyboard and the mouse, set, asked for and reset: cursor keys, mouse reporting, focus, bracketed paste, the keyboard protocol, insert"
+cols = 60
+rows = 8

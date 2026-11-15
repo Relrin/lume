@@ -43,6 +43,7 @@ import {
 } from "../theme.ts";
 import type { TransportClient } from "../transport/client.ts";
 import {
+  CommandError,
   MAX_DIMENSION,
   type CellPx,
   type ClientFacts,
@@ -59,6 +60,7 @@ import {
   FONT_SIZE_MIN_PX,
   FONT_ZOOM_STEP_PX,
   MAC_OPTION_AS_ALT,
+  PINNED_SIZE_TIMEOUT_MS,
   REPORT_INTERVAL_MS,
 } from "../tuning.ts";
 import {
@@ -88,6 +90,7 @@ import {
   type GridPoint,
 } from "./mouse.ts";
 import type { PromptStore } from "./prompts.ts";
+import type { Match, Screen } from "./remote.ts";
 import { TerminalSession } from "./session.ts";
 import { sanitizeTitle } from "./title.ts";
 
@@ -105,6 +108,8 @@ export interface ViewElements {
   readonly preedit: HTMLElement;
   /** One line of text about the terminal: where a link leads, that the program ended. */
   readonly status: HTMLElement;
+  /** Starts a new session once the program has ended. Shown only then. */
+  readonly restart: HTMLButtonElement;
 }
 
 /** What a view needs from its surroundings. */
@@ -121,6 +126,8 @@ export interface ViewServices {
   openLink(target: string): Promise<void>;
   /** Whether the key that opens the webview's developer tools is left to the webview. */
   readonly developerTools: boolean;
+  /** Starts a new session in place of one whose program has ended. */
+  restart(): void;
 }
 
 /** A pointer button held down, and what it is doing. */
@@ -133,9 +140,17 @@ interface Drag {
 }
 
 function exitMessage(status: ExitStatus): string {
-  if (status === "unknown") return "The program has ended.";
-  if ("code" in status) return `The program has ended (exit code ${status.code}).`;
-  return `The program was ended by signal ${status.signal}.`;
+  const how =
+    status === "unknown"
+      ? "The program has ended."
+      : "code" in status
+        ? `The program has ended (exit code ${status.code}).`
+        : `The program was ended by signal ${status.signal}.`;
+  return `${how} Press Enter to start a new one.`;
+}
+
+function sameSize(a: TermSize, b: TermSize): boolean {
+  return a.cols === b.cols && a.rows === b.rows;
 }
 
 export class TerminalView implements FrameView {
@@ -149,7 +164,19 @@ export class TerminalView implements FrameView {
   #stopListening: (() => void)[] = [];
 
   #session: TerminalSession | undefined;
+  /** The id of the session being shown. */
+  #shown: string | undefined;
   #gesture: SelectionGesture | undefined;
+  /**
+   * A size the terminal was told to have whatever fits the view, and the grid that
+   * fitted when it was told. The size holds until another grid fits: a caller's choice
+   * is kept while the window stays as it is, and the window's user has the last word.
+   */
+  #pin: { readonly size: TermSize; readonly fitted: TermSize } | undefined;
+  /** Run whenever the terminal's contents or size may have changed. */
+  readonly #watchers = new Set<() => void>();
+  /** Waiting for the view to have a size. */
+  #measured: (() => void)[] = [];
   #programClipboard = new ProgramClipboard();
 
   #dirty = false;
@@ -240,6 +267,10 @@ export class TerminalView implements FrameView {
     this.#listen(root, "pointerleave", () => this.#onPointerLeave());
     this.#listen(root, "wheel", (event) => this.#onWheel(event), { passive: false });
     this.#listen(root, "contextmenu", (event) => event.preventDefault());
+    this.#listen(elements.restart, "click", () => {
+      this.#services.restart();
+      this.focus();
+    });
     // A session is told when its view goes out of sight and comes back.
     const visibility = () => this.#scheduleReport();
     document.addEventListener("visibilitychange", visibility);
@@ -288,13 +319,31 @@ export class TerminalView implements FrameView {
 
   // Size.
 
-  /** The grid that fits the view at its current size. */
+  /**
+   * The grid the terminal should have: the one that fits the view at its current size,
+   * unless a caller has asked for another.
+   */
   gridSize(): TermSize {
+    return this.#pin?.size ?? this.#fitted();
+  }
+
+  /** The grid that fits the view at its current size. */
+  #fitted(): TermSize {
     const grid = this.#renderer?.gridSize() ?? { cols: 80, rows: 24 };
     return {
       cols: Math.min(Math.max(grid.cols, 1), MAX_DIMENSION),
       rows: Math.min(Math.max(grid.rows, 1), MAX_DIMENSION),
     };
+  }
+
+  /**
+   * Resolves once the view has been laid out and knows what grid fits it. Before that
+   * the grid is a guess, and a session started at a guess draws its first screen for
+   * the wrong size.
+   */
+  whenMeasured(): Promise<void> {
+    if (this.#renderer && this.#cssSize.width > 0) return Promise.resolve();
+    return new Promise((resolve) => this.#measured.push(resolve));
   }
 
   /** The size of one cell in device pixels. */
@@ -332,9 +381,12 @@ export class TerminalView implements FrameView {
     // The picture follows the element at once. The grid follows when the session has
     // answered, so until then the old grid is drawn in the new space.
     renderer.resize(size, this.#dpr);
+    // Another grid fits now: the window or the font changed, and that is the newer wish.
+    if (this.#pin && !sameSize(this.#fitted(), this.#pin.fitted)) this.#pin = undefined;
     this.#updateGeometry();
     this.#scheduleReport();
     this.#markDirty();
+    for (const resolve of this.#measured.splice(0)) resolve();
   }
 
   /**
@@ -415,12 +467,28 @@ export class TerminalView implements FrameView {
 
   // The session.
 
-  /** Attaches the view to a session and starts showing it. */
-  async attach(client: TransportClient, backend: string, session: string): Promise<void> {
+  /** The id of the session the view shows. */
+  get session(): string | undefined {
+    return this.#shown;
+  }
+
+  /**
+   * Attaches the view to a session and starts showing it, in place of any it showed
+   * before. With `size`, the terminal keeps that size instead of taking the view's.
+   */
+  async attach(
+    client: TransportClient,
+    backend: string,
+    session: string,
+    size?: TermSize,
+  ): Promise<void> {
     const { vt, appearance } = this.#services;
-    const facts = this.facts();
+    const pin = size ? { size, fitted: this.#fitted() } : undefined;
+    const facts = { ...this.facts(), ...(size ? { size } : {}) };
     const attachment = await client.attach(backend, session, facts);
     this.#dropSession();
+    this.#pin = pin;
+    this.#shown = session;
     this.#lastFacts = JSON.stringify(facts);
     this.#programClipboard = new ProgramClipboard();
     const opened = new TerminalSession(vt, attachment, {
@@ -433,8 +501,12 @@ export class TerminalView implements FrameView {
           // the next frame has the screen as it now is.
           this.#hoverStale = this.#hover !== undefined;
           this.#markDirty();
+          this.#notify();
         },
-        resized: () => this.#updateGeometry(),
+        resized: () => {
+          this.#updateGeometry();
+          this.#notify();
+        },
         exited: (status) => this.#setMessage(exitMessage(status)),
         title: (title) => {
           document.title = sanitizeTitle(title) || "Lume";
@@ -462,7 +534,119 @@ export class TerminalView implements FrameView {
     this.#gesture = undefined;
     this.#session?.dispose();
     this.#session = undefined;
+    this.#shown = undefined;
+    this.#pin = undefined;
     this.#pressed.clear();
+    // Whoever waits on the session that is gone learns so now.
+    this.#notify();
+  }
+
+  // What a caller outside the window may ask of the terminal.
+
+  /** The session a request means, which must be the one shown. */
+  #asked(session: string | undefined): { readonly id: string; readonly open: TerminalSession } {
+    const open = this.#session;
+    const id = this.#shown;
+    if (!open || id === undefined) {
+      throw new CommandError("not_shown", "the window is not showing a session");
+    }
+    if (session !== undefined && session !== id) {
+      throw new CommandError(
+        "not_shown",
+        `session ${session} is not the one the window shows, and only that one has a screen`,
+      );
+    }
+    return { id, open };
+  }
+
+  /** The visible screen of the session shown, as text. */
+  screen(session?: string): Screen {
+    const { id, open } = this.#asked(session);
+    const { terminal } = open;
+    const cursor = terminal.cursor();
+    return {
+      session: id,
+      size: { cols: terminal.cols, rows: terminal.rows },
+      cursor: { col: cursor.x, row: cursor.y, visible: cursor.visible },
+      alternate: terminal.alternateScreen(),
+      lines: terminal.screenText(),
+    };
+  }
+
+  /**
+   * Resolves once `text` is on the screen of the session shown, with the first row that
+   * holds it. Rejects with `timeout` after `timeoutMs`, and with `not_shown` if the view
+   * turns to another session first.
+   */
+  waitText(session: string | undefined, text: string, timeoutMs: number): Promise<Match> {
+    const { id, open } = this.#asked(session);
+    return this.#until(
+      open,
+      () => {
+        const lines = open.terminal.screenText();
+        const row = lines.findIndex((line) => line.includes(text));
+        return row < 0 ? undefined : { session: id, row, line: lines[row] ?? "" };
+      },
+      timeoutMs,
+      "the text did not appear on the screen in time",
+    );
+  }
+
+  /**
+   * Gives the terminal of the session shown `size`, whatever fits the view, and resolves
+   * once the terminal has it. The size holds until the view's own size next changes.
+   */
+  resizeTo(session: string | undefined, size: TermSize): Promise<TermSize> {
+    const { open } = this.#asked(session);
+    this.#pin = { size, fitted: this.#fitted() };
+    this.#report();
+    return this.#until(
+      open,
+      () => {
+        const now = { cols: open.terminal.cols, rows: open.terminal.rows };
+        return sameSize(now, size) ? now : undefined;
+      },
+      PINNED_SIZE_TIMEOUT_MS,
+      "the terminal did not take the size in time",
+    );
+  }
+
+  /** Resolves with what `probe` finds, looking again each time the terminal changes. */
+  #until<T>(
+    open: TerminalSession,
+    probe: () => T | undefined,
+    timeoutMs: number,
+    late: string,
+  ): Promise<T> {
+    const found = probe();
+    if (found !== undefined) return Promise.resolve(found);
+    return new Promise((resolve, reject) => {
+      const done = () => {
+        this.#watchers.delete(watch);
+        window.clearTimeout(timer);
+      };
+      const watch = () => {
+        if (this.#session !== open) {
+          done();
+          reject(new CommandError("not_shown", "the window turned to another session"));
+          return;
+        }
+        const now = probe();
+        if (now === undefined) return;
+        done();
+        resolve(now);
+      };
+      const timer = window.setTimeout(() => {
+        done();
+        reject(new CommandError("timeout", late));
+      }, timeoutMs);
+      this.#watchers.add(watch);
+    });
+  }
+
+  #notify(): void {
+    // Copied: a watcher that is done removes itself.
+    for (const watch of [...this.#watchers]) watch();
   }
 
   // Drawing.
@@ -575,6 +759,8 @@ export class TerminalView implements FrameView {
     const text = this.#hover?.target ?? this.#message;
     status.textContent = text;
     status.hidden = text === "";
+    const restart = this.#elements?.restart;
+    if (restart) restart.hidden = this.#session?.exit === undefined;
   }
 
   // The keyboard.
@@ -590,6 +776,19 @@ export class TerminalView implements FrameView {
     if (purpose !== null) {
       event.preventDefault();
       this.#perform(purpose);
+      return;
+    }
+
+    // Nothing is left to type into. Enter, which would have been the next thing typed
+    // at a shell, starts a new session instead.
+    if (
+      this.#session?.exit !== undefined &&
+      event.key === "Enter" &&
+      !event.isComposing &&
+      !(event.ctrlKey || event.altKey || event.metaKey || event.shiftKey)
+    ) {
+      event.preventDefault();
+      this.#services.restart();
       return;
     }
 

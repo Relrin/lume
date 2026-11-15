@@ -9,19 +9,26 @@
 //! A [`Link`] is one carrier with its streams. It keeps no credit: the webview's grants
 //! go straight to the session, which sends no more than it was granted. What waits in
 //! a link is therefore bounded by the credit the webview handed out.
+//!
+//! The carrier's stream 0 carries requests from the core to the page: what is on a
+//! session's screen is known only to the terminal in the page, so the core asks. The
+//! page answers through a command, which names the request it answers.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
+use lume_proto::app::{AppError, AppReplyBody, PageRequest, PageRequestBody, codes};
 use lume_proto::{Body, FrameDecoder, Header, HydratePayload, Kind, Message, Role, encode};
 use lume_session::{
     Attachment, BackendId, ExitStatus, Hydrate, InputSink, OutputFrame, SessionError, SessionId,
 };
 use tokio::runtime::Handle;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::AbortHandle;
 
 use crate::error::CommandError;
+use crate::marks::Marks;
 use crate::tuning::CARRIER_BATCH_MAX;
 
 /// The other end of the carrier is gone.
@@ -52,17 +59,30 @@ pub struct SessionKey {
     pub session: SessionId,
 }
 
-/// Called when a session's program has ended, from the task that forwards its output.
-pub type OnExit = Arc<dyn Fn(&SessionKey) + Send + Sync>;
+/// Called from the task that forwards a session's output: with the status when the
+/// program's exit goes by, and with nothing when the output has ended.
+pub type OnExit = Arc<dyn Fn(&SessionKey, Option<ExitStatus>) + Send + Sync>;
+
+/// What a page answered, or why there is no answer.
+pub type PageAnswer = Result<AppReplyBody, AppError>;
+
+/// What waits to be written to the carrier.
+enum Queued {
+    /// A frame of a stream.
+    Frame(Message),
+    /// A request to the page, already encoded as the frames of a control message.
+    Control(Vec<u8>),
+}
 
 /// One carrier and the streams on it.
 pub struct Link {
     id: u32,
-    outgoing: mpsc::UnboundedSender<Message>,
+    outgoing: mpsc::UnboundedSender<Queued>,
     state: Mutex<LinkState>,
     writer: AbortHandle,
     runtime: Handle,
     on_exit: OnExit,
+    marks: Arc<Marks>,
 }
 
 struct LinkState {
@@ -71,11 +91,19 @@ struct LinkState {
     /// reused and a late frame cannot land on a newer attachment.
     last_stream: u32,
     retired: bool,
+    /// Requests the page has not answered yet, by their id.
+    asked: HashMap<u64, oneshot::Sender<PageAnswer>>,
+    next_ask: u64,
 }
 
 struct Stream {
+    session: SessionKey,
     input: InputSink,
     pump: AbortHandle,
+}
+
+fn page_gone() -> AppError {
+    AppError::new(codes::NO_WINDOW, "the page that was asked has gone")
 }
 
 impl Link {
@@ -85,6 +113,7 @@ impl Link {
         carrier: Arc<dyn Carrier>,
         runtime: &Handle,
         on_exit: OnExit,
+        marks: Arc<Marks>,
     ) -> Arc<Self> {
         let (outgoing, queued) = mpsc::unbounded_channel();
         let writer = runtime.spawn(write_loop(queued, carrier)).abort_handle();
@@ -95,10 +124,13 @@ impl Link {
                 streams: HashMap::new(),
                 last_stream: 0,
                 retired: false,
+                asked: HashMap::new(),
+                next_ask: 1,
             }),
             writer,
             runtime: runtime.clone(),
             on_exit,
+            marks,
         })
     }
 
@@ -155,17 +187,25 @@ impl Link {
                 if let Some(start) = start {
                     let _ = self
                         .outgoing
-                        .send(Message::new(stream, Body::Hydrate(start)));
+                        .send(Queued::Frame(Message::new(stream, Body::Hydrate(start))));
                 }
                 let forwarding = pump(
                     stream,
-                    session,
+                    session.clone(),
                     output,
                     self.outgoing.clone(),
                     Arc::clone(&self.on_exit),
+                    Arc::clone(&self.marks),
                 );
                 let pump = self.runtime.spawn(forwarding).abort_handle();
-                state.streams.insert(stream, Stream { input, pump });
+                state.streams.insert(
+                    stream,
+                    Stream {
+                        session,
+                        input,
+                        pump,
+                    },
+                );
                 return Ok(());
             }
         }
@@ -212,6 +252,77 @@ impl Link {
         Ok(())
     }
 
+    /// The session the page shows: the one it attached to last. While a page changes
+    /// from one session to another it is attached to both for a moment.
+    pub fn shown(&self) -> Option<SessionKey> {
+        let state = self.state();
+        let (_, stream) = state.streams.iter().max_by_key(|(id, _)| **id)?;
+        Some(stream.session.clone())
+    }
+
+    /// The way to type into a session, if the page is attached to it.
+    pub fn input_of(&self, session: &SessionKey) -> Option<InputSink> {
+        let state = self.state();
+        let (_, stream) = state
+            .streams
+            .iter()
+            .filter(|(_, stream)| stream.session == *session)
+            .max_by_key(|(id, _)| **id)?;
+        Some(stream.input.clone())
+    }
+
+    /// Asks the page something and waits for its answer, for `limit` at most.
+    ///
+    /// A page that is replaced or closed while it is being asked gives no answer; that
+    /// is reported at once rather than when the time runs out.
+    pub async fn ask(&self, body: PageRequestBody, limit: Duration) -> PageAnswer {
+        let (answer, answered) = oneshot::channel();
+        let id = {
+            let mut state = self.state();
+            if state.retired {
+                return Err(page_gone());
+            }
+            let id = state.next_ask;
+            state.next_ask += 1;
+            state.asked.insert(id, answer);
+            id
+        };
+        let mut frames = Vec::new();
+        let sent = PageRequest { id, body }
+            .encode(&mut frames)
+            .map_err(|error| AppError::new(codes::BAD_REQUEST, error.to_string()))
+            .and_then(|()| {
+                self.outgoing
+                    .send(Queued::Control(frames))
+                    .map_err(|_| page_gone())
+            });
+        if let Err(error) = sent {
+            self.state().asked.remove(&id);
+            return Err(error);
+        }
+        match tokio::time::timeout(limit, answered).await {
+            Ok(Ok(answer)) => answer,
+            // The link was retired, which dropped the other end.
+            Ok(Err(_)) => Err(page_gone()),
+            Err(_) => {
+                self.state().asked.remove(&id);
+                Err(AppError::new(
+                    codes::TIMEOUT,
+                    "the page did not answer in time",
+                ))
+            }
+        }
+    }
+
+    /// Takes the page's answer to the request with this id. An answer nobody waits for
+    /// any more, or one with an id that was never asked, is dropped.
+    pub fn answer(&self, id: u64, answer: PageAnswer) {
+        let waiting = self.state().asked.remove(&id);
+        if let Some(waiting) = waiting {
+            let _ = waiting.send(answer);
+        }
+    }
+
     /// Ends one stream: its output stops and its session is free for another attachment.
     async fn close(&self, stream: u32) {
         let closed = self.state().streams.remove(&stream);
@@ -229,6 +340,8 @@ impl Link {
         let streams = {
             let mut state = self.state();
             state.retired = true;
+            // Whoever waits for the page's answer learns now that none will come.
+            state.asked.clear();
             std::mem::take(&mut state.streams)
         };
         self.writer.abort();
@@ -290,43 +403,63 @@ async fn pump(
     stream: u32,
     session: SessionKey,
     mut output: lume_session::FrameStream,
-    outgoing: mpsc::UnboundedSender<Message>,
+    outgoing: mpsc::UnboundedSender<Queued>,
     on_exit: OnExit,
+    marks: Arc<Marks>,
 ) {
     let mut exited = false;
     while let Some(frame) = output.next().await {
         let body = match frame {
-            OutputFrame::Data(bytes) => Body::Data(bytes),
+            OutputFrame::Data(bytes) => {
+                marks.output();
+                Body::Data(bytes)
+            }
             OutputFrame::Resized(size) => Body::Resized(size),
             OutputFrame::Event(event) => Body::Event(event),
             OutputFrame::Exit(status) => {
                 exited = true;
+                on_exit(&session, Some(status));
                 Body::Exit(status)
             }
         };
-        if outgoing.send(Message::new(stream, body)).is_err() {
+        if outgoing
+            .send(Queued::Frame(Message::new(stream, body)))
+            .is_err()
+        {
             return;
         }
     }
     // The attachment ended without the program's exit: the backend went away. The view
     // is told the session is over rather than left waiting for output for ever.
     if !exited {
-        let _ = outgoing.send(Message::new(stream, Body::Exit(ExitStatus::Unknown)));
+        let _ = outgoing.send(Queued::Frame(Message::new(
+            stream,
+            Body::Exit(ExitStatus::Unknown),
+        )));
     }
-    on_exit(&session);
+    on_exit(&session, None);
 }
 
 /// Sends queued frames to the carrier, as many as are ready in each message.
 ///
 /// This is the only sender on a carrier, which is what keeps frames in order.
-async fn write_loop(mut queued: mpsc::UnboundedReceiver<Message>, carrier: Arc<dyn Carrier>) {
+async fn write_loop(mut queued: mpsc::UnboundedReceiver<Queued>, carrier: Arc<dyn Carrier>) {
     let mut batch = Vec::new();
     let mut piece = Vec::new();
-    while let Some(mut message) = queued.recv().await {
+    while let Some(mut next) = queued.recv().await {
         loop {
             piece.clear();
-            if let Err(error) = encode(&message, &mut piece) {
-                tracing::error!(%error, stream = message.stream, "a frame could not be encoded");
+            let encoded = match next {
+                Queued::Frame(message) => encode(&message, &mut piece).map_err(|error| {
+                    tracing::error!(%error, stream = message.stream, "a frame could not be encoded");
+                }),
+                Queued::Control(frames) => {
+                    piece = frames;
+                    Ok(())
+                }
+            };
+            if encoded.is_err() {
+                // Reported above; the frames around it still go.
             } else if !batch.is_empty() && batch.len() + piece.len() > CARRIER_BATCH_MAX {
                 // A frame is never split across messages: this one starts the next.
                 if carrier.deliver(std::mem::take(&mut batch)).is_err() {
@@ -340,7 +473,7 @@ async fn write_loop(mut queued: mpsc::UnboundedReceiver<Message>, carrier: Arc<d
                 break;
             }
             match queued.try_recv() {
-                Ok(next) => message = next,
+                Ok(following) => next = following,
                 Err(_) => break,
             }
         }
@@ -365,7 +498,7 @@ mod tests {
         let carrier = RecordingCarrier::new();
         let (outgoing, queued) = mpsc::unbounded_channel();
         for message in messages {
-            outgoing.send(message).unwrap();
+            outgoing.send(Queued::Frame(message)).unwrap();
         }
         drop(outgoing);
         write_loop(queued, carrier.clone()).await;
@@ -407,7 +540,7 @@ mod tests {
         let carrier = RecordingCarrier::new();
         carrier.close();
         let (outgoing, queued) = mpsc::unbounded_channel();
-        outgoing.send(data(1, 1)).unwrap();
+        outgoing.send(Queued::Frame(data(1, 1))).unwrap();
         // The sender is kept, so only the closed carrier can end the loop.
         write_loop(queued, carrier.clone()).await;
         assert!(carrier.batches().is_empty());
@@ -420,6 +553,96 @@ mod tests {
             encode(message, &mut out).unwrap();
         }
         out
+    }
+
+    fn link(carrier: Arc<RecordingCarrier>) -> Arc<Link> {
+        Link::open(
+            7,
+            carrier,
+            &Handle::current(),
+            Arc::new(|_, _| {}),
+            Arc::new(Marks::start()),
+        )
+    }
+
+    async fn asked(carrier: &RecordingCarrier, count: usize) -> Vec<serde_json::Value> {
+        for _ in 0..200 {
+            let requests = carrier.requests();
+            if requests.len() >= count {
+                return requests;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("the page was not asked");
+    }
+
+    #[tokio::test]
+    async fn a_request_reaches_the_page_and_its_answer_comes_back() {
+        let carrier = RecordingCarrier::new();
+        let link = link(carrier.clone());
+        let asking = {
+            let link = Arc::clone(&link);
+            tokio::spawn(async move {
+                link.ask(
+                    PageRequestBody::Screen { session: None },
+                    Duration::from_secs(20),
+                )
+                .await
+            })
+        };
+        let requests = asked(&carrier, 1).await;
+        assert_eq!(
+            requests[0],
+            serde_json::json!({"request": {"id": 1, "body": {"type": "screen"}}})
+        );
+
+        // An answer to a request that was never made changes nothing.
+        link.answer(99, Ok(AppReplyBody::Killed {}));
+        let size = TermSize::new(90, 20).unwrap();
+        link.answer(1, Ok(AppReplyBody::Resized { size }));
+        assert_eq!(asking.await.unwrap(), Ok(AppReplyBody::Resized { size }));
+    }
+
+    #[tokio::test]
+    async fn a_page_that_does_not_answer_is_given_up_on() {
+        let carrier = RecordingCarrier::new();
+        let link = link(carrier.clone());
+        let answer = link
+            .ask(
+                PageRequestBody::Screen { session: None },
+                Duration::from_millis(30),
+            )
+            .await;
+        assert_eq!(answer.unwrap_err().code, codes::TIMEOUT);
+        // What arrives afterwards is too late and is dropped.
+        link.answer(1, Ok(AppReplyBody::Killed {}));
+    }
+
+    #[tokio::test]
+    async fn retiring_a_link_ends_the_wait_for_its_page() {
+        let carrier = RecordingCarrier::new();
+        let link = link(carrier.clone());
+        let asking = {
+            let link = Arc::clone(&link);
+            tokio::spawn(async move {
+                link.ask(
+                    PageRequestBody::Screen { session: None },
+                    Duration::from_secs(20),
+                )
+                .await
+            })
+        };
+        asked(&carrier, 1).await;
+        link.retire().await;
+        assert_eq!(asking.await.unwrap().unwrap_err().code, codes::NO_WINDOW);
+
+        let answer = link
+            .ask(
+                PageRequestBody::Screen { session: None },
+                Duration::from_secs(20),
+            )
+            .await;
+        assert_eq!(answer.unwrap_err().code, codes::NO_WINDOW);
     }
 
     #[test]

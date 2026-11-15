@@ -1,0 +1,15 @@
+{
+  "bundle": {
+    "active": true,
+    "category": "DeveloperTool",
+    "shortDescription": "A terminal",
+    "longDescription": "Lume is a terminal emulator.",
+    "licenseFile": "../../LICENSE",
+    "externalBin": ["../../target/dist/sidecar/lume"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

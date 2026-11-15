@@ -1,0 +1,21 @@
+size 40x8
+cursor 34,6 visible
+screen primary
+--- text
+00|rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr
+01|boldcolourrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr
+02|rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr
+03|
+04|after the cancel
+05|bad:���(� �31mC1 nul
+06|and the terminal is still standing
+07|
+--- attrs
+01 4..10 fg=rgb:e7e7e7
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+

@@ -184,7 +184,7 @@ fn unpack(archive: &Path, into: &Path) -> Result<()> {
 
 /// On Windows, name bsdtar by its full path: a `tar` from Git's MSYS tools may come first
 /// on `PATH`, and it reads neither zip archives nor `C:\` paths.
-fn system_tar() -> PathBuf {
+pub fn system_tar() -> PathBuf {
     if cfg!(windows)
         && let Some(root) = std::env::var_os("SystemRoot")
     {

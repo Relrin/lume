@@ -27,3 +27,10 @@ screen primary
 22|progress 100%
 23|user@host:~$
 --- attrs
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+

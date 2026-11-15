@@ -1,0 +1,3 @@
+description = "Hostile: links whose target is a script, a local file, or not what the text says"
+cols = 60
+rows = 10

@@ -2062,7 +2062,9 @@ version = "0.0.0"
 dependencies = [
  "arboard",
  "fontdb",
+ "lume-ipc",
  "lume-proto",
+ "lume-pty",
  "lume-session",
  "serde",
  "serde_json",
@@ -2070,6 +2072,7 @@ dependencies = [
  "tauri-build",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "url",
  "windows-sys 0.61.2",
 ]
@@ -2077,6 +2080,13 @@ dependencies = [
 [[package]]
 name = "lume-cli"
 version = "0.0.0"
+dependencies = [
+ "lume-ipc",
+ "lume-proto",
+ "serde_json",
+ "static_vcruntime",
+ "tokio",
+]
 
 [[package]]
 name = "lume-host"
@@ -3537,6 +3547,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "shared_library"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4131,6 +4150,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread_local"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "time"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4385,6 +4413,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
+dependencies = [
+ "sharded-slab",
+ "thread_local",
+ "tracing-core",
 ]
 
 [[package]]
@@ -5361,6 +5400,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "serde",
+ "serde_json",
  "sha2 0.11.1",
  "toml 1.2.1+spec-1.1.0",
  "ureq",

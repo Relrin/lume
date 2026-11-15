@@ -35,6 +35,14 @@ export const FONT_SIZE_MAX_PX = 72;
  */
 export const WHEEL_PIXELS_PER_LINE = 100 / 3;
 
+/**
+ * How long a terminal may take to have a size it was told to take from outside the
+ * window. The session answers a size request at the point of its output where the
+ * program saw the size, which is at once unless the program has stopped reading. This is
+ * shorter than the core waits for the page, so the page's own answer arrives first.
+ */
+export const PINNED_SIZE_TIMEOUT_MS = 4000;
+
 /** How many rows either side of the pointer are joined when looking for a wrapped link. */
 export const LINK_SCAN_MAX_ROWS = 4;
 

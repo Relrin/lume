@@ -5,7 +5,13 @@ pub const MAX_PAYLOAD: usize = 64 * 1024;
 
 /// How many bytes of terminal output a client lets the host send on one stream before it
 /// must grant more. This bounds what a slow client has to buffer per stream.
-pub const CREDIT_WINDOW: u32 = 1024 * 1024;
+///
+/// It also bounds how long one stream can hold up another. Everything for a client
+/// travels in one order, so a key's echo waits behind whatever a flooding stream already
+/// has on the way: at most one window of it. Twice this window carries a flood about
+/// forty per cent faster and makes that wait about forty per cent longer; a smaller one
+/// starves the sender while it waits for each grant.
+pub const CREDIT_WINDOW: u32 = 512 * 1024;
 
 /// The most credit a sender will hold for one stream. A peer that grants beyond this is
 /// broken: honouring it would let one stream buffer without bound.

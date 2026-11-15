@@ -67,3 +67,10 @@ screen primary
 06 15..26 fg=palette:1 italic
 07 0..17 fg=palette:2
 08 0..13 fg=palette:2
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+

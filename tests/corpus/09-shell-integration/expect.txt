@@ -1,0 +1,22 @@
+size 60x10
+cursor 21,4 visible
+screen primary
+--- text
+00|user@host:~/project$ make test
+01|running 3 tests
+02|ok
+03|user@host:~/project$ false
+04|user@host:~/project$
+05|
+06|
+07|
+08|
+09|
+--- attrs
+--- state
+title=user@host: ~/project
+pwd=file://host/tmp
+modes 7 25 1007
+ansi-modes
+--- replies
+

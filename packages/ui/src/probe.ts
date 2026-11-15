@@ -14,6 +14,8 @@ export interface WebviewInfo {
   arch: string;
   appVersion: string;
   probe: boolean;
+  /** The test suite the app was started to run, if it was started for one. */
+  harness: string | null;
 }
 
 export interface GpuCheck {
@@ -125,6 +127,20 @@ export function webviewInfo(): Promise<WebviewInfo | null> {
   // Not running inside Tauri (for example `vite` opened in a browser) fails the call.
   info ??= invoke<WebviewInfo>("webview_info").catch(() => null);
   return info;
+}
+
+/**
+ * Says that the test suite the app was started for cannot run: this page is shown
+ * where the harness page should be, which is what a build without that page serves.
+ * The core prints the report and exits, so the run fails instead of opening a terminal.
+ */
+export async function reportMissingHarness(suite: string): Promise<void> {
+  const report = {
+    ok: false,
+    suite,
+    error: "this build of the application does not contain the harness page",
+  };
+  await invoke("harness_done", { report }).catch(() => undefined);
 }
 
 export async function runProbe(): Promise<ProbeReport> {

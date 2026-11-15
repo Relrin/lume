@@ -1,0 +1,3 @@
+description = "What a shell reports about itself: the working directory, the title, prompt and command marks, program status"
+cols = 60
+rows = 10

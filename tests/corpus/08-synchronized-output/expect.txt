@@ -1,0 +1,18 @@
+size 40x6
+cursor 4,2 visible
+screen primary
+--- text
+00|frame 2, line 1
+01|frame 2, line 2
+02|done
+03|
+04|
+05|
+--- attrs
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+\x1b[?2026;1$y\x1b[?2026;2$y

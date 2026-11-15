@@ -63,4 +63,13 @@ export {
   type SelectionGeometry,
 } from "./selection.ts";
 export { formatText, selectionText, type FormatOptions, type TextFormat } from "./format.ts";
-export { dump, parseScript, replay, type Resize, type Script } from "./corpus.ts";
+export {
+  ANSI_MODES,
+  DEC_MODES,
+  dump,
+  parseScript,
+  replay,
+  type Replayed,
+  type Resize,
+  type Script,
+} from "./corpus.ts";

@@ -133,10 +133,17 @@ impl Listener {
     pub(crate) async fn accept(&mut self) -> io::Result<Stream> {
         loop {
             let (stream, _) = self.listener.accept().await?;
-            if same_user(&stream)? {
-                return Ok(stream);
+            match same_user(&stream) {
+                Ok(true) => return Ok(stream),
+                Ok(false) => tracing::warn!("dropped a connection from another user"),
+                // A client that has closed already has no user to read, on the systems
+                // that forget a peer once it is gone. Who it was cannot be known, so it
+                // is not served; the endpoint itself is fine.
+                Err(error) if error.kind() == io::ErrorKind::NotConnected => {
+                    tracing::debug!("dropped a connection that closed as it was accepted");
+                }
+                Err(error) => return Err(error),
             }
-            tracing::warn!("dropped a connection from another user");
         }
     }
 }

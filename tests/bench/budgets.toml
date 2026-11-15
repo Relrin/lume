@@ -1,0 +1,56 @@
+# The limits the benchmarks are held to. `cargo xtask bench` measures the release build
+# and fails when a number is outside its limit.
+#
+# A table is a profile; `cargo xtask bench --profile <name>` picks one. Each entry names
+# a number by its path in the benchmark report (target/bench/report.json):
+#
+#   max       the number must not be above this
+#   min       the number must not be below this
+#   unit      what the number is counted in
+#   optional  a report without the number passes (a webview may lack a renderer tier)
+#
+# Times are in milliseconds. p95 and p99 are the values 95 and 99 samples in a hundred
+# stay under.
+
+# The limits the product is built to, on the hardware it was measured on: a desktop with
+# a discrete GPU and a 144 Hz display.
+[reference]
+
+# A full redraw of a 200 by 60 screen, until the GPU has finished it.
+"redraw.webgpu.finish.p95" = { max = 4.0, unit = "ms", optional = true }
+"redraw.webgl2.finish.p95" = { max = 8.0, unit = "ms", optional = true }
+# The last tier has one frame at 60 Hz to draw in.
+"redraw.canvas2d.finish.p95" = { max = 16.6, unit = "ms" }
+
+# A flood from a session to the page, with nothing done to the bytes.
+"transport.mibPerSecond" = { min = 50.0, unit = "MiB/s" }
+
+# From a key being sent to its echo arriving, with nothing else going on: typed in a
+# burst, and typed with a pause before each key.
+"echoBurst.p99" = { max = 5.0, unit = "ms" }
+"echoSpaced.p99" = { max = 5.0, unit = "ms" }
+# The same while another session floods.
+"flood.echo.p99" = { max = 10.0, unit = "ms" }
+
+# A terminal drawn every frame while a flood is written into it.
+"flood.framesPerSecond" = { min = 60.0, unit = "frames/s" }
+"flood.inputToFrame.p95" = { max = 50.0, unit = "ms" }
+
+# From the start of the application to the first output of its shell reaching the page.
+# What follows, until the prompt, is the shell's own start and is recorded only.
+"startup.outputMs.p50" = { max = 1000.0, unit = "ms" }
+
+# Shared CI runners: no GPU, a virtual display, and neighbours. These limits catch a
+# change that makes something several times slower, and nothing finer than that.
+[ci]
+
+"redraw.webgpu.finish.p95" = { max = 40.0, unit = "ms", optional = true }
+"redraw.webgl2.finish.p95" = { max = 80.0, unit = "ms", optional = true }
+"redraw.canvas2d.finish.p95" = { max = 160.0, unit = "ms" }
+"transport.mibPerSecond" = { min = 8.0, unit = "MiB/s" }
+"echoBurst.p99" = { max = 50.0, unit = "ms" }
+"echoSpaced.p99" = { max = 50.0, unit = "ms" }
+"flood.echo.p99" = { max = 100.0, unit = "ms" }
+"flood.framesPerSecond" = { min = 10.0, unit = "frames/s" }
+"flood.inputToFrame.p95" = { max = 500.0, unit = "ms" }
+"startup.outputMs.p50" = { max = 10000.0, unit = "ms" }

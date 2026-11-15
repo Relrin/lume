@@ -5,6 +5,12 @@
 //! with the flag that makes creation fail if a pipe of that name already exists: without
 //! it, a process that created the name earlier would own the access list and receive
 //! the clients meant for us.
+//!
+//! A client cannot rely on that: when no server of ours is running, another user's
+//! process is free to create the name, with an access list that lets us in. So a client
+//! reads who owns the pipe it has opened and goes no further unless it is the user. The
+//! server names the user as the owner outright, rather than taking the default, which
+//! for an elevated process is the administrators group.
 
 use std::fmt;
 use std::io;
@@ -19,14 +25,16 @@ use tokio::net::windows::named_pipe::{
     ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
 };
 use windows_sys::Win32::Foundation::{
-    ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, ERROR_PIPE_BUSY, HANDLE, LocalFree,
+    ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, ERROR_PIPE_BUSY, ERROR_SUCCESS, HANDLE,
+    LocalFree,
 };
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo,
+    SE_KERNEL_OBJECT,
 };
 use windows_sys::Win32::Security::{
-    GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
-    TokenUser,
+    GetTokenInformation, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -105,11 +113,19 @@ fn read_user_sid() -> io::Result<String> {
     // SAFETY: on success the buffer starts with a `TOKEN_USER`, for which it is aligned,
     // and the identifier it points to lies within the buffer.
     let user = unsafe { &*buffer.as_ptr().cast::<TOKEN_USER>() };
+    // SAFETY: the identifier is valid while `buffer` lives.
+    unsafe { sid_text(user.User.Sid) }
+}
 
+/// A security identifier in its textual form.
+///
+/// # Safety
+///
+/// `sid` must point to a valid security identifier.
+unsafe fn sid_text(sid: PSID) -> io::Result<String> {
     let mut text: *mut u16 = std::ptr::null_mut();
-    // SAFETY: the identifier is valid while `buffer` lives, and `text` is a valid out
-    // pointer.
-    check(unsafe { ConvertSidToStringSidW(user.User.Sid, &mut text) })?;
+    // SAFETY: the caller vouches for `sid`, and `text` is a valid out pointer.
+    check(unsafe { ConvertSidToStringSidW(sid, &mut text) })?;
     // SAFETY: on success `text` is a NUL-terminated string allocated by the system. It
     // is read up to its terminator and then released exactly once.
     let sid = unsafe {
@@ -119,6 +135,49 @@ fn read_user_sid() -> io::Result<String> {
         sid
     };
     Ok(sid)
+}
+
+/// The owner of the object behind `handle`, as a textual security identifier.
+fn owner_sid(handle: HANDLE) -> io::Result<String> {
+    let mut owner: PSID = std::ptr::null_mut();
+    let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    // SAFETY: `handle` is open for the length of the call, the two out pointers are
+    // valid, and the parts that are not asked for may be null.
+    let status = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+    // SAFETY: on success `owner` points into `descriptor`, which is released below and
+    // not before the identifier has been read.
+    let sid = unsafe { sid_text(owner) };
+    // SAFETY: the descriptor was allocated by the system for this call and is released
+    // exactly once.
+    unsafe { LocalFree(descriptor) };
+    sid
+}
+
+/// Checks that the pipe behind `handle` was created by `user`.
+fn verify_owner(handle: HANDLE, user: &str, address: &str) -> io::Result<()> {
+    let owner = owner_sid(handle)?;
+    if owner == user {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("the endpoint {address} belongs to another user ({owner})"),
+        ))
+    }
 }
 
 /// A security descriptor that grants the current user everything and nobody else
@@ -135,9 +194,10 @@ unsafe impl Sync for OwnerOnly {}
 
 impl OwnerOnly {
     fn new() -> io::Result<Self> {
-        // A protected access list (it inherits nothing) with a single entry: allow,
-        // generic all, to this user.
-        let sddl: Vec<u16> = format!("D:P(A;;GA;;;{})\0", user_sid()?)
+        // Owned by this user, with a protected access list (it inherits nothing) of a
+        // single entry: allow, generic all, to this user.
+        let user = user_sid()?;
+        let sddl: Vec<u16> = format!("O:{user}D:P(A;;GA;;;{user})\0")
             .encode_utf16()
             .collect();
         let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
@@ -222,7 +282,11 @@ pub(crate) async fn connect(address: &Address) -> io::Result<Stream> {
     let deadline = Instant::now() + BUSY_TIMEOUT;
     loop {
         match ClientOptions::new().open(address) {
-            Ok(client) => return Ok(Stream::Client(client)),
+            Ok(client) => {
+                // Nothing is sent to, or believed from, a pipe someone else made.
+                verify_owner(client.as_raw_handle(), user_sid()?, address)?;
+                return Ok(Stream::Client(client));
+            }
             // Every instance is taken by a client that connected a moment ago.
             Err(error)
                 if error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)
@@ -289,5 +353,21 @@ mod tests {
         let sid = user_sid().unwrap();
         assert!(sid.starts_with("S-1-"), "{sid}");
         assert_eq!(address("app").unwrap(), format!(r"\\.\pipe\lume-app-{sid}"));
+    }
+
+    #[tokio::test]
+    async fn a_pipe_is_owned_by_the_user_who_serves_it_and_by_nobody_else() {
+        let address = address(&format!("owner-{}", std::process::id())).unwrap();
+        let _listener = Listener::bind(&address).unwrap();
+        let client = ClientOptions::new().open(&address).unwrap();
+        let handle = client.as_raw_handle();
+
+        let user = user_sid().unwrap();
+        assert_eq!(owner_sid(handle).unwrap(), user);
+        verify_owner(handle, user, &address).unwrap();
+
+        // The local system account stands in for any other user.
+        let error = verify_owner(handle, "S-1-5-18", &address).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error}");
     }
 }

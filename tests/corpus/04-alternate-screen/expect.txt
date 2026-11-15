@@ -26,3 +26,10 @@ screen alternate
 00 0..40 inverse
 04 6..19 bold
 19 0..40 inverse
+--- state
+title=
+pwd=
+modes 7 1007 1049
+ansi-modes
+--- replies
+

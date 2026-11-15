@@ -1,0 +1,28 @@
+size 40x16
+cursor 0,15 visible
+screen primary
+--- text
+00|line 01
+01|line 02
+02|line 03
+03|                   origin
+04|line 06
+05|inserted
+06|
+07|line 08
+08|line 09
+09|
+10|line 11
+11|line 12  text that wraps betwe
+12|line 13  en the two margins it
+13|line 14   was given
+14|line 15
+15|line 16
+--- attrs
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+

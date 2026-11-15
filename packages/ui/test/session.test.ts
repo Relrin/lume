@@ -6,15 +6,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { OSC52_WRITE_MAX_BYTES, SCROLLBACK_MAX_LINES } from "../src/limits.ts";
 import { TerminalSession, type SessionHooks } from "../src/terminal/session.ts";
 import { DEFAULT_APPEARANCE, terminalColors } from "../src/theme.ts";
-import type { Attachment, StreamFrame } from "../src/transport/client.ts";
-import type {
-  BackendCaps,
-  CellPx,
-  ClientFacts,
-  ExitStatus,
-  Responder,
-  TermSize,
-} from "../src/transport/types.ts";
+import type { CellPx, ClientFacts, ExitStatus, Responder } from "../src/transport/types.ts";
+import { FakeAttachment } from "./fake-attachment.ts";
 
 let vt: Vt;
 beforeAll(async () => {
@@ -30,58 +23,6 @@ beforeAll(async () => {
 const ESC = "\x1b";
 const CELL: CellPx = { w: 8, h: 16 };
 const utf8 = (text: string) => new TextEncoder().encode(text);
-const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
-
-/** An attachment with a test at the other end instead of a session. */
-class FakeAttachment implements Attachment {
-  readonly size: TermSize = { cols: 80, rows: 24 };
-  readonly resizePullsScrollback = false;
-  readonly hydrate = "none" as const;
-  readonly caps: BackendCaps;
-  /** Everything the terminal's side did, in order. */
-  readonly calls: string[] = [];
-  readonly inputs: string[] = [];
-  consumedBytes = 0;
-  /** Sends a frame to the terminal, as the session would. */
-  deliver: (frame: StreamFrame) => void = () => {
-    throw new Error("the attachment has not been started");
-  };
-
-  constructor(responder: Responder = "client") {
-    this.caps = {
-      persistent: false,
-      multiClient: false,
-      serverLayout: false,
-      responder,
-      hydrate: { snapshot: false, vtReplay: false },
-    };
-  }
-
-  start(receive: (frame: StreamFrame) => void): void {
-    this.calls.push("start");
-    this.deliver = receive;
-  }
-  input(bytes: Uint8Array): void {
-    this.calls.push("input");
-    this.inputs.push(text(bytes));
-  }
-  resize(size: TermSize, cellPx: CellPx): void {
-    this.calls.push(`resize ${size.cols}x${size.rows} ${cellPx.w}x${cellPx.h}`);
-  }
-  facts(facts: ClientFacts): void {
-    this.calls.push(`facts focused=${facts.focused}`);
-  }
-  consumed(bytes: number): void {
-    this.consumedBytes += bytes;
-  }
-  detach(): void {
-    this.calls.push("detach");
-  }
-
-  data(output: string): void {
-    this.deliver({ stream: 1, kind: "data", bytes: utf8(output) });
-  }
-}
 
 interface Opened {
   attachment: FakeAttachment;

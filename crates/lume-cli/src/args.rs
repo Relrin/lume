@@ -1,0 +1,533 @@
+//! The command line of `lume`.
+
+use std::time::Duration;
+
+use lume_proto::app::{AppRequestBody, OpenSpec};
+use lume_proto::{Launcher, SessionId, TermSize};
+
+/// What the arguments may be, shown on request and when they are not understood.
+pub const USAGE: &str = "\
+usage: lume [--endpoint <name>]
+       lume ctl [--endpoint <name>] [--timeout <seconds>] <command>
+       lume --help | --version
+
+Without a command, lume starts the application, or brings its window to the front if
+it is running.
+
+Commands of lume ctl, which drive the running application:
+  status                         what the application is and how far its start has come
+  list                           every session
+  spawn [--cwd <dir>] [--size <cols>x<rows>] [--env <name>=<value>]... [-- <program> [<arg>...]]
+                                 start a session and show it in the window; the session
+                                 shown before keeps running
+  send [--session <id>] [--enter] [--escapes] <text>...
+                                 type text into a session; --enter ends it with a
+                                 carriage return, --escapes reads \\r \\n \\t \\e \\\\ \\xHH
+  wait --text <text> [--session <id>]
+                                 wait until the text is on the session's screen
+  wait --exit [--session <id>]   wait until the session's program has ended
+  capture [--session <id>] [--plain]
+                                 read the session's screen; --plain prints its lines
+  resize [--session <id>] <cols>x<rows>
+                                 give the session's terminal this size
+  kill <id>                      end a session
+  quit                           close the application
+
+A command that names no session means the one the window shows. Each prints one JSON
+object. --timeout is how long a wait may last, in seconds (10 if not given).
+
+Exit status: 0 done, 1 refused or failed, 2 arguments not understood, 3 a wait ran
+out of time, 4 the application is not running.";
+
+/// How long a wait may last when `--timeout` is not given.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// What `lume` was asked to do.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Command {
+    Help,
+    Version,
+    /// Start the application or bring it to the front.
+    Start {
+        endpoint: Option<String>,
+    },
+    /// Send one request to the running application.
+    Ctl(Ctl),
+}
+
+/// One request to the running application.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Ctl {
+    pub endpoint: Option<String>,
+    pub request: AppRequestBody,
+    /// How long the application may take to answer a request that waits.
+    pub timeout: Duration,
+    /// Print a captured screen as its lines instead of as JSON.
+    pub plain: bool,
+}
+
+type Words = std::iter::Peekable<std::vec::IntoIter<String>>;
+
+fn value(words: &mut Words, option: &str, what: &str) -> Result<String, String> {
+    words.next().ok_or_else(|| format!("{option} needs {what}"))
+}
+
+fn session(words: &mut Words, option: &str) -> Result<SessionId, String> {
+    let id = value(words, option, "a session id")?;
+    id.parse()
+        .map_err(|_| format!("{id} is not a session id (sixteen hexadecimal digits)"))
+}
+
+fn size(text: &str) -> Result<TermSize, String> {
+    let bad = || format!("{text} is not a size (columns x rows, as in 100x30)");
+    let (cols, rows) = text.split_once(['x', 'X']).ok_or_else(bad)?;
+    let cols = cols.parse().map_err(|_| bad())?;
+    let rows = rows.parse().map_err(|_| bad())?;
+    TermSize::new(cols, rows).map_err(|_| bad())
+}
+
+fn seconds(text: &str) -> Result<Duration, String> {
+    text.parse::<f64>()
+        .ok()
+        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        .map(Duration::from_secs_f64)
+        .ok_or_else(|| format!("{text} is not a number of seconds"))
+}
+
+/// Reads the escapes `--escapes` allows. The result is text: `\xHH` takes a code below
+/// 0x80 only, since a lone byte above it is not a character.
+pub fn unescape(text: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(character) = chars.next() {
+        if character != '\\' {
+            out.push(character);
+            continue;
+        }
+        let escaped = chars
+            .next()
+            .ok_or("the text ends in the middle of an escape")?;
+        out.push(match escaped {
+            'r' => '\r',
+            'n' => '\n',
+            't' => '\t',
+            'e' => '\x1b',
+            '0' => '\0',
+            '\\' => '\\',
+            'x' => {
+                let digits: String = chars.by_ref().take(2).collect();
+                u8::from_str_radix(&digits, 16)
+                    .ok()
+                    .filter(|code| digits.len() == 2 && code.is_ascii())
+                    .map(char::from)
+                    .ok_or_else(|| format!("\\x{digits} is not an escape for a character"))?
+            }
+            other => return Err(format!("\\{other} is not an escape lume knows")),
+        });
+    }
+    Ok(out)
+}
+
+fn timeout_ms(timeout: Duration) -> u64 {
+    u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn spawn(words: &mut Words) -> Result<AppRequestBody, String> {
+    let mut spec = OpenSpec::default();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--cwd" => spec.cwd = Some(value(words, "--cwd", "a directory")?),
+            "--size" => spec.size = Some(size(&value(words, "--size", "a size")?)?),
+            "--env" => {
+                let pair = value(words, "--env", "a variable as name=value")?;
+                let (name, value) = pair
+                    .split_once('=')
+                    .filter(|(name, _)| !name.is_empty())
+                    .ok_or_else(|| format!("{pair} is not a variable as name=value"))?;
+                spec.env.push((name.to_owned(), value.to_owned()));
+            }
+            "--" => {
+                let program = value(words, "--", "a program to run")?;
+                spec.launcher = Some(Launcher::Shell {
+                    program,
+                    args: words.by_ref().collect(),
+                    login: false,
+                });
+            }
+            other => return Err(format!("spawn does not take {other}")),
+        }
+    }
+    Ok(AppRequestBody::Spawn { spec })
+}
+
+fn send(words: &mut Words) -> Result<AppRequestBody, String> {
+    let mut named = None;
+    let mut enter = false;
+    let mut escapes = false;
+    let mut text: Vec<String> = Vec::new();
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--session" if text.is_empty() => named = Some(session(words, "--session")?),
+            "--enter" if text.is_empty() => enter = true,
+            "--escapes" if text.is_empty() => escapes = true,
+            // What follows is text, whatever it looks like.
+            "--" if text.is_empty() => text.extend(words.by_ref()),
+            _ => text.push(word),
+        }
+    }
+    let mut text = text.join(" ");
+    if escapes {
+        text = unescape(&text)?;
+    }
+    if enter {
+        text.push('\r');
+    }
+    if text.is_empty() {
+        return Err("send needs text to type, or --enter".to_owned());
+    }
+    Ok(AppRequestBody::Send {
+        session: named,
+        text,
+    })
+}
+
+fn wait(words: &mut Words, timeout: Duration) -> Result<AppRequestBody, String> {
+    let mut named = None;
+    let mut text = None;
+    let mut exit = false;
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--session" => named = Some(session(words, "--session")?),
+            "--text" => text = Some(value(words, "--text", "the text to wait for")?),
+            "--exit" => exit = true,
+            other => return Err(format!("wait does not take {other}")),
+        }
+    }
+    let timeout_ms = timeout_ms(timeout);
+    match (text, exit) {
+        (Some(text), false) if !text.is_empty() => Ok(AppRequestBody::WaitText {
+            session: named,
+            text,
+            timeout_ms,
+        }),
+        (None, true) => Ok(AppRequestBody::WaitExit {
+            session: named,
+            timeout_ms,
+        }),
+        _ => Err("wait needs exactly one of --text <text> and --exit".to_owned()),
+    }
+}
+
+fn nothing_more(words: &mut Words, command: &str) -> Result<(), String> {
+    match words.next() {
+        Some(word) => Err(format!("{command} does not take {word}")),
+        None => Ok(()),
+    }
+}
+
+fn ctl(words: &mut Words) -> Result<Ctl, String> {
+    let mut endpoint = None;
+    let mut timeout = DEFAULT_TIMEOUT;
+    let command = loop {
+        let word = words.next().ok_or("ctl needs a command; see lume --help")?;
+        match word.as_str() {
+            "--endpoint" => endpoint = Some(value(words, "--endpoint", "a name")?),
+            "--timeout" => timeout = seconds(&value(words, "--timeout", "a number of seconds")?)?,
+            _ => break word,
+        }
+    };
+
+    let mut plain = false;
+    let request = match command.as_str() {
+        "status" => {
+            nothing_more(words, "status")?;
+            AppRequestBody::Status {}
+        }
+        "list" => {
+            nothing_more(words, "list")?;
+            AppRequestBody::List {}
+        }
+        "quit" => {
+            nothing_more(words, "quit")?;
+            AppRequestBody::Quit {}
+        }
+        "spawn" => spawn(words)?,
+        "send" => send(words)?,
+        "wait" => wait(words, timeout)?,
+        "capture" => {
+            let mut named = None;
+            while let Some(word) = words.next() {
+                match word.as_str() {
+                    "--session" => named = Some(session(words, "--session")?),
+                    "--plain" => plain = true,
+                    other => return Err(format!("capture does not take {other}")),
+                }
+            }
+            AppRequestBody::Screen { session: named }
+        }
+        "resize" => {
+            let mut named = None;
+            let mut wanted = None;
+            while let Some(word) = words.next() {
+                match word.as_str() {
+                    "--session" => named = Some(session(words, "--session")?),
+                    other if wanted.is_none() => wanted = Some(size(other)?),
+                    other => return Err(format!("resize does not take {other}")),
+                }
+            }
+            AppRequestBody::Resize {
+                session: named,
+                size: wanted.ok_or("resize needs a size, as in 100x30")?,
+            }
+        }
+        "kill" => {
+            let id = value(words, "kill", "a session id")?;
+            nothing_more(words, "kill")?;
+            AppRequestBody::Kill {
+                session: id
+                    .parse()
+                    .map_err(|_| format!("{id} is not a session id"))?,
+            }
+        }
+        other => return Err(format!("ctl has no command called {other}")),
+    };
+    Ok(Ctl {
+        endpoint,
+        request,
+        timeout,
+        plain,
+    })
+}
+
+/// Reads the arguments that follow the program's name.
+pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String> {
+    let mut words: Words = args.into_iter().collect::<Vec<_>>().into_iter().peekable();
+    let mut endpoint = None;
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--help" | "-h" | "help" => return Ok(Command::Help),
+            "--version" | "-V" => return Ok(Command::Version),
+            "--endpoint" => endpoint = Some(value(&mut words, "--endpoint", "a name")?),
+            "ctl" => {
+                let mut ctl = ctl(&mut words)?;
+                // An endpoint named before `ctl` holds unless one is named after it.
+                ctl.endpoint = ctl.endpoint.or(endpoint);
+                return Ok(Command::Ctl(ctl));
+            }
+            other => return Err(format!("{other} is not something lume knows")),
+        }
+    }
+    Ok(Command::Start { endpoint })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parsed(args: &[&str]) -> Result<Command, String> {
+        parse(args.iter().map(|arg| (*arg).to_owned()))
+    }
+
+    fn request(args: &[&str]) -> AppRequestBody {
+        match parsed(args) {
+            Ok(Command::Ctl(ctl)) => ctl.request,
+            other => panic!("not a request: {other:?}"),
+        }
+    }
+
+    fn id() -> SessionId {
+        "00000000000000ab".parse().unwrap()
+    }
+
+    #[test]
+    fn no_arguments_start_the_application() {
+        assert_eq!(parsed(&[]), Ok(Command::Start { endpoint: None }));
+        assert_eq!(
+            parsed(&["--endpoint", "trial"]),
+            Ok(Command::Start {
+                endpoint: Some("trial".to_owned())
+            })
+        );
+        assert_eq!(parsed(&["--help"]), Ok(Command::Help));
+        assert_eq!(parsed(&["--version"]), Ok(Command::Version));
+    }
+
+    #[test]
+    fn simple_commands_take_nothing() {
+        assert_eq!(request(&["ctl", "status"]), AppRequestBody::Status {});
+        assert_eq!(request(&["ctl", "list"]), AppRequestBody::List {});
+        assert_eq!(request(&["ctl", "quit"]), AppRequestBody::Quit {});
+        assert!(parsed(&["ctl", "list", "all"]).is_err());
+        assert!(parsed(&["ctl"]).is_err());
+        assert!(parsed(&["ctl", "dance"]).is_err());
+    }
+
+    #[test]
+    fn the_endpoint_and_the_timeout_come_before_the_command() {
+        let Ok(Command::Ctl(ctl)) =
+            parsed(&["ctl", "--endpoint", "trial", "--timeout", "2.5", "list"])
+        else {
+            panic!("not a request");
+        };
+        assert_eq!(ctl.endpoint.as_deref(), Some("trial"));
+        assert_eq!(ctl.timeout, Duration::from_millis(2500));
+
+        let Ok(Command::Ctl(ctl)) = parsed(&["--endpoint", "outer", "ctl", "list"]) else {
+            panic!("not a request");
+        };
+        assert_eq!(ctl.endpoint.as_deref(), Some("outer"));
+        assert!(parsed(&["ctl", "--timeout", "soon", "list"]).is_err());
+        assert!(parsed(&["ctl", "--timeout", "-1", "list"]).is_err());
+    }
+
+    #[test]
+    fn spawn_takes_a_directory_a_size_variables_and_a_program() {
+        assert_eq!(
+            request(&["ctl", "spawn"]),
+            AppRequestBody::Spawn {
+                spec: OpenSpec::default()
+            }
+        );
+        let spawned = request(&[
+            "ctl", "spawn", "--cwd", "/tmp", "--size", "100x30", "--env", "A=1", "--env", "B=x=y",
+            "--", "bash", "-l", "--norc",
+        ]);
+        assert_eq!(
+            spawned,
+            AppRequestBody::Spawn {
+                spec: OpenSpec {
+                    launcher: Some(Launcher::Shell {
+                        program: "bash".to_owned(),
+                        args: vec!["-l".to_owned(), "--norc".to_owned()],
+                        login: false,
+                    }),
+                    cwd: Some("/tmp".to_owned()),
+                    env: vec![
+                        ("A".to_owned(), "1".to_owned()),
+                        ("B".to_owned(), "x=y".to_owned())
+                    ],
+                    size: Some(TermSize::new(100, 30).unwrap()),
+                }
+            }
+        );
+        assert!(parsed(&["ctl", "spawn", "--size", "0x30"]).is_err());
+        assert!(parsed(&["ctl", "spawn", "--env", "=1"]).is_err());
+        assert!(parsed(&["ctl", "spawn", "--"]).is_err());
+        assert!(parsed(&["ctl", "spawn", "bash"]).is_err());
+    }
+
+    #[test]
+    fn send_joins_its_words_and_reads_escapes_when_asked() {
+        assert_eq!(
+            request(&["ctl", "send", "echo", "hello"]),
+            AppRequestBody::Send {
+                session: None,
+                text: "echo hello".to_owned()
+            }
+        );
+        assert_eq!(
+            request(&[
+                "ctl",
+                "send",
+                "--session",
+                "00000000000000ab",
+                "--enter",
+                "ls"
+            ]),
+            AppRequestBody::Send {
+                session: Some(id()),
+                text: "ls\r".to_owned()
+            }
+        );
+        assert_eq!(
+            request(&["ctl", "send", "--escapes", r"a\tb\x03\e[A\\"]),
+            AppRequestBody::Send {
+                session: None,
+                text: "a\tb\x03\x1b[A\\".to_owned()
+            }
+        );
+        // Without --escapes a backslash is a backslash, and after the text begins an
+        // option is text.
+        assert_eq!(
+            request(&["ctl", "send", r"a\tb", "--enter"]),
+            AppRequestBody::Send {
+                session: None,
+                text: r"a\tb --enter".to_owned()
+            }
+        );
+        assert_eq!(
+            request(&["ctl", "send", "--", "--enter"]),
+            AppRequestBody::Send {
+                session: None,
+                text: "--enter".to_owned()
+            }
+        );
+        assert_eq!(
+            request(&["ctl", "send", "--enter"]),
+            AppRequestBody::Send {
+                session: None,
+                text: "\r".to_owned()
+            }
+        );
+        assert!(parsed(&["ctl", "send"]).is_err());
+        assert!(parsed(&["ctl", "send", "--escapes", r"\q"]).is_err());
+        assert!(parsed(&["ctl", "send", "--escapes", r"\xff"]).is_err());
+        assert!(parsed(&["ctl", "send", "--session", "nope", "x"]).is_err());
+    }
+
+    #[test]
+    fn wait_is_for_text_or_for_the_exit() {
+        assert_eq!(
+            request(&["ctl", "--timeout", "3", "wait", "--text", "$ "]),
+            AppRequestBody::WaitText {
+                session: None,
+                text: "$ ".to_owned(),
+                timeout_ms: 3000
+            }
+        );
+        assert_eq!(
+            request(&["ctl", "wait", "--exit", "--session", "00000000000000ab"]),
+            AppRequestBody::WaitExit {
+                session: Some(id()),
+                timeout_ms: 10_000
+            }
+        );
+        assert!(parsed(&["ctl", "wait"]).is_err());
+        assert!(parsed(&["ctl", "wait", "--text", "a", "--exit"]).is_err());
+        assert!(parsed(&["ctl", "wait", "--text", ""]).is_err());
+    }
+
+    #[test]
+    fn capture_resize_and_kill_name_their_session() {
+        assert_eq!(
+            request(&["ctl", "capture"]),
+            AppRequestBody::Screen { session: None }
+        );
+        let Ok(Command::Ctl(ctl)) = parsed(&["ctl", "capture", "--plain"]) else {
+            panic!("not a request");
+        };
+        assert!(ctl.plain);
+        assert_eq!(
+            request(&["ctl", "resize", "120x40"]),
+            AppRequestBody::Resize {
+                session: None,
+                size: TermSize::new(120, 40).unwrap()
+            }
+        );
+        assert_eq!(
+            request(&["ctl", "resize", "--session", "00000000000000ab", "90X20"]),
+            AppRequestBody::Resize {
+                session: Some(id()),
+                size: TermSize::new(90, 20).unwrap()
+            }
+        );
+        assert_eq!(
+            request(&["ctl", "kill", "00000000000000ab"]),
+            AppRequestBody::Kill { session: id() }
+        );
+        assert!(parsed(&["ctl", "resize"]).is_err());
+        assert!(parsed(&["ctl", "resize", "wide"]).is_err());
+        assert!(parsed(&["ctl", "kill"]).is_err());
+        assert!(parsed(&["ctl", "kill", "zz"]).is_err());
+    }
+}

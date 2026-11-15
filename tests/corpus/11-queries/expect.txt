@@ -1,0 +1,18 @@
+size 80x6
+cursor 51,2 visible
+screen primary
+--- text
+00|questions a program asks its terminal
+01|
+02|and the answers went to the program, not the screen
+03|
+04|
+05|
+--- attrs
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+\x1b[?62;22c\x1b[>1;0;0c\x1bP!|00000000\x1b\x5c\x1bP>|libghostty\x1b\x5c\x1b[0n\x1b[2;5R\x1b[?2;5;1R\x1b[8;6;80t\x1b[4;0;0t\x1b[6;0;0t\x1b[9;6;80t\x1b]4;1;rgb:cccc/6666/6666\x1b\x5c\x1bP1$r0;1;31m\x1b\x5c\x1bP1$r3;6r\x1b\x5c\x1bP0$r\x1b\x5c\x1b[?9999;0$y

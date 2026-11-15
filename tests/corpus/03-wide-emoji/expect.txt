@@ -15,3 +15,10 @@ screen primary
 10|
 11|
 --- attrs
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+

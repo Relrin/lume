@@ -3,13 +3,20 @@
 //! Everything that needs more than one toolchain goes through here, so that a fresh clone
 //! builds with `cargo xtask setup && cargo xtask build` on Windows, Linux and macOS.
 
+mod bench;
+mod dist;
 mod fetch;
 mod paths;
 mod run;
+mod smoke;
+mod suites;
 mod tools;
 mod vt;
 
 use anyhow::{Result, bail};
+
+/// The variable that makes the UI's build include the test harness page.
+const UI_FOR_TESTING: &str = "LUME_HARNESS";
 
 const USAGE: &str = "\
 cargo xtask <command>
@@ -20,6 +27,18 @@ Commands:
   vt wasm      Build libghostty-vt for wasm32 into packages/vt/dist/
   build        Build libghostty-vt if stale, then the Cargo and pnpm workspaces
   test         Run Cargo and pnpm tests
+  e2e          Build, then run the suites that need the application's window: the
+               corpus and the renderer snapshots inside its webview, and real shells
+               driven through `lume ctl`
+  smoke        Build, then start the application under WebDriver, type through its
+               window and see the text arrive (needs tauri-driver; Windows and Linux)
+  bench [--profile <name>]
+               Build for release, measure, and hold the numbers to the limits in
+               tests/bench/budgets.toml (profile `reference` unless another is named)
+  dist [--installers]
+               Build for release and pack the application and the console command
+               into a portable archive in target/dist; with --installers, make the
+               platform's installers too (the bundler may fetch tools to do so)
   lint         Run format, clippy, licence and JS lint checks
   dev          Run the app with hot reload
 ";
@@ -34,6 +53,18 @@ fn main() -> Result<()> {
         ["vt", "wasm"] => vt::wasm(true),
         ["build"] => build(),
         ["test"] => test(),
+        ["e2e"] => {
+            build()?;
+            suites::end_to_end()
+        }
+        ["smoke"] => {
+            build()?;
+            smoke::run()
+        }
+        ["dist"] => dist::run(false),
+        ["dist", "--installers"] => dist::run(true),
+        ["bench"] => bench("reference"),
+        ["bench", "--profile", profile] => bench(profile),
         ["lint"] => lint(),
         ["dev"] => dev(),
         [] | ["help"] | ["--help"] | ["-h"] => {
@@ -56,7 +87,12 @@ fn setup() -> Result<()> {
 fn build() -> Result<()> {
     vt::native(false)?;
     vt::wasm(false)?;
-    run::pnpm(&["--recursive", "--if-present", "run", "build"])?;
+    // A build for development and testing: the UI also contains the page that runs the
+    // test suites inside the webview. A build that is shipped is made without it.
+    run::pnpm_env(
+        &["--recursive", "--if-present", "run", "build"],
+        &[(UI_FOR_TESTING, "1")],
+    )?;
     // `custom-protocol` makes lume-gui serve the UI built above instead of the dev server.
     run::cargo(&[
         "build",
@@ -65,6 +101,32 @@ fn build() -> Result<()> {
         "lume-app/custom-protocol",
     ])?;
     Ok(())
+}
+
+/// The release build of the application and the console command, with the test page
+/// inside the application: what the benchmarks measure is the product's own code.
+fn build_release_for_testing() -> Result<()> {
+    vt::native(false)?;
+    vt::wasm(false)?;
+    run::pnpm_env(
+        &["--recursive", "--if-present", "run", "build"],
+        &[(UI_FOR_TESTING, "1")],
+    )?;
+    run::cargo(&[
+        "build",
+        "--release",
+        "-p",
+        "lume-app",
+        "-p",
+        "lume-cli",
+        "--features",
+        "lume-app/custom-protocol",
+    ])
+}
+
+fn bench(profile: &str) -> Result<()> {
+    build_release_for_testing()?;
+    bench::run(profile)
 }
 
 fn test() -> Result<()> {

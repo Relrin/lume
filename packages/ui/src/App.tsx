@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 
-import { type GpuCheck, type ProbeReport, runProbe, webviewInfo } from "./probe.ts";
+import {
+  type GpuCheck,
+  type ProbeReport,
+  reportMissingHarness,
+  runProbe,
+  webviewInfo,
+} from "./probe.ts";
 import { Terminal } from "./Terminal.tsx";
 
 /**
@@ -16,6 +22,12 @@ export function App() {
   useEffect(() => {
     let current = true;
     void webviewInfo().then((info) => {
+      // Started to run a test suite, the app shows the harness page, not this one.
+      // Being here means the build has no such page.
+      if (info?.harness) {
+        void reportMissingHarness(info.harness);
+        return;
+      }
       if (current) setShowing(info && !info.probe ? "terminal" : "report");
     });
     return () => {

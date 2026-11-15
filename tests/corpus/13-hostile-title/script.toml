@@ -1,0 +1,3 @@
+description = "Hostile: a title, a status request and a colour that would be commands if the terminal sent them back"
+cols = 70
+rows = 6

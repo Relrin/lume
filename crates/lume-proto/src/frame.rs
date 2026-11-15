@@ -287,6 +287,20 @@ pub fn encode_bytes(stream: u32, kind: BytesKind, bytes: &[u8], out: &mut Vec<u8
     write_split(stream, kind, bytes, false, out);
 }
 
+/// Appends one control-plane message that is already JSON, split across frames where it
+/// is longer than one payload.
+///
+/// The control plane of a connection is JSON whoever speaks on it; which messages those
+/// are is the business of the two ends. This is the framing alone, for ends whose
+/// messages are not the session host's.
+pub fn encode_control_json(json: &[u8], out: &mut Vec<u8>) -> Result<(), EncodeError> {
+    if json.len() > MAX_CONTROL_MESSAGE {
+        return Err(EncodeError::MessageTooLarge(Kind::Control));
+    }
+    write_split(CONTROL_STREAM, Kind::Control, json, true, out);
+    Ok(())
+}
+
 fn write_one(stream: u32, kind: Kind, payload: &[u8], out: &mut Vec<u8>) {
     debug_assert!(payload.len() <= MAX_PAYLOAD);
     Header {

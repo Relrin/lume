@@ -1,0 +1,5 @@
+]7;file://host/home/user/project\]2;user@host: ~/project\]133;A\user@host:~/project$ ]133;B\make test
+]133;C\running 3 tests
+ok
+]133;D;0\]7501;state=working:app=make:msg=YnVpbGRpbmc=\]133;A\user@host:~/project$ ]133;B\false
+]133;C\]133;D;1\]7501;state=done:app=make\]7;file://host/tmp]133;Auser@host:~/project$ ]7501;?\

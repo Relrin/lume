@@ -108,12 +108,20 @@ function unescape(body: string, fail: (why: string) => never): string {
   );
 }
 
+/** A recording that has been fed to a terminal. */
+export interface Replayed {
+  /** The terminal as the recording left it. The caller frees it. */
+  readonly terminal: Terminal;
+  /** Every byte the terminal wrote back to the program while it was fed, in order. */
+  readonly replies: Uint8Array;
+}
+
 /**
  * Feed a recording into a fresh terminal, applying each resize at its offset. The
- * terminal runs with the library's defaults, as the native replay does. The caller frees
- * it.
+ * terminal runs with the library's defaults, as the native replay does, and what it
+ * answers to the program's questions is collected. The caller frees the terminal.
  */
-export function replay(vt: Vt, script: Script, input: Uint8Array): Terminal {
+export function replay(vt: Vt, script: Script, input: Uint8Array): Replayed {
   let previous = 0;
   for (const r of script.resize) {
     if (r.at < previous || r.at > input.length) {
@@ -125,6 +133,8 @@ export function replay(vt: Vt, script: Script, input: Uint8Array): Terminal {
   }
 
   const term = vt.createTerminal(script.cols, script.rows);
+  const answered: Uint8Array[] = [];
+  term.handlers = { output: (bytes) => void answered.push(bytes) };
   try {
     let fed = 0;
     for (const r of script.resize) {
@@ -133,11 +143,49 @@ export function replay(vt: Vt, script: Script, input: Uint8Array): Terminal {
       fed = r.at;
     }
     term.write(input.subarray(fed));
-    return term;
   } catch (err) {
     term.free();
     throw err;
   }
+  term.handlers = {};
+
+  const replies = new Uint8Array(answered.reduce((sum, piece) => sum + piece.length, 0));
+  let at = 0;
+  for (const piece of answered) {
+    replies.set(piece, at);
+    at += piece.length;
+  }
+  return { terminal: term, replies };
+}
+
+/**
+ * The DEC private modes a dump reports when they are on, by the number a program uses:
+ * cursor keys, origin, wraparound, cursor shown, the mouse reporting modes and formats,
+ * focus events, alternate scroll, the alternate screen, bracketed paste, synchronized
+ * output, grapheme clusters, colour scheme reports, and size reports.
+ */
+export const DEC_MODES: readonly number[] = [
+  1, 6, 7, 25, 1000, 1002, 1003, 1004, 1006, 1007, 1016, 1049, 2004, 2026, 2027, 2031, 2048,
+];
+
+/** The ANSI modes a dump reports when they are on: insert, and linefeed/new line. */
+export const ANSI_MODES: readonly number[] = [4, 20];
+
+const encoder = new TextEncoder();
+
+/**
+ * Bytes as dump text: printable ASCII as it is, everything else and the backslash as
+ * `\xNN`.
+ */
+function escape(bytes: Uint8Array): string {
+  let out = "";
+  for (const byte of bytes) {
+    out +=
+      byte >= 0x20 && byte <= 0x7e && byte !== 0x5c
+        ? String.fromCharCode(byte)
+        : `\\x${byte.toString(16).padStart(2, "0")}`;
+  }
+  return out;
 }
 
 /**
@@ -153,12 +201,24 @@ export function replay(vt: Vt, script: Script, input: Uint8Array): Terminal {
  * ...
  * --- attrs
  * 01 0..3 fg=palette:1
+ * --- state
+ * title=vim
+ * pwd=file://host/tmp
+ * modes 7 25 2004
+ * ansi-modes
+ * --- replies
+ * \x1b[?62;22c
  * ```
  *
  * Text rows have trailing blanks removed. The attrs section lists runs of adjacent cells
  * that share a style other than the default; `a..b` is a half-open column range.
+ *
+ * The state section gives the title and working directory the program set, and which of
+ * the modes in {@link DEC_MODES} and {@link ANSI_MODES} are on. The replies section is
+ * one line: every byte the terminal wrote back to the program, as `replies` holds them.
+ * Bytes outside printable ASCII, and the backslash, are written as `\xNN`.
  */
-export function dump(term: Terminal): string {
+export function dump(term: Terminal, replies: Uint8Array = new Uint8Array()): string {
   let out = `size ${term.cols}x${term.rows}\n`;
 
   const cursor = term.cursor();
@@ -192,7 +252,19 @@ export function dump(term: Terminal): string {
     flush(term.cols);
     out += `${label}|${line.replace(/ +$/, "")}\n`;
   }
-  return `${out}--- attrs\n${attrs}`;
+  out += `--- attrs\n${attrs}`;
+
+  out += "--- state\n";
+  out += `title=${escape(encoder.encode(term.title()))}\n`;
+  out += `pwd=${escape(encoder.encode(term.pwd()))}\n`;
+  const on = (modes: readonly number[], ansi: boolean) =>
+    modes
+      .filter((mode) => term.mode(mode, ansi))
+      .map((mode) => ` ${mode}`)
+      .join("");
+  out += `modes${on(DEC_MODES, false)}\n`;
+  out += `ansi-modes${on(ANSI_MODES, true)}\n`;
+  return `${out}--- replies\n${escape(replies)}\n`;
 }
 
 /** A stable, space-separated description of a non-default style; empty for the default. */

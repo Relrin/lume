@@ -1,0 +1,3 @@
+description = "Hostile: reading the clipboard and putting a command on it"
+cols = 60
+rows = 6

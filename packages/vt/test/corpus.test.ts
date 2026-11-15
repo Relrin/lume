@@ -30,11 +30,11 @@ describe("the golden corpus through the WebAssembly build", async () => {
     const input = await readFile(join(dir, "input.bin"));
     const expected = (await readFile(join(dir, "expect.txt"), "utf8")).replaceAll("\r\n", "\n");
 
-    const term = replay(await loadVt(), script, input);
+    const { terminal, replies } = replay(await loadVt(), script, input);
     try {
-      expect(dump(term)).toBe(expected);
+      expect(dump(terminal, replies)).toBe(expected);
     } finally {
-      term.free();
+      terminal.free();
     }
   });
 });

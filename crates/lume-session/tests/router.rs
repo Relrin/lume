@@ -220,8 +220,16 @@ async fn a_second_attachment_follows_a_detach_and_the_first_is_dead() {
     read_until(&mut first, "lume-k7q-done").await;
 
     first.input.detach().await.unwrap();
-    // The first attachment's stream has ended and its sink refuses everything.
-    assert_eq!(timeout(STEP, first.output.next()).await.unwrap(), None);
+    // The first attachment's stream ends and its sink refuses everything. What the shell
+    // printed before the detach took effect, such as its next prompt, may still be on
+    // the way and arrives first; nothing but output does.
+    loop {
+        match timeout(STEP, first.output.next()).await.unwrap() {
+            None => break,
+            Some(OutputFrame::Data(_)) => {}
+            Some(other) => panic!("unexpected {other:?} after a detach"),
+        }
+    }
     assert!(matches!(
         first.input.write(b"x").await,
         Err(SessionError::Detached)

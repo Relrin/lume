@@ -1,0 +1,20 @@
+size 60x8
+cursor 27,3 visible
+screen primary
+--- text
+00|modes a full-screen program turns on
+01|Xabc
+02|
+03|left as the program left it
+04|
+05|
+06|
+07|
+--- attrs
+--- state
+title=
+pwd=
+modes 1 7 25 1000 1004 1006 2004
+ansi-modes
+--- replies
+\x1b[?2004;1$y\x1b[?1000;1$y\x1b[?1003;2$y\x1b[?5u\x1b[4;1$y\x1b[?0u

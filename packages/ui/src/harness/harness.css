@@ -1,0 +1,43 @@
+/* The harness page: a line saying what is running, and the report when it is done. */
+
+body {
+  margin: 0;
+  padding: 16px;
+  font:
+    13px/1.5 system-ui,
+    sans-serif;
+  color: #dfe3ee;
+  background: #14161d;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+#report {
+  margin: 12px 0 0;
+  font:
+    12px/1.4 ui-monospace,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Where renderers draw while they are tested. The surfaces lie on top of one another in
+ * the corner of the window: each must be on screen to be drawn at full speed, and none
+ * needs to be looked at.
+ */
+.harness-stage {
+  position: fixed;
+  top: 64px;
+  left: 16px;
+}
+
+.harness-surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+}

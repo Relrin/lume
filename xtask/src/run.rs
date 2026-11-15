@@ -21,6 +21,11 @@ pub fn cargo(args: &[&str]) -> Result<()> {
 /// `PATH`, `npx` (shipped with Node) fetches and runs exactly that version. Corepack is
 /// not used: the copy bundled with Node 24 cannot launch pnpm 12.
 pub fn pnpm(args: &[&str]) -> Result<()> {
+    pnpm_env(args, &[])
+}
+
+/// Run `pnpm <args>` in the repository root with the given variables set as well.
+pub fn pnpm_env(args: &[&str], env: &[(&str, &str)]) -> Result<()> {
     let pinned;
     let (program, prefix): (&str, Vec<&str>) = if on_path("pnpm") {
         ("pnpm", vec![])
@@ -39,7 +44,10 @@ pub fn pnpm(args: &[&str]) -> Result<()> {
     } else {
         Command::new(program)
     };
-    cmd.args(prefix).args(args).current_dir(paths::root());
+    cmd.args(prefix)
+        .args(args)
+        .envs(env.iter().copied())
+        .current_dir(paths::root());
     check(cmd, &format!("pnpm {}", args.join(" ")))
 }
 

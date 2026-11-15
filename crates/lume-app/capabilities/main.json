@@ -15,6 +15,7 @@
     "allow-clipboard-read",
     "allow-clipboard-write",
     "allow-open-link",
-    "allow-font-families"
+    "allow-font-families",
+    "allow-page-reply"
   ]
 }

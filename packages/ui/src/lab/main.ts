@@ -10,55 +10,31 @@
  * The page is served by the dev server only and is not part of the built app.
  */
 
-import {
-  RenderHost,
-  rgba,
-  TIER_ORDER,
-  type CellRenderer,
-  type RenderFrame,
-  type TerminalTheme,
-  type Tier,
-} from "@lume/renderer";
+import type { RenderFrame } from "@lume/renderer";
 import { FIXED_FRAMES, fullRedrawFrame } from "@lume/renderer/testing";
 import { Vt } from "@lume/vt";
 import wasmUrl from "@lume/vt/ghostty-vt.wasm?url";
 
-import fontUrl from "../../../../tests/fonts/JetBrainsMono-Regular.ttf?url";
 import { checkFrameContract } from "../frame-contract.ts";
+import {
+  canvasOf,
+  createPane,
+  drawWhole,
+  fit,
+  loadTestFont,
+  TIERS,
+  type TierPane,
+} from "../harness/panes.ts";
+import { compare, readPixels, toPng, type Difference } from "../harness/pixels.ts";
+import { nextFrame, timing, type Timing } from "../harness/timing.ts";
+import { COMPARE_TOLERANCE, REDRAW_FRAMES, REDRAW_WARMUP_FRAMES } from "../harness/tuning.ts";
+import { fullRedrawOutput, terminalFrames, type TerminalFrame } from "../harness/workloads.ts";
 import "./lab.css";
-import { fullRedrawOutput, terminalFrames, type TerminalFrame } from "./workloads.ts";
 
-/** A family name no installed font has, so the bundled file is the one measured. */
-const FONT_FAMILY = "Lume Lab Mono";
-
-/** Frames drawn per tier when timing. */
-const TIMING_FRAMES = 120;
-
-/** Colour channels may differ by this much between tiers and still count as equal. */
-const COMPARE_TOLERANCE = 2;
-
-const theme: TerminalTheme = {
-  // The system fonts follow for what the test font lacks: CJK and emoji.
-  font: { family: `"${FONT_FAMILY}", monospace`, sizePx: 14 },
-  cursor: rgba(0xf0, 0xf0, 0xf0),
-  selectionBackground: rgba(0x2f, 0x4f, 0x8f),
-  padding: 4,
-};
-
-interface Pane {
-  /** The tier this pane is restricted to, or `"auto"` for the normal order. */
-  kind: Tier | "auto";
-  host: RenderHost;
-  renderer: CellRenderer | undefined;
-  root: HTMLElement;
-  surface: HTMLElement;
-  note: HTMLElement;
-  error: string | undefined;
-}
-
-interface Timing {
-  p50: number;
-  p95: number;
+/** A pane of the lab: a renderer and the elements around it. */
+interface Pane extends TierPane {
+  readonly root: HTMLElement;
+  readonly note: HTMLElement;
 }
 
 interface Results {
@@ -66,8 +42,8 @@ interface Results {
   frame: string;
   devicePixelRatio: number;
   tiers: Record<string, string>;
-  /** Pixels that differ from the Canvas 2D picture: exactly, and beyond the tolerance. */
-  differences: Record<string, { exact: number; beyondTolerance: number; pixels: number }>;
+  /** How each pane's picture differs from the Canvas 2D one. */
+  differences: Record<string, Difference>;
   timings: Record<string, { draw: Timing; drawAndFinish: Timing }>;
   terminal: { write: Timing; read: Timing } | undefined;
   log: string[];
@@ -115,97 +91,11 @@ function log(message: string): void {
   console.info(`[lab] ${message}`);
 }
 
-function percentile(sorted: number[], p: number): number {
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] ?? 0;
-}
-
-function timing(samples: number[]): Timing {
-  const sorted = [...samples].sort((a, b) => a - b);
-  const round = (ms: number) => Math.round(ms * 1000) / 1000;
-  return { p50: round(percentile(sorted, 0.5)), p95: round(percentile(sorted, 0.95)) };
-}
-
-/**
- * The next animation frame. A hidden page gets none, so after a short wait it goes on
- * anyway: the lab must also run where nobody is looking at it.
- */
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => {
-    const fallback = setTimeout(resolve, 50);
-    requestAnimationFrame(() => {
-      clearTimeout(fallback);
-      resolve();
-    });
-  });
-}
-
-async function loadFont(): Promise<void> {
-  // Loaded from its bytes: fetching needs no more than the page's own origin.
-  const bytes = await (await fetch(fontUrl)).arrayBuffer();
-  const face = new FontFace(FONT_FAMILY, bytes);
-  await face.load();
-  document.fonts.add(face);
-}
-
-/** The canvas a renderer put into its pane. */
-function canvasOf(pane: Pane): HTMLCanvasElement | undefined {
-  return pane.surface.querySelector("canvas") ?? undefined;
-}
-
-/** A copy of what a canvas shows right now. Call it in the task that drew the canvas. */
-function readPixels(canvas: HTMLCanvasElement): ImageData {
-  const copy = element("canvas");
-  copy.width = canvas.width;
-  copy.height = canvas.height;
-  const context = copy.getContext("2d", { willReadFrequently: true });
-  if (!context) throw new Error("no 2D context for reading pixels back");
-  context.drawImage(canvas, 0, 0);
-  return context.getImageData(0, 0, copy.width, copy.height);
-}
-
-function compare(
-  a: ImageData,
-  b: ImageData,
-): { exact: number; beyondTolerance: number; pixels: number } {
-  if (a.width !== b.width || a.height !== b.height) {
-    return { exact: -1, beyondTolerance: -1, pixels: a.width * a.height };
-  }
-  let exact = 0;
-  let beyond = 0;
-  for (let i = 0; i < a.data.length; i += 4) {
-    const delta = Math.max(
-      Math.abs(a.data[i]! - b.data[i]!),
-      Math.abs(a.data[i + 1]! - b.data[i + 1]!),
-      Math.abs(a.data[i + 2]! - b.data[i + 2]!),
-    );
-    if (delta > 0) exact++;
-    if (delta > COMPARE_TOLERANCE) beyond++;
-  }
-  return { exact, beyondTolerance: beyond, pixels: a.width * a.height };
-}
-
-/** Size a pane's renderer so that the frame's grid fits exactly. */
-function fit(pane: Pane, frame: RenderFrame): void {
-  const renderer = pane.renderer;
-  if (!renderer) return;
-  const dpr = window.devicePixelRatio;
-  // The metrics depend on the pixel ratio, so it is set before they are read.
-  renderer.resize({ width: 1, height: 1 }, dpr);
-  const m = renderer.metrics;
-  renderer.resize(
-    {
-      width: (frame.cols * m.cellWidth + 2 * m.padding) / dpr,
-      height: (frame.rows * m.cellHeight + 2 * m.padding) / dpr,
-    },
-    dpr,
-  );
-}
-
 async function main(): Promise<void> {
   const root = document.getElementById("lab");
   if (!root) throw new Error("lab.html has no #lab element");
   checkFrameContract();
-  await loadFont();
+  await loadTestFont();
   const vt = await Vt.instantiate(fetch(wasmUrl));
   const fromTerminal = terminalFrames(vt);
 
@@ -228,38 +118,27 @@ async function main(): Promise<void> {
   // One pane per tier, each held to that tier, and one that takes the normal order and
   // is the one to lose its tier.
   const panes: Pane[] = [];
-  for (const kind of [...TIER_ORDER, "auto"] as const) {
-    const host = await RenderHost.create(kind === "auto" ? {} : { tiers: [kind] });
+  for (const kind of [...TIERS, "auto"] as const) {
     const paneRoot = element("section", "pane");
     const title = element("h2", undefined, kind === "auto" ? "automatic (falls back)" : kind);
     const note = element("div", "note");
     const surface = element("div", "surface");
     paneRoot.append(title, note, surface);
     panesRoot.append(paneRoot);
-    const pane: Pane = {
-      kind,
-      host,
-      renderer: undefined,
-      root: paneRoot,
-      surface,
-      note,
-      error: undefined,
-    };
-    try {
-      pane.renderer = host.createRenderer(surface, theme, {
-        onTierChange: (tier, reason) => {
-          log(`${kind}: now ${tier ?? "nothing"} (${reason})`);
-          show(picker.value);
-        },
-        onInvalidate: () => void nextFrame().then(() => show(picker.value)),
-      });
-      results.tiers[kind] = pane.renderer.tier;
-    } catch (error) {
-      pane.error = error instanceof Error ? error.message : String(error);
+    const made = await createPane(kind, surface, {
+      onTierChange: (tier, reason) => {
+        log(`${kind}: now ${tier ?? "nothing"} (${reason})`);
+        show(picker.value);
+      },
+      onInvalidate: () => void nextFrame().then(() => show(picker.value)),
+    });
+    if (made.renderer) {
+      results.tiers[kind] = made.renderer.tier;
+    } else {
       paneRoot.classList.add("unavailable");
-      results.tiers[kind] = `unavailable: ${pane.error}`;
+      results.tiers[kind] = `unavailable: ${made.error}`;
     }
-    panes.push(pane);
+    panes.push({ ...made, root: paneRoot, note });
   }
 
   let current: TerminalFrame | undefined;
@@ -290,11 +169,9 @@ async function main(): Promise<void> {
         pane.note.textContent = pane.error ?? "unavailable";
         continue;
       }
-      fit(pane, frame);
+      fit(pane, frame, window.devicePixelRatio);
       // Every pane draws the whole frame, whatever the last one left flagged.
-      frame.dirty = 2;
-      frame.dirtyRows.fill(1);
-      pane.renderer.draw(frame);
+      drawWhole(pane, frame);
       const canvas = canvasOf(pane);
       if (canvas) pictures.set(pane, readPixels(canvas));
       results.tiers[pane.kind] = pane.renderer.tier;
@@ -308,9 +185,11 @@ async function main(): Promise<void> {
       const m = pane.renderer.metrics;
       let note = `tier ${pane.renderer.tier}, cell ${m.cellWidth}×${m.cellHeight} px, surface ${picture.width}×${picture.height} px`;
       if (base && pane !== reference) {
-        const difference = compare(picture, base);
+        const difference = compare(picture, base, COMPARE_TOLERANCE);
         results.differences[pane.kind] = difference;
-        note += `\nagainst canvas2d: ${difference.exact} of ${difference.pixels} pixels differ, ${difference.beyondTolerance} by more than ${COMPARE_TOLERANCE}`;
+        note += difference.sameSize
+          ? `\nagainst canvas2d: ${difference.exact} of ${difference.pixels} pixels differ, ${difference.beyondTolerance} by more than ${COMPARE_TOLERANCE}`
+          : "\nagainst canvas2d: the pictures are not the same size";
       }
       pane.note.textContent = note;
     }
@@ -330,16 +209,14 @@ async function main(): Promise<void> {
     for (const pane of panes) {
       const renderer = pane.renderer;
       if (!renderer || pane.kind === "auto") continue;
-      fit(pane, frames[0]!);
+      fit(pane, frames[0]!, window.devicePixelRatio);
       const draw: number[] = [];
       const finish: number[] = [];
       // A few frames first, so the atlas holds every glyph the workload uses.
-      for (let i = -8; i < TIMING_FRAMES; i++) {
+      for (let i = -REDRAW_WARMUP_FRAMES; i < REDRAW_FRAMES; i++) {
         const frame = frames[i & 1]!;
-        frame.dirty = 2;
-        frame.dirtyRows.fill(1);
         const start = performance.now();
-        renderer.draw(frame);
+        drawWhole(pane, frame);
         const drawn = performance.now();
         // Reading a pixel back makes the browser wait for the GPU to finish the
         // frame, so this time includes the drawing itself and not only queueing it.
@@ -364,7 +241,7 @@ async function main(): Promise<void> {
     const outputs = [fullRedrawOutput(0), fullRedrawOutput(1)];
     const write: number[] = [];
     const read: number[] = [];
-    for (let i = 0; i < TIMING_FRAMES; i++) {
+    for (let i = 0; i < REDRAW_FRAMES; i++) {
       const start = performance.now();
       terminal.write(outputs[i & 1]!);
       const written = performance.now();
@@ -434,11 +311,7 @@ async function main(): Promise<void> {
     const pane = panes.find((candidate) => candidate.kind === kind);
     const picture = pane && pictures.get(pane);
     if (!picture) return Promise.resolve(undefined);
-    const copy = element("canvas");
-    copy.width = picture.width;
-    copy.height = picture.height;
-    copy.getContext("2d")?.putImageData(picture, 0, 0);
-    return new Promise((resolve) => copy.toBlob((blob) => resolve(blob ?? undefined), "image/png"));
+    return toPng(picture).then((png) => new Blob([png as BlobPart], { type: "image/png" }));
   }
 
   picker.addEventListener("change", () => show(picker.value));

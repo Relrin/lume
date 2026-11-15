@@ -5,6 +5,10 @@
  * for a graphics device, opening the carrier. In development React mounts components
  * twice, and a second carrier would retire the first, so none of this may follow the
  * component's life.
+ *
+ * The window holds one session at a time on screen. A session that is started while
+ * another is shown takes its place; the other keeps running, and is still there when
+ * the page is reloaded.
  */
 
 import { RenderHost } from "@lume/renderer";
@@ -18,6 +22,8 @@ import { TransportClient } from "../transport/client.ts";
 import { CommandError } from "../transport/types.ts";
 import { currentPlatform, KeyLayout } from "./keyboard.ts";
 import { PromptStore } from "./prompts.ts";
+import { reattachOrder } from "./reattach.ts";
+import { answerRequest, type Opened, type OpenSpec, type RemoteTarget } from "./remote.ts";
 import { TerminalView } from "./view.ts";
 
 /** The page's prompts. Created with the module so a component can show them at once. */
@@ -37,6 +43,9 @@ export interface TerminalApp {
 /** A session cannot be attached to for a reason that leaves the others worth trying. */
 const TRY_ANOTHER = new Set(["already_attached", "not_found", "session_exited"]);
 
+/** Where the page keeps the id of the session it shows, to find it again after a reload. */
+const SHOWN_KEY = "lume.shown-session";
+
 /** The parts of the keyboard-layout interface some webviews offer. */
 interface KeyboardLike {
   getLayoutMap(): Promise<Iterable<[string, string]>>;
@@ -53,24 +62,120 @@ async function keyboardLayout(): Promise<KeyLayout> {
   return new KeyLayout();
 }
 
-async function connect(view: TerminalView, carrier: TauriCarrier): Promise<void> {
-  const client = await TransportClient.open(carrier, {
-    onFailure: (error) =>
-      view.showMessage(`The session can no longer be reached: ${error.message}`),
-  });
-  // A page that was reloaded finds its sessions still running. Whether one is free is
-  // found out by trying: the list may be a moment behind.
-  for (const session of await client.list()) {
-    if (session.exit !== null) continue;
-    try {
-      await view.attach(client, session.backend, session.id);
-      return;
-    } catch (error) {
-      if (!(error instanceof CommandError) || !TRY_ANOTHER.has(error.code)) throw error;
-    }
+function remembered(): string | null {
+  try {
+    return window.sessionStorage.getItem(SHOWN_KEY);
+  } catch {
+    // Storage may be refused. Then a reload shows whichever session it finds first.
+    return null;
   }
-  const session = await client.spawn(client.defaultBackend, { size: view.gridSize() });
-  await view.attach(client, client.defaultBackend, session);
+}
+
+function remember(session: string): void {
+  try {
+    window.sessionStorage.setItem(SHOWN_KEY, session);
+  } catch {
+    // As above.
+  }
+}
+
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** The page's sessions: the transport, and which session the view shows. */
+class Sessions implements RemoteTarget {
+  readonly #view: TerminalView;
+  readonly #carrier: TauriCarrier;
+  #client: TransportClient | undefined;
+  /** Settles when the first session has been shown, or could not be. */
+  #started: Promise<void> | undefined;
+
+  constructor(view: TerminalView, carrier: TauriCarrier) {
+    this.#view = view;
+    this.#carrier = carrier;
+  }
+
+  /** Opens the transport and gives the view a session. Does so once. */
+  connect(): void {
+    this.#started ??= this.#connect().catch((error: unknown) => {
+      this.#view.showMessage(`A session could not be started: ${reason(error)}`);
+    });
+  }
+
+  async #connect(): Promise<void> {
+    const client = await TransportClient.open(this.#carrier, {
+      onFailure: (error) =>
+        this.#view.showMessage(`The session can no longer be reached: ${error.message}`),
+      onControl: (message) => this.#asked(message),
+    });
+    this.#client = client;
+    // A session is started at the size that fits the view, so the view is laid out first.
+    await this.#view.whenMeasured();
+    // A page that was reloaded finds its sessions still running. Whether one is free is
+    // found out by trying: the list may be a moment behind.
+    for (const session of reattachOrder(await client.list(), remembered())) {
+      try {
+        await this.#view.attach(client, session.backend, session.id);
+        remember(session.id);
+        return;
+      } catch (error) {
+        if (!(error instanceof CommandError) || !TRY_ANOTHER.has(error.code)) throw error;
+      }
+    }
+    await this.open({});
+  }
+
+  /** Carries out a request from the core and sends back the answer. */
+  #asked(message: unknown): void {
+    // A request that arrives while the page is still starting is about the session the
+    // page is about to show, so it waits for that.
+    const started = this.#started ?? Promise.resolve();
+    void started.then(async () => {
+      const answer = await answerRequest(this, message);
+      if (!answer) return;
+      this.#client?.answer(answer.id, answer.result).catch((error: unknown) => {
+        console.error("an answer to the core was not delivered", error);
+      });
+    });
+  }
+
+  /** Starts a session and shows it in place of the one shown before, which carries on. */
+  async open(spec: OpenSpec): Promise<Opened> {
+    const client = this.#client;
+    if (!client) throw new CommandError("no_window", "the page has not connected yet");
+    await this.#view.whenMeasured();
+    const previous = this.#view.session ?? null;
+    const backend = client.defaultBackend;
+    const session = await client.spawn(backend, {
+      size: spec.size ?? this.#view.gridSize(),
+      ...(spec.launcher ? { launcher: spec.launcher } : {}),
+      ...(spec.cwd === undefined ? {} : { cwd: spec.cwd }),
+      ...(spec.env ? { env: spec.env } : {}),
+    });
+    await this.#view.attach(client, backend, session, spec.size);
+    remember(session);
+    return { session, previous };
+  }
+
+  /** Starts a new shell where a program has ended. */
+  restart(): void {
+    this.open({}).catch((error: unknown) => {
+      this.#view.showMessage(`A session could not be started: ${reason(error)}`);
+    });
+  }
+
+  screen(session: string | undefined) {
+    return this.#view.screen(session);
+  }
+
+  waitText(session: string | undefined, text: string, timeoutMs: number) {
+    return this.#view.waitText(session, text, timeoutMs);
+  }
+
+  resizeTo(session: string | undefined, size: Parameters<TerminalView["resizeTo"]>[1]) {
+    return this.#view.resizeTo(session, size);
+  }
 }
 
 async function start(): Promise<TerminalApp> {
@@ -81,7 +186,8 @@ async function start(): Promise<TerminalApp> {
     RenderHost.create(),
     keyboardLayout(),
   ]);
-  const view = new TerminalView({
+  // The view asks for a restart through the sessions, which are made from the view.
+  const view: TerminalView = new TerminalView({
     vt,
     host,
     keys: new KeyEncoder(vt),
@@ -95,20 +201,11 @@ async function start(): Promise<TerminalApp> {
     },
     openLink: (url) => carrier.command<void>("open_link", { url }),
     developerTools: import.meta.env.DEV,
+    restart: () => sessions.restart(),
   });
+  const sessions = new Sessions(view, carrier);
 
-  let connected = false;
-  return {
-    view,
-    connect() {
-      if (connected) return;
-      connected = true;
-      connect(view, carrier).catch((error: unknown) => {
-        const reason = error instanceof Error ? error.message : String(error);
-        view.showMessage(`A session could not be started: ${reason}`);
-      });
-    },
-  };
+  return { view, connect: () => sessions.connect() };
 }
 
 let app: Promise<TerminalApp> | undefined;

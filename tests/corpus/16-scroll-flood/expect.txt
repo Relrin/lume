@@ -1,0 +1,18 @@
+size 20x6
+cursor 3,5 visible
+screen primary
+--- text
+00|04996
+01|04997
+02|04998
+03|04999
+04|05000
+05|end
+--- attrs
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+

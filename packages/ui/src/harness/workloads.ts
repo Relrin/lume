@@ -1,5 +1,5 @@
 /**
- * The lab's frames that come from the terminal engine.
+ * Frames that come from the terminal engine, for the renderer's tests.
  *
  * Each is program output fed to the WebAssembly terminal, whose render state then
  * produces the frame. They show the same things as the hand-built frames of the
@@ -35,7 +35,7 @@ function unpack(color: number): Rgb {
   return { r: color & 0xff, g: (color >>> 8) & 0xff, b: (color >>> 16) & 0xff };
 }
 
-/** The 256-colour palette: the lab's sixteen, then the standard cube and grey ramp. */
+/** The 256-colour palette: the tests' sixteen, then the standard cube and grey ramp. */
 function palette(): Rgb[] {
   const colors = PALETTE.map(unpack);
   const steps = [0, 95, 135, 175, 215, 255];
@@ -56,9 +56,27 @@ function palette(): Rgb[] {
 function open(vt: Vt, cols: number, rows: number): { term: Terminal; state: RenderState } {
   const term = vt.createTerminal(cols, rows, {
     colors: { foreground: unpack(FOREGROUND), background: unpack(BACKGROUND), palette: palette() },
-    // The lab keeps no history worth speaking of.
+    // A test keeps no history worth speaking of.
     scrollbackMaxLines: 100,
     scrollbackMaxBytes: 1 << 20,
+  });
+  return { term, state: new RenderState(term) };
+}
+
+/**
+ * A terminal of the given size with the tests' colours, and with as much history as
+ * the product keeps: what a flood costs depends on how much it has to push out.
+ */
+export function benchTerminal(
+  vt: Vt,
+  cols: number,
+  rows: number,
+  history: { readonly lines: number; readonly bytes: number },
+): { term: Terminal; state: RenderState } {
+  const term = vt.createTerminal(cols, rows, {
+    colors: { foreground: unpack(FOREGROUND), background: unpack(BACKGROUND), palette: palette() },
+    scrollbackMaxLines: history.lines,
+    scrollbackMaxBytes: history.bytes,
   });
   return { term, state: new RenderState(term) };
 }

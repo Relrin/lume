@@ -1,0 +1,3 @@
+description = "A full reset after a program left a title, a directory, modes, the alternate screen and colours behind"
+cols = 40
+rows = 6

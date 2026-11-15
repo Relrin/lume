@@ -9,6 +9,11 @@
 //! The dump format is plain text and deliberately simple, so that the WebAssembly build
 //! can produce the same text from TypeScript and the two can be compared byte for
 //! byte.
+//!
+//! A dump holds more than the screen. Some of what a program can do to a terminal leaves
+//! nothing on screen: it sets a title, turns a mode on, or asks a question the terminal
+//! answers. The dump records those too, because that is where a hostile stream does its
+//! work: what must not be answered is seen not to have been.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -147,10 +152,22 @@ pub fn recordings(root: &Path) -> Result<Vec<PathBuf>, BoxError> {
 /// ...
 /// --- attrs
 /// 01 0..3 fg=palette:1
+/// --- state
+/// title=vim
+/// pwd=file://host/tmp
+/// modes 7 25 2004
+/// ansi-modes
+/// --- replies
+/// \x1b[?62;22c
 /// ```
 ///
 /// Text rows have trailing blanks removed. The attrs section lists runs of adjacent cells
 /// that share a style other than the default; `a..b` is a half-open column range.
+///
+/// The state section gives the title and working directory the program set, and which
+/// of the modes in [`DEC_MODES`] and [`ANSI_MODES`] are on. The replies section is one
+/// line: every byte the terminal wrote back to the program. Bytes outside printable
+/// ASCII, and the backslash, are written as `\xNN`.
 pub fn dump(term: &Terminal) -> Result<String, BoxError> {
     let mut out = String::new();
     writeln!(out, "size {}x{}", term.cols(), term.rows())?;
@@ -203,7 +220,51 @@ pub fn dump(term: &Terminal) -> Result<String, BoxError> {
     }
     writeln!(out, "--- attrs")?;
     out.push_str(&attrs);
+
+    writeln!(out, "--- state")?;
+    writeln!(out, "title={}", escape(term.title()?.as_bytes()))?;
+    writeln!(out, "pwd={}", escape(term.pwd()?.as_bytes()))?;
+    for (label, modes, ansi) in [
+        ("modes", DEC_MODES, false),
+        ("ansi-modes", ANSI_MODES, true),
+    ] {
+        out.push_str(label);
+        for &mode in modes {
+            if term.mode(mode, ansi)? {
+                write!(out, " {mode}")?;
+            }
+        }
+        out.push('\n');
+    }
+    writeln!(out, "--- replies")?;
+    writeln!(out, "{}", escape(&term.replies()))?;
     Ok(out)
+}
+
+/// The DEC private modes a dump reports when they are on, by the number a program uses:
+/// cursor keys, origin, wraparound, cursor shown, the mouse reporting modes and formats,
+/// focus events, alternate scroll, the alternate screen, bracketed paste, synchronized
+/// output, grapheme clusters, colour scheme reports, and size reports.
+pub const DEC_MODES: &[u16] = &[
+    1, 6, 7, 25, 1000, 1002, 1003, 1004, 1006, 1007, 1016, 1049, 2004, 2026, 2027, 2031, 2048,
+];
+
+/// The ANSI modes a dump reports when they are on: insert, and linefeed/new line.
+pub const ANSI_MODES: &[u16] = &[4, 20];
+
+/// Bytes as dump text: printable ASCII as it is, everything else and the backslash as
+/// `\xNN`.
+fn escape(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for &byte in bytes {
+        if (0x20..=0x7e).contains(&byte) && byte != b'\\' {
+            out.push(char::from(byte));
+        } else {
+            // Writing to a String cannot fail.
+            let _ = write!(out, "\\x{byte:02x}");
+        }
+    }
+    out
 }
 
 fn flush_run(

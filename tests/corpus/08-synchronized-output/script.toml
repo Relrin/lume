@@ -1,0 +1,3 @@
+description = "Frames drawn between the synchronized-output marks, and the mode asked for inside and outside them"
+cols = 40
+rows = 6

@@ -58,6 +58,13 @@ impl fmt::Display for CommandError {
 
 impl std::error::Error for CommandError {}
 
+impl From<CommandError> for lume_proto::app::AppError {
+    /// The same code and message, for a caller on the control endpoint.
+    fn from(error: CommandError) -> Self {
+        Self::new(error.code, error.message)
+    }
+}
+
 impl From<SessionError> for CommandError {
     fn from(error: SessionError) -> Self {
         let code = match &error {

@@ -136,6 +136,88 @@ impl FrameDecoder {
     }
 }
 
+/// An incremental decoder for a connection that carries the control plane and nothing
+/// else. It yields each message's JSON as it was sent, for the caller to read as its own
+/// kind of message.
+///
+/// It follows the same rules as [`FrameDecoder`]: chunk boundaries carry no meaning, a
+/// long message arrives in several frames and is joined, and the first error is final.
+#[derive(Debug, Default)]
+pub struct ControlDecoder {
+    buffer: Vec<u8>,
+    /// How much of `buffer` has been consumed.
+    read: usize,
+    /// The frames so far of a message that is not complete.
+    unfinished: Option<Vec<u8>>,
+    failed: Option<DecodeError>,
+}
+
+impl ControlDecoder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds received bytes. After an error they are discarded.
+    pub fn push(&mut self, bytes: &[u8]) {
+        if self.failed.is_some() {
+            return;
+        }
+        if self.read > 0 {
+            self.buffer.drain(..self.read);
+            self.read = 0;
+        }
+        self.buffer.extend_from_slice(bytes);
+    }
+
+    /// The JSON of the next complete message, or `Ok(None)` when more bytes are needed.
+    #[allow(clippy::should_implement_trait)] // Fallible, and not an iterator: more may come.
+    pub fn next(&mut self) -> Result<Option<Vec<u8>>, DecodeError> {
+        if let Some(error) = &self.failed {
+            return Err(error.clone());
+        }
+        match self.advance() {
+            Ok(message) => Ok(message),
+            Err(error) => {
+                self.failed = Some(error.clone());
+                self.buffer = Vec::new();
+                self.read = 0;
+                self.unfinished = None;
+                Err(error)
+            }
+        }
+    }
+
+    fn advance(&mut self) -> Result<Option<Vec<u8>>, DecodeError> {
+        loop {
+            let available = &self.buffer[self.read..];
+            let Some(header_bytes) = available.first_chunk::<{ Header::LEN }>() else {
+                return Ok(None);
+            };
+            let header = Header::parse(header_bytes)?;
+            if header.kind != Kind::Control {
+                return Err(DecodeError::NotControl(header.kind));
+            }
+            let end = Header::LEN + header.len as usize;
+            let Some(frame) = available.get(..end) else {
+                return Ok(None);
+            };
+            let payload = &frame[Header::LEN..];
+
+            let mut bytes = self.unfinished.take().unwrap_or_default();
+            if bytes.len() + payload.len() > MAX_CONTROL_MESSAGE {
+                return Err(DecodeError::MessageTooLarge(Kind::Control));
+            }
+            bytes.extend_from_slice(payload);
+            self.read += end;
+            if header.more {
+                self.unfinished = Some(bytes);
+            } else {
+                return Ok(Some(bytes));
+            }
+        }
+    }
+}
+
 /// The most bytes a message of this kind may have once its frames are joined.
 fn message_limit(kind: Kind) -> usize {
     match kind {

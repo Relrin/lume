@@ -103,8 +103,11 @@ async fn an_endpoint_can_be_bound_again_after_its_server_is_gone() {
     let mut listener = Listener::bind(&endpoint).unwrap();
 
     let server = tokio::spawn(async move { listener.accept().await.map(|_| ()) });
-    timeout(STEP, connect(&endpoint)).await.unwrap().unwrap();
+    // Kept open until the server has it: a client that is gone before it is accepted is
+    // not served.
+    let client = timeout(STEP, connect(&endpoint)).await.unwrap().unwrap();
     timeout(STEP, server).await.unwrap().unwrap().unwrap();
+    drop(client);
 }
 
 #[tokio::test]

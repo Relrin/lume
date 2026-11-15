@@ -1,0 +1,3 @@
+description = "Questions a program asks its terminal, each answered once: identity, cursor, size, colours, settings"
+cols = 80
+rows = 6

@@ -1,0 +1,18 @@
+size 40x6
+cursor 15,0 visible
+screen primary
+--- text
+00|after the reset
+01|
+02|
+03|
+04|
+05|
+--- attrs
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+

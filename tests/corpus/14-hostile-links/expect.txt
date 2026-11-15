@@ -1,0 +1,22 @@
+size 60x10
+cursor 0,8 visible
+screen primary
+--- text
+00|links that are not what they seem
+01|an ordinary link
+02|https://example.com/safe
+03|click here
+04|a very long address
+05|opened with an id
+06|never closed
+07|and still going
+08|
+09|
+--- attrs
+--- state
+title=
+pwd=
+modes 7 25 1007
+ansi-modes
+--- replies
+

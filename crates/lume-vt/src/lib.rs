@@ -1,8 +1,9 @@
 //! A safe wrapper over libghostty-vt.
 //!
-//! Current scope: create a terminal, write bytes to it, resize it, and read back text and cell
-//! attributes. That is enough for the smoke test and the golden corpus. Render state,
-//! input encoding, selection and snapshots are not wrapped yet.
+//! Current scope: create a terminal, write bytes to it, resize it, and read back text,
+//! cell attributes, the title, the working directory, modes, and what the terminal
+//! answered to the program's questions. That is enough for the smoke test and the golden
+//! corpus. Render state, input encoding, selection and snapshots are not wrapped yet.
 
 // bindgen gives C enums a different integer type on each platform (`i32` with MSVC, `u32`
 // elsewhere), so a cast that is needed on one platform is a no-op on another.
@@ -10,7 +11,8 @@
 
 pub mod corpus;
 
-use std::ffi::CStr;
+use std::cell::{Cell as StdCell, RefCell};
+use std::ffi::{CStr, c_void};
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -133,6 +135,63 @@ pub struct Cursor {
     pub pending_wrap: bool,
 }
 
+/// What the library's callbacks reach while it runs: the size to report, and where
+/// the terminal's answers go.
+struct Host {
+    cols: StdCell<u16>,
+    rows: StdCell<u16>,
+    /// Everything the terminal wrote back to the program, in order.
+    replies: RefCell<Vec<u8>>,
+}
+
+/// Collects what the terminal writes back to the program: answers to its questions.
+///
+/// # Safety
+///
+/// Called by the library only, with the userdata this crate set: a live [`Host`].
+unsafe extern "C" fn on_write_pty(
+    _terminal: sys::GhosttyTerminal,
+    userdata: *mut c_void,
+    data: *const u8,
+    len: usize,
+) {
+    if userdata.is_null() || data.is_null() || len == 0 {
+        return;
+    }
+    // SAFETY: the userdata is the `Host` of the terminal that is running, which outlives
+    // the call, and the library hands over `len` readable bytes at `data`.
+    let (host, bytes) = unsafe {
+        (
+            &*userdata.cast::<Host>(),
+            std::slice::from_raw_parts(data, len),
+        )
+    };
+    host.replies.borrow_mut().extend_from_slice(bytes);
+}
+
+/// Tells the library the terminal's size when a program asks for it. The pixel size of
+/// a cell is not known here and stays zero, as the library left it.
+///
+/// # Safety
+///
+/// Called by the library only, with the userdata this crate set: a live [`Host`].
+unsafe extern "C" fn on_size(
+    _terminal: sys::GhosttyTerminal,
+    userdata: *mut c_void,
+    out_size: *mut sys::GhosttySizeReportSize,
+) -> bool {
+    if userdata.is_null() || out_size.is_null() {
+        return false;
+    }
+    // SAFETY: as in `on_write_pty`; `out_size` is the library's own zeroed struct.
+    unsafe {
+        let host = &*userdata.cast::<Host>();
+        (*out_size).rows = host.rows.get();
+        (*out_size).columns = host.cols.get();
+    }
+    true
+}
+
 /// A terminal emulator: screen, scrollback, cursor, styles and modes.
 ///
 /// libghostty-vt is not thread-safe, so a `Terminal` is neither `Send` nor `Sync`. Each
@@ -141,6 +200,8 @@ pub struct Terminal {
     raw: sys::GhosttyTerminal,
     cols: u16,
     rows: u16,
+    /// Boxed so that its address, which the library holds, never changes.
+    host: Box<Host>,
     _single_thread: PhantomData<*mut ()>,
 }
 
@@ -154,12 +215,36 @@ impl Terminal {
         if raw.is_null() {
             return Err(Error(sys::GHOSTTY_OUT_OF_MEMORY as i32));
         }
-        Ok(Self {
+        let term = Self {
             raw,
             cols,
             rows,
+            host: Box::new(Host {
+                cols: StdCell::new(cols),
+                rows: StdCell::new(rows),
+                replies: RefCell::new(Vec::new()),
+            }),
             _single_thread: PhantomData,
-        })
+        };
+        // From here on dropping `term` frees the handle, whatever fails.
+        term.set(
+            sys::GHOSTTY_TERMINAL_OPT_USERDATA,
+            (&raw const *term.host).cast(),
+        )?;
+        term.set(
+            sys::GHOSTTY_TERMINAL_OPT_WRITE_PTY,
+            on_write_pty as *const c_void,
+        )?;
+        term.set(sys::GHOSTTY_TERMINAL_OPT_SIZE, on_size as *const c_void)?;
+        Ok(term)
+    }
+
+    /// Set one option with `ghostty_terminal_set`. `value` must be what the header
+    /// documents for `option`.
+    fn set(&self, option: sys::GhosttyTerminalOption, value: *const c_void) -> Result<()> {
+        // SAFETY: the handle is live; the callers pass the pointer kind the option takes,
+        // and what it points to lives as long as the terminal.
+        check(unsafe { sys::ghostty_terminal_set(self.raw, option, value) })
     }
 
     pub fn cols(&self) -> u16 {
@@ -182,11 +267,69 @@ impl Terminal {
     /// Resize the grid. Cell pixel sizes are not known to this wrapper yet and are passed
     /// as zero.
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        // The size a program is told is the one the grid is about to have: the resize
+        // itself may report it.
+        self.host.cols.set(cols);
+        self.host.rows.set(rows);
         // SAFETY: the handle is live.
-        check(unsafe { sys::ghostty_terminal_resize(self.raw, cols, rows, 0, 0) })?;
+        let resized = check(unsafe { sys::ghostty_terminal_resize(self.raw, cols, rows, 0, 0) });
+        if resized.is_err() {
+            self.host.cols.set(self.cols);
+            self.host.rows.set(self.rows);
+            return resized;
+        }
         self.cols = cols;
         self.rows = rows;
         Ok(())
+    }
+
+    /// Everything the terminal has written back to the program so far: its answers to
+    /// device, cursor, size and colour queries, in the order it gave them.
+    pub fn replies(&self) -> Vec<u8> {
+        self.host.replies.borrow().clone()
+    }
+
+    /// The title the program last set, or the empty string.
+    pub fn title(&self) -> Result<String> {
+        self.string(sys::GHOSTTY_TERMINAL_DATA_TITLE)
+    }
+
+    /// The working directory the program last reported, or the empty string.
+    pub fn pwd(&self) -> Result<String> {
+        self.string(sys::GHOSTTY_TERMINAL_DATA_PWD)
+    }
+
+    /// Whether a mode is set. `mode` is the number a program uses for it; `ansi` selects
+    /// the ANSI modes (`CSI n h`) instead of the DEC private ones (`CSI ? n h`).
+    pub fn mode(&self, mode: u16, ansi: bool) -> Result<bool> {
+        // The library packs the mode number and its kind into one 16-bit value.
+        let mut config = sys::GhosttyTerminalModeConfig {
+            mode: (mode & 0x7fff) | if ansi { 0x8000 } else { 0 },
+            value: false,
+        };
+        // SAFETY: the handle is live and `config` is the type the header documents for
+        // this key, with the mode to look up filled in.
+        check(unsafe {
+            sys::ghostty_terminal_get(
+                self.raw,
+                sys::GHOSTTY_TERMINAL_DATA_MODE,
+                (&raw mut config).cast(),
+            )
+        })?;
+        Ok(config.value)
+    }
+
+    /// Read a string value. The library's string is borrowed until the terminal next
+    /// changes, so it is copied at once.
+    fn string(&self, key: sys::GhosttyTerminalData) -> Result<String> {
+        let borrowed = self.get::<sys::GhosttyString>(key)?;
+        if borrowed.ptr.is_null() || borrowed.len == 0 {
+            return Ok(String::new());
+        }
+        // SAFETY: the library returned `len` readable bytes at `ptr`, valid until the
+        // terminal is next written to, which cannot happen during this call.
+        let bytes = unsafe { std::slice::from_raw_parts(borrowed.ptr, borrowed.len) };
+        Ok(String::from_utf8_lossy(bytes).into_owned())
     }
 
     /// The cell at `col`, `row` of the active area (the screen without scrollback).
@@ -370,6 +513,35 @@ mod tests {
 
         let plain = term.cell(0, 0).unwrap();
         assert_eq!(plain.fg, Color::Default);
+    }
+
+    #[test]
+    fn answers_to_the_programs_questions_are_collected_in_order() {
+        let mut term = Terminal::new(80, 24).expect("create terminal");
+        assert!(term.replies().is_empty());
+        // Where is the cursor, then how large is the text area.
+        term.write(b"ab\x1b[6n\x1b[18t");
+        assert_eq!(term.replies(), b"\x1b[1;3R\x1b[8;24;80t");
+
+        // The size reported is the one the terminal has after a resize.
+        term.resize(100, 30).unwrap();
+        term.write(b"\x1b[18t");
+        assert!(term.replies().ends_with(b"\x1b[8;30;100t"));
+    }
+
+    #[test]
+    fn the_title_the_directory_and_modes_can_be_read() {
+        let mut term = Terminal::new(80, 24).expect("create terminal");
+        assert_eq!(term.title().unwrap(), "");
+        assert_eq!(term.pwd().unwrap(), "");
+        assert!(!term.mode(2004, false).unwrap());
+        assert!(term.mode(7, false).unwrap(), "lines wrap by default");
+
+        term.write(b"\x1b]2;a title\x07\x1b]7;file://host/tmp\x07\x1b[?2004h\x1b[4h");
+        assert_eq!(term.title().unwrap(), "a title");
+        assert_eq!(term.pwd().unwrap(), "file://host/tmp");
+        assert!(term.mode(2004, false).unwrap());
+        assert!(term.mode(4, true).unwrap());
     }
 
     #[test]

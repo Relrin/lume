@@ -92,6 +92,12 @@ export interface TransportOptions {
   onFailure?(error: Error): void;
   /** Called when something a view asked for could not be done. Defaults to the console. */
   onError?(error: Error): void;
+  /**
+   * Called with each control message the core sends on the carrier: a request to the
+   * page, to be answered with {@link TransportClient.answer}. A client that is given no
+   * handler treats a control message as a fault of the transport.
+   */
+  onControl?(message: unknown): void;
 }
 
 export class TransportClient {
@@ -145,6 +151,14 @@ export class TransportClient {
   /** Ends a session. */
   async kill(backend: string, session: string): Promise<void> {
     await this.#command("session_kill", { backend, session });
+  }
+
+  /**
+   * Answers a request the core sent as a control message. `id` is the request's, and
+   * `result` is `{ ok: … }` with what it yielded or `{ err: { code, message } }`.
+   */
+  async answer(id: number, result: unknown): Promise<void> {
+    await this.#command("page_reply", { id, result });
   }
 
   /** Attaches to a session. `facts` describes the view it will be shown in. */
@@ -222,7 +236,15 @@ export class TransportClient {
       this.#decoder.push(chunk);
       for (let frame = this.#decoder.next(); frame; frame = this.#decoder.next()) {
         if (frame.kind === "control") {
-          throw new Error("a control message arrived on the carrier");
+          const { onControl } = this.#options;
+          if (!onControl) throw new Error("a control message arrived on the carrier");
+          try {
+            onControl(frame.message);
+          } catch (error) {
+            // A request that cannot be handled must not stop the sessions' frames.
+            this.#report(error);
+          }
+          continue;
         }
         // A frame for no stream was on its way when the stream was detached.
         const stream = this.#streams.get(frame.stream);

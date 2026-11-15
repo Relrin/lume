@@ -118,6 +118,8 @@ pub enum DecodeError {
     WrongDirection(Kind),
     #[error("a {kind:?} frame is not valid on stream {stream}")]
     WrongPlane { kind: Kind, stream: u32 },
+    #[error("a {0:?} frame arrived on a connection that carries only control messages")]
+    NotControl(Kind),
     #[error("a {0:?} message cannot be split across frames")]
     NotFragmentable(Kind),
     #[error("a frame that announces a continuation carries no bytes")]

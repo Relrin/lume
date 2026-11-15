@@ -4,7 +4,8 @@
 //! command is callable from the webview only if a capability file grants it. Without this
 //! every registered command would be allowed by default.
 
-/// Every command the web UI may be granted.
+/// Every command the web UI may be granted. The capability file grants the terminal's;
+/// the last three are granted only when the application is started to run a test suite.
 const COMMANDS: &[&str] = &[
     "webview_info",
     "probe_done",
@@ -18,6 +19,10 @@ const COMMANDS: &[&str] = &[
     "clipboard_write",
     "open_link",
     "font_families",
+    "page_reply",
+    "harness_done",
+    "harness_save",
+    "harness_read",
 ];
 
 fn main() {

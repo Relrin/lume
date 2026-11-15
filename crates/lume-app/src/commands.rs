@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use lume_proto::app::PageResult;
 use lume_proto::tuning::{CREDIT_WINDOW, MAX_CONTROL_MESSAGE, MAX_HYDRATE, MAX_PAYLOAD};
 use lume_session::{
     BackendId, ClientFacts, Launcher, SessionId, SpawnSpec, TermSize, default_shell,
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeBody, InvokeResponseBody, Request};
 use tauri::{AppHandle, Manager, State, Webview};
 
+use crate::args::{Args, Mode};
 use crate::carrier::TauriChannelCarrier;
 use crate::clipboard::ClipboardThread;
 use crate::error::CommandError;
@@ -26,9 +28,6 @@ use crate::state::{AppState, Attached, Listed};
 const CARRIER_HEADER: &str = "lume-carrier";
 
 type App<'a> = State<'a, Arc<AppState>>;
-
-/// Whether the application was started only to check that it runs.
-pub struct ProbeMode(pub bool);
 
 /// What the core knows about the webview it is hosting.
 #[derive(Serialize)]
@@ -43,10 +42,14 @@ pub struct WebviewInfo {
     app_version: &'static str,
     /// Whether the app was started with `--probe`.
     probe: bool,
+    /// The suite the app was started to run with `--harness`, if it was.
+    harness: Option<&'static str>,
+    /// Whether that suite may replace its reference files.
+    update: bool,
 }
 
 #[tauri::command]
-pub fn webview_info(probe: State<'_, ProbeMode>) -> WebviewInfo {
+pub fn webview_info(args: State<'_, Args>) -> WebviewInfo {
     let engine = if cfg!(windows) {
         "WebView2"
     } else if cfg!(target_os = "macos") {
@@ -60,15 +63,20 @@ pub fn webview_info(probe: State<'_, ProbeMode>) -> WebviewInfo {
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
         app_version: env!("CARGO_PKG_VERSION"),
-        probe: probe.0,
+        probe: args.mode == Mode::Probe,
+        harness: match args.mode {
+            Mode::Harness(suite) => Some(suite.name()),
+            Mode::Terminal | Mode::Probe => None,
+        },
+        update: args.update,
     }
 }
 
 /// Called by the page when its checks are finished. In probe mode the report is printed
 /// and the app exits; otherwise the call does nothing.
 #[tauri::command]
-pub fn probe_done(report: serde_json::Value, app: AppHandle, probe: State<'_, ProbeMode>) {
-    if !probe.0 {
+pub fn probe_done(report: serde_json::Value, app: AppHandle, args: State<'_, Args>) {
+    if args.mode != Mode::Probe {
         return;
     }
     println!("{report}");
@@ -238,6 +246,19 @@ pub async fn open_link(url: String) -> Result<(), CommandError> {
     tokio::task::spawn_blocking(move || opener::open(&url))
         .await
         .map_err(|error| CommandError::internal(error.to_string()))?
+}
+
+/// Takes the page's answer to a request the core sent it on its carrier. `id` is the
+/// request's; an answer to nothing that was asked is dropped.
+#[tauri::command]
+pub fn page_reply(
+    webview: Webview,
+    state: App<'_>,
+    carrier: u32,
+    id: u64,
+    result: PageResult,
+) -> Result<(), CommandError> {
+    state.answer(webview.label(), carrier, id, result.into())
 }
 
 /// The installed monospace font families, in alphabetical order.
