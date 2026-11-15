@@ -1,16 +1,24 @@
 # Lume
 
-A cross-platform terminal that works standalone or as a client of a Rex server.
+A cross-platform terminal with a focus on modularity and Rex server support
 
-Lume is at an early stage: the repository builds, and a hello window reports what the webview
-on your machine can do. There is no terminal yet.
+The Lume project is a focused on bringing an idea of a terminal that built on a top of libghostty while embracing  
+a Pi coding agent approach with leeting a developer to adapt the software to its own needs and workflows. 
 
-## Build
+## Features 
+- Simple core with WASM support for extending the behavior, layouts and UI  
+- An ability to run in a standalone mode and/or with [Rex server](https://www.superlogical.com/) (optional)
+- No built-it coding agents or other tools: a developer decides what to use 
+- Supports Windows, Linux and macOS
 
-You need Rust (the version in `rust-toolchain.toml` is installed by rustup on first use),
-Node (the version in `.node-version`), and on Windows and Linux a libclang for bindgen. Zig
-and libghostty-vt are fetched for you at pinned versions; a system Zig is never used.
+## Development
 
+Pre-requisistes:
+- Rust 1.100 (or later)
+- NodeJS 24.11.0
+
+In order to simplify the development there is exist the xtask CLI app that can help with installing required
+dependencies, run builds and tests:
 ```sh
 cargo xtask setup   # fetch pinned Zig and libghostty-vt, install JS dependencies
 cargo xtask build   # build libghostty-vt (native and WASM), the UI, and the workspace
@@ -21,7 +29,7 @@ cargo xtask dev     # run the app with hot reload
 `target/debug/lume-gui --probe` starts the app, prints what the webview supports as JSON,
 and exits.
 
-## Layout
+## Project layout
 
 | Path            | Contents                                                                                                                                       |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -31,6 +39,6 @@ and exits.
 | `tools.toml`    | Pinned versions and checksums of external tools                                                                                                |
 | `tests/corpus/` | Recorded terminal streams with expected screens                                                                                                |
 
-## Licence
+## License
 
-Apache-2.0. See `LICENSE`.
+The Lume project is published under the Apache-2.0 license. For more details read the [LICENSE](LICENSE) file.
