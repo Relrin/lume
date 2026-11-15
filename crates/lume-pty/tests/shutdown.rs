@@ -2,13 +2,23 @@
 
 mod common;
 
+use std::io::Write;
 use std::time::{Duration, Instant};
 
 use common::{Output, Running, STEP_TIMEOUT, wait_with_timeout};
-use lume_pty::PtySize;
+use lume_pty::{Pty, PtySize};
 
 /// Generous for a loaded machine, and still far below a hang.
 const PROMPT: Duration = Duration::from_secs(10);
+
+/// Lets go of a terminal whose reader has been stopped. With nobody reading, a program
+/// that has printed something is not let go, on some systems, for as long as anything
+/// still holds its terminal; whoever stops reading must let go of it too.
+fn release(pty: Box<dyn Pty>, writer: Box<dyn Write + Send>, output: Output) {
+    drop(output);
+    drop(writer);
+    drop(pty);
+}
 
 #[test]
 fn kill_ends_a_long_running_child() {
@@ -75,7 +85,7 @@ fn reader_stop_unblocks_a_blocked_read() {
     let (mut pty, child) = lume_pty::native()
         .spawn(&common::quick_shell(), PtySize::cells(80, 24))
         .unwrap();
-    let _writer = pty.take_writer().unwrap();
+    let writer = pty.take_writer().unwrap();
     let output = Output::collect(pty.take_reader().unwrap());
     assert!(output.wait_for_any(), "the shell printed nothing");
     // The shell now sits at its prompt, so the reader is blocked with nothing to read.
@@ -94,6 +104,7 @@ fn reader_stop_unblocks_a_blocked_read() {
     println!("stop to end of read: {:?}", started.elapsed());
 
     child.killer().kill().unwrap();
+    release(pty, writer, output);
     assert!(wait_with_timeout(child, PROMPT).is_some());
 }
 
@@ -142,7 +153,7 @@ fn stop_before_the_first_read_ends_it_at_once() {
     let (mut pty, child) = lume_pty::native()
         .spawn(&common::quick_shell(), PtySize::cells(80, 24))
         .unwrap();
-    let _writer = pty.take_writer().unwrap();
+    let writer = pty.take_writer().unwrap();
     let reader = pty.take_reader().unwrap();
     reader.stopper().stop();
     let output = Output::collect(reader);
@@ -153,6 +164,7 @@ fn stop_before_the_first_read_ends_it_at_once() {
     assert_eq!(output.len(), 0);
 
     child.killer().kill().unwrap();
+    release(pty, writer, output);
     assert!(wait_with_timeout(child, PROMPT).is_some());
 }
 

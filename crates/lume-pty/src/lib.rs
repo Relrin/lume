@@ -157,6 +157,11 @@ pub trait Child: Send {
     fn pid(&self) -> u32;
 
     /// Blocks until the child has ended.
+    ///
+    /// Keep reading the terminal's output while waiting, or let go of the terminal. A
+    /// program that has printed something nobody reads is, on some systems, not let go
+    /// by the terminal until that output is read or the terminal is closed, and is not
+    /// reported as ended before then.
     fn wait(&mut self) -> io::Result<ExitStatus>;
 
     /// A handle that can end the child while another thread is in [`wait`](Self::wait).

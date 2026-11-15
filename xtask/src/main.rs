@@ -132,7 +132,9 @@ fn bench(profile: &str) -> Result<()> {
 fn test() -> Result<()> {
     vt::native(false)?;
     vt::wasm(false)?;
-    run::cargo(&["test", "--workspace"])?;
+    // Every test binary runs even after one has failed: a run on a system nobody has
+    // at hand should say everything that is wrong there, not only the first thing.
+    run::cargo(&["test", "--workspace", "--no-fail-fast"])?;
     run::pnpm(&["--recursive", "--if-present", "run", "test"])?;
     Ok(())
 }

@@ -22,14 +22,17 @@ fn run_to_exit() {
         .unwrap();
     let mut reader = pty.take_reader().unwrap();
     let writer = pty.take_writer().unwrap();
-    // The output is far smaller than the terminal's buffer, so the program can finish
-    // before anything is read.
+    // Read while waiting. On some systems a program is not let go until what it printed
+    // has been read, however little that is, so one nobody reads from never ends.
+    let printing = std::thread::spawn(move || {
+        let mut printed = Vec::new();
+        reader.read_to_end(&mut printed).map(|_| printed)
+    });
     assert_eq!(
         wait_with_timeout(child, STEP_TIMEOUT),
         Some(ExitStatus::Code(3))
     );
-    let mut printed = Vec::new();
-    reader.read_to_end(&mut printed).unwrap();
+    let printed = printing.join().unwrap().unwrap();
     assert!(String::from_utf8_lossy(&printed).contains("short-lived"));
     drop(writer);
 }
