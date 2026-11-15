@@ -35,13 +35,29 @@ $secret = ConvertTo-SecureString ('Aa1!' + [Convert]::ToBase64String($bytes)) -A
 New-LocalUser -Name $other -Password $secret -AccountNeverExpires | Out-Null
 $credential = New-Object System.Management.Automation.PSCredential("$env:COMPUTERNAME\$other", $secret)
 
+# The scripts handed to the other user, to be removed at the end.
+$handed = New-Object System.Collections.Generic.List[string]
+
+# Starts a script as the other user and returns its process.
+#
+# The script is handed over as a file. A process started as another user may have a
+# command line of 1024 characters at most, and a script passed on the command line is
+# soon longer than that; the start then fails with "The parameter is incorrect". The
+# file is put where every user may read it: the other user cannot read this one's
+# temporary directory.
+function Start-AsOther([string] $Script, [switch] $Wait) {
+    $path = Join-Path $env:PUBLIC "lume-xuser-$PID-$($handed.Count).ps1"
+    Set-Content -LiteralPath $path -Value $Script -Encoding Ascii
+    $handed.Add($path)
+    # The new user's own policy may forbid scripts; this one is ours.
+    $arguments = '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', "`"$path`""
+    Start-Process powershell.exe -Credential $credential -WorkingDirectory $env:SystemRoot `
+        -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait:$Wait
+}
+
 # Runs a script as the other user and returns its exit code.
 function Invoke-AsOther([string] $Script) {
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Script))
-    $process = Start-Process powershell.exe -Credential $credential -WorkingDirectory $env:SystemRoot `
-        -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', $encoded `
-        -WindowStyle Hidden -PassThru -Wait
-    return $process.ExitCode
+    return (Start-AsOther $Script -Wait).ExitCode
 }
 
 $application = $null
@@ -88,10 +104,7 @@ try {
 `$pipe = New-Object System.IO.Pipes.NamedPipeServerStream('lume-$planted-$sid', 'InOut', 4, 'Byte', 'None', 4096, 4096, `$security)
 Start-Sleep -Seconds 30
 "@
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($squat))
-    $squatter = Start-Process powershell.exe -Credential $credential -WorkingDirectory $env:SystemRoot `
-        -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', $encoded `
-        -WindowStyle Hidden -PassThru
+    $squatter = Start-AsOther $squat
 
     # The pipe exists once the other user's process has created it.
     $exists = $false
@@ -114,5 +127,6 @@ finally {
         & $Lume ctl --endpoint $name quit *> $null
         if (-not $application.WaitForExit(10000)) { $application.Kill() }
     }
+    foreach ($path in $handed) { Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue }
     Remove-LocalUser -Name $other
 }
