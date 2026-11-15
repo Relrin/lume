@@ -303,6 +303,24 @@ export function selectAll(terminal: Terminal): void {
   terminal.setOption("SELECTION", selection);
 }
 
+/**
+ * Move the end of the selection to a cell of the viewport, keeping where it started: what
+ * a click with Shift held does. Returns false, and selects nothing, when there is no
+ * selection to extend.
+ */
+export function extendSelection(terminal: Terminal, col: number, row: number): boolean {
+  const core = terminal.core;
+  const m = core.manifest;
+  const selection = core.scratch(m.struct("GhosttySelection").size);
+  if (!terminal.getData("SELECTION", selection)) return false;
+  // The reference lives in the reader's own memory, not the scratch the selection is in.
+  const ref = cellReader(core).ref(terminal.handle, "viewport", col, row);
+  const end = selection + m.offset("GhosttySelection", "end");
+  core.u8().copyWithin(end, ref, ref + m.struct("GhosttyGridRef").size);
+  terminal.setOption("SELECTION", selection);
+  return true;
+}
+
 /** Remove the selection. */
 export function clearSelection(terminal: Terminal): void {
   terminal.setOption("SELECTION", 0);

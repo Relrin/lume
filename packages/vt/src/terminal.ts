@@ -205,6 +205,7 @@ export class Terminal {
   #cellHeightPx: number;
   #colorScheme: ColorScheme | undefined;
   #clipboardWriteMaxBytes: number | undefined;
+  #scrollbackMaxBytes: number | undefined;
   #revision = 0;
 
   readonly #scratch: number;
@@ -230,6 +231,7 @@ export class Terminal {
     this.#cellHeightPx = options?.cellHeightPx ?? 0;
     this.#colorScheme = options?.colorScheme;
     this.#clipboardWriteMaxBytes = options?.clipboardWriteMaxBytes;
+    this.#scrollbackMaxBytes = options?.scrollbackMaxBytes;
     this.handlers = options?.handlers ?? {};
     this.#option = core.manifest.enumValues("GhosttyTerminalOption");
     this.#data = core.manifest.enumValues("GhosttyTerminalData");
@@ -461,6 +463,25 @@ export class Terminal {
   /** Put `row`, counted as `Scrollbar.offset` is, at the top of the viewport. */
   scrollToRow(row: number): void {
     this.#scroll("ROW", row);
+  }
+
+  /**
+   * Forget everything that has scrolled off the screen. The screen itself is kept.
+   *
+   * This is done through the scrollback limit, not by feeding the terminal an escape
+   * sequence: a sequence written between two chunks of output could land in the middle
+   * of one the program is sending.
+   */
+  clearScrollback(): void {
+    this.#live();
+    this.#call("input", () => {
+      // A byte limit of zero erases the history. The limit in force is then put back;
+      // the address 0 restores the library's default.
+      this.#setSize("SCROLLBACK_MAX_BYTES", 0);
+      if (this.#scrollbackMaxBytes === undefined) this.#set("SCROLLBACK_MAX_BYTES", 0);
+      else this.#setSize("SCROLLBACK_MAX_BYTES", this.#scrollbackMaxBytes);
+      this.#revision++;
+    });
   }
 
   /** Release the terminal and its scratch memory. The object must not be used afterwards. */

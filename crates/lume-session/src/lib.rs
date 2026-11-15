@@ -22,6 +22,8 @@ use lume_proto::ProtoError;
 
 pub use backend::{Attachment, FrameStream, Hydrate, InputSink, OutputFrame, SessionBackend};
 pub use local::LocalBackend;
+/// What an in-process host is built from, for [`LocalBackend::in_process`].
+pub use lume_host::HostConfig;
 pub use lume_proto::{
     BackendCaps, BackendId, CellPx, ClientFacts, ColorScheme, ErrorCode, ExitStatus, HydrateKinds,
     Launcher, Palette, Responder, Rgb, SessionEvent, SessionId, SessionInfo, SessionStats,

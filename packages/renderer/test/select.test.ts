@@ -187,6 +187,20 @@ describe("losing a tier", () => {
     expect(renderer.metrics.cellWidth).toBe(16);
   });
 
+  it("carries a hidden cursor and the underlined runs over to the next tier", () => {
+    const { renderer, made } = started();
+    const f = frame();
+    f.cursor.visible = true;
+    renderer.setCursorVisible(false);
+    renderer.setUnderlines([{ row: 1, startCol: 0, endCol: 3 }]);
+    renderer.draw(f);
+    expect(made.webgpu[0]!.last.overlayRects).toBe(1);
+    made.webgpu[0]!.lose();
+    renderer.draw(f);
+    // One rectangle: the run. The cursor, which would add four, stays hidden.
+    expect(made.webgl2[0]!.last.overlayRects).toBe(1);
+  });
+
   it("falls through a tier that cannot be started", () => {
     const { renderer, made, events } = started(["webgl2"]);
     const f = frame();

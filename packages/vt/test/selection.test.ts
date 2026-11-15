@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   clearSelection,
   DirtyState,
+  extendSelection,
   formatText,
   hasSelection,
   hyperlinkAt,
@@ -145,6 +146,53 @@ describe("selecting with the pointer", () => {
       expect(term.scrollbar().offset).toBe(top - 2);
       gesture.release();
       expect(selectionText(term).split("\n").length).toBeGreaterThanOrEqual(4);
+    });
+  });
+});
+
+describe("extending a selection", () => {
+  function selectHello(term: Terminal, gesture: SelectionGesture): void {
+    term.write("hello world\r\nsecond line");
+    gesture.press(cell(0, 0), { timeMs: 0 });
+    gesture.drag(cell(4, 0, 0.8));
+    gesture.release(cell(4, 0, 0.8));
+    expect(selectionText(term)).toBe("hello");
+  }
+
+  it("moves the end to the cell and keeps the start", () => {
+    withGesture(20, 5, (term, gesture) => {
+      selectHello(term, gesture);
+      expect(extendSelection(term, 10, 0)).toBe(true);
+      expect(selectionText(term)).toBe("hello world");
+      expect(extendSelection(term, 5, 1)).toBe(true);
+      expect(selectionText(term)).toBe("hello world\nsecond");
+      // And back again, to before where it ended at first.
+      expect(extendSelection(term, 1, 0)).toBe(true);
+      expect(selectionText(term)).toBe("he");
+    });
+  });
+
+  it("shows in the next frame", () => {
+    withGesture(20, 5, (term, gesture) => {
+      selectHello(term, gesture);
+      const state = new RenderState(term);
+      try {
+        state.update();
+        state.markDrawn();
+        extendSelection(term, 10, 0);
+        const frame = state.update();
+        expect([frame.selectionStart[0], frame.selectionEnd[0]]).toEqual([0, 10]);
+      } finally {
+        state.free();
+      }
+    });
+  });
+
+  it("does nothing when there is no selection", () => {
+    withGesture(20, 5, (term) => {
+      term.write("hello world");
+      expect(extendSelection(term, 4, 0)).toBe(false);
+      expect(hasSelection(term)).toBe(false);
     });
   });
 });

@@ -45,6 +45,13 @@ export interface TerminalTheme {
   padding: number;
 }
 
+/** A run of cells in one row of the grid. `endCol` is the last cell of the run. */
+export interface UnderlineRange {
+  row: number;
+  startCol: number;
+  endCol: number;
+}
+
 /** What a font measures, in device pixels, before anything is rounded. */
 export interface RawFontMetrics {
   /** The advance of one character of the monospace font. */
@@ -83,6 +90,16 @@ export interface CellRenderer {
   setTheme(theme: TerminalTheme): void;
   /** Whether the terminal has keyboard focus. Without it the cursor is drawn hollow. */
   setFocused(focused: boolean): void;
+  /**
+   * Whether the cursor is drawn when the frame says it is visible. A blinking cursor is
+   * the caller turning this off and on; the renderer keeps no time of its own.
+   */
+  setCursorVisible(visible: boolean): void;
+  /**
+   * Underline these runs of cells on top of whatever the frame draws there, in each
+   * run's text colour: the link the pointer is over. Replaces the runs set before.
+   */
+  setUnderlines(ranges: readonly UnderlineRange[]): void;
   /** The grid that fits the surface at its current size. */
   gridSize(): { cols: number; rows: number };
   /** Draw a frame. Rows the frame does not flag as changed are not rebuilt. */

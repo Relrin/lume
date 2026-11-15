@@ -309,6 +309,113 @@ describe("the cursor", () => {
     renderer.draw(makeFrame(80, 24));
     expect([backend.last.overlayRects, backend.last.overlayGlyphs]).toEqual([0, 0]);
   });
+
+  it("disappears and comes back when a blink turns it off and on, repainting only its row", () => {
+    const { renderer, backend } = setup();
+    const frame = makeFrame(80, 24);
+    putText(frame, 4, 2, "Q");
+    setCursor(frame, 4, 2, CursorShape.Block);
+    drawn(renderer, frame);
+    backend.clear();
+
+    renderer.setCursorVisible(false);
+    renderer.draw(frame);
+    expect([backend.last.overlayRects, backend.last.overlayGlyphs]).toEqual([0, 0]);
+    expect(rect(backend.planes!.overlayRect, 0)).toBeUndefined();
+    expect(backend.uploads.map((u) => u.plane)).toEqual(["overlayRect", "overlayGlyph"]);
+    expect([...backend.last.repaint!].flatMap((dirty, row) => (dirty ? [row] : []))).toEqual([2]);
+
+    backend.clear();
+    renderer.setCursorVisible(true);
+    renderer.draw(frame);
+    expect([backend.last.overlayRects, backend.last.overlayGlyphs]).toEqual([1, 1]);
+    expect([...backend.last.repaint!].flatMap((dirty, row) => (dirty ? [row] : []))).toEqual([2]);
+
+    // Setting it to what it already is draws nothing.
+    backend.clear();
+    renderer.setCursorVisible(true);
+    renderer.draw(frame);
+    expect(backend.presents).toEqual([]);
+  });
+});
+
+describe("underlined runs", () => {
+  function underlined(cursor: boolean) {
+    const { renderer, backend } = setup();
+    const frame = makeFrame(80, 24);
+    putText(frame, 10, 3, "https://example.org");
+    if (cursor) setCursor(frame, 0, 0, CursorShape.HollowBlock);
+    drawn(renderer, frame);
+    backend.clear();
+    return { renderer, backend, frame };
+  }
+
+  it("are drawn at the underline position in the text colour of their first cell", () => {
+    const { renderer, backend, frame } = underlined(false);
+    renderer.setUnderlines([{ row: 3, startCol: 10, endCol: 28 }]);
+    renderer.draw(frame);
+
+    const m = renderer.metrics;
+    expect(backend.last.overlayRects).toBe(1);
+    expect(rect(backend.planes!.overlayRect, 0)).toEqual({
+      x: 10 * CW,
+      y: 3 * CH + m.underlineTop,
+      w: 19 * CW,
+      h: m.lineThickness,
+      color: frame.fg[3 * 80 + 10],
+    });
+    expect([...backend.last.repaint!].flatMap((dirty, row) => (dirty ? [row] : []))).toEqual([3]);
+    // The rows under them are not rebuilt.
+    expect(backend.uploads.map((u) => u.plane)).toEqual(["overlayRect", "overlayGlyph"]);
+  });
+
+  it("follow the cursor's rectangles", () => {
+    const { renderer, backend, frame } = underlined(true);
+    renderer.setUnderlines([
+      { row: 3, startCol: 10, endCol: 79 },
+      { row: 4, startCol: 0, endCol: 5 },
+    ]);
+    renderer.draw(frame);
+    expect(backend.last.overlayRects).toBe(6);
+    expect(rect(backend.planes!.overlayRect, 4)).toMatchObject({ x: 10 * CW, w: 70 * CW });
+    expect(rect(backend.planes!.overlayRect, 5)).toMatchObject({ x: 0, w: 6 * CW });
+  });
+
+  it("go away again, repainting the rows they were on", () => {
+    const { renderer, backend, frame } = underlined(false);
+    renderer.setUnderlines([{ row: 3, startCol: 10, endCol: 28 }]);
+    drawn(renderer, frame);
+    backend.clear();
+
+    renderer.setUnderlines([]);
+    renderer.draw(frame);
+    expect(backend.last.overlayRects).toBe(0);
+    expect([...backend.last.repaint!].flatMap((dirty, row) => (dirty ? [row] : []))).toEqual([3]);
+  });
+
+  it("are cut to the grid, and those outside it or beyond the limit are left out", () => {
+    const { renderer, backend, frame } = underlined(false);
+    renderer.setUnderlines([
+      { row: 5, startCol: -3, endCol: 200 },
+      { row: 99, startCol: 0, endCol: 5 },
+      { row: 6, startCol: 9, endCol: 4 },
+      ...Array.from({ length: 20 }, (_, i) => ({ row: 7 + (i % 10), startCol: 0, endCol: 1 })),
+    ]);
+    renderer.draw(frame);
+    expect(rect(backend.planes!.overlayRect, 0)).toMatchObject({ x: 0, w: 80 * CW });
+    expect(backend.last.overlayRects).toBe(backend.planes!.overlayRect.capacity);
+  });
+
+  it("are the renderer's own copy, not the caller's list", () => {
+    const { renderer, backend, frame } = underlined(false);
+    const ranges = [{ row: 3, startCol: 10, endCol: 28 }];
+    renderer.setUnderlines(ranges);
+    drawn(renderer, frame);
+    backend.clear();
+    ranges[0]!.row = 9;
+    renderer.draw(frame);
+    expect(backend.presents).toEqual([]);
+  });
 });
 
 describe("what reaches the tier", () => {

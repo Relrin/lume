@@ -19,7 +19,7 @@ import {
   type RenderFrame,
 } from "./frame.ts";
 import { clearSlots, GLYPH_FLAG_COLOR, writeGlyph, writeRect, type Planes } from "./layout.ts";
-import type { CellMetrics, TerminalTheme } from "./types.ts";
+import type { CellMetrics, TerminalTheme, UnderlineRange } from "./types.ts";
 
 /** The atlas slot of the glyph in a cell, or the empty slot. */
 function glyphSlot(frame: RenderFrame, index: number, atlas: GlyphAtlas): number {
@@ -132,20 +132,65 @@ export function buildRow(
   }
 }
 
-/** How many overlay records the cursor uses. */
+/** How many overlay records a frame uses. */
 export interface OverlayCounts {
   rects: number;
   glyphs: number;
 }
 
 /**
- * Rebuild the overlay planes: the cursor.
+ * Rebuild the overlay planes: the cursor, then the underlined runs.
+ *
+ * `cursorShown` is false while a blinking cursor is in the dark half of its period.
+ */
+export function buildOverlay(
+  frame: RenderFrame,
+  planes: Planes,
+  atlas: GlyphAtlas,
+  metrics: CellMetrics,
+  theme: TerminalTheme,
+  focused: boolean,
+  cursorShown: boolean,
+  underlines: readonly UnderlineRange[],
+): OverlayCounts {
+  const { overlayRect, overlayGlyph } = planes;
+  clearSlots(overlayRect, 0, overlayRect.capacity);
+  clearSlots(overlayGlyph, 0, overlayGlyph.capacity);
+
+  const counts = cursorShown
+    ? buildCursor(frame, planes, atlas, metrics, theme, focused)
+    : { rects: 0, glyphs: 0 };
+
+  // The records in use are drawn from the first slot on, so the runs follow the cursor's
+  // rectangles directly.
+  const { cellWidth, lineThickness, underlineTop, padding } = metrics;
+  for (const range of underlines) {
+    if (counts.rects >= overlayRect.capacity) break;
+    if (range.row < 0 || range.row >= frame.rows) continue;
+    const start = Math.max(0, range.startCol);
+    const end = Math.min(frame.cols - 1, range.endCol);
+    if (end < start) continue;
+    writeRect(
+      overlayRect,
+      counts.rects++,
+      padding + start * cellWidth,
+      padding + range.row * metrics.cellHeight + underlineTop,
+      (end - start + 1) * cellWidth,
+      lineThickness,
+      frame.fg[range.row * frame.cols + start]!,
+    );
+  }
+  return counts;
+}
+
+/**
+ * Write the cursor into the first overlay records.
  *
  * A block cursor covers its cell, so the glyph under it is drawn again on top in a
  * colour that shows against the cursor. Without keyboard focus every shape becomes a
  * hollow block, which is how a terminal shows that typing goes elsewhere.
  */
-export function buildCursor(
+function buildCursor(
   frame: RenderFrame,
   planes: Planes,
   atlas: GlyphAtlas,
@@ -154,8 +199,6 @@ export function buildCursor(
   focused: boolean,
 ): OverlayCounts {
   const { overlayRect, overlayGlyph } = planes;
-  clearSlots(overlayRect, 0, overlayRect.capacity);
-  clearSlots(overlayGlyph, 0, overlayGlyph.capacity);
 
   const cursor = frame.cursor;
   if (!cursor.visible || cursor.x >= frame.cols || cursor.y >= frame.rows) {

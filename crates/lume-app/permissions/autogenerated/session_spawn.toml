@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-session-spawn"
+description = "Enables the session_spawn command without any pre-configured scope."
+commands.allow = ["session_spawn"]
+
+[[permission]]
+identifier = "deny-session-spawn"
+description = "Denies the session_spawn command without any pre-configured scope."
+commands.deny = ["session_spawn"]

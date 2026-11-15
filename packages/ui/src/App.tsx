@@ -1,12 +1,38 @@
 import { useEffect, useState } from "react";
 
-import { type GpuCheck, type ProbeReport, runProbe } from "./probe.ts";
+import { type GpuCheck, type ProbeReport, runProbe, webviewInfo } from "./probe.ts";
+import { Terminal } from "./Terminal.tsx";
+
+/**
+ * What the window shows. Inside the application it is the terminal. Started only to be
+ * checked, or opened in a browser with no core behind it, it reports what the webview
+ * can do instead.
+ */
+type Showing = "terminal" | "report";
+
+export function App() {
+  const [showing, setShowing] = useState<Showing | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    void webviewInfo().then((info) => {
+      if (current) setShowing(info && !info.probe ? "terminal" : "report");
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  if (showing === "terminal") return <Terminal />;
+  if (showing === "report") return <WebviewReport />;
+  return null;
+}
 
 // The checks run once per page load, not once per mount: React's strict mode mounts twice
 // in development, and the probe must not report (and exit the app) twice.
 let probe: Promise<ProbeReport> | undefined;
 
-export function App() {
+function WebviewReport() {
   const [report, setReport] = useState<ProbeReport | null>(null);
 
   useEffect(() => {
@@ -23,9 +49,7 @@ export function App() {
   return (
     <main className="hello">
       <h1>Lume</h1>
-      <p className="lead">
-        This window reports what the webview on this machine can do. There is no terminal yet.
-      </p>
+      <p className="lead">This window reports what the webview on this machine can do.</p>
       {report ? <Report report={report} /> : <p>Checking the webview…</p>}
       {/* A development page; the built app does not contain it. */}
       {import.meta.env.DEV && (

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-carrier-send"
+description = "Enables the carrier_send command without any pre-configured scope."
+commands.allow = ["carrier_send"]
+
+[[permission]]
+identifier = "deny-carrier-send"
+description = "Denies the carrier_send command without any pre-configured scope."
+commands.deny = ["carrier_send"]

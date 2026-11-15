@@ -14,9 +14,27 @@ name = "lume-gui"
 path = "src/main.rs"
 
 [dependencies]
+arboard.workspace = true
+fontdb.workspace = true
+lume-proto.workspace = true
+lume-session.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+# On Linux the clipboard is reached through X11 by default; this adds the Wayland way.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+arboard = { workspace = true, features = ["wayland-data-control"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [build-dependencies]
 tauri-build.workspace = true

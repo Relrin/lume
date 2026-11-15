@@ -44,7 +44,16 @@ export const CLASSIFY_WHITE_TOLERANCE = 8;
 export const LINE_RECTS_PER_CELL = 2;
 
 /** Rectangles the cursor can need: a hollow block is four. */
-export const OVERLAY_RECT_CAPACITY = 4;
+export const CURSOR_RECTS_MAX = 4;
+
+/**
+ * Runs of cells that can be underlined at once on top of the grid, as the link under
+ * the pointer is. A link wraps over a few rows at most; runs beyond this are not drawn.
+ */
+export const UNDERLINE_RANGES_MAX = 8;
+
+/** Rectangles drawn on top of the grid: the cursor's, then one per underlined run. */
+export const OVERLAY_RECT_CAPACITY = CURSOR_RECTS_MAX + UNDERLINE_RANGES_MAX;
 
 /** Glyphs redrawn on top of a block cursor. */
 export const OVERLAY_GLYPH_CAPACITY = 1;

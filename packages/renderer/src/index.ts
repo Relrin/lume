@@ -26,4 +26,12 @@ export {
 export { RenderHost, type RenderHostOptions } from "./host.ts";
 export { FrameLoop, type FrameLoopEnvironment, type FrameView } from "./loop.ts";
 export { TierUnavailableError, type RendererOptions } from "./select.ts";
-export type { CellMetrics, CellRenderer, FontSpec, Size, TerminalTheme, Tier } from "./types.ts";
+export type {
+  CellMetrics,
+  CellRenderer,
+  FontSpec,
+  Size,
+  TerminalTheme,
+  Tier,
+  UnderlineRange,
+} from "./types.ts";

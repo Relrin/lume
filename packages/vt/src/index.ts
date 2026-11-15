@@ -52,6 +52,7 @@ export {
 export { encodeFocus, encodePaste, isPasteSafe } from "./input.ts";
 export {
   clearSelection,
+  extendSelection,
   hasSelection,
   hyperlinkAt,
   selectAll,

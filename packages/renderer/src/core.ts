@@ -14,7 +14,7 @@ import { GlyphAtlas } from "./atlas/atlas.ts";
 import { FULL_UPLOAD_DIRTY_RATIO } from "./constants.ts";
 import { collectDirtyRows, rowRuns } from "./dirty.ts";
 import { NO_SELECTION, type RenderFrame } from "./frame.ts";
-import { buildCursor, buildRow, type OverlayCounts } from "./instances.ts";
+import { buildOverlay, buildRow, type OverlayCounts } from "./instances.ts";
 import { createPlanes, type PlaneName, type Planes } from "./layout.ts";
 import { cellMetrics, fontKey, gridSize } from "./metrics.ts";
 import type {
@@ -25,6 +25,7 @@ import type {
   TerminalTheme,
   Tier,
   TierBackend,
+  UnderlineRange,
 } from "./types.ts";
 
 /** The planes with a fixed number of records per cell. */
@@ -36,6 +37,8 @@ export class GridRenderer implements CellRenderer {
   readonly #fonts: FontBackend;
   #theme: TerminalTheme;
   #focused = true;
+  #cursorVisible = true;
+  #underlines: readonly UnderlineRange[] = [];
   #disposed = false;
 
   /** The surface in CSS pixels and the device pixel ratio, as last set. */
@@ -60,9 +63,9 @@ export class GridRenderer implements CellRenderer {
 
   /** Everything must be rebuilt and redrawn on the next frame. */
   #force = true;
-  /** The cursor as last drawn, to notice when it changes, and the row it was on. */
-  #cursorKey = "";
-  #cursorRow = -1;
+  /** What was last drawn on top of the grid, to notice when it changes, and its rows. */
+  #overlayKey = "";
+  #overlayRows: number[] = [];
   #overlay: OverlayCounts = { rects: 0, glyphs: 0 };
 
   constructor(backend: TierBackend, fonts: FontBackend, theme: TerminalTheme) {
@@ -117,6 +120,15 @@ export class GridRenderer implements CellRenderer {
     this.#focused = focused;
   }
 
+  setCursorVisible(visible: boolean): void {
+    this.#cursorVisible = visible;
+  }
+
+  setUnderlines(ranges: readonly UnderlineRange[]): void {
+    // Copied: the caller's list is its own to change.
+    this.#underlines = ranges.map((range) => ({ ...range }));
+  }
+
   gridSize(): { cols: number; rows: number } {
     return gridSize(this.#surface, this.#ensureMetrics());
   }
@@ -148,7 +160,18 @@ export class GridRenderer implements CellRenderer {
     for (let row = 0; row < rows; row++) {
       if (this.#dirty[row] === 1) buildRow(frame, row, planes, atlas, metrics, this.#theme);
     }
-    let overlay = buildCursor(frame, planes, atlas, metrics, this.#theme, this.#focused);
+    const buildOverlays = () =>
+      buildOverlay(
+        frame,
+        planes,
+        atlas,
+        metrics,
+        this.#theme,
+        this.#focused,
+        this.#cursorVisible,
+        this.#underlines,
+      );
+    let overlay = buildOverlays();
     let rebuiltAll = this.#force;
     if (atlas.generation !== generation) {
       // The atlas filled up and was emptied while rows were being built, so records
@@ -161,34 +184,42 @@ export class GridRenderer implements CellRenderer {
       for (let row = 0; row < rows; row++) {
         buildRow(frame, row, planes, atlas, metrics, this.#theme);
       }
-      overlay = buildCursor(frame, planes, atlas, metrics, this.#theme, this.#focused);
+      overlay = buildOverlays();
     }
     this.#generation = atlas.generation;
 
     const cursor = frame.cursor;
-    const cursorKey = cursor.visible
-      ? `${cursor.x},${cursor.y},${cursor.shape},${cursor.wideTail},${cursor.color},${this.#focused}`
-      : "";
-    const cursorChanged = cursorKey !== this.#cursorKey;
-    if (count === 0 && !cursorChanged && !rebuiltAll) return;
+    const cursorShown = cursor.visible && this.#cursorVisible;
+    const overlayRows: number[] = [];
+    let overlayKey = "";
+    if (cursorShown) {
+      overlayKey = `${cursor.x},${cursor.y},${cursor.shape},${cursor.wideTail},${cursor.color},${this.#focused}`;
+      overlayRows.push(cursor.y);
+    }
+    for (const range of this.#underlines) {
+      overlayKey += `|${range.row},${range.startCol},${range.endCol}`;
+      overlayRows.push(range.row);
+    }
+    const overlayChanged = overlayKey !== this.#overlayKey;
+    if (count === 0 && !overlayChanged && !rebuiltAll) return;
 
     this.#upload(planes, frame.cols, count, rebuiltAll);
-    if (cursorChanged || rebuiltAll || count > 0) {
+    if (overlayChanged || rebuiltAll || count > 0) {
       this.#backend.upload("overlayRect", 0, planes.overlayRect.bytes.byteLength);
       this.#backend.upload("overlayGlyph", 0, planes.overlayGlyph.bytes.byteLength);
     }
 
-    // A surface that keeps its pixels must also redraw the row the cursor left and the
-    // row it is on now, whether or not their cells changed.
+    // A surface that keeps its pixels must also redraw the rows the overlay left and the
+    // rows it is on now, whether or not their cells changed.
     let repaint: Uint8Array | undefined;
     if (!rebuiltAll) {
       repaint = this.#repaint;
       repaint.set(this.#dirty);
-      if (this.#cursorRow >= 0 && this.#cursorRow < rows) repaint[this.#cursorRow] = 1;
-      if (cursor.visible && cursor.y < rows) repaint[cursor.y] = 1;
+      for (const row of this.#overlayRows) if (row >= 0 && row < rows) repaint[row] = 1;
+      for (const row of overlayRows) if (row >= 0 && row < rows) repaint[row] = 1;
     }
-    this.#cursorKey = cursorKey;
-    this.#cursorRow = cursor.visible ? cursor.y : -1;
+    this.#overlayKey = overlayKey;
+    this.#overlayRows = overlayRows;
     this.#overlay = overlay;
     this.#force = false;
 

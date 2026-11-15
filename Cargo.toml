@@ -21,8 +21,10 @@ lume-vt-sys = { path = "crates/lume-vt-sys" }
 
 # Third-party
 anyhow = "1"
+arboard = { version = "3.7", default-features = false }
 async-trait = "0.1"
 bindgen = "0.73"
+fontdb = "0.24"
 getrandom = "0.3"
 libc = "0.2"
 portable-pty = "0.9"
@@ -37,6 +39,7 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-threa
 toml = "1"
 tracing = "0.1"
 ureq = "3"
+url = "2"
 windows-sys = "0.61"
 
 [workspace.lints.rust]

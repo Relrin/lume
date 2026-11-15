@@ -1,6 +1,6 @@
 /**
- * Checks the hello window runs inside the real webview: which engine it is, which GPU
- * paths it offers, and whether libghostty-vt works there.
+ * Checks the window runs inside the real webview: which engine it is, which GPU paths it
+ * offers, and whether libghostty-vt works there.
  */
 
 import { Vt } from "@lume/vt";
@@ -115,17 +115,20 @@ async function checkVt(): Promise<VtCheck> {
   }
 }
 
-async function getWebviewInfo(): Promise<WebviewInfo | null> {
-  try {
-    return await invoke<WebviewInfo>("webview_info");
-  } catch {
-    // Not running inside Tauri (for example `vite` opened in a browser).
-    return null;
-  }
+let info: Promise<WebviewInfo | null> | undefined;
+
+/**
+ * What the core says about the webview, or `null` when there is no core: the page was
+ * opened in a browser. Asked once for each page.
+ */
+export function webviewInfo(): Promise<WebviewInfo | null> {
+  // Not running inside Tauri (for example `vite` opened in a browser) fails the call.
+  info ??= invoke<WebviewInfo>("webview_info").catch(() => null);
+  return info;
 }
 
 export async function runProbe(): Promise<ProbeReport> {
-  const [webview, webgpu, vt] = await Promise.all([getWebviewInfo(), checkWebGpu(), checkVt()]);
+  const [webview, webgpu, vt] = await Promise.all([webviewInfo(), checkWebGpu(), checkVt()]);
   const webgl2 = checkWebGl2();
   const canvas2d = checkCanvas2d();
   const report: ProbeReport = {

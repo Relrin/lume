@@ -21,6 +21,7 @@ import type {
   TerminalTheme,
   Tier,
   TierBackend,
+  UnderlineRange,
 } from "./types.ts";
 
 /** A tier cannot be used here. The next one in the order is tried. */
@@ -71,6 +72,8 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
   #size: Size = { width: 0, height: 0 };
   #dpr = 1;
   #focused = true;
+  #cursorVisible = true;
+  #underlines: readonly UnderlineRange[] = [];
 
   #inner: GridRenderer;
   #canvas: Canvas;
@@ -131,6 +134,16 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
     this.#inner.setFocused(focused);
   }
 
+  setCursorVisible(visible: boolean): void {
+    this.#cursorVisible = visible;
+    this.#inner.setCursorVisible(visible);
+  }
+
+  setUnderlines(ranges: readonly UnderlineRange[]): void {
+    this.#underlines = ranges.map((range) => ({ ...range }));
+    this.#inner.setUnderlines(this.#underlines);
+  }
+
   gridSize(): { cols: number; rows: number } {
     return this.#inner.gridSize();
   }
@@ -181,6 +194,8 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
       });
       const inner = new GridRenderer(backend, this.#fonts, this.#theme);
       inner.setFocused(this.#focused);
+      inner.setCursorVisible(this.#cursorVisible);
+      inner.setUnderlines(this.#underlines);
       if (this.#size.width > 0 && this.#size.height > 0) {
         this.#surface.setCssSize(canvas, this.#size);
         inner.resize(this.#size, this.#dpr);

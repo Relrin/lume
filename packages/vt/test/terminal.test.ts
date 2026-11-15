@@ -274,6 +274,40 @@ describe("terminal state", () => {
     expect(both).toBeLessThan(12000);
   });
 
+  it("forgets its scrollback when asked, keeps the screen, and goes on keeping history", () => {
+    const lines = (from: number, count: number) =>
+      Array.from({ length: count }, (_, i) => `line ${from + i}`).join("\r\n");
+    for (const options of [{ scrollbackMaxLines: 1000, scrollbackMaxBytes: 4 << 20 }, {}]) {
+      withTerminal(options, (term) => {
+        term.write(lines(0, 100));
+        expect(term.scrollbar().total).toBe(100);
+        const screen = term.screenText();
+        const revision = term.revision;
+
+        term.clearScrollback();
+        expect(term.scrollbar()).toEqual({ total: 24, offset: 0, length: 24 });
+        expect(term.viewportAtBottom()).toBe(true);
+        expect(term.screenText()).toEqual(screen);
+        expect(term.revision).not.toBe(revision);
+
+        // The limit was put back, so history builds up again.
+        term.write("\r\n" + lines(100, 50));
+        expect(term.scrollbar().total).toBe(74);
+        expect(term.rowText(23)).toBe("line 149");
+      });
+    }
+  });
+
+  it("forgets its scrollback while the viewport is showing it", () => {
+    withTerminal({ scrollbackMaxLines: 1000, scrollbackMaxBytes: 4 << 20 }, (term) => {
+      term.write(Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\r\n"));
+      term.scrollToTop();
+      term.clearScrollback();
+      expect(term.scrollbar()).toEqual({ total: 24, offset: 0, length: 24 });
+      expect(term.viewportAtBottom()).toBe(true);
+    });
+  });
+
   it("refuses use after free", () => {
     const term = vt.createTerminal(10, 2);
     term.free();
