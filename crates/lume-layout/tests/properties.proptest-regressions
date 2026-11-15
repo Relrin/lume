@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3426cd7adf386158ff17a0ca6ff30019909b379eb276857010f6b5e1125020c6 # shrinks to ops = [Split { pane: 0, dir: 0, ratio: 0, view: false }, Split { pane: 0, dir: 0, ratio: 50000, view: false }, Split { pane: 3, dir: 0, ratio: 50000, view: false }]
+cc 76d3943a0bfbe81bc096fdb79731987e09406fd463157c1fe334f61569abdaaf # shrinks to ops = [WindowNew, Split { pane: 0, dir: 0, ratio: 50000, view: false }, Split { pane: 0, dir: 0, ratio: 50000, view: false }]
+cc 6bd6897a43511fe4027debff5bef16b06d45d8d08658f9dce4e73ca0a2a0925b # shrinks to ops = [Split { pane: 2, dir: 2, ratio: 50000, view: false }, Split { pane: 0, dir: 2, ratio: 50000, view: false }]

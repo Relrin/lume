@@ -1,0 +1,109 @@
+# Lume configuration.
+#
+# Every setting is optional. The lines below show each setting at its default, commented
+# out: remove the `#` and change the value to set one. The file is read again whenever
+# it is saved, and a mistake in it is reported without anything being changed.
+#
+# A workspace can override any of this in `workspaces/<name>.toml` beside this file.
+
+[app]
+# Keep the application running when its last window closes.
+# keep-running = false
+# The workspace opened at start: a name, or "last" for the one open when Lume closed.
+# start-workspace = "last"
+
+[window]
+# Who draws the title bar: "custom" (Lume, as part of its top bar) or "system". Left
+# out, Lume draws it on Windows and macOS and the window system does on Linux.
+#   title-bar = "custom"
+# Close a window when its last tab closes.
+# close-with-last-tab = true
+# Whether closing a window asks first: "never" or "always".
+# confirm-close = "never"
+# Open windows where they were when the workspace was last open.
+# restore-bounds = true
+
+[workspace]
+# What happens to a workspace's programs when another workspace is opened: "close".
+# on-switch = "close"
+
+[appearance]
+# The theme, whatever the system's colour scheme is. Left out, the theme follows the
+# system and is one of the two below.
+#   theme = "lume-dark"
+# theme-light = "lume-light"
+# theme-dark = "lume-dark"
+# The radius of a pane's corners and the space between panes, in pixels. Left out, the
+# theme decides.
+#   card-radius = 12
+#   gap = 8
+# When a pane shows its header: "always", "auto" (only beside other panes) or "never".
+# pane-header = "always"
+# How much a pane without the focus is dimmed, from 0 to 1. Left out, the theme decides.
+#   dim-unfocused = 0.15
+# A picture behind the panes, how much it is blurred (pixels) and how opaque it is.
+#   background-image = "C:/Users/me/Pictures/wallpaper.jpg"
+#   background-blur = 0
+#   background-opacity = 1.0
+#
+# Any design token can be set over the theme's, in a table named after its group:
+#
+#   [appearance.tokens.color]
+#   accent = "#ff8800"
+
+[font]
+# The font of terminals, and the fonts tried after it.
+# family = "JetBrains Mono"
+# fallback = ["Cascadia Mono", "Consolas", "Menlo", "DejaVu Sans Mono", "monospace"]
+# The size in pixels, and the height of a line as a multiple of it.
+# size = 14.0
+# line-height = 1.2
+# The weights of ordinary and bold text.
+# weight = 400
+# bold-weight = 700
+# The font and size of everything that is not a terminal.
+# ui-family = "system-ui"
+# ui-size = 13.0
+
+[terminal]
+# The program a new terminal runs, and its arguments. Empty, it is your own shell.
+# shell = ""
+# shell-args = []
+# How many lines that have scrolled off the top are kept.
+# scrollback-lines = 10000
+# The cursor: "block", "bar" or "underline", and whether it blinks.
+# cursor-style = "block"
+# cursor-blink = true
+# The space between a pane's edge and its text, in pixels. Left out, the theme decides.
+#   padding = 4
+# What happens to a pane when its program ends: "clean" (close if it ended without an
+# error), "always" or "never".
+# close-on-exit = "clean"
+# Whether closing a pane asks first: "never" or "always".
+# confirm-close = "never"
+
+[layout]
+# Where the list of tabs is: "top", "left" or "right".
+# tab-placement = "top"
+# Where a new pane's program starts: "workspace" (the workspace's folder) or "home".
+# new-pane-cwd = "workspace"
+
+[renderer]
+# What terminals are drawn with: "auto", "webgpu", "webgl2" or "canvas2d".
+# tier = "auto"
+
+[keybindings]
+# A key is a chord such as "ctrl+shift+t", or several chords separated by spaces. Its
+# value is a command's id, or a table that also says where the key holds:
+#
+#   "ctrl+shift+t" = "lume.tab.new"
+#   "ctrl+a c" = "lume.tab.new"
+#   "ctrl+shift+f" = { command = "lume.search.open", when = "terminal" }
+#
+# "unbound" takes a default away:
+#
+#   "ctrl+shift+k" = "unbound"
+#
+# `lume keymap` prints every key that is bound and where its binding comes from.
+# Bindings for one platform go in [keybindings.windows], [keybindings.macos] or
+# [keybindings.linux].

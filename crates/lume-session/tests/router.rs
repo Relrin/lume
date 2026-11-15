@@ -164,6 +164,8 @@ async fn caps_describe_the_in_process_host() {
             vt_replay: false
         }
     );
+    // A backend that does not arrange panes itself has no layout of its own to offer.
+    assert!(router.get(&Router::local_id()).unwrap().layout().is_none());
     local.shutdown().await;
 }
 

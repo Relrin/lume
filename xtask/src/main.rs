@@ -6,6 +6,7 @@
 mod bench;
 mod dist;
 mod fetch;
+mod generate;
 mod paths;
 mod run;
 mod smoke;
@@ -14,6 +15,7 @@ mod tools;
 mod vt;
 
 use anyhow::{Result, bail};
+use lume_config::generate::GeneratedKind;
 
 /// The variable that makes the UI's build include the test harness page.
 const UI_FOR_TESTING: &str = "LUME_HARNESS";
@@ -39,6 +41,9 @@ Commands:
                Build for release and pack the application and the console command
                into a portable archive in target/dist; with --installers, make the
                platform's installers too (the bundler may fetch tools to do so)
+  schema       Write the JSON Schemas of the settings and of themes into schemas/
+  tokens       Write the design tokens' TypeScript module and stylesheet into
+               packages/tokens/src/
   lint         Run format, clippy, licence and JS lint checks
   dev          Run the app with hot reload
 ";
@@ -65,6 +70,8 @@ fn main() -> Result<()> {
         ["dist", "--installers"] => dist::run(true),
         ["bench"] => bench("reference"),
         ["bench", "--profile", profile] => bench(profile),
+        ["schema"] => generate::write(GeneratedKind::Schema, "schema"),
+        ["tokens"] => generate::write(GeneratedKind::Tokens, "tokens"),
         ["lint"] => lint(),
         ["dev"] => dev(),
         [] | ["help"] | ["--help"] | ["-h"] => {

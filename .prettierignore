@@ -9,3 +9,7 @@ crates/lume-app/gen/
 tests/corpus/
 tests/fonts/
 crates/lume-proto/tests/vectors/
+schemas/
+packages/tokens/src/generated.ts
+packages/tokens/src/defaults.css
+tests/layout/vectors/

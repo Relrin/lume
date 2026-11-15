@@ -1,6 +1,6 @@
 [package]
 name = "lume-cli"
-description = "The lume console command: launcher, ctl, plugin and host subcommands."
+description = "The lume console command: launcher, ctl, and the commands on the configuration."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,7 @@ publish.workspace = true
 build = "build.rs"
 
 [dependencies]
+lume-config.workspace = true
 lume-ipc.workspace = true
 lume-proto.workspace = true
 serde_json.workspace = true

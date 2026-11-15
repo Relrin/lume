@@ -1,0 +1,311 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A theme: design tokens, written as a table for each group.",
+  "properties": {
+    "background": {
+      "additionalProperties": false,
+      "properties": {
+        "blur": {
+          "description": "How much that picture is blurred.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "image": {
+          "description": "A picture behind the panes.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "color": {
+      "additionalProperties": false,
+      "properties": {
+        "accent": {
+          "description": "What is selected or active.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "accent-text": {
+          "description": "Text on the accent colour.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "border": {
+          "description": "Lines between and around things.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "border-focus": {
+          "description": "The border of the pane that has the focus.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "card": {
+          "description": "A pane's background around its terminal.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "card-header": {
+          "description": "A pane's header.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "control": {
+          "description": "A button or field at rest.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "control-active": {
+          "description": "A button or field being pressed.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "control-hover": {
+          "description": "A button or field under the pointer.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "drop-preview": {
+          "description": "Where something being dragged would land.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "overlay": {
+          "description": "What dims the window behind a dialog.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "popover": {
+          "description": "Menus, the command palette and other things that float.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "status": {
+          "additionalProperties": false,
+          "properties": {
+            "danger": {
+              "description": "Something that went wrong.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            },
+            "info": {
+              "description": "Something worth knowing.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            },
+            "success": {
+              "description": "Something that went well.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            },
+            "warning": {
+              "description": "Something to look at.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "surface": {
+          "description": "The window behind the panes.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "text": {
+          "description": "Text.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "text-inverse": {
+          "description": "Text on a strong colour.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "text-muted": {
+          "description": "Text that matters less.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "inherits": {
+      "description": "The theme this one starts from. Left out, the built-in theme of its scheme.",
+      "type": "string"
+    },
+    "name": {
+      "description": "What the theme is called.",
+      "type": "string"
+    },
+    "opacity": {
+      "additionalProperties": false,
+      "properties": {
+        "background-image": {
+          "description": "How opaque the picture behind the panes is.",
+          "type": "number"
+        },
+        "dim": {
+          "description": "How much a pane without the focus is dimmed.",
+          "type": "number"
+        },
+        "disabled": {
+          "description": "How opaque something that cannot be used is.",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "radius": {
+      "additionalProperties": false,
+      "properties": {
+        "card": {
+          "description": "The radius of a pane's corners.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "control": {
+          "description": "The radius of a button's or field's corners.",
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "scheme": {
+      "description": "Whether the theme is a light or a dark one.",
+      "enum": [
+        "light",
+        "dark"
+      ],
+      "type": "string"
+    },
+    "shadow": {
+      "additionalProperties": false,
+      "properties": {
+        "card": {
+          "description": "The shadow of a pane.",
+          "type": "string"
+        },
+        "card-focus": {
+          "description": "The shadow of the pane that has the focus.",
+          "type": "string"
+        },
+        "floating": {
+          "description": "The shadow of a floating pane.",
+          "type": "string"
+        },
+        "popover": {
+          "description": "The shadow of a menu or dialog.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "size": {
+      "additionalProperties": false,
+      "properties": {
+        "border": {
+          "description": "The width of a border.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "focus-ring": {
+          "description": "The width of the ring around what has the focus.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "header": {
+          "description": "The height of a pane's header.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "tab": {
+          "description": "The height of a tab.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "topbar": {
+          "description": "The height of the bar at the top of a window.",
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "space": {
+      "additionalProperties": false,
+      "properties": {
+        "gap": {
+          "description": "The space between panes and around them.",
+          "minimum": 0,
+          "type": "number"
+        },
+        "padding": {
+          "description": "The space between a pane's edge and its text.",
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "terminal": {
+      "additionalProperties": false,
+      "properties": {
+        "bg": {
+          "description": "The terminal's background.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "cursor": {
+          "description": "The cursor.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "cursor-text": {
+          "description": "The character under a block cursor.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "fg": {
+          "description": "Terminal text.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "palette": {
+          "description": "The sixteen ANSI colours: eight normal, then eight bright.",
+          "items": {
+            "description": "One colour.",
+            "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "type": "array"
+        },
+        "search-active": {
+          "description": "The background of the match a search is at.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "search-match": {
+          "description": "The background of text a search found.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "selection": {
+          "description": "The background of selected text.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        },
+        "selection-text": {
+          "description": "Selected text.",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "title": "Lume theme",
+  "type": "object"
+}

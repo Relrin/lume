@@ -1,0 +1,757 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The settings of config.toml.",
+  "properties": {
+    "app": {
+      "default": {
+        "keep-running": false,
+        "start-workspace": "last"
+      },
+      "description": "The application as a whole.",
+      "properties": {
+        "keep-running": {
+          "default": false,
+          "description": "Keep the application running when its last window closes.",
+          "type": "boolean"
+        },
+        "start-workspace": {
+          "default": "last",
+          "description": "The workspace opened at start: a workspace's name, or `\"last\"` for the one\nthat was open when the application closed.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "appearance": {
+      "default": {
+        "pane-header": "always",
+        "theme-dark": "lume-dark",
+        "theme-light": "lume-light",
+        "tokens": {}
+      },
+      "description": "How things look: the theme and what overrides it.",
+      "properties": {
+        "background-blur": {
+          "description": "How much the picture is blurred, in pixels. Left out, the theme's.",
+          "format": "double",
+          "maximum": 200.0,
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "background-image": {
+          "description": "A picture shown behind the panes: the path of an image file.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "background-opacity": {
+          "description": "How opaque the picture is, from 0 to 1. Left out, the theme's.",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "card-radius": {
+          "description": "The radius of a pane's corners, in pixels. Left out, the theme's.",
+          "format": "double",
+          "maximum": 64.0,
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "dim-unfocused": {
+          "description": "How much a pane without the focus is dimmed, from 0 (not at all) to 1. Left\nout, the theme's.",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "gap": {
+          "description": "The space between panes and around them, in pixels. Left out, the theme's.",
+          "format": "double",
+          "maximum": 64.0,
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "pane-header": {
+          "default": "always",
+          "description": "When a pane shows its header.",
+          "oneOf": [
+            {
+              "const": "always",
+              "description": "Always.",
+              "type": "string"
+            },
+            {
+              "const": "auto",
+              "description": "Only in a tab with more than one pane.",
+              "type": "string"
+            },
+            {
+              "const": "never",
+              "description": "Never.",
+              "type": "string"
+            }
+          ]
+        },
+        "theme": {
+          "description": "The theme to use whatever the system's colour scheme is. Left out, the theme\nfollows the system: `theme-light` or `theme-dark`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "theme-dark": {
+          "default": "lume-dark",
+          "description": "The theme used when the system's colour scheme is dark.",
+          "type": "string"
+        },
+        "theme-light": {
+          "default": "lume-light",
+          "description": "The theme used when the system's colour scheme is light.",
+          "type": "string"
+        },
+        "tokens": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Design tokens set over the theme's, written as a theme file writes them: a\ntable for each group, such as `[appearance.tokens.color]` with `accent = \"#ff8800\"`.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "font": {
+      "default": {
+        "bold-weight": 700,
+        "fallback": [
+          "Cascadia Mono",
+          "Consolas",
+          "Menlo",
+          "DejaVu Sans Mono",
+          "monospace"
+        ],
+        "family": "JetBrains Mono",
+        "line-height": 1.2,
+        "size": 14.0,
+        "ui-family": "system-ui",
+        "ui-size": 13.0,
+        "weight": 400
+      },
+      "description": "The fonts.",
+      "properties": {
+        "bold-weight": {
+          "default": 700,
+          "description": "The weight of bold text.",
+          "format": "uint16",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "fallback": {
+          "default": [
+            "Cascadia Mono",
+            "Consolas",
+            "Menlo",
+            "DejaVu Sans Mono",
+            "monospace"
+          ],
+          "description": "The fonts tried, in order, for a character the first has no glyph for, or when\nit is not installed.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "family": {
+          "default": "JetBrains Mono",
+          "description": "The font terminals are drawn in.",
+          "type": "string"
+        },
+        "line-height": {
+          "default": 1.2,
+          "description": "The height of a line of terminal text, as a multiple of the font's size.",
+          "format": "double",
+          "maximum": 3.0,
+          "minimum": 0.8,
+          "type": "number"
+        },
+        "size": {
+          "default": 14.0,
+          "description": "The size of terminal text, in pixels.",
+          "format": "double",
+          "maximum": 72.0,
+          "minimum": 6.0,
+          "type": "number"
+        },
+        "ui-family": {
+          "default": "system-ui",
+          "description": "The font of everything that is not a terminal: tabs, headers, menus.",
+          "type": "string"
+        },
+        "ui-size": {
+          "default": 13.0,
+          "description": "The size of that text, in pixels.",
+          "format": "double",
+          "maximum": 32.0,
+          "minimum": 8.0,
+          "type": "number"
+        },
+        "weight": {
+          "default": 400,
+          "description": "The weight of ordinary text, as fonts number weights: 400 is regular.",
+          "format": "uint16",
+          "maximum": 1000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "keybindings": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "description": "A command's id, or `\"unbound\"`.",
+            "type": "string"
+          },
+          {
+            "description": "A command with a context or arguments.",
+            "properties": {
+              "args": {
+                "description": "What the command is given."
+              },
+              "command": {
+                "description": "The id of the command the key runs.",
+                "type": "string"
+              },
+              "when": {
+                "description": "Where the key does so: context names joined by `&&`, each of which may be\nnegated with `!`. Left out, everywhere.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "command"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Several, for a key that does different things in different contexts.",
+            "items": {
+              "description": "One binding of a key, written out.",
+              "properties": {
+                "args": {
+                  "description": "What the command is given."
+                },
+                "command": {
+                  "description": "The id of the command the key runs.",
+                  "type": "string"
+                },
+                "when": {
+                  "description": "Where the key does so: context names joined by `&&`, each of which may be\nnegated with `!`. Left out, everywhere.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "command"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        ],
+        "description": "What a key is bound to."
+      },
+      "default": {},
+      "description": "Keys and the commands they run. A key is a chord such as `\"ctrl+shift+t\"`, or a\nsequence of chords separated by spaces; its value is a command's id, a table\nwith `command`, `when` and `args`, or `\"unbound\"` to take a default away.",
+      "properties": {
+        "linux": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "description": "A command's id, or `\"unbound\"`.",
+                "type": "string"
+              },
+              {
+                "description": "A command with a context or arguments.",
+                "properties": {
+                  "args": {
+                    "description": "What the command is given."
+                  },
+                  "command": {
+                    "description": "The id of the command the key runs.",
+                    "type": "string"
+                  },
+                  "when": {
+                    "description": "Where the key does so: context names joined by `&&`, each of which may be\nnegated with `!`. Left out, everywhere.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "command"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "Several, for a key that does different things in different contexts.",
+                "items": {
+                  "description": "One binding of a key, written out.",
+                  "properties": {
+                    "args": {
+                      "description": "What the command is given."
+                    },
+                    "command": {
+                      "description": "The id of the command the key runs.",
+                      "type": "string"
+                    },
+                    "when": {
+                      "description": "Where the key does so: context names joined by `&&`, each of which may be\nnegated with `!`. Left out, everywhere.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "command"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "What a key is bound to."
+          },
+          "description": "Bindings that hold on Linux only.",
+          "type": "object"
+        },
+        "macos": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "description": "A command's id, or `\"unbound\"`.",
+                "type": "string"
+              },
+              {
+                "description": "A command with a context or arguments.",
+                "properties": {
+                  "args": {
+                    "description": "What the command is given."
+                  },
+                  "command": {
+                    "description": "The id of the command the key runs.",
+                    "type": "string"
+                  },
+                  "when": {
+                    "description": "Where the key does so: context names joined by `&&`, each of which may be\nnegated with `!`. Left out, everywhere.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "command"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "Several, for a key that does different things in different contexts.",
+                "items": {
+                  "description": "One binding of a key, written out.",
+                  "properties": {
+                    "args": {
+                      "description": "What the command is given."
+                    },
+                    "command": {
+                      "description": "The id of the command the key runs.",
+                      "type": "string"
+                    },
+                    "when": {
+                      "description": "Where the key does so: context names joined by `&&`, each of which may be\nnegated with `!`. Left out, everywhere.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "command"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "What a key is bound to."
+          },
+          "description": "Bindings that hold on macOS only.",
+          "type": "object"
+        },
+        "windows": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "description": "A command's id, or `\"unbound\"`.",
+                "type": "string"
+              },
+              {
+                "description": "A command with a context or arguments.",
+                "properties": {
+                  "args": {
+                    "description": "What the command is given."
+                  },
+                  "command": {
+                    "description": "The id of the command the key runs.",
+                    "type": "string"
+                  },
+                  "when": {
+                    "description": "Where the key does so: context names joined by `&&`, each of which may be\nnegated with `!`. Left out, everywhere.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "command"
+                ],
+                "type": "object"
+              },
+              {
+                "description": "Several, for a key that does different things in different contexts.",
+                "items": {
+                  "description": "One binding of a key, written out.",
+                  "properties": {
+                    "args": {
+                      "description": "What the command is given."
+                    },
+                    "command": {
+                      "description": "The id of the command the key runs.",
+                      "type": "string"
+                    },
+                    "when": {
+                      "description": "Where the key does so: context names joined by `&&`, each of which may be\nnegated with `!`. Left out, everywhere.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "command"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "What a key is bound to."
+          },
+          "description": "Bindings that hold on Windows only.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "layout": {
+      "default": {
+        "new-pane-cwd": "workspace",
+        "tab-placement": "top"
+      },
+      "description": "Where things are placed in a window.",
+      "properties": {
+        "new-pane-cwd": {
+          "default": "workspace",
+          "description": "The directory a new pane's program starts in.",
+          "oneOf": [
+            {
+              "const": "workspace",
+              "description": "The workspace's folder, or the home directory if it has none.",
+              "type": "string"
+            },
+            {
+              "const": "home",
+              "description": "The home directory.",
+              "type": "string"
+            }
+          ]
+        },
+        "tab-placement": {
+          "default": "top",
+          "description": "Where the list of tabs is.",
+          "oneOf": [
+            {
+              "const": "top",
+              "description": "In the bar at the top of the window.",
+              "type": "string"
+            },
+            {
+              "const": "left",
+              "description": "In a panel on the left.",
+              "type": "string"
+            },
+            {
+              "const": "right",
+              "description": "In a panel on the right.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "plugins": {
+      "additionalProperties": true,
+      "default": {},
+      "description": "Settings of plugins, by plugin id.",
+      "type": "object"
+    },
+    "renderer": {
+      "default": {
+        "tier": "auto"
+      },
+      "description": "How terminals are drawn.",
+      "properties": {
+        "tier": {
+          "default": "auto",
+          "description": "What terminals are drawn with. Anything but `auto` is for finding out why\ndrawing goes wrong on a machine.",
+          "oneOf": [
+            {
+              "enum": [
+                "webgpu",
+                "webgl2",
+                "canvas2d"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "auto",
+              "description": "The best the machine offers.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "terminal": {
+      "default": {
+        "close-on-exit": "clean",
+        "confirm-close": "never",
+        "cursor-blink": true,
+        "cursor-style": "block",
+        "scrollback-lines": 10000,
+        "shell": "",
+        "shell-args": []
+      },
+      "description": "The terminals.",
+      "properties": {
+        "close-on-exit": {
+          "default": "clean",
+          "description": "What happens to a pane when its program ends.",
+          "oneOf": [
+            {
+              "const": "clean",
+              "description": "The pane closes if the program ended without an error, and stays otherwise.",
+              "type": "string"
+            },
+            {
+              "const": "always",
+              "description": "The pane closes however the program ended.",
+              "type": "string"
+            },
+            {
+              "const": "never",
+              "description": "The pane stays, and says how the program ended.",
+              "type": "string"
+            }
+          ]
+        },
+        "confirm-close": {
+          "default": "never",
+          "description": "Whether closing a pane asks first.",
+          "oneOf": [
+            {
+              "const": "never",
+              "description": "Never ask.",
+              "type": "string"
+            },
+            {
+              "const": "always",
+              "description": "Always ask.",
+              "type": "string"
+            }
+          ]
+        },
+        "cursor-blink": {
+          "default": true,
+          "description": "Whether the cursor blinks, until a program says otherwise.",
+          "type": "boolean"
+        },
+        "cursor-style": {
+          "default": "block",
+          "description": "The cursor's shape, until a program chooses another.",
+          "oneOf": [
+            {
+              "const": "block",
+              "description": "A filled cell.",
+              "type": "string"
+            },
+            {
+              "const": "bar",
+              "description": "A line before the character.",
+              "type": "string"
+            },
+            {
+              "const": "underline",
+              "description": "A line under the character.",
+              "type": "string"
+            }
+          ]
+        },
+        "padding": {
+          "description": "The space between a pane's edge and its text, in pixels. Left out, the theme's.",
+          "format": "double",
+          "maximum": 64.0,
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "scrollback-lines": {
+          "default": 10000,
+          "description": "How many lines that have scrolled off the top are kept.",
+          "format": "uint32",
+          "maximum": 200000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shell": {
+          "default": "",
+          "description": "The program a new terminal runs. Empty, it is the user's own shell.",
+          "type": "string"
+        },
+        "shell-args": {
+          "default": [],
+          "description": "The arguments that program is started with.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "window": {
+      "default": {
+        "close-with-last-tab": true,
+        "confirm-close": "never",
+        "restore-bounds": true
+      },
+      "description": "The application's windows.",
+      "properties": {
+        "close-with-last-tab": {
+          "default": true,
+          "description": "Close a window when its last tab closes.",
+          "type": "boolean"
+        },
+        "confirm-close": {
+          "default": "never",
+          "description": "Whether closing a window with running programs asks first.",
+          "oneOf": [
+            {
+              "const": "never",
+              "description": "Never ask.",
+              "type": "string"
+            },
+            {
+              "const": "always",
+              "description": "Always ask.",
+              "type": "string"
+            }
+          ]
+        },
+        "restore-bounds": {
+          "default": true,
+          "description": "Open windows where they were when the workspace was last open.",
+          "type": "boolean"
+        },
+        "title-bar": {
+          "anyOf": [
+            {
+              "description": "Who draws a window's title bar.",
+              "oneOf": [
+                {
+                  "const": "custom",
+                  "description": "The application draws it, as part of the top bar.",
+                  "type": "string"
+                },
+                {
+                  "const": "system",
+                  "description": "The window system draws it.",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who draws the title bar. Left out, the application draws it on Windows and\nmacOS, and the window system does on Linux."
+        }
+      },
+      "type": "object"
+    },
+    "workspace": {
+      "default": {
+        "on-switch": "close"
+      },
+      "description": "Workspaces.",
+      "properties": {
+        "on-switch": {
+          "default": "close",
+          "description": "What happens to a workspace's programs when another workspace is opened.",
+          "oneOf": [
+            {
+              "const": "close",
+              "description": "They are ended.",
+              "type": "string"
+            },
+            {
+              "const": "keep",
+              "description": "They keep running. Not available yet: programs are ended as with `close`.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "title": "Lume configuration",
+  "type": "object"
+}

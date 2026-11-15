@@ -5,11 +5,16 @@
 //! them, waits for text or for an exit, reads the screen, and so on. Each command is one
 //! request on the application's control endpoint, which only the user who runs the
 //! application can reach.
+//!
+//! `lume config`, `lume keymap` and `lume theme` read and write the configuration's
+//! files and need no application: they check a file, list the keys that are bound, and
+//! make a theme from another terminal's colour scheme.
 
 mod args;
 mod client;
 mod ctl;
 mod launch;
+mod offline;
 
 use std::process::ExitCode;
 
@@ -34,6 +39,11 @@ fn main() -> ExitCode {
         Command::Version => {
             println!("lume {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
+        }
+        Command::Offline(command) => {
+            let dirs = lume_config::Dirs::resolve();
+            let (mut out, mut err) = (std::io::stdout().lock(), std::io::stderr().lock());
+            return ExitCode::from(offline::run(command, dirs.as_ref(), &mut out, &mut err));
         }
         Command::Start { endpoint } => (Some(endpoint), None),
         Command::Ctl(ctl) => (None, Some(ctl)),

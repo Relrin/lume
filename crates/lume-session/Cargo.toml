@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 lume-host.workspace = true
+lume-layout.workspace = true
 lume-proto.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

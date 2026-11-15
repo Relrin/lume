@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use lume_config::Platform;
 use lume_proto::app::{AppRequestBody, OpenSpec};
 use lume_proto::{Launcher, SessionId, TermSize};
 
@@ -9,6 +10,9 @@ use lume_proto::{Launcher, SessionId, TermSize};
 pub const USAGE: &str = "\
 usage: lume [--endpoint <name>]
        lume ctl [--endpoint <name>] [--timeout <seconds>] <command>
+       lume config schema | path | check [<file>]
+       lume keymap [--platform windows|macos|linux] [--workspace <name>] [--json]
+       lume theme import <file> [--name <name>]
        lume --help | --version
 
 Without a command, lume starts the application, or brings its window to the front if
@@ -36,8 +40,22 @@ Commands of lume ctl, which drive the running application:
 A command that names no session means the one the window shows. Each prints one JSON
 object. --timeout is how long a wait may last, in seconds (10 if not given).
 
-Exit status: 0 done, 1 refused or failed, 2 arguments not understood, 3 a wait ran
-out of time, 4 the application is not running.";
+Commands on the configuration, which need no application running:
+  config schema                  print the JSON Schema of config.toml, for an editor
+  config path                    print where config.toml is
+  config check [<file>]          say what is wrong in the configuration, or in a file:
+                                 unknown keys, values that are not allowed, bindings
+                                 and themes that cannot be read
+  keymap                         print every key that is bound, the command it runs,
+                                 where it holds and where the binding comes from;
+                                 --platform lists another platform's keys, --workspace
+                                 lays a workspace's file over yours, --json prints JSON
+  theme import <file>            make a theme from a Ghostty theme file and put it in
+                                 the themes folder; --name names it (the file's name
+                                 if not given)
+
+Exit status: 0 done, 1 refused or failed (for config check: something is wrong), 2
+arguments not understood, 3 a wait ran out of time, 4 the application is not running.";
 
 /// How long a wait may last when `--timeout` is not given.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -53,6 +71,29 @@ pub enum Command {
     },
     /// Send one request to the running application.
     Ctl(Ctl),
+    /// Read or write the configuration. The application need not be running.
+    Offline(Offline),
+}
+
+/// Something done with the configuration's files alone.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Offline {
+    /// Print the JSON Schema of `config.toml`.
+    Schema,
+    /// Print where `config.toml` is.
+    Path,
+    /// Say what is wrong in the configuration, or in one file.
+    Check { file: Option<String> },
+    /// Print the keys that are bound.
+    Keymap {
+        /// The platform whose keys to print. This one's if not given.
+        platform: Option<Platform>,
+        /// The workspace whose file is laid over the user's.
+        workspace: Option<String>,
+        json: bool,
+    },
+    /// Make a theme from another terminal's colour scheme.
+    ThemeImport { file: String, name: Option<String> },
 }
 
 /// One request to the running application.
@@ -299,6 +340,71 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
     })
 }
 
+fn config(words: &mut Words) -> Result<Offline, String> {
+    let command = match words.next().as_deref() {
+        Some("schema") => Offline::Schema,
+        Some("path") => Offline::Path,
+        Some("check") => Offline::Check { file: words.next() },
+        Some(other) => {
+            return Err(format!(
+                "{other} is not something lume config does (schema, path or check)"
+            ));
+        }
+        None => return Err("lume config needs a command: schema, path or check".to_owned()),
+    };
+    nothing_more(words, "lume config")?;
+    Ok(command)
+}
+
+fn keymap(words: &mut Words) -> Result<Offline, String> {
+    let mut platform = None;
+    let mut workspace = None;
+    let mut json = false;
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--platform" => {
+                let name = value(words, "--platform", "windows, macos or linux")?;
+                platform = Some(Platform::parse(&name).ok_or_else(|| {
+                    format!("{name} is not a platform (windows, macos or linux)")
+                })?);
+            }
+            "--workspace" => workspace = Some(value(words, "--workspace", "a name")?),
+            "--json" => json = true,
+            other => return Err(format!("lume keymap does not take {other}")),
+        }
+    }
+    Ok(Offline::Keymap {
+        platform,
+        workspace,
+        json,
+    })
+}
+
+fn theme(words: &mut Words) -> Result<Offline, String> {
+    match words.next().as_deref() {
+        Some("import") => {}
+        Some(other) => {
+            return Err(format!("{other} is not something lume theme does (import)"));
+        }
+        None => return Err("lume theme needs a command: import".to_owned()),
+    }
+    let mut file = None;
+    let mut name = None;
+    while let Some(word) = words.next() {
+        match word.as_str() {
+            "--name" => name = Some(value(words, "--name", "a name")?),
+            _ if file.is_none() => file = Some(word),
+            other => {
+                return Err(format!(
+                    "lume theme import takes one file, and {other} is a second"
+                ));
+            }
+        }
+    }
+    let file = file.ok_or("lume theme import needs the file to import")?;
+    Ok(Offline::ThemeImport { file, name })
+}
+
 /// Reads the arguments that follow the program's name.
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String> {
     let mut words: Words = args.into_iter().collect::<Vec<_>>().into_iter().peekable();
@@ -314,6 +420,9 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
                 ctl.endpoint = ctl.endpoint.or(endpoint);
                 return Ok(Command::Ctl(ctl));
             }
+            "config" => return config(&mut words).map(Command::Offline),
+            "keymap" => return keymap(&mut words).map(Command::Offline),
+            "theme" => return theme(&mut words).map(Command::Offline),
             other => return Err(format!("{other} is not something lume knows")),
         }
     }
@@ -529,5 +638,82 @@ mod tests {
         assert!(parsed(&["ctl", "resize", "wide"]).is_err());
         assert!(parsed(&["ctl", "kill"]).is_err());
         assert!(parsed(&["ctl", "kill", "zz"]).is_err());
+    }
+
+    fn offline(args: &[&str]) -> Offline {
+        match parsed(args) {
+            Ok(Command::Offline(offline)) => offline,
+            other => panic!("not a command on the configuration: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn config_prints_the_schema_or_the_path_or_checks_a_file() {
+        assert_eq!(offline(&["config", "schema"]), Offline::Schema);
+        assert_eq!(offline(&["config", "path"]), Offline::Path);
+        assert_eq!(offline(&["config", "check"]), Offline::Check { file: None });
+        assert_eq!(
+            offline(&["config", "check", "my.toml"]),
+            Offline::Check {
+                file: Some("my.toml".to_owned())
+            }
+        );
+        assert!(parsed(&["config"]).is_err());
+        assert!(parsed(&["config", "edit"]).is_err());
+        assert!(parsed(&["config", "schema", "now"]).is_err());
+        assert!(parsed(&["config", "check", "a.toml", "b.toml"]).is_err());
+    }
+
+    #[test]
+    fn keymap_takes_a_platform_a_workspace_and_a_format() {
+        assert_eq!(
+            offline(&["keymap"]),
+            Offline::Keymap {
+                platform: None,
+                workspace: None,
+                json: false
+            }
+        );
+        assert_eq!(
+            offline(&[
+                "keymap",
+                "--json",
+                "--platform",
+                "macos",
+                "--workspace",
+                "work"
+            ]),
+            Offline::Keymap {
+                platform: Some(Platform::Macos),
+                workspace: Some("work".to_owned()),
+                json: true
+            }
+        );
+        assert!(parsed(&["keymap", "--platform"]).is_err());
+        assert!(parsed(&["keymap", "--platform", "beos"]).is_err());
+        assert!(parsed(&["keymap", "all"]).is_err());
+    }
+
+    #[test]
+    fn theme_import_takes_a_file_and_perhaps_a_name() {
+        assert_eq!(
+            offline(&["theme", "import", "tokyo-night"]),
+            Offline::ThemeImport {
+                file: "tokyo-night".to_owned(),
+                name: None
+            }
+        );
+        assert_eq!(
+            offline(&["theme", "import", "--name", "Tokyo Night", "scheme.conf"]),
+            Offline::ThemeImport {
+                file: "scheme.conf".to_owned(),
+                name: Some("Tokyo Night".to_owned())
+            }
+        );
+        assert!(parsed(&["theme"]).is_err());
+        assert!(parsed(&["theme", "export"]).is_err());
+        assert!(parsed(&["theme", "import"]).is_err());
+        assert!(parsed(&["theme", "import", "a", "b"]).is_err());
+        assert!(parsed(&["theme", "import", "a", "--name"]).is_err());
     }
 }

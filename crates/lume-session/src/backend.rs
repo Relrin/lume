@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use lume_layout::LayoutAuthority;
 use lume_proto::{
     BackendCaps, CellPx, ClientFacts, ExitStatus, SessionEvent, SessionId, SessionInfo, SpawnSpec,
     TermSize,
@@ -29,6 +30,14 @@ pub trait SessionBackend: Send + Sync {
     async fn attach(&self, id: SessionId, facts: ClientFacts) -> Result<Attachment>;
 
     async fn kill(&self, id: SessionId) -> Result<()>;
+
+    /// Who decides how this backend's sessions are arranged in panes, for a backend
+    /// that decides it itself (its [`caps`](Self::caps) say `server_layout`). Any other
+    /// backend has nothing to offer here: its sessions are arranged by the
+    /// application's own layout.
+    fn layout(&self) -> Option<Arc<dyn LayoutAuthority>> {
+        None
+    }
 }
 
 /// An open attachment: everything that connects a view to its session.

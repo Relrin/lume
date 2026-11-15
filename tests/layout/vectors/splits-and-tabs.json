@@ -1,0 +1,1123 @@
+{
+  "end": {
+    "focused_window": "w1",
+    "id": "00000000000000a1",
+    "name": "test",
+    "next_id": 11,
+    "scratch": null,
+    "windows": [
+      {
+        "bounds": null,
+        "centre": {
+          "active": null,
+          "tabs": []
+        },
+        "dock": {
+          "bottom": {
+            "collapsed": false,
+            "panels": [],
+            "size": 240
+          },
+          "left": {
+            "collapsed": false,
+            "panels": [],
+            "size": 240
+          },
+          "right": {
+            "collapsed": false,
+            "panels": [],
+            "size": 240
+          },
+          "top": {
+            "collapsed": false,
+            "panels": [
+              {
+                "content": {
+                  "slot": "topbar.left",
+                  "type": "slot"
+                },
+                "id": "lume.topbar.left"
+              },
+              {
+                "content": {
+                  "slot": "topbar.center",
+                  "type": "slot"
+                },
+                "id": "lume.topbar.center"
+              },
+              {
+                "content": {
+                  "slot": "topbar.right",
+                  "type": "slot"
+                },
+                "id": "lume.topbar.right"
+              }
+            ],
+            "size": 240
+          }
+        },
+        "floating": [],
+        "focus": null,
+        "history": [],
+        "id": "w1"
+      }
+    ]
+  },
+  "name": "splits-and-tabs",
+  "start": {
+    "focused_window": null,
+    "id": "00000000000000a1",
+    "name": "test",
+    "next_id": 1,
+    "scratch": null,
+    "windows": []
+  },
+  "steps": [
+    {
+      "changes": [
+        {
+          "type": "window_opened",
+          "window": {
+            "bounds": null,
+            "centre": {
+              "active": "t3",
+              "tabs": [
+                {
+                  "id": "t3",
+                  "last_focus": "p2",
+                  "root": {
+                    "content": {
+                      "backend": null,
+                      "cwd": null,
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": null,
+                      "type": "terminal"
+                    },
+                    "id": "p2",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  "title": null,
+                  "zoomed": null
+                }
+              ]
+            },
+            "dock": {
+              "bottom": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "left": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "right": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "top": {
+                "collapsed": false,
+                "panels": [
+                  {
+                    "content": {
+                      "slot": "topbar.left",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.left"
+                  },
+                  {
+                    "content": {
+                      "slot": "topbar.center",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.center"
+                  },
+                  {
+                    "content": {
+                      "slot": "topbar.right",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.right"
+                  }
+                ],
+                "size": 240
+              }
+            },
+            "floating": [],
+            "focus": "p2",
+            "history": [
+              "p2"
+            ],
+            "id": "w1"
+          }
+        },
+        {
+          "type": "window_focused",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p2",
+        "tab": "t3",
+        "window": "w1"
+      },
+      "intent": {
+        "bounds": null,
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "type": "window_new"
+      }
+    },
+    {
+      "changes": [
+        {
+          "root": {
+            "axis": "row",
+            "children": [
+              {
+                "content": {
+                  "backend": null,
+                  "cwd": null,
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": null,
+                  "type": "terminal"
+                },
+                "id": "p2",
+                "title": null,
+                "type": "pane"
+              },
+              {
+                "content": {
+                  "backend": "local",
+                  "cwd": "/work",
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": "0000000000000002",
+                  "type": "terminal"
+                },
+                "id": "p4",
+                "title": null,
+                "type": "pane"
+              }
+            ],
+            "id": "s5",
+            "ratios": [
+              500000,
+              500000
+            ],
+            "type": "split"
+          },
+          "tab": "t3",
+          "type": "tab_tree",
+          "zoomed": null
+        },
+        {
+          "pane": "p4",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p4",
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "dir": "right",
+        "pane": "p2",
+        "ratio": 500000,
+        "type": "split"
+      }
+    },
+    {
+      "changes": [
+        {
+          "root": {
+            "axis": "row",
+            "children": [
+              {
+                "content": {
+                  "backend": null,
+                  "cwd": null,
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": null,
+                  "type": "terminal"
+                },
+                "id": "p2",
+                "title": null,
+                "type": "pane"
+              },
+              {
+                "axis": "column",
+                "children": [
+                  {
+                    "content": {
+                      "backend": "local",
+                      "cwd": "/work",
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": "0000000000000002",
+                      "type": "terminal"
+                    },
+                    "id": "p4",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  {
+                    "content": {
+                      "backend": "local",
+                      "cwd": "/work",
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": "0000000000000003",
+                      "type": "terminal"
+                    },
+                    "id": "p6",
+                    "title": null,
+                    "type": "pane"
+                  }
+                ],
+                "id": "s7",
+                "ratios": [
+                  700000,
+                  300000
+                ],
+                "type": "split"
+              }
+            ],
+            "id": "s5",
+            "ratios": [
+              500000,
+              500000
+            ],
+            "type": "split"
+          },
+          "tab": "t3",
+          "type": "tab_tree",
+          "zoomed": null
+        },
+        {
+          "pane": "p6",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p6",
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "dir": "down",
+        "pane": "p4",
+        "ratio": 300000,
+        "type": "split"
+      }
+    },
+    {
+      "changes": [
+        {
+          "ratios": [
+            350000,
+            650000
+          ],
+          "split": "s5",
+          "type": "ratios"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "ratios": [
+          350000,
+          650000
+        ],
+        "split": "s5",
+        "type": "resize"
+      }
+    },
+    {
+      "changes": [
+        {
+          "pane": "p2",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "dir": "left",
+        "type": "focus_dir",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "root": {
+            "axis": "row",
+            "children": [
+              {
+                "content": {
+                  "backend": null,
+                  "cwd": null,
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": null,
+                  "type": "terminal"
+                },
+                "id": "p2",
+                "title": null,
+                "type": "pane"
+              },
+              {
+                "axis": "column",
+                "children": [
+                  {
+                    "content": {
+                      "backend": "local",
+                      "cwd": "/work",
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": "0000000000000002",
+                      "type": "terminal"
+                    },
+                    "id": "p4",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  {
+                    "content": {
+                      "backend": "local",
+                      "cwd": "/work",
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": "0000000000000003",
+                      "type": "terminal"
+                    },
+                    "id": "p6",
+                    "title": null,
+                    "type": "pane"
+                  }
+                ],
+                "id": "s7",
+                "ratios": [
+                  700000,
+                  300000
+                ],
+                "type": "split"
+              }
+            ],
+            "id": "s5",
+            "ratios": [
+              350000,
+              650000
+            ],
+            "type": "split"
+          },
+          "tab": "t3",
+          "type": "tab_tree",
+          "zoomed": "p2"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "on": true,
+        "pane": "p2",
+        "type": "zoom"
+      }
+    },
+    {
+      "changes": [
+        {
+          "root": {
+            "axis": "row",
+            "children": [
+              {
+                "content": {
+                  "backend": null,
+                  "cwd": null,
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": null,
+                  "type": "terminal"
+                },
+                "id": "p2",
+                "title": null,
+                "type": "pane"
+              },
+              {
+                "axis": "column",
+                "children": [
+                  {
+                    "content": {
+                      "backend": "local",
+                      "cwd": "/work",
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": "0000000000000002",
+                      "type": "terminal"
+                    },
+                    "id": "p4",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  {
+                    "content": {
+                      "backend": "local",
+                      "cwd": "/work",
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": "0000000000000003",
+                      "type": "terminal"
+                    },
+                    "id": "p6",
+                    "title": null,
+                    "type": "pane"
+                  }
+                ],
+                "id": "s7",
+                "ratios": [
+                  700000,
+                  300000
+                ],
+                "type": "split"
+              }
+            ],
+            "id": "s5",
+            "ratios": [
+              350000,
+              650000
+            ],
+            "type": "split"
+          },
+          "tab": "t3",
+          "type": "tab_tree",
+          "zoomed": null
+        },
+        {
+          "pane": "p6",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "target": {
+          "pane": "p6",
+          "type": "pane"
+        },
+        "type": "focus"
+      }
+    },
+    {
+      "changes": [
+        {
+          "root": {
+            "axis": "row",
+            "children": [
+              {
+                "content": {
+                  "backend": "local",
+                  "cwd": "/work",
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": "0000000000000003",
+                  "type": "terminal"
+                },
+                "id": "p6",
+                "title": null,
+                "type": "pane"
+              },
+              {
+                "axis": "column",
+                "children": [
+                  {
+                    "content": {
+                      "backend": "local",
+                      "cwd": "/work",
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": "0000000000000002",
+                      "type": "terminal"
+                    },
+                    "id": "p4",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  {
+                    "content": {
+                      "backend": null,
+                      "cwd": null,
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": null,
+                      "type": "terminal"
+                    },
+                    "id": "p2",
+                    "title": null,
+                    "type": "pane"
+                  }
+                ],
+                "id": "s7",
+                "ratios": [
+                  700000,
+                  300000
+                ],
+                "type": "split"
+              }
+            ],
+            "id": "s5",
+            "ratios": [
+              350000,
+              650000
+            ],
+            "type": "split"
+          },
+          "tab": "t3",
+          "type": "tab_tree",
+          "zoomed": null
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "a": "p2",
+        "b": "p6",
+        "type": "swap"
+      }
+    },
+    {
+      "changes": [
+        {
+          "root": {
+            "axis": "row",
+            "children": [
+              {
+                "content": {
+                  "backend": "local",
+                  "cwd": "/work",
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": "0000000000000003",
+                  "type": "terminal"
+                },
+                "id": "p6",
+                "title": null,
+                "type": "pane"
+              },
+              {
+                "content": {
+                  "backend": "local",
+                  "cwd": "/work",
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": "0000000000000002",
+                  "type": "terminal"
+                },
+                "id": "p4",
+                "title": null,
+                "type": "pane"
+              },
+              {
+                "content": {
+                  "backend": null,
+                  "cwd": null,
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": null,
+                  "type": "terminal"
+                },
+                "id": "p2",
+                "title": null,
+                "type": "pane"
+              }
+            ],
+            "id": "s5",
+            "ratios": [
+              350000,
+              325000,
+              325000
+            ],
+            "type": "split"
+          },
+          "tab": "t3",
+          "type": "tab_tree",
+          "zoomed": null
+        },
+        {
+          "pane": "p4",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "pane": "p4",
+        "to": {
+          "edge": "left",
+          "pane": "p2",
+          "type": "beside"
+        },
+        "type": "move"
+      }
+    },
+    {
+      "changes": [
+        {
+          "pane": {
+            "content": {
+              "backend": "local",
+              "cwd": "/work",
+              "env": [],
+              "launcher": null,
+              "profile": null,
+              "session": "0000000000000002",
+              "type": "terminal"
+            },
+            "id": "p4",
+            "title": "logs"
+          },
+          "type": "pane"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "pane": "p4",
+        "title": "logs",
+        "type": "pane_rename"
+      }
+    },
+    {
+      "changes": [
+        {
+          "index": 0,
+          "tab": {
+            "id": "t10",
+            "last_focus": "p9",
+            "root": {
+              "content": {
+                "plugin": "lume.notes",
+                "state": {
+                  "page": 3
+                },
+                "type": "plugin_view",
+                "view": "page"
+              },
+              "id": "p9",
+              "title": null,
+              "type": "pane"
+            },
+            "title": null,
+            "zoomed": null
+          },
+          "type": "tab_added",
+          "window": "w1"
+        },
+        {
+          "active": "t3",
+          "order": [
+            "t10",
+            "t3"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p9",
+        "tab": "t10",
+        "window": null
+      },
+      "intent": {
+        "activate": false,
+        "content": {
+          "plugin": "lume.notes",
+          "state": {
+            "page": 3
+          },
+          "type": "plugin_view",
+          "view": "page"
+        },
+        "index": 0,
+        "type": "tab_new",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "tab": "t10",
+          "title": "notes",
+          "type": "tab_title"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "tab": "t10",
+        "title": "notes",
+        "type": "tab_rename"
+      }
+    },
+    {
+      "changes": [
+        {
+          "active": "t10",
+          "order": [
+            "t10",
+            "t3"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p9",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "target": {
+          "type": "next",
+          "window": "w1"
+        },
+        "type": "tab_activate"
+      }
+    },
+    {
+      "changes": [
+        {
+          "active": "t10",
+          "order": [
+            "t3",
+            "t10"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "index": 1,
+        "tab": "t10",
+        "type": "tab_move"
+      }
+    },
+    {
+      "changes": [
+        {
+          "root": {
+            "axis": "row",
+            "children": [
+              {
+                "content": {
+                  "backend": "local",
+                  "cwd": "/work",
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": "0000000000000002",
+                  "type": "terminal"
+                },
+                "id": "p4",
+                "title": "logs",
+                "type": "pane"
+              },
+              {
+                "content": {
+                  "backend": null,
+                  "cwd": null,
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": null,
+                  "type": "terminal"
+                },
+                "id": "p2",
+                "title": null,
+                "type": "pane"
+              }
+            ],
+            "id": "s5",
+            "ratios": [
+              500000,
+              500000
+            ],
+            "type": "split"
+          },
+          "tab": "t3",
+          "type": "tab_tree",
+          "zoomed": null
+        },
+        {
+          "content": {
+            "backend": "local",
+            "cwd": "/work",
+            "env": [],
+            "launcher": null,
+            "profile": null,
+            "session": "0000000000000003",
+            "type": "terminal"
+          },
+          "pane": "p6",
+          "type": "pane_closed"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "pane": "p6",
+        "type": "close"
+      }
+    },
+    {
+      "intent": {
+        "pane": "p6",
+        "type": "close"
+      },
+      "refused": "not_found"
+    },
+    {
+      "intent": {
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "dir": "up",
+        "pane": "p2",
+        "ratio": 10,
+        "type": "split"
+      },
+      "refused": "invalid_intent"
+    },
+    {
+      "changes": [
+        {
+          "tab": "t10",
+          "type": "tab_removed"
+        },
+        {
+          "active": "t3",
+          "order": [
+            "t3"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p4",
+          "type": "focus",
+          "window": "w1"
+        },
+        {
+          "content": {
+            "plugin": "lume.notes",
+            "state": {
+              "page": 3
+            },
+            "type": "plugin_view",
+            "view": "page"
+          },
+          "pane": "p9",
+          "type": "pane_closed"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "tab": "t10",
+        "type": "tab_close"
+      }
+    },
+    {
+      "changes": [
+        {
+          "root": {
+            "content": {
+              "backend": null,
+              "cwd": null,
+              "env": [],
+              "launcher": null,
+              "profile": null,
+              "session": null,
+              "type": "terminal"
+            },
+            "id": "p2",
+            "title": null,
+            "type": "pane"
+          },
+          "tab": "t3",
+          "type": "tab_tree",
+          "zoomed": null
+        },
+        {
+          "pane": "p2",
+          "type": "focus",
+          "window": "w1"
+        },
+        {
+          "content": {
+            "backend": "local",
+            "cwd": "/work",
+            "env": [],
+            "launcher": null,
+            "profile": null,
+            "session": "0000000000000002",
+            "type": "terminal"
+          },
+          "pane": "p4",
+          "type": "pane_closed"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "pane": "p4",
+        "type": "close"
+      }
+    },
+    {
+      "changes": [
+        {
+          "tab": "t3",
+          "type": "tab_removed"
+        },
+        {
+          "active": null,
+          "order": [],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": null,
+          "type": "focus",
+          "window": "w1"
+        },
+        {
+          "content": {
+            "backend": null,
+            "cwd": null,
+            "env": [],
+            "launcher": null,
+            "profile": null,
+            "session": null,
+            "type": "terminal"
+          },
+          "pane": "p2",
+          "type": "pane_closed"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "pane": "p2",
+        "type": "close"
+      }
+    }
+  ]
+}

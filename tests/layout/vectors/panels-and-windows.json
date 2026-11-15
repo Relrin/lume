@@ -1,0 +1,546 @@
+{
+  "end": {
+    "focused_window": null,
+    "id": "00000000000000a1",
+    "name": "test",
+    "next_id": 7,
+    "scratch": null,
+    "windows": []
+  },
+  "name": "panels-and-windows",
+  "start": {
+    "focused_window": null,
+    "id": "00000000000000a1",
+    "name": "test",
+    "next_id": 1,
+    "scratch": null,
+    "windows": []
+  },
+  "steps": [
+    {
+      "changes": [
+        {
+          "type": "window_opened",
+          "window": {
+            "bounds": null,
+            "centre": {
+              "active": "t3",
+              "tabs": [
+                {
+                  "id": "t3",
+                  "last_focus": "p2",
+                  "root": {
+                    "content": {
+                      "backend": null,
+                      "cwd": null,
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": null,
+                      "type": "terminal"
+                    },
+                    "id": "p2",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  "title": null,
+                  "zoomed": null
+                }
+              ]
+            },
+            "dock": {
+              "bottom": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "left": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "right": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "top": {
+                "collapsed": false,
+                "panels": [
+                  {
+                    "content": {
+                      "slot": "topbar.left",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.left"
+                  },
+                  {
+                    "content": {
+                      "slot": "topbar.center",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.center"
+                  },
+                  {
+                    "content": {
+                      "slot": "topbar.right",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.right"
+                  }
+                ],
+                "size": 240
+              }
+            },
+            "floating": [],
+            "focus": "p2",
+            "history": [
+              "p2"
+            ],
+            "id": "w1"
+          }
+        },
+        {
+          "type": "window_focused",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p2",
+        "tab": "t3",
+        "window": "w1"
+      },
+      "intent": {
+        "bounds": null,
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "type": "window_new"
+      }
+    },
+    {
+      "changes": [
+        {
+          "area": "left",
+          "dock": {
+            "collapsed": false,
+            "panels": [
+              {
+                "content": {
+                  "type": "tab_list"
+                },
+                "id": "lume.tabs"
+              }
+            ],
+            "size": 240
+          },
+          "type": "dock",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "area": "left",
+        "content": {
+          "type": "tab_list"
+        },
+        "index": 0,
+        "panel": "lume.tabs",
+        "type": "panel_set",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "area": "left",
+          "size": 320,
+          "type": "dock_size",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "area": "left",
+        "size": 320,
+        "type": "panel_resize",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "area": "left",
+          "dock": {
+            "collapsed": false,
+            "panels": [],
+            "size": 320
+          },
+          "type": "dock",
+          "window": "w1"
+        },
+        {
+          "area": "right",
+          "dock": {
+            "collapsed": false,
+            "panels": [
+              {
+                "content": {
+                  "type": "tab_list"
+                },
+                "id": "lume.tabs"
+              }
+            ],
+            "size": 240
+          },
+          "type": "dock",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "area": "right",
+        "index": 0,
+        "panel": "lume.tabs",
+        "type": "panel_move",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "area": "right",
+          "dock": {
+            "collapsed": true,
+            "panels": [
+              {
+                "content": {
+                  "type": "tab_list"
+                },
+                "id": "lume.tabs"
+              }
+            ],
+            "size": 240
+          },
+          "type": "dock",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "area": "right",
+        "on": null,
+        "type": "panel_toggle",
+        "window": "w1"
+      }
+    },
+    {
+      "intent": {
+        "area": "top",
+        "index": 0,
+        "panel": "lume.tabs",
+        "type": "panel_move",
+        "window": "w1"
+      },
+      "refused": "invalid_intent"
+    },
+    {
+      "changes": [
+        {
+          "bounds": {
+            "fullscreen": false,
+            "height": 800,
+            "maximised": false,
+            "width": 1280,
+            "x": 120,
+            "y": 80
+          },
+          "type": "window_bounds",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "bounds": {
+          "fullscreen": false,
+          "height": 800,
+          "maximised": false,
+          "width": 1280,
+          "x": 120,
+          "y": 80
+        },
+        "type": "window_bounds",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "type": "window_opened",
+          "window": {
+            "bounds": {
+              "fullscreen": false,
+              "height": 800,
+              "maximised": true,
+              "width": 1280,
+              "x": 400,
+              "y": 80
+            },
+            "centre": {
+              "active": "t6",
+              "tabs": [
+                {
+                  "id": "t6",
+                  "last_focus": "p5",
+                  "root": {
+                    "content": {
+                      "backend": null,
+                      "cwd": null,
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": null,
+                      "type": "terminal"
+                    },
+                    "id": "p5",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  "title": null,
+                  "zoomed": null
+                }
+              ]
+            },
+            "dock": {
+              "bottom": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "left": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "right": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "top": {
+                "collapsed": false,
+                "panels": [
+                  {
+                    "content": {
+                      "slot": "topbar.left",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.left"
+                  },
+                  {
+                    "content": {
+                      "slot": "topbar.center",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.center"
+                  },
+                  {
+                    "content": {
+                      "slot": "topbar.right",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.right"
+                  }
+                ],
+                "size": 240
+              }
+            },
+            "floating": [],
+            "focus": "p5",
+            "history": [
+              "p5"
+            ],
+            "id": "w4"
+          }
+        },
+        {
+          "type": "window_focused",
+          "window": "w4"
+        }
+      ],
+      "created": {
+        "pane": "p5",
+        "tab": "t6",
+        "window": "w4"
+      },
+      "intent": {
+        "bounds": {
+          "fullscreen": false,
+          "height": 800,
+          "maximised": true,
+          "width": 1280,
+          "x": 400,
+          "y": 80
+        },
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "type": "window_new"
+      }
+    },
+    {
+      "changes": [
+        {
+          "type": "window_focused",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "type": "window_focus",
+        "window": "w1"
+      }
+    },
+    {
+      "intent": {
+        "a": "p2",
+        "b": "p5",
+        "type": "swap"
+      },
+      "refused": "unsupported"
+    },
+    {
+      "changes": [
+        {
+          "area": "right",
+          "dock": {
+            "collapsed": true,
+            "panels": [],
+            "size": 240
+          },
+          "type": "dock",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "area": null,
+        "content": {
+          "type": "tab_list"
+        },
+        "index": 0,
+        "panel": "lume.tabs",
+        "type": "panel_set",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "type": "window_closed",
+          "window": "w1"
+        },
+        {
+          "type": "window_focused",
+          "window": "w4"
+        },
+        {
+          "content": {
+            "backend": null,
+            "cwd": null,
+            "env": [],
+            "launcher": null,
+            "profile": null,
+            "session": null,
+            "type": "terminal"
+          },
+          "pane": "p2",
+          "type": "pane_closed"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "type": "window_close",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "type": "window_closed",
+          "window": "w4"
+        },
+        {
+          "type": "window_focused",
+          "window": null
+        },
+        {
+          "content": {
+            "backend": null,
+            "cwd": null,
+            "env": [],
+            "launcher": null,
+            "profile": null,
+            "session": null,
+            "type": "terminal"
+          },
+          "pane": "p5",
+          "type": "pane_closed"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "type": "window_close",
+        "window": "w4"
+      }
+    }
+  ]
+}
