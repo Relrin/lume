@@ -30,6 +30,7 @@ pub mod keymap;
 pub mod keys;
 pub mod layers;
 pub mod paths;
+pub mod profiles;
 pub mod schema;
 pub mod settings;
 pub mod source;
@@ -49,7 +50,10 @@ pub use keymap::{Binding, Keymap, Removed, default_bindings, resolve_keymap};
 pub use keys::{Chord, KeySequence, WhenTerm, parse_when, write_when};
 pub use layers::{LayerInput, LayerKind, Layered, resolve_layers};
 pub use paths::{Dirs, Platform, check_workspace_name};
-pub use schema::{Config, WorkspaceSettings, config_schema, default_config_text};
+pub use profiles::{
+    LauncherKind, Profile, ProfileEntry, ProfileOrigin, ShellIntegration, merge_profiles,
+};
+pub use schema::{CloseOnExit, Config, WorkspaceSettings, config_schema, default_config_text};
 pub use source::{Problem, ProblemKind, Source};
 pub use store::{ConfigStore, Resolved, check_setting};
 pub use theme::{

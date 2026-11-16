@@ -21,6 +21,7 @@ import type {
   KeyBinding,
   Notice,
   Scheme,
+  ProfileList,
   ShellEntry,
   ThemeEntry,
   TitleBar,
@@ -251,6 +252,44 @@ const SHELLS: readonly ShellEntry[] = [
   { name: "Command Prompt", program: "C:\\Windows\\System32\\cmd.exe" },
 ];
 
+/** The ways a fixture's machine has to start a terminal. */
+const PROFILES: ProfileList = {
+  revision: 1,
+  default: null,
+  notes: [],
+  looked: true,
+  profiles: [
+    {
+      id: "auto.pwsh",
+      name: "PowerShell",
+      launcher: {
+        type: "shell",
+        program: "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        args: [],
+        login: false,
+      },
+      hidden: false,
+      origin: "generated",
+    },
+    {
+      id: "auto.wsl.Ubuntu",
+      name: "Ubuntu",
+      launcher: { type: "wsl", distro: "Ubuntu" },
+      hidden: false,
+      origin: "generated",
+      detail: "WSL 2 · running",
+    },
+    {
+      id: "auto.ssh.dev-staging",
+      name: "dev-staging",
+      launcher: { type: "ssh", host: "dev-staging" },
+      hidden: false,
+      origin: "generated",
+      detail: "from ~/.ssh/config",
+    },
+  ],
+};
+
 /** The fixed-width fonts a fixture's machine has. */
 const FONTS: readonly string[] = ["Cascadia Mono", "Consolas", "JetBrains Mono"];
 
@@ -452,6 +491,8 @@ export class FakeCore implements Carrier {
         return answer(THEMES);
       case "shells_list":
         return answer(SHELLS);
+      case "profiles_list":
+        return answer(PROFILES);
       case "font_families":
         return answer(FONTS);
       // No picture is behind the panes: no bytes.

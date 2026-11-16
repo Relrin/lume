@@ -42,6 +42,7 @@ mod log;
 mod marks;
 mod opener;
 mod panes;
+mod profiles;
 mod registry;
 mod services;
 mod state;
@@ -368,6 +369,7 @@ fn main() -> ExitCode {
                 let Some(services) = following.upgrade().filter(|_| changed) else {
                     return;
                 };
+                services.panes.profiles.config_changed();
                 let now = services.config.title_bar_custom();
                 if custom.swap(now, Ordering::Relaxed) != now {
                     services.shell.set_title_bar(now);
@@ -377,6 +379,13 @@ fn main() -> ExitCode {
                     .runtime()
                     .spawn(async move { panes.sync_tab_panel().await });
             });
+            // What is installed on the machine is looked for off to the side, and the
+            // pages are told what was found.
+            let telling = Arc::clone(&serving);
+            services
+                .panes
+                .profiles
+                .start(serving.runtime(), move |notice| telling.broadcast(&notice));
             services.panes.run(shell);
             if let Some((exec, cwd)) = exec {
                 let launching = Arc::clone(&services);
@@ -432,6 +441,7 @@ fn main() -> ExitCode {
             commands_config::config_schema,
             commands_config::themes_list,
             commands_config::shells_list,
+            commands_config::profiles_list,
             commands_config::background_image,
             commands_window::window_drag,
             commands_window::window_control,

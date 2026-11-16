@@ -93,6 +93,14 @@ pub async fn shells_list() -> Result<Vec<ShellEntry>, CommandError> {
         .collect())
 }
 
+/// The profiles in effect: the ways there are to start a terminal, the id of the one
+/// new terminals use, and what there is to say about ones that are not there. A page
+/// reads this once and is told of every change from then on.
+#[tauri::command]
+pub fn profiles_list(services: Shared<'_>) -> Value {
+    services.panes.profiles.view()
+}
+
 /// The picture shown behind the panes, as the bytes of its file; no bytes when the
 /// settings name no picture. The page says nothing of which file: it is the one the
 /// settings name and no other.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { promptsFor, readArg, type ArgPrompt } from "../src/palette/args.ts";
+import { profileChoices, workspaceChoices } from "../src/palette/choices.ts";
 import {
   createPaletteStore,
   readRecents,
@@ -53,6 +54,58 @@ describe("what the palette asks for before running a command", () => {
       },
     });
     expect(prompt).toMatchObject({ name: "name", choices: "workspaces", placeholder: "name" });
+  });
+
+  it("offers the profiles for an argument that says so, and nothing for a list it does not know", () => {
+    const prompts = promptsFor({
+      args: {
+        type: "object",
+        properties: {
+          profile: { type: "string", "x-lume-choices": "profiles" },
+          other: { type: "string", "x-lume-choices": "planets" },
+        },
+        required: ["profile", "other"],
+      },
+    });
+    expect(prompts.map((prompt) => prompt.choices)).toEqual(["profiles", null]);
+  });
+
+  it("lists a profile under the kind of place it is, and gives the command its id", () => {
+    const shell = { type: "shell", program: "pwsh", args: [], login: false } as const;
+    const choices = profileChoices({
+      profiles: [
+        { id: "mine", name: "Mine", launcher: shell, hidden: false, origin: "user" },
+        {
+          id: "auto.cmd",
+          name: "Command Prompt",
+          launcher: shell,
+          hidden: true,
+          origin: "generated",
+        },
+        {
+          id: "auto.wsl.Ubuntu",
+          name: "Ubuntu",
+          launcher: { type: "wsl", distro: "Ubuntu" },
+          hidden: false,
+          origin: "generated",
+        },
+        {
+          id: "auto.ssh.work",
+          name: "work",
+          launcher: { type: "ssh", host: "work" },
+          hidden: false,
+          origin: "generated",
+        },
+      ],
+    });
+    expect(choices).toEqual([
+      { value: "mine", label: "Local: Mine" },
+      { value: "auto.wsl.Ubuntu", label: "WSL: Ubuntu" },
+      { value: "auto.ssh.work", label: "SSH: work" },
+    ]);
+    expect(workspaceChoices({ active: "a", workspaces: [{ name: "a", root: null }] })).toEqual([
+      { value: "a", label: "a" },
+    ]);
   });
 
   it("leaves out what cannot be asked for in a line of text", () => {

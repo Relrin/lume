@@ -24,6 +24,15 @@ pub const LINK_MAX_BYTES: usize = 2048;
 /// arrives before the page has loaded.
 pub const PAGE_START_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How long a pane that names a profile waits for the machine to have been looked at,
+/// when the profile is not one the user wrote out. Looking asks another program which
+/// Linux distributions there are, and that program has a time limit of its own.
+pub const PROFILE_DETECT_WAIT: Duration = Duration::from_secs(6);
+
+/// How long the OpenSSH configuration must stay quiet after a change before its hosts
+/// are read again. An editor saves a file in several steps.
+pub const PROFILE_REDETECT_DELAY: Duration = Duration::from_millis(300);
+
 /// How long a page may take to answer a request about what it shows.
 pub const PAGE_ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
 

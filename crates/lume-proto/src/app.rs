@@ -27,7 +27,7 @@ use crate::frame::{Kind, encode_control_json};
 use crate::types::{BackendId, ExitStatus, Launcher, SessionId, SessionInfo, TermSize};
 
 /// The version of the control endpoint's messages this crate speaks.
-pub const APP_PROTO_VERSION: u32 = 3;
+pub const APP_PROTO_VERSION: u32 = 4;
 
 /// The name the control endpoint is served under, and looked for, when none is given.
 ///
@@ -110,7 +110,11 @@ pub struct AppRequest {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpenSpec {
-    /// The program to run. Left out, it is the user's default shell.
+    /// The profile to start, by its id. Left out, it is the default profile. A program
+    /// named in `launcher` is run as named, whatever the profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    /// The program to run. Left out, it is the profile's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launcher: Option<Launcher>,
     /// The working directory. Left out, it is the user's home directory.
@@ -250,6 +254,8 @@ pub enum AppRequestBody {
     },
     /// Lists the workspaces there are, and says which is on show.
     Workspaces {},
+    /// Lists the profiles there are: the ways to start a terminal.
+    Profiles {},
     /// Lists the commands there are.
     Commands {},
     /// Runs a command, in the window named or the one the user is working in.
@@ -483,6 +489,11 @@ pub enum AppReplyBody {
         active: String,
         workspaces: Vec<WorkspaceEntry>,
     },
+    /// The profiles in effect, the id of the default one, and what there is to say
+    /// about ones that might be expected and are not there.
+    Profiles {
+        profiles: serde_json::Value,
+    },
     Commands {
         commands: serde_json::Value,
     },
@@ -627,6 +638,17 @@ mod tests {
                 r#"{"type":"launch","workspace":"site","exec":["htop","-d"],"cwd":"/work"}"#,
             ),
             (AppRequestBody::Workspaces {}, r#"{"type":"workspaces"}"#),
+            (AppRequestBody::Profiles {}, r#"{"type":"profiles"}"#),
+            (
+                AppRequestBody::Spawn {
+                    spec: OpenSpec {
+                        profile: Some("auto.wsl.Ubuntu".to_owned()),
+                        ..OpenSpec::default()
+                    },
+                    place: SpawnPlace::Tab {},
+                },
+                r#"{"type":"spawn","spec":{"profile":"auto.wsl.Ubuntu"}}"#,
+            ),
             (AppRequestBody::Quit {}, r#"{"type":"quit"}"#),
             (AppRequestBody::Status {}, r#"{"type":"status"}"#),
             (
@@ -744,6 +766,7 @@ mod tests {
     #[test]
     fn a_spawn_request_says_only_what_it_chooses() {
         let spec = OpenSpec {
+            profile: Some("mine".to_owned()),
             launcher: Some(Launcher::Shell {
                 program: "cmd.exe".to_owned(),
                 args: vec!["/d".to_owned()],

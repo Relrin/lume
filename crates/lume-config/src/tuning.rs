@@ -42,6 +42,12 @@ pub const SETTINGS_SCROLLBACK_LINES: [u32; 5] =
 /// The longest name a workspace may have, in characters.
 pub const WORKSPACE_NAME_MAX: usize = 64;
 
+/// The longest id a profile may have, in characters.
+pub const PROFILE_ID_MAX_CHARS: usize = 128;
+
+/// How many profiles one file may define. More than this is not a list a person keeps.
+pub const PROFILES_MAX: usize = 512;
+
 /// The largest configuration or theme file that is read. A larger one is not a file
 /// anybody wrote by hand.
 pub const FILE_MAX_BYTES: u64 = 4 * 1024 * 1024;

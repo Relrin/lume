@@ -22,6 +22,7 @@
     "allow-config-set",
     "allow-config-unset",
     "allow-config-open",
+    "allow-profiles-list",
     "allow-background-image",
     "allow-window-drag",
     "allow-window-control",

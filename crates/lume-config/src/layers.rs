@@ -17,12 +17,14 @@ use serde_json::{Map, Value};
 use toml::Spanned;
 use toml::de::{DeTable, DeValue};
 
+use crate::profiles::ProfileEntry;
 use crate::schema::{
-    Config, NOT_IN_A_WORKSPACE, OnSwitch, WORKSPACE_PROFILE_KEY, WORKSPACE_ROOT_KEY,
+    Config, NOT_IN_A_WORKSPACE, OnSwitch, PROFILES_KEY, WORKSPACE_PROFILE_KEY, WORKSPACE_ROOT_KEY,
     WorkspaceSettings, config_schema,
 };
 use crate::source::{Position, Problem, ProblemKind, Source, join_path};
 use crate::suggest::nearest;
+use crate::tuning::PROFILES_MAX;
 
 /// Which layer a file is.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -145,7 +147,19 @@ fn convert(
         DeValue::Array(array) => Value::Array(
             array
                 .iter()
-                .map(|item| convert(item, text, path, positions))
+                .enumerate()
+                .map(|(index, item)| {
+                    if !matches!(item.get_ref(), DeValue::Table(_)) {
+                        return convert(item, text, path, positions);
+                    }
+                    // A table in a list has keys of its own. They are filed under the
+                    // table's place in the list, so that two tables' keys stay apart.
+                    path.push(index.to_string());
+                    positions.insert(join_path(path), Position::of(text, item.span().start));
+                    let converted = convert(item, text, path, positions);
+                    path.pop();
+                    converted
+                })
                 .collect(),
         ),
         DeValue::Table(inner) => Value::Object(table(inner, text, path, positions)),
@@ -238,6 +252,16 @@ fn one_of(allowed: &[&Value]) -> String {
 fn none_of(value: &Value, options: &[Value]) -> String {
     let options: Vec<&Value> = options
         .iter()
+        // A choice among choices is one list of choices to whoever reads the message.
+        .flat_map(|option| {
+            let inner = ["anyOf", "oneOf"]
+                .iter()
+                .find_map(|keyword| option.get(keyword).and_then(Value::as_array));
+            match inner {
+                Some(inner) => inner.iter().collect::<Vec<_>>(),
+                None => vec![option],
+            }
+        })
         // "Or nothing" is how an optional setting is described; a file cannot say it.
         .filter(|option| option.get("type") != Some(&Value::from("null")))
         .collect();
@@ -334,9 +358,12 @@ pub(crate) fn check(value: &Value, schema: &Value) -> Result<(), String> {
     }
     if let Value::Object(entries) = value {
         let properties = schema.get("properties").and_then(Value::as_object);
-        let additional = schema.get("additionalProperties");
+        let stated = schema.get("additionalProperties");
+        // A table that takes no other keys says so with `false`: a key it does not
+        // name is then unknown, which says more than "nothing is allowed here".
+        let additional = stated.filter(|other| **other != Value::Bool(false));
         // A schema that says nothing about tables allows any.
-        let open = properties.is_none() && additional.is_none();
+        let open = properties.is_none() && stated.is_none();
         for (key, entry) in entries {
             let inner = properties.and_then(|known| known.get(key)).or(additional);
             match inner {
@@ -402,6 +429,8 @@ struct Read {
     leaves: Vec<(String, u32)>,
     problems: Vec<Problem>,
     workspace: WorkspaceSettings,
+    /// The id of every profile the file writes, with the line it is on.
+    profile_lines: Vec<(String, u32)>,
 }
 
 struct Checking<'a> {
@@ -524,6 +553,143 @@ fn take_string(
     }
 }
 
+/// The profiles a file writes that can be used, and the line each one's id is on.
+type Profiles = (Vec<Value>, Vec<(String, u32)>);
+
+/// Takes the profiles out of a file's tree and gives back the ones that can be used.
+/// What is wrong with the others is reported at the line each is written on. A profile
+/// may leave out what a file below it says, so whether it is complete is not looked at
+/// here.
+fn take_profiles(tree: &mut Map<String, Value>, checking: &mut Checking<'_>) -> Profiles {
+    let key = || vec![PROFILES_KEY.to_owned()];
+    let items = match tree.remove(PROFILES_KEY) {
+        None => return Profiles::default(),
+        Some(Value::Array(items)) => items,
+        Some(other) => {
+            let message = format!(
+                "`{PROFILES_KEY}` is a list of tables, each begun with `[[{PROFILES_KEY}]]`, not {}",
+                kind_of(&other)
+            );
+            checking.problem(ProblemKind::InvalidValue, &key(), message);
+            return Profiles::default();
+        }
+    };
+    let schema = config_schema()
+        .pointer(&format!("/properties/{PROFILES_KEY}/items"))
+        .unwrap_or(&Value::Bool(true));
+
+    let mut kept = Vec::new();
+    let mut ids: Vec<(String, u32)> = Vec::new();
+    for (index, item) in items.into_iter().enumerate() {
+        // The line of the profile's id if it has one, else of where it begins.
+        let own = vec![PROFILES_KEY.to_owned(), index.to_string()];
+        let mut at = own.clone();
+        at.push("id".to_owned());
+        if !checking.positions.contains_key(&join_path(&at)) {
+            at = own;
+        }
+        if !checking.positions.contains_key(&join_path(&at)) {
+            at = key();
+        }
+        let named = item.get("id").and_then(Value::as_str).map_or_else(
+            || format!("profile {}", index + 1),
+            |id| format!("profile `{id}`"),
+        );
+
+        if index >= PROFILES_MAX {
+            let message = format!("only the first {PROFILES_MAX} profiles of a file are read");
+            checking.problem(ProblemKind::InvalidValue, &at, message);
+            break;
+        }
+        let entry = check(&item, schema)
+            .and_then(|()| {
+                serde_json::from_value::<ProfileEntry>(item.clone())
+                    .map_err(|error| error.to_string())
+            })
+            .and_then(|entry| entry.check_written().map(|()| entry));
+        match entry {
+            Ok(entry) if ids.iter().any(|(id, _)| *id == entry.id) => {
+                let message = format!("{named}: this file already has a profile with that id");
+                checking.problem(ProblemKind::InvalidValue, &at, message);
+            }
+            Ok(entry) => {
+                ids.push((entry.id, checking.position(&join_path(&at)).line));
+                kept.push(item);
+            }
+            Err(message) => {
+                checking.problem(
+                    ProblemKind::InvalidValue,
+                    &at,
+                    format!("{named}: {message}"),
+                );
+            }
+        }
+    }
+    (kept, ids)
+}
+
+/// Takes out of the merged profiles the ones that are not complete: a profile of the
+/// user's own that, with every file laid over the others, still does not say what to
+/// run. Each is reported at the line it was last written on.
+fn drop_incomplete_profiles(
+    tree: &mut Map<String, Value>,
+    written: &BTreeMap<String, (PathBuf, u32)>,
+    problems: &mut Vec<Problem>,
+) {
+    let Some(Value::Array(profiles)) = tree.get_mut(PROFILES_KEY) else {
+        return;
+    };
+    profiles.retain(|profile| {
+        let why = match serde_json::from_value::<ProfileEntry>(profile.clone()) {
+            Ok(entry) => match entry.check() {
+                Ok(()) => return true,
+                Err(why) => why,
+            },
+            Err(error) => error.to_string(),
+        };
+        let id = profile
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let at = written.get(id);
+        problems.push(Problem {
+            kind: ProblemKind::InvalidValue,
+            path: PROFILES_KEY.to_owned(),
+            file: at.map(|(file, _)| file.clone()),
+            line: at.map_or(0, |(_, line)| *line),
+            column: 0,
+            message: format!("profile `{id}`: {why}"),
+            suggestion: None,
+        });
+        false
+    });
+}
+
+/// Lays the profiles of an upper file over those below: a profile with an id that is
+/// already there is laid over it key by key, and any other is added after them.
+fn overlay_profiles(lower: &mut Map<String, Value>, upper: &mut Map<String, Value>) {
+    let Some(Value::Array(above)) = upper.remove(PROFILES_KEY) else {
+        return;
+    };
+    let below = lower
+        .entry(PROFILES_KEY.to_owned())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let Value::Array(below) = below else {
+        *below = Value::Array(above);
+        return;
+    };
+    for profile in above {
+        let id = profile.get("id").cloned();
+        let same = below
+            .iter_mut()
+            .find(|known| known.get("id") == id.as_ref());
+        match (same, profile) {
+            (Some(Value::Object(known)), Value::Object(entries)) => known.extend(entries),
+            (_, profile) => below.push(profile),
+        }
+    }
+}
+
 fn read(input: &LayerInput) -> Result<Read, Problem> {
     let Document {
         mut tree,
@@ -548,7 +714,15 @@ fn read(input: &LayerInput) -> Result<Read, Problem> {
             }
         }
     }
+    // Profiles are checked one by one, so that one that is wrong does not take the
+    // others with it.
+    let (profiles, profile_lines) = take_profiles(&mut tree, &mut checking);
     checking.prune(&mut tree, config_schema(), &mut Vec::new());
+    if !profiles.is_empty() {
+        let line = checking.position(PROFILES_KEY).line;
+        checking.leaves.push((PROFILES_KEY.to_owned(), line));
+        tree.insert(PROFILES_KEY.to_owned(), Value::Array(profiles));
+    }
     // In the order of the file, whatever order the keys were looked at in.
     checking
         .problems
@@ -558,6 +732,7 @@ fn read(input: &LayerInput) -> Result<Read, Problem> {
         leaves: checking.leaves,
         problems: checking.problems,
         workspace,
+        profile_lines,
     })
 }
 
@@ -633,6 +808,9 @@ pub fn resolve_layers(inputs: &[LayerInput]) -> Layered {
     let mut problems = Vec::new();
     let mut fatal = Vec::new();
     let mut workspace = WorkspaceSettings::default();
+    // Where each profile was last written, for a problem that shows only once every
+    // file has been laid over the others.
+    let mut profiles_at: BTreeMap<String, (PathBuf, u32)> = BTreeMap::new();
 
     for input in inputs {
         let read = match read(input) {
@@ -643,6 +821,9 @@ pub fn resolve_layers(inputs: &[LayerInput]) -> Layered {
             }
         };
         problems.extend(read.problems);
+        for (id, line) in read.profile_lines {
+            profiles_at.insert(id, (input.file.clone(), line));
+        }
         if matches!(input.kind, LayerKind::Workspace { .. }) {
             workspace = read.workspace;
         }
@@ -663,8 +844,19 @@ pub fn resolve_layers(inputs: &[LayerInput]) -> Layered {
             };
             sources.insert(path, source);
         }
-        overlay(&mut tree, read.tree, schema);
+        let mut above = read.tree;
+        overlay_profiles(&mut tree, &mut above);
+        overlay(&mut tree, above, schema);
     }
+    drop_incomplete_profiles(&mut tree, &profiles_at, &mut problems);
+    // File by file in the order they were given, and each in the order it is written.
+    let file_order = |problem: &Problem| {
+        inputs
+            .iter()
+            .position(|input| Some(&input.file) == problem.file.as_ref())
+            .unwrap_or(usize::MAX)
+    };
+    problems.sort_by_key(|problem| (file_order(problem), problem.line, problem.column));
 
     let config = match serde_json::from_value::<Config>(Value::Object(tree)) {
         Ok(config) => config,
@@ -852,6 +1044,115 @@ mod tests {
         assert_eq!(syntax.file.as_deref(), Some(Path::new("work.toml")));
         assert_eq!(syntax.line, 1);
         assert!(syntax.is_fatal());
+    }
+
+    #[test]
+    fn profiles_are_read_and_the_default_profile_is_a_setting() {
+        let layered = resolve_layers(&[user(
+            "default-profile = \"box\"\n\n[[profile]]\nid = \"box\"\nlauncher = \"ssh\"\n\
+             host = \"work\"\n\n[[profile]]\nid = \"auto.pwsh\"\nhidden = true\n\n\
+             [ssh]\nconnection-sharing = false\n",
+        )]);
+        assert_eq!(layered.problems, vec![]);
+        assert_eq!(layered.config.default_profile, "box");
+        assert!(!layered.config.ssh.connection_sharing);
+        assert_eq!(layered.config.ssh.control_persist, "10m");
+        let ids: Vec<&str> = layered
+            .config
+            .profiles
+            .iter()
+            .map(|profile| profile.id.as_str())
+            .collect();
+        assert_eq!(ids, ["box", "auto.pwsh"]);
+        assert_eq!(layered.config.profiles[0].host.as_deref(), Some("work"));
+        assert_eq!(layered.config.profiles[1].hidden, Some(true));
+        assert!(matches!(
+            layered.sources["profile"],
+            Source::User { line: 3, .. }
+        ));
+    }
+
+    #[test]
+    fn a_profile_that_is_wrong_is_left_out_and_the_others_stay() {
+        let layered = resolve_layers(&[user(
+            "[[profile]]\nid = \"a\"\nlauncher = \"shell\"\n\n\
+             [[profile]]\nid = \"b\"\nlauncher = \"wsl\"\n\n\
+             [[profile]]\nid = \"c\"\nlauncher = \"shell\"\nprogam = \"x\"\n\n\
+             [[profile]]\nid = \"a\"\nlauncher = \"shell\"\n\n\
+             [[profile]]\nlauncher = \"shell\"\n\n\
+             [[profile]]\nid = \"d\"\nlauncher = \"ssh\"\nhost = \"-oProxyCommand=x\"\n\n\
+             [[profile]]\nid = \"e\"\nlauncher = \"telnet\"\n",
+        )]);
+        let ids: Vec<&str> = layered
+            .config
+            .profiles
+            .iter()
+            .map(|profile| profile.id.as_str())
+            .collect();
+        assert_eq!(ids, ["a"]);
+        let said: Vec<(u32, &str)> = layered
+            .problems
+            .iter()
+            .map(|problem| (problem.line, problem.message.as_str()))
+            .collect();
+        assert_eq!(said.len(), 6, "{said:?}");
+        assert_eq!(said[0], (6, "profile `b`: a `wsl` profile needs `distro`"));
+        assert_eq!(said[1].0, 10);
+        assert!(said[1].1.contains("unknown key `progam`"), "{}", said[1].1);
+        assert!(said[1].1.contains("`program`"), "{}", said[1].1);
+        assert_eq!(
+            said[2],
+            (
+                15,
+                "profile `a`: this file already has a profile with that id"
+            )
+        );
+        assert!((18..=19).contains(&said[3].0), "{}", said[3].0);
+        assert!(
+            said[3].1.starts_with("profile 5: `id` is missing"),
+            "{}",
+            said[3].1
+        );
+        assert_eq!(said[4], (22, "profile `d`: `host` cannot start with `-`"));
+        assert_eq!(said[5].0, 27);
+        assert!(said[5].1.contains("`shell`, `wsl`, `ssh`"), "{}", said[5].1);
+    }
+
+    #[test]
+    fn a_table_called_profile_is_not_a_list_of_profiles() {
+        let layered = resolve_layers(&[user("[profile]\nid = \"a\"\nlauncher = \"shell\"\n")]);
+        assert!(layered.config.profiles.is_empty());
+        assert_eq!(layered.problems.len(), 1);
+        assert!(layered.problems[0].message.contains("[[profile]]"));
+        assert_eq!(layered.problems[0].line, 1);
+    }
+
+    #[test]
+    fn a_workspaces_profile_is_laid_over_the_users_by_id() {
+        let layered = resolve_layers(&[
+            user(
+                "[[profile]]\nid = \"box\"\nlauncher = \"ssh\"\nhost = \"work\"\nuser = \"me\"\n\n\
+                 [[profile]]\nid = \"other\"\nlauncher = \"shell\"\n",
+            ),
+            workspace(
+                "[[profile]]\nid = \"box\"\nuser = \"deploy\"\ncwd = \"/srv\"\n\n\
+                 [[profile]]\nid = \"here\"\nlauncher = \"shell\"\nprogram = \"nu\"\n",
+            ),
+        ]);
+        // The workspace's `box` stands on the user's, so it needs no launcher of its
+        // own; said as a problem only if nothing below it has one.
+        let ids: Vec<&str> = layered
+            .config
+            .profiles
+            .iter()
+            .map(|profile| profile.id.as_str())
+            .collect();
+        assert_eq!(ids, ["box", "other", "here"]);
+        let merged = &layered.config.profiles[0];
+        assert_eq!(merged.host.as_deref(), Some("work"));
+        assert_eq!(merged.user.as_deref(), Some("deploy"));
+        assert_eq!(merged.cwd.as_deref(), Some("/srv"));
+        assert_eq!(layered.problems, vec![]);
     }
 
     #[test]

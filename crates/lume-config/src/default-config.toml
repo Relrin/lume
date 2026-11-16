@@ -6,6 +6,10 @@
 #
 # A workspace can override any of this in `workspaces/<name>.toml` beside this file.
 
+# The profile new terminals use: the id of a profile (profiles are described at the end
+# of this file). Left empty, new terminals run the shell of `terminal.shell`.
+# default-profile = ""
+
 [app]
 # Keep the application running when its last window closes.
 # keep-running = false
@@ -92,6 +96,15 @@
 # What terminals are drawn with: "auto", "webgpu", "webgl2" or "canvas2d".
 # tier = "auto"
 
+[ssh]
+# Let terminals to one machine share a connection, so that only the first has to sign
+# in. It applies to the hosts listed from your OpenSSH configuration, and only where the
+# OpenSSH client can do it, which the one that comes with Windows cannot.
+# connection-sharing = true
+# How long a shared connection is kept after its last terminal closes, as OpenSSH's
+# ControlPersist takes it: "10m", "yes", "no".
+# control-persist = "10m"
+
 [keybindings]
 # A key is a chord such as "ctrl+shift+t", or several chords separated by spaces. Its
 # value is a command's id, or a table that also says where the key holds:
@@ -107,3 +120,32 @@
 # `lume keymap` prints every key that is bound and where its binding comes from.
 # Bindings for one platform go in [keybindings.windows], [keybindings.macos] or
 # [keybindings.linux].
+
+# Profiles are ways to start a terminal. Lume makes one for every shell it finds, for
+# every WSL distribution and for every host of your OpenSSH configuration; `lume ctl
+# profiles` lists them with their ids. A profile of your own is a [[profile]] table:
+#
+#   [[profile]]
+#   id = "work"
+#   name = "Work box"
+#   launcher = "ssh"          # "shell", "wsl" or "ssh"
+#   host = "work.example"     # ssh: a name from your OpenSSH configuration, or a host
+#   user = "me"               # ssh and wsl
+#   port = 2222               # ssh
+#
+#   [[profile]]
+#   id = "scratch"
+#   launcher = "shell"
+#   program = "nu"            # left out, your own shell
+#   args = ["--login"]
+#   cwd = "~/scratch"
+#   env = { EDITOR = "hx" }
+#   close-on-exit = "never"   # instead of terminal.close-on-exit
+#
+# Other keys: icon, login (shell), distro (wsl), extra-args and client (ssh), theme,
+# font-size, shell-integration ("auto" or "off") and hidden. A table with the id of a
+# profile Lume made changes that profile, and needs only what it changes:
+#
+#   [[profile]]
+#   id = "auto.wsl.Ubuntu"
+#   user = "root"

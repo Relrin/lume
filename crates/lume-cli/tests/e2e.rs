@@ -839,6 +839,125 @@ fn pane_of(spawned: &Value) -> String {
 
 #[test]
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_profile_starts_its_terminal_and_a_split_runs_the_same_profile() {
+    let (program, args, show) = if cfg!(windows) {
+        ("cmd.exe", "[\"/d\"]", "echo lume-%LUME_E2E%-seen")
+    } else {
+        ("/bin/sh", "[]", "echo \"lume-${LUME_E2E}-seen\"")
+    };
+    // The settings close a pane whose program ended well; this profile keeps it.
+    let app = App::start_with(&format!(
+        "\n[[profile]]\nid = \"mine\"\nname = \"Mine\"\nlauncher = \"shell\"\n\
+         program = \"{program}\"\nargs = {args}\nenv = {{ LUME_E2E = \"k7q\" }}\n\
+         close-on-exit = \"never\"\n"
+    ));
+    app.status_with_session();
+
+    // The user's profile is listed at once; the ones made for what is installed
+    // follow when the machine has been looked at.
+    let deadline = Instant::now() + START;
+    let listed = loop {
+        let listed = app.ctl(&["profiles"]).ok("profiles")["profiles"].clone();
+        if listed["looked"] == true {
+            break listed;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the machine was never looked at: {listed}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let profiles = listed["profiles"].as_array().expect("profiles");
+    let mine = &profiles[0];
+    assert_eq!(mine["id"], "mine", "{listed}");
+    assert_eq!(mine["origin"], "user");
+    assert_eq!(mine["launcher"]["type"], "shell");
+    let generated: Vec<&str> = profiles
+        .iter()
+        .filter(|profile| profile["origin"] == "generated")
+        .filter_map(|profile| profile["id"].as_str())
+        .collect();
+    assert!(
+        generated.iter().any(|id| id.starts_with("auto.")),
+        "no shell was found on this machine: {listed}"
+    );
+
+    // A terminal started from the profile runs its program with its variables.
+    let spawned = app.ctl(&["spawn", "--profile", "mine"]).ok("spawn");
+    let pane = pane_of(&spawned);
+    app.type_line_in(&pane, show);
+    app.wait_text_in(&pane, "lume-k7q-seen");
+    assert_eq!(content_of(&app.layout(), &pane)["profile"], "mine");
+
+    // Splitting it starts the same profile beside it.
+    let split = format!(r#"{{"pane":"{pane}"}}"#);
+    app.ctl(&["command", "lume.pane.split-right", &split])
+        .ok("splitting the profile's pane");
+    let layout = app.layout();
+    let tab = tabs_of(&layout)
+        .into_iter()
+        .find(|tab| tab.contains(&pane))
+        .expect("the tab of the profile's pane");
+    assert_eq!(tab.len(), 2, "{layout}");
+    let beside = tab
+        .iter()
+        .find(|other| **other != pane)
+        .expect("the new pane")
+        .clone();
+    assert_eq!(content_of(&layout, &beside)["profile"], "mine");
+    app.type_line_in(&beside, show);
+    app.wait_text_in(&beside, "lume-k7q-seen");
+
+    // A profile that is not there is refused, not replaced by another.
+    let refused = app.ctl(&["spawn", "--profile", "no-such-profile"]);
+    assert_eq!(refused.status, 1, "{}", refused.json);
+    assert_eq!(refused.json["code"], "not_found");
+
+    // The profile's own rule for a program that ended holds over the settings'.
+    app.type_line_in(&beside, "exit");
+    app.ctl(&["wait", "--exit", "--pane", &beside])
+        .ok("waiting for the shell to end");
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(
+        tabs_of(&app.layout())
+            .iter()
+            .any(|tab| tab.contains(&beside)),
+        "the pane of a profile that keeps its panes was closed"
+    );
+
+    // A Linux distribution, where there is one. Nothing is typed into it: its shell
+    // is the user's own, with the user's history.
+    match generated.iter().find(|id| id.starts_with("auto.wsl.")) {
+        Some(distribution) => {
+            let spawned = app
+                .ctl(&["spawn", "--profile", distribution])
+                .ok("starting a distribution");
+            let pane = pane_of(&spawned);
+            let session = spawned["session"].as_str().expect("a session id");
+            std::thread::sleep(Duration::from_secs(2));
+            let sessions = app.ctl(&["list"]).ok("list");
+            let running = sessions["sessions"]
+                .as_array()
+                .expect("sessions")
+                .iter()
+                .find(|listed| listed["info"]["id"] == session)
+                .expect("the distribution's session");
+            assert!(
+                running["info"]["program"]
+                    .as_str()
+                    .is_some_and(|program| program.to_lowercase().ends_with("wsl.exe")),
+                "{running}"
+            );
+            assert!(running["info"]["exit"].is_null(), "{running}");
+            assert_eq!(content_of(&app.layout(), &pane)["profile"], *distribution);
+        }
+        None => eprintln!("skipped the distribution: this machine lists none"),
+    }
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn docks_floating_panes_and_where_the_window_was_come_back_after_a_restart() {
     let shell = shells().into_iter().next().expect("a shell to test with");
     // The list of tabs is a panel at the left, so there is something docked.

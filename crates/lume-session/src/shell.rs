@@ -17,6 +17,8 @@ pub fn default_shell() -> Launcher {
 /// A shell that is installed on this machine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KnownShell {
+    /// A short name for it that never changes, to tell the shells apart by.
+    pub id: &'static str,
     /// What a person calls it.
     pub name: &'static str,
     /// The file to run, as an absolute path.
@@ -35,18 +37,28 @@ pub fn known_shells() -> Vec<KnownShell> {
     shells_in(platform::SHELLS, &dirs)
 }
 
-/// The shells of `candidates` (a name and a file name each) found in `dirs`, each at
-/// the first folder that has it. Only absolute folders are looked in, so a file planted
-/// in the working directory is never offered.
-fn shells_in(candidates: &[(&'static str, &str)], dirs: &[PathBuf]) -> Vec<KnownShell> {
+/// Whether the file at `path` is a program that can be started.
+#[cfg(unix)]
+pub(crate) fn runnable(path: &std::path::Path) -> bool {
+    platform::runnable(path)
+}
+
+/// The shells of `candidates` (an id, a name and a file name each) found in `dirs`,
+/// each at the first folder that has it. Only absolute folders are looked in, so a file
+/// planted in the working directory is never offered.
+fn shells_in(
+    candidates: &[(&'static str, &'static str, &str)],
+    dirs: &[PathBuf],
+) -> Vec<KnownShell> {
     candidates
         .iter()
-        .filter_map(|(name, file)| {
+        .filter_map(|(id, name, file)| {
             dirs.iter()
                 .filter(|dir| dir.is_absolute())
                 .map(|dir| dir.join(file))
                 .find(|candidate| platform::runnable(candidate))
                 .map(|program| KnownShell {
+                    id,
                     name,
                     program: program.to_string_lossy().into_owned(),
                 })
@@ -60,13 +72,14 @@ mod platform {
 
     use lume_proto::Launcher;
 
-    /// The shells looked for: what each is called, and its program's file name.
-    pub(super) const SHELLS: &[(&str, &str)] = &[
-        ("PowerShell", "pwsh.exe"),
-        ("Windows PowerShell", "powershell.exe"),
-        ("Command Prompt", "cmd.exe"),
-        ("Bash", "bash.exe"),
-        ("Nushell", "nu.exe"),
+    /// The shells looked for: each one's id, what it is called, and its program's
+    /// file name.
+    pub(super) const SHELLS: &[(&str, &str, &str)] = &[
+        ("pwsh", "PowerShell", "pwsh.exe"),
+        ("powershell", "Windows PowerShell", "powershell.exe"),
+        ("cmd", "Command Prompt", "cmd.exe"),
+        ("bash", "Bash", "bash.exe"),
+        ("nu", "Nushell", "nu.exe"),
     ];
 
     pub(super) fn runnable(path: &Path) -> bool {
@@ -119,14 +132,15 @@ mod platform {
 
     const FALLBACK: &str = "/bin/sh";
 
-    /// The shells looked for: what each is called, and its program's file name.
-    pub(super) const SHELLS: &[(&str, &str)] = &[
-        ("zsh", "zsh"),
-        ("bash", "bash"),
-        ("fish", "fish"),
-        ("Nushell", "nu"),
-        ("PowerShell", "pwsh"),
-        ("sh", "sh"),
+    /// The shells looked for: each one's id, what it is called, and its program's
+    /// file name.
+    pub(super) const SHELLS: &[(&str, &str, &str)] = &[
+        ("zsh", "zsh", "zsh"),
+        ("bash", "bash", "bash"),
+        ("fish", "fish", "fish"),
+        ("nu", "Nushell", "nu"),
+        ("pwsh", "PowerShell", "pwsh"),
+        ("sh", "sh", "sh"),
     ];
 
     pub(super) fn runnable(path: &Path) -> bool {
@@ -249,17 +263,23 @@ mod tests {
         let dirs = [first.0.clone(), second.0.clone()];
 
         let found = shells_in(
-            &[("One", "one"), ("Absent", "absent"), ("Two", "two")],
+            &[
+                ("1", "One", "one"),
+                ("0", "Absent", "absent"),
+                ("2", "Two", "two"),
+            ],
             &dirs,
         );
         assert_eq!(
             found,
             [
                 KnownShell {
+                    id: "1",
                     name: "One",
                     program: one.to_string_lossy().into_owned(),
                 },
                 KnownShell {
+                    id: "2",
                     name: "Two",
                     program: two.to_string_lossy().into_owned(),
                 },
@@ -272,8 +292,8 @@ mod tests {
         // Tests run in the crate's own folder, which holds this file.
         assert!(Path::new("Cargo.toml").is_file());
         let here = [PathBuf::from("."), PathBuf::new()];
-        assert_eq!(shells_in(&[("Manifest", "Cargo.toml")], &here), []);
-        assert_eq!(shells_in(&[("Manifest", "Cargo.toml")], &[]), []);
+        assert_eq!(shells_in(&[("m", "Manifest", "Cargo.toml")], &here), []);
+        assert_eq!(shells_in(&[("m", "Manifest", "Cargo.toml")], &[]), []);
     }
 
     #[test]

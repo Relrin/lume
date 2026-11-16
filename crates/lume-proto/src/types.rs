@@ -251,6 +251,39 @@ pub enum Launcher {
         /// Start the program as a login shell. Only Unix shells have the notion.
         login: bool,
     },
+    /// The default shell of a Linux distribution on this Windows machine.
+    Wsl {
+        distro: String,
+        /// The distribution's user to start as. `None` is the distribution's default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+    },
+    /// A shell on another machine, reached with this machine's OpenSSH client. The
+    /// client reads the user's own configuration, so `host` may be a name from it.
+    Ssh {
+        host: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        port: Option<u16>,
+        /// Arguments given to the client before the host.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        extra_args: Vec<String>,
+        /// The client program to run instead of the one the host finds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client: Option<String>,
+    },
+}
+
+impl Launcher {
+    /// What kind of place the session is in, as one lowercase word.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Shell { .. } => "shell",
+            Self::Wsl { .. } => "wsl",
+            Self::Ssh { .. } => "ssh",
+        }
+    }
 }
 
 /// Everything needed to start a session.

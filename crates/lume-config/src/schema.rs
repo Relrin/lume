@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::paths::Platform;
+use crate::profiles::ProfileEntry;
 use crate::settings::{PAGES_KEY, Shown, pages};
 use crate::tuning::{
     FONT_SIZE_MAX, FONT_SIZE_MIN, SCROLLBACK_LINES_MAX, SETTINGS_BLURS, SETTINGS_CORNER_RADII,
@@ -53,6 +54,38 @@ pub struct Config {
     pub keybindings: Keybindings,
     /// Settings of plugins, by plugin id.
     pub plugins: BTreeMap<String, Value>,
+    /// Terminals on other machines.
+    pub ssh: SshConfig,
+    /// The profile new terminals use, by its id. Empty, new terminals run the shell of
+    /// `terminal.shell`.
+    pub default_profile: String,
+    /// Ways to start a terminal. Each is a `[[profile]]` table with an `id`; one with
+    /// the id of a profile the application made changes that profile.
+    #[serde(rename = "profile", skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<ProfileEntry>,
+}
+
+/// Terminals on other machines.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct SshConfig {
+    /// Let terminals to one machine share a connection, so that only the first has to
+    /// sign in. It applies to the hosts listed from the OpenSSH configuration, and
+    /// only where the OpenSSH client can do it, which the one that comes with Windows
+    /// cannot.
+    pub connection_sharing: bool,
+    /// How long a shared connection is kept after its last terminal closes, as
+    /// OpenSSH's `ControlPersist` takes it: `10m`, `yes`, `no`.
+    pub control_persist: String,
+}
+
+impl Default for SshConfig {
+    fn default() -> Self {
+        Self {
+            connection_sharing: true,
+            control_persist: "10m".to_owned(),
+        }
+    }
 }
 
 /// The application as a whole.
@@ -562,6 +595,9 @@ pub struct WorkspaceSettings {
 /// The keys a workspace's file has at its top besides the sections.
 pub const WORKSPACE_ROOT_KEY: &str = "root";
 pub const WORKSPACE_PROFILE_KEY: &str = "default-profile";
+
+/// The key profiles are written under, in any file.
+pub const PROFILES_KEY: &str = "profile";
 
 fn generate() -> Value {
     let settings = SchemaSettings::draft2020_12().with(|settings| {

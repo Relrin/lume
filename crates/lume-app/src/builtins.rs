@@ -70,6 +70,20 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     ("lume.tab.new", "New Tab", "Tab", Runs::Core, true),
+    (
+        "lume.terminal.new-with-profile",
+        "New Terminal with Profile…",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.profile.refresh",
+        "Look for Profiles Again",
+        "Application",
+        Runs::Core,
+        true,
+    ),
     ("lume.tab.close", "Close Tab", "Tab", Runs::Core, true),
     ("lume.tab.next", "Next Tab", "Tab", Runs::Core, true),
     ("lume.tab.previous", "Previous Tab", "Tab", Runs::Core, true),
@@ -99,6 +113,13 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     ("lume.pane.split-up", "Split Up", "Pane", Runs::Core, true),
+    (
+        "lume.pane.duplicate",
+        "Duplicate Pane",
+        "Pane",
+        Runs::Core,
+        true,
+    ),
     (
         "lume.pane.focus-left",
         "Focus Pane on the Left",
@@ -364,8 +385,34 @@ fn arguments(id: &str) -> Option<Value> {
         json!({ "type": "string", "description": "A pane's id; the focused pane if left out." });
     let tab =
         json!({ "type": "string", "description": "A tab's id; the tab on show if left out." });
+    let profile = json!({
+        "type": "string",
+        "description": "A profile's id; the default profile if left out.",
+    });
     let object = |properties: Value, required: &[&str]| json!({ "type": "object", "properties": properties, "required": required });
     match id {
+        "lume.tab.new" | "lume.window.new" => Some(object(json!({ "profile": profile }), &[])),
+        "lume.terminal.new-with-profile" => Some(object(
+            json!({ "profile": {
+                "type": "string",
+                "description": "The profile to open",
+                "x-lume-choices": "profiles",
+            } }),
+            &["profile"],
+        )),
+        "lume.pane.split-right"
+        | "lume.pane.split-down"
+        | "lume.pane.split-left"
+        | "lume.pane.split-up" => Some(object(
+            json!({
+                "pane": pane,
+                "profile": {
+                    "type": "string",
+                    "description": "A profile's id; the profile of the pane that is split if left out.",
+                },
+            }),
+            &[],
+        )),
         "lume.tab.activate" => Some(object(
             json!({ "index": { "type": "integer", "minimum": 1, "description": "The tab's place, counted from one." } }),
             &["index"],
@@ -384,10 +431,7 @@ fn arguments(id: &str) -> Option<Value> {
             &[],
         )),
         "lume.pane.close"
-        | "lume.pane.split-right"
-        | "lume.pane.split-down"
-        | "lume.pane.split-left"
-        | "lume.pane.split-up"
+        | "lume.pane.duplicate"
         | "lume.pane.zoom"
         | "lume.pane.float"
         | "lume.pane.minimise"
@@ -549,13 +593,46 @@ fn terminal() -> NewContent {
     NewContent::Terminal(SpawnRequest::default())
 }
 
-fn split(pane: PaneId, dir: Dir) -> Intent {
-    Intent::Split {
+/// A new terminal that runs `profile`, or the default one if none is named.
+fn terminal_with(profile: Option<String>) -> NewContent {
+    NewContent::Terminal(SpawnRequest {
+        profile,
+        ..SpawnRequest::default()
+    })
+}
+
+/// The profile a command's arguments name. It has to be one there is: a pane that
+/// quietly started something else would be worse than a refusal.
+async fn profile(context: &Context<'_>, args: &Value) -> Result<Option<String>, CommandError> {
+    let Some(id) = argument::<String>(args, "profile")?.filter(|id| !id.trim().is_empty()) else {
+        return Ok(None);
+    };
+    match context.panes.profiles.resolve(&id).await {
+        Some(_) => Ok(Some(id)),
+        None => Err(CommandError::not_found(format!(
+            "there is no profile called `{id}`"
+        ))),
+    }
+}
+
+/// A split of `pane`. The new pane runs the profile the arguments name, or else the
+/// profile of the pane that is split: a second terminal on the same machine or in the
+/// same distribution is what splitting one asks for.
+async fn split(context: &Context<'_>, args: &Value, dir: Dir) -> Result<Intent, CommandError> {
+    let pane = context.pane(args)?;
+    let named = profile(context, args).await?;
+    let inherited = || {
+        context
+            .panes
+            .terminal(pane)
+            .and_then(|terminal| terminal.profile)
+    };
+    Ok(Intent::Split {
         pane,
         dir,
         ratio: UNITS / 2,
-        content: terminal(),
-    }
+        content: terminal_with(named.or_else(inherited)),
+    })
 }
 
 /// Carries out a command that runs in the application.
@@ -593,10 +670,25 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
         "lume.app.whats-new" => return open_link(format!("{REPOSITORY}/releases")).await,
         "lume.tab.new" => Intent::TabNew {
             window,
-            content: terminal(),
+            content: terminal_with(profile(context, args).await?),
             index: None,
             activate: true,
         },
+        "lume.terminal.new-with-profile" => {
+            let named = profile(context, args)
+                .await?
+                .ok_or_else(|| CommandError::bad_request("which profile: `profile`"))?;
+            Intent::TabNew {
+                window,
+                content: terminal_with(Some(named)),
+                index: None,
+                activate: true,
+            }
+        }
+        "lume.profile.refresh" => {
+            context.panes.profiles.refresh().await;
+            return Ok(());
+        }
         "lume.tab.close" => Intent::TabClose {
             tab: context.tab(args)?,
         },
@@ -633,10 +725,30 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
         "lume.pane.close" => Intent::Close {
             pane: context.pane(args)?,
         },
-        "lume.pane.split-right" => split(context.pane(args)?, Dir::Right),
-        "lume.pane.split-down" => split(context.pane(args)?, Dir::Down),
-        "lume.pane.split-left" => split(context.pane(args)?, Dir::Left),
-        "lume.pane.split-up" => split(context.pane(args)?, Dir::Up),
+        "lume.pane.split-right" => split(context, args, Dir::Right).await?,
+        "lume.pane.split-down" => split(context, args, Dir::Down).await?,
+        "lume.pane.split-left" => split(context, args, Dir::Left).await?,
+        "lume.pane.split-up" => split(context, args, Dir::Up).await?,
+        "lume.pane.duplicate" => {
+            let pane = context.pane(args)?;
+            let terminal = panes.terminal(pane).ok_or_else(|| {
+                CommandError::bad_request(format!("pane {pane} is not a terminal"))
+            })?;
+            // The same thing again, beside it: what was asked for, not the session.
+            Intent::Split {
+                pane,
+                dir: Dir::Right,
+                ratio: UNITS / 2,
+                content: NewContent::Terminal(SpawnRequest {
+                    backend: terminal.backend,
+                    profile: terminal.profile,
+                    launcher: terminal.launcher,
+                    cwd: terminal.cwd,
+                    env: terminal.env,
+                    size: None,
+                }),
+            }
+        }
         "lume.pane.focus-left" => Intent::FocusDir {
             window,
             dir: Dir::Left,
@@ -717,7 +829,7 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
             },
         },
         "lume.window.new" => Intent::WindowNew {
-            content: terminal(),
+            content: terminal_with(profile(context, args).await?),
             bounds: None,
         },
         "lume.window.close" => {
@@ -842,7 +954,21 @@ mod tests {
         let registry = registry();
         let activate = registry.get("lume.tab.activate").unwrap();
         assert_eq!(activate.args.unwrap()["required"], json!(["index"]));
-        assert!(registry.get("lume.tab.new").unwrap().args.is_none());
+        // A new tab may name its profile and need not.
+        let new_tab = registry.get("lume.tab.new").unwrap().args.unwrap();
+        assert_eq!(new_tab["properties"]["profile"]["type"], "string");
+        assert_eq!(new_tab["required"], json!([]));
+        let with_profile = registry
+            .get("lume.terminal.new-with-profile")
+            .unwrap()
+            .args
+            .unwrap();
+        assert_eq!(with_profile["required"], json!(["profile"]));
+        assert_eq!(
+            with_profile["properties"]["profile"]["x-lume-choices"],
+            "profiles"
+        );
+        assert!(registry.get("lume.app.quit").unwrap().args.is_none());
         assert!(!registry.get("lume.tab.activate").unwrap().palette);
     }
 

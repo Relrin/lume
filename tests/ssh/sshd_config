@@ -1,0 +1,12 @@
+Port 22
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+# A second server is reached through this one.
+AllowTcpForwarding yes
+# Lets a test tell a lost connection from an idle one quickly.
+ClientAliveInterval 5
+ClientAliveCountMax 2
+PrintMotd no
+Subsystem sftp internal-sftp

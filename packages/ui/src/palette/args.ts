@@ -11,7 +11,23 @@
 import type { CommandSpec } from "../core/types.ts";
 
 /** The lists an argument's value may be chosen from. */
-export type ChoiceSource = "workspaces";
+export type ChoiceSource = "workspaces" | "profiles";
+
+const CHOICE_SOURCES: readonly string[] = ["workspaces", "profiles"] satisfies ChoiceSource[];
+
+/** One thing on such a list: what the command is given, and what a person reads. */
+export interface Choice {
+  readonly value: string;
+  readonly label: string;
+}
+
+/** The list a property's schema names, if it names one the palette can offer. */
+function choicesOf(schema: Record<string, unknown>): ChoiceSource | null {
+  const named = schema["x-lume-choices"];
+  return typeof named === "string" && CHOICE_SOURCES.includes(named)
+    ? (named as ChoiceSource)
+    : null;
+}
 
 /** One thing the palette asks for. */
 export interface ArgPrompt {
@@ -64,7 +80,7 @@ export function promptsFor(command: Pick<CommandSpec, "args">): ArgPrompt[] {
       name,
       kind,
       placeholder: typeof description === "string" && description !== "" ? description : name,
-      choices: property["x-lume-choices"] === "workspaces" ? "workspaces" : null,
+      choices: choicesOf(property),
       minimum: typeof minimum === "number" ? minimum : null,
     });
   }

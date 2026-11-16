@@ -84,13 +84,26 @@ export interface SessionInfo {
   readonly exit: ExitStatus | null;
 }
 
-/** The program a new session runs. Left out, the core starts the user's default shell. */
-export interface Launcher {
-  readonly type: "shell";
-  readonly program: string;
-  readonly args: readonly string[];
-  readonly login: boolean;
-}
+/**
+ * What a session runs: a program on this machine, the shell of a Linux distribution
+ * on it, or a shell on another machine. Left out, the core starts the default profile.
+ */
+export type Launcher =
+  | {
+      readonly type: "shell";
+      readonly program: string;
+      readonly args: readonly string[];
+      readonly login: boolean;
+    }
+  | { readonly type: "wsl"; readonly distro: string; readonly user?: string }
+  | {
+      readonly type: "ssh";
+      readonly host: string;
+      readonly user?: string;
+      readonly port?: number;
+      readonly extra_args?: readonly string[];
+      readonly client?: string;
+    };
 
 /** What to start. Only the size is required. */
 export interface SpawnRequest {

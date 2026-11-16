@@ -17,7 +17,8 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use lume_config::schema::{CloseOnExit, NewPaneCwd, TabPlacement};
+use lume_config::Profile;
+use lume_config::schema::{CloseOnExit, NewPaneCwd, TabPlacement, TerminalConfig};
 use lume_layout::{
     Applied, Area, ChangeStream, Intent, LayoutAuthority, LayoutChange, LayoutEvent,
     LayoutSnapshot, LocalLayout, NewContent, Pane, PaneContent, PaneId, PanelContent, PanelId,
@@ -35,6 +36,7 @@ use crate::carrier::SessionKey;
 use crate::configsvc::ConfigService;
 use crate::control::Shell;
 use crate::error::CommandError;
+use crate::profiles::ProfileService;
 use crate::state::AppState;
 use crate::tuning::{
     DEFAULT_SPAWN_COLS, DEFAULT_SPAWN_ROWS, ESTIMATE_TIMEOUT, PENDING_NOTICES_MAX, SAVE_DEBOUNCE,
@@ -123,10 +125,117 @@ fn start_launcher(shell: &str, args: &[String]) -> Launcher {
     }
 }
 
+/// What a pane's session is started with, once its profile and the settings have
+/// been consulted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Start {
+    launcher: Launcher,
+    cwd: Option<String>,
+    env: Vec<(String, String)>,
+}
+
+/// A directory as a profile writes it, with a leading `~` standing for the user's
+/// home directory.
+fn expand_home(dir: &str) -> String {
+    let rest = match dir.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with(['/', '\\']) => rest,
+        _ => return dir.to_owned(),
+    };
+    match std::env::home_dir() {
+        Some(home) => {
+            let rest = rest.trim_start_matches(['/', '\\']);
+            // Joining nothing would still add a separator.
+            let dir = if rest.is_empty() {
+                home
+            } else {
+                home.join(rest)
+            };
+            dir.to_string_lossy().into_owned()
+        }
+        None => dir.to_owned(),
+    }
+}
+
+/// The directory given to a Linux distribution's shell. A Linux path is taken on
+/// trust, since only the distribution can say whether it is there; a path of this
+/// machine has to be a folder. Anything else leaves the shell in its home directory.
+fn distro_dir(asked: Option<&str>) -> Option<String> {
+    let dir = asked?;
+    let linux = dir.starts_with('/') || dir == "~" || dir.starts_with("~/");
+    (linux || Path::new(dir).is_dir()).then(|| dir.to_owned())
+}
+
+/// Works out what a pane's session is started with. A pane that names its program
+/// runs it as named. Any other runs its profile; a profile that names no program runs
+/// the user's shell with the profile's arguments. With neither, it is the shell of the
+/// settings.
+fn plan_start(
+    request: &SpawnRequest,
+    profile: Option<&Profile>,
+    terminal: &TerminalConfig,
+    root: Option<&str>,
+    new_panes: NewPaneCwd,
+) -> Start {
+    let profile = profile.filter(|_| request.launcher.is_none());
+    let launcher = match (&request.launcher, profile) {
+        (Some(launcher), _) => launcher.clone(),
+        (None, Some(profile)) => match &profile.launcher {
+            Launcher::Shell {
+                program,
+                args,
+                login,
+            } if program.trim().is_empty() => match start_launcher("", args) {
+                Launcher::Shell {
+                    program,
+                    args,
+                    login: own,
+                } => Launcher::Shell {
+                    program,
+                    args,
+                    login: *login || own,
+                },
+                other => other,
+            },
+            launcher => launcher.clone(),
+        },
+        (None, None) => start_launcher(&terminal.shell, &terminal.shell_args),
+    };
+
+    let from_profile = profile.and_then(|profile| profile.cwd.as_deref());
+    let cwd = match &launcher {
+        Launcher::Wsl { .. } => distro_dir(request.cwd.as_deref().or(from_profile)),
+        // The directory is the other machine's business.
+        Launcher::Ssh { .. } => None,
+        _ => {
+            let asked = request
+                .cwd
+                .clone()
+                .or_else(|| from_profile.map(expand_home));
+            start_dir(asked.as_deref(), root, new_panes)
+        }
+    };
+
+    // The pane's own variables go last, so they are the ones that hold.
+    let mut env: Vec<(String, String)> = profile
+        .map(|profile| {
+            profile
+                .env
+                .iter()
+                .filter(|(name, _)| !request.env.iter().any(|(set, _)| set == *name))
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    env.extend(request.env.iter().cloned());
+
+    Start { launcher, cwd, env }
+}
+
 /// Starts and ends the sessions of panes on the application's backends.
 struct PaneSpawner {
     state: Weak<AppState>,
     config: Arc<ConfigService>,
+    profiles: Arc<ProfileService>,
 }
 
 impl PaneSpawner {
@@ -147,23 +256,47 @@ impl Spawner for PaneSpawner {
             message: "the application is closing".to_owned(),
         })?;
         let resolved = self.config.current();
-        let terminal = &resolved.config.terminal;
         let backend = request
             .backend
             .clone()
             .unwrap_or_else(|| state.default_backend());
-        let cwd = start_dir(
-            request.cwd.as_deref(),
+        // A pane that names its program needs no profile, and is not kept waiting for
+        // one.
+        let wanted = match &request.launcher {
+            Some(_) => None,
+            None => request
+                .profile
+                .clone()
+                .or_else(|| self.profiles.default_id()),
+        };
+        let profile = match &wanted {
+            Some(id) => {
+                let profile = self.profiles.resolve(id).await;
+                if profile.is_none() {
+                    tracing::warn!(profile = %id, "a pane names a profile that is not there");
+                    state.broadcast(&json!({
+                        "type": "notice",
+                        "level": "warning",
+                        "message": format!(
+                            "there is no profile called `{id}`, so the default shell was started"
+                        ),
+                    }));
+                }
+                profile
+            }
+            None => None,
+        };
+        let Start { launcher, cwd, env } = plan_start(
+            request,
+            profile.as_ref(),
+            &resolved.config.terminal,
             resolved.workspace.root.as_deref(),
             resolved.config.layout.new_pane_cwd,
         );
         let spec = SpawnSpec {
-            launcher: request
-                .launcher
-                .clone()
-                .unwrap_or_else(|| start_launcher(&terminal.shell, &terminal.shell_args)),
+            launcher,
             cwd: cwd.clone(),
-            env: request.env.clone(),
+            env,
             size: request.size.unwrap_or_else(default_size),
         };
         let session = state
@@ -237,6 +370,7 @@ pub struct Panes {
     pub(crate) layout: Arc<LocalLayout>,
     spawner: Arc<PaneSpawner>,
     pub(crate) config: Arc<ConfigService>,
+    pub(crate) profiles: Arc<ProfileService>,
     pub(crate) store: Arc<Store>,
     /// The layout's changes from before any page could connect. The task that follows
     /// them takes this.
@@ -280,9 +414,11 @@ impl Panes {
             .iter()
             .map(|warning| json!({ "type": "notice", "level": "warning", "message": warning }))
             .collect();
+        let profiles = ProfileService::new(Arc::clone(&config));
         let spawner = Arc::new(PaneSpawner {
             state: Arc::downgrade(state),
             config: Arc::clone(&config),
+            profiles: Arc::clone(&profiles),
         });
         let layout = LocalLayout::new(opened.workspace, 1, spawner.clone());
         // Taken before anything can change the layout, so the task that follows it
@@ -293,6 +429,7 @@ impl Panes {
             layout,
             spawner,
             config,
+            profiles,
             store: Arc::new(store),
             changes: Mutex::new(Some(changes)),
             starting: tokio::sync::Mutex::new(()),
@@ -362,6 +499,11 @@ impl Panes {
     /// The pane that has the keyboard in a window.
     pub fn focused_pane(&self, window: WindowId) -> Option<PaneId> {
         self.workspace().window(window)?.focus
+    }
+
+    /// The terminal a pane shows: what it runs and how it was asked for.
+    pub fn terminal(&self, pane: PaneId) -> Option<lume_layout::TerminalPane> {
+        self.workspace().pane(pane).and_then(terminal_of).cloned()
     }
 
     /// The session a pane shows, if it is a terminal that has one.
@@ -579,7 +721,16 @@ impl Panes {
         let Some(pane) = self.pane_of(key) else {
             return;
         };
-        let close = match self.config.current().config.terminal.close_on_exit {
+        // A profile may say otherwise than the settings do.
+        let of_profile = self
+            .workspace()
+            .pane(pane)
+            .and_then(terminal_of)
+            .and_then(|terminal| terminal.profile.as_deref())
+            .and_then(|id| self.profiles.find(id))
+            .and_then(|profile| profile.close_on_exit);
+        let rule = of_profile.unwrap_or(self.config.current().config.terminal.close_on_exit);
+        let close = match rule {
             CloseOnExit::Always => true,
             CloseOnExit::Clean => status == ExitStatus::Code(0),
             CloseOnExit::Never => false,
@@ -948,6 +1099,162 @@ mod tests {
         shell: Arc<FakeShell>,
         window: WindowId,
         _dir: TempDir,
+    }
+
+    fn profile(launcher: Launcher) -> Profile {
+        Profile {
+            id: "p".to_owned(),
+            name: "P".to_owned(),
+            icon: None,
+            launcher,
+            cwd: None,
+            env: std::collections::BTreeMap::new(),
+            theme: None,
+            font_size: None,
+            shell_integration: lume_config::ShellIntegration::Auto,
+            close_on_exit: None,
+            hidden: false,
+            origin: lume_config::ProfileOrigin::User,
+            detail: None,
+        }
+    }
+
+    fn shell(program: &str, args: &[&str]) -> Launcher {
+        Launcher::Shell {
+            program: program.to_owned(),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+            login: false,
+        }
+    }
+
+    fn planned(request: &SpawnRequest, profile: Option<&Profile>) -> Start {
+        let terminal = TerminalConfig {
+            shell: "settings-shell".to_owned(),
+            shell_args: vec!["-s".to_owned()],
+            ..TerminalConfig::default()
+        };
+        plan_start(request, profile, &terminal, None, NewPaneCwd::Home)
+    }
+
+    #[test]
+    fn a_pane_runs_its_own_program_then_its_profile_then_the_settings_shell() {
+        let named = SpawnRequest {
+            launcher: Some(shell("htop", &[])),
+            ..SpawnRequest::default()
+        };
+        let nu = profile(shell("nu", &["--login"]));
+        // A pane that names its program is not changed by any profile.
+        assert_eq!(planned(&named, Some(&nu)).launcher, shell("htop", &[]));
+        assert_eq!(
+            planned(&SpawnRequest::default(), Some(&nu)).launcher,
+            shell("nu", &["--login"])
+        );
+        assert_eq!(
+            planned(&SpawnRequest::default(), None).launcher,
+            shell("settings-shell", &["-s"])
+        );
+    }
+
+    #[test]
+    fn a_profile_that_names_no_program_runs_the_users_shell_with_its_arguments() {
+        let bare = profile(shell("", &["-x"]));
+        let Launcher::Shell { program, args, .. } =
+            planned(&SpawnRequest::default(), Some(&bare)).launcher
+        else {
+            panic!("not a shell");
+        };
+        let Launcher::Shell { program: own, .. } = default_shell() else {
+            panic!("the default is not a shell");
+        };
+        assert_eq!(program, own);
+        assert_eq!(args, ["-x"]);
+    }
+
+    #[test]
+    fn a_shell_starts_in_a_folder_that_is_there_and_the_profiles_tilde_is_home() {
+        let here = std::env::current_dir().unwrap();
+        let here = here.to_string_lossy();
+        let home = std::env::home_dir().unwrap();
+
+        let mut cmd = profile(shell("cmd", &[]));
+        cmd.cwd = Some(here.to_string());
+        let start = planned(&SpawnRequest::default(), Some(&cmd));
+        assert_eq!(start.cwd.as_deref(), Some(&*here));
+
+        cmd.cwd = Some("~".to_owned());
+        let start = planned(&SpawnRequest::default(), Some(&cmd));
+        assert_eq!(start.cwd.as_deref(), Some(&*home.to_string_lossy()));
+
+        // The pane's own directory goes before the profile's.
+        cmd.cwd = Some("~".to_owned());
+        let asked = SpawnRequest {
+            cwd: Some(here.to_string()),
+            ..SpawnRequest::default()
+        };
+        assert_eq!(planned(&asked, Some(&cmd)).cwd.as_deref(), Some(&*here));
+
+        // A folder that is not there is passed over for the home directory.
+        cmd.cwd = Some(format!("{here}/no-such-folder-here"));
+        let start = planned(&SpawnRequest::default(), Some(&cmd));
+        assert_eq!(start.cwd.as_deref(), Some(&*home.to_string_lossy()));
+    }
+
+    #[test]
+    fn a_distribution_takes_a_linux_path_on_trust_and_another_machine_takes_none() {
+        let mut ubuntu = profile(Launcher::Wsl {
+            distro: "Ubuntu".to_owned(),
+            user: None,
+        });
+        assert_eq!(planned(&SpawnRequest::default(), Some(&ubuntu)).cwd, None);
+        ubuntu.cwd = Some("/srv/www".to_owned());
+        assert_eq!(
+            planned(&SpawnRequest::default(), Some(&ubuntu))
+                .cwd
+                .as_deref(),
+            Some("/srv/www")
+        );
+        ubuntu.cwd = Some("~/work".to_owned());
+        assert_eq!(
+            planned(&SpawnRequest::default(), Some(&ubuntu))
+                .cwd
+                .as_deref(),
+            Some("~/work")
+        );
+        // Not a Linux path and not a folder of this machine: the shell's home.
+        ubuntu.cwd = Some("no-such-folder-here".to_owned());
+        assert_eq!(planned(&SpawnRequest::default(), Some(&ubuntu)).cwd, None);
+
+        let mut remote = profile(Launcher::Ssh {
+            host: "work".to_owned(),
+            user: None,
+            port: None,
+            extra_args: vec![],
+            client: None,
+        });
+        remote.cwd = Some("/srv".to_owned());
+        let asked = SpawnRequest {
+            cwd: Some("/tmp".to_owned()),
+            ..SpawnRequest::default()
+        };
+        assert_eq!(planned(&asked, Some(&remote)).cwd, None);
+    }
+
+    #[test]
+    fn the_panes_own_variables_hold_over_the_profiles() {
+        let mut nu = profile(shell("nu", &[]));
+        nu.env.insert("A".to_owned(), "profile".to_owned());
+        nu.env.insert("B".to_owned(), "profile".to_owned());
+        let asked = SpawnRequest {
+            env: vec![("B".to_owned(), "pane".to_owned())],
+            ..SpawnRequest::default()
+        };
+        assert_eq!(
+            planned(&asked, Some(&nu)).env,
+            [
+                ("A".to_owned(), "profile".to_owned()),
+                ("B".to_owned(), "pane".to_owned())
+            ]
+        );
     }
 
     /// A configuration whose shell is one that starts fast and keeps no history.

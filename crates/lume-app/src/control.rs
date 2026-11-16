@@ -328,9 +328,19 @@ impl Control {
                 // The page says how large the pane will be and shows what is started.
                 let page = self.page_of(window).await?;
                 let size = spec.size;
+                // A profile that is not there is refused here, where the answer can
+                // say so, rather than replaced by another when the pane starts.
+                if let Some(id) = &spec.profile
+                    && panes.profiles.resolve(id).await.is_none()
+                {
+                    return Err(AppError::new(
+                        codes::NOT_FOUND,
+                        format!("there is no profile called `{id}`"),
+                    ));
+                }
                 let content = NewContent::Terminal(SpawnRequest {
                     backend: None,
-                    profile: None,
+                    profile: spec.profile,
                     launcher: spec.launcher,
                     cwd: spec.cwd,
                     env: spec.env,
@@ -627,6 +637,14 @@ impl Control {
                 reply(
                     format!("listed {} workspaces", workspaces.len()),
                     AppReplyBody::Workspaces { active, workspaces },
+                )
+            }
+            AppRequestBody::Profiles {} => {
+                let profiles = panes.profiles.view();
+                let count = profiles["profiles"].as_array().map_or(0, Vec::len);
+                reply(
+                    format!("listed {count} profiles"),
+                    AppReplyBody::Profiles { profiles },
                 )
             }
             AppRequestBody::Commands {} => {

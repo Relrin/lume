@@ -18,6 +18,7 @@ import type {
   LayoutView,
   Notice,
   PaneStart,
+  ProfileList,
   SessionsStarted,
   ShellEntry,
   ThemeEntry,
@@ -122,6 +123,11 @@ export class CoreClient {
   /** The shells found on this machine. */
   shellsList(): Promise<ShellEntry[]> {
     return this.transport.command("shells_list");
+  }
+
+  /** The ways there are to start a terminal. */
+  profilesList(): Promise<ProfileList> {
+    return this.transport.command("profiles_list");
   }
 
   /** The fixed-width fonts installed on this machine. */

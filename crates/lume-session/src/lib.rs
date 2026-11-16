@@ -15,8 +15,12 @@
 
 mod backend;
 mod local;
+pub mod profiles;
 mod router;
 mod shell;
+pub mod ssh_config;
+pub mod tuning;
+pub mod wsl;
 
 use lume_proto::ProtoError;
 
@@ -29,6 +33,7 @@ pub use lume_proto::{
     Launcher, Palette, Responder, Rgb, SessionEvent, SessionId, SessionInfo, SessionStats,
     SpawnSpec, TermSize,
 };
+pub use profiles::{DetectOptions, Detected, detect};
 pub use router::Router;
 pub use shell::{KnownShell, default_shell, known_shells};
 

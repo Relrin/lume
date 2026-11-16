@@ -22,7 +22,7 @@ pub use windows::console::ensure_hidden_console;
 
 /// Variables every child gets, so programs can tell what terminal they run in and that
 /// it draws 24-bit colour.
-pub(crate) const IDENTITY_ENV: [(&str, &str); 3] = [
+pub const IDENTITY_ENV: [(&str, &str); 3] = [
     ("COLORTERM", "truecolor"),
     ("TERM_PROGRAM", "lume"),
     ("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION")),

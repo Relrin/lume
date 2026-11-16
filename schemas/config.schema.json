@@ -462,6 +462,11 @@
       },
       "type": "object"
     },
+    "default-profile": {
+      "default": "",
+      "description": "The profile new terminals use, by its id. Empty, new terminals run the shell of\n`terminal.shell`.",
+      "type": "string"
+    },
     "font": {
       "default": {
         "bold-weight": 700,
@@ -1028,6 +1033,230 @@
       "description": "Settings of plugins, by plugin id.",
       "type": "object"
     },
+    "profile": {
+      "description": "Ways to start a terminal. Each is a `[[profile]]` table with an `id`; one with\nthe id of a profile the application made changes that profile.",
+      "items": {
+        "additionalProperties": false,
+        "description": "One `[[profile]]` table: what it sets, and nothing for what it leaves out.",
+        "properties": {
+          "args": {
+            "description": "`shell`: the program's arguments.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "client": {
+            "description": "`ssh`: the client program, instead of the one found on this machine.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "close-on-exit": {
+            "anyOf": [
+              {
+                "description": "What happens to a pane when its program ends.",
+                "oneOf": [
+                  {
+                    "const": "clean",
+                    "description": "The pane closes if the program ended without an error, and stays otherwise.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "always",
+                    "description": "The pane closes however the program ended.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "never",
+                    "description": "The pane stays, and says how the program ended.",
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What happens to the pane when the program ends, instead of\n`terminal.close-on-exit`."
+          },
+          "cwd": {
+            "description": "The directory the terminal starts in.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "distro": {
+            "description": "`wsl`: the distribution's name.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Environment variables set for the program.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "extra-args": {
+            "description": "`ssh`: arguments given to the client before the host.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "font-size": {
+            "description": "The text size of this profile's terminals, in pixels.",
+            "format": "double",
+            "maximum": 72.0,
+            "minimum": 6.0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "hidden": {
+            "description": "Leave the profile out of lists. It can still be named.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "host": {
+            "description": "`ssh`: the machine, as it would be given to `ssh`: a name from the user's\nOpenSSH configuration, a host name or an address.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "icon": {
+            "description": "The name of the icon shown for it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "The profile's id: what `default-profile`, commands and other entries name it by.\nAn id the application uses for a profile it made (`auto.pwsh`,\n`auto.wsl.<distribution>`, `auto.ssh.<host>`) changes that profile.",
+            "type": "string"
+          },
+          "launcher": {
+            "anyOf": [
+              {
+                "description": "What a profile's terminal runs.",
+                "oneOf": [
+                  {
+                    "const": "shell",
+                    "description": "A program on this machine.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "wsl",
+                    "description": "The shell of a Linux distribution on this Windows machine.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "ssh",
+                    "description": "A shell on another machine, through the OpenSSH client.",
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the terminal runs. Needed unless the id is that of a generated profile."
+          },
+          "login": {
+            "description": "`shell`: start the program as a login shell.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "What the profile is called in lists.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "port": {
+            "description": "`ssh`: the port.",
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "program": {
+            "description": "`shell`: the program to run. Left out, the user's own shell.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shell-integration": {
+            "anyOf": [
+              {
+                "description": "Whether a shell is told to report its directory and its commands.",
+                "oneOf": [
+                  {
+                    "const": "auto",
+                    "description": "The shell is set up to report them, without its own files being changed.",
+                    "type": "string"
+                  },
+                  {
+                    "const": "off",
+                    "description": "The shell is started as it is.",
+                    "type": "string"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the shell is set up to report its directory and commands."
+          },
+          "theme": {
+            "description": "The theme of this profile's terminals, instead of the window's.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "user": {
+            "description": "`wsl` and `ssh`: the user to be there.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "renderer": {
       "default": {
         "tier": "auto"
@@ -1052,6 +1281,26 @@
               "type": "string"
             }
           ]
+        }
+      },
+      "type": "object"
+    },
+    "ssh": {
+      "default": {
+        "connection-sharing": true,
+        "control-persist": "10m"
+      },
+      "description": "Terminals on other machines.",
+      "properties": {
+        "connection-sharing": {
+          "default": true,
+          "description": "Let terminals to one machine share a connection, so that only the first has to\nsign in. It applies to the hosts listed from the OpenSSH configuration, and\nonly where the OpenSSH client can do it, which the one that comes with Windows\ncannot.",
+          "type": "boolean"
+        },
+        "control-persist": {
+          "default": "10m",
+          "description": "How long a shared connection is kept after its last terminal closes, as\nOpenSSH's `ControlPersist` takes it: `10m`, `yes`, `no`.",
+          "type": "string"
         }
       },
       "type": "object"

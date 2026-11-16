@@ -16,7 +16,8 @@ import type { CommandSpec } from "../core/types.ts";
 import { useShell } from "../shell/context.ts";
 import { SearchIcon } from "../shell/icons.tsx";
 import { PALETTE_RESULTS_MAX } from "../tuning.ts";
-import { promptsFor, readArg, type ArgPrompt } from "./args.ts";
+import { promptsFor, readArg, type ArgPrompt, type Choice } from "./args.ts";
+import { profileChoices, workspaceChoices } from "./choices.ts";
 import { rank } from "./fuzzy.ts";
 import { pageStorage, readRecents, rememberRecent } from "./store.ts";
 
@@ -44,6 +45,8 @@ interface Row {
   /** The keys that run the row's command. */
   readonly keys: string | undefined;
   readonly command: CommandSpec | undefined;
+  /** What a row chosen from a list stands for, when that is not the text it shows. */
+  readonly value?: string;
 }
 
 /** The command that shows the palette, which the palette has no reason to list. */
@@ -119,16 +122,17 @@ function commandRows(
     .map((match) => row(match.item, match.indices));
 }
 
-function choiceRows(choices: readonly string[], query: string): Row[] {
-  return rank(choices, query, (choice) => choice)
+function choiceRows(choices: readonly Choice[], query: string): Row[] {
+  return rank(choices, query, (choice) => choice.label)
     .slice(0, PALETTE_RESULTS_MAX)
     .map((match) => ({
-      key: match.item,
+      key: match.item.value,
       prefix: "",
-      text: match.item,
+      text: match.item.label,
       indices: match.indices,
       keys: undefined,
       command: undefined,
+      value: match.item.value,
     }));
 }
 
@@ -149,8 +153,8 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
-  /** The names a prompt's value is chosen from, once they have been fetched. */
-  const [choices, setChoices] = useState<readonly string[] | null>(null);
+  /** What a prompt's value is chosen from, once it has been fetched. */
+  const [choices, setChoices] = useState<readonly Choice[] | null>(null);
 
   const prompt = stage.kind === "args" ? stage.prompts[stage.at] : undefined;
   const source = prompt?.choices ?? null;
@@ -177,11 +181,15 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
 
   useEffect(() => {
     setChoices(null);
-    if (source !== "workspaces") return undefined;
+    if (source === null) return undefined;
     let current = true;
-    app.client.workspacesList().then(
-      (listed) => {
-        if (current) setChoices(listed.workspaces.map((workspace) => workspace.name));
+    const listed: Promise<Choice[]> =
+      source === "profiles"
+        ? app.client.profilesList().then(profileChoices)
+        : app.client.workspacesList().then(workspaceChoices);
+    listed.then(
+      (found) => {
+        if (current) setChoices(found);
       },
       () => {
         // Without the list the name can still be typed.
@@ -243,8 +251,8 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
       if (row?.command) choose(row.command);
       return;
     }
-    // A name on the list is taken as it is listed; anything else as it was typed.
-    answer(row ? row.text : query);
+    // A row of the list is taken for what it stands for; anything else as it was typed.
+    answer(row ? (row.value ?? row.text) : query);
   };
 
   const move = (to: number) => {

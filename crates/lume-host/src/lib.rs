@@ -12,6 +12,7 @@
 //! and the program in it blocks on its next write.
 
 mod conn;
+mod launch;
 mod pending;
 mod session;
 pub mod tuning;
@@ -21,13 +22,14 @@ use std::io;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use lume_proto::{
-    BackendCaps, DecodeError, ErrorCode, HydrateKinds, Launcher, ProtoError, Responder, SessionId,
+    BackendCaps, DecodeError, ErrorCode, HydrateKinds, ProtoError, Responder, SessionId,
     SessionInfo, SpawnSpec,
 };
-use lume_pty::{CommandSpec, PtySize, PtySystem};
+use lume_pty::{PtySize, PtySystem};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::conn::Outbox;
+use crate::launch::Launch;
 use crate::session::SessionHandle;
 
 /// What a host is built from.
@@ -139,26 +141,8 @@ impl Host {
             ));
         }
 
-        let Launcher::Shell {
-            program,
-            args,
-            login,
-        } = spec.launcher
-        else {
-            return Err(ProtoError::new(
-                ErrorCode::Unsupported,
-                "this host cannot start that",
-            ));
-        };
-        let mut command = CommandSpec::new(&program).args(&args);
-        command.login = login;
-        command.cwd = spec.cwd.map(Into::into);
-        command.env = spec
-            .env
-            .into_iter()
-            .map(|(name, value)| (name.into(), value.into()))
-            .collect();
         let size = spec.size;
+        let Launch { command, program } = launch::launch(spec)?;
 
         // Starting a process blocks for a moment, so it runs off the async threads.
         let pty_system = Arc::clone(&self.config.pty);

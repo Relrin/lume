@@ -2109,6 +2109,7 @@ dependencies = [
  "lume-proto",
  "lume-pty",
  "lume-session",
+ "notify",
  "serde",
  "serde_json",
  "tauri",
@@ -2211,6 +2212,7 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "libc",
+ "lume-config",
  "lume-host",
  "lume-ipc",
  "lume-layout",

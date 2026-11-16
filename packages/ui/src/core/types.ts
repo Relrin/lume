@@ -20,7 +20,7 @@ import type {
   WindowId,
   Workspace,
 } from "../layout/types.ts";
-import type { TermSize } from "../transport/types.ts";
+import type { Launcher, TermSize } from "../transport/types.ts";
 
 /** Whether a look is a light or a dark one. */
 export type Scheme = "light" | "dark";
@@ -143,6 +143,37 @@ export interface ShellEntry {
   readonly program: string;
 }
 
+/** A way to start a terminal, as `profiles_list` describes it. */
+export interface Profile {
+  /** What commands and the configuration name it by. */
+  readonly id: string;
+  /** What a person calls it. */
+  readonly name: string;
+  readonly icon?: string;
+  readonly launcher: Launcher;
+  readonly cwd?: string;
+  readonly theme?: string;
+  readonly font_size?: number;
+  /** Left out of lists; it can still be named. */
+  readonly hidden: boolean;
+  /** Whether the application made it for something it found, or the user wrote it. */
+  readonly origin: "generated" | "user";
+  /** A line about it: where it was found, what state it is in. */
+  readonly detail?: string;
+}
+
+/** The profiles there are, as `profiles_list` returns them. */
+export interface ProfileList {
+  readonly revision: number;
+  readonly profiles: readonly Profile[];
+  /** The id of the profile new terminals use, if one is set. */
+  readonly default: string | null;
+  /** Why something that might be expected is not among them. */
+  readonly notes: readonly string[];
+  /** Whether the machine has been looked at yet. Before that only the user's own are listed. */
+  readonly looked: boolean;
+}
+
 /** The layout as `layout_view` returns it. */
 export interface LayoutView {
   /** The window this page is. */
@@ -220,6 +251,8 @@ export type Notice =
    * the window itself if the answer is yes.
    */
   | { readonly type: "close_requested" }
+  /** The profiles changed: what was found on the machine, or what the user wrote. */
+  | ({ readonly type: "profiles_changed" } & ProfileList)
   /** The settings window was asked for again: the page to show, if one was named. */
   | { readonly type: "settings_show"; readonly section: string | null }
   | {

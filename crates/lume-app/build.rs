@@ -35,6 +35,7 @@ const COMMANDS: &[&str] = &[
     "config_schema",
     "themes_list",
     "shells_list",
+    "profiles_list",
     "background_image",
     "window_drag",
     "window_control",

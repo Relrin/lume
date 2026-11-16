@@ -23,10 +23,12 @@ everything after the program is the program's own.
 Commands of lume ctl, which drive the running application:
   status                         what the application is and how far its start has come
   list                           every session, and the pane that shows it
-  spawn [--tab | --split left|right|up|down | --window] [--cwd <dir>]
-        [--size <cols>x<rows>] [--env <name>=<value>]... [-- <program> [<arg>...]]
+  spawn [--tab | --split left|right|up|down | --window] [--profile <id>]
+        [--cwd <dir>] [--size <cols>x<rows>] [--env <name>=<value>]...
+        [-- <program> [<arg>...]]
                                  start a session in a new tab, in a new pane beside
-                                 the focused one, or in a new window
+                                 the focused one, or in a new window; --profile says
+                                 which profile it runs, -- a program instead
   send [<target>] [--enter] [--escapes] <text>...
                                  type text into a terminal; --enter ends it with a
                                  carriage return, --escapes reads \\r \\n \\t \\e \\\\ \\xHH
@@ -40,6 +42,8 @@ Commands of lume ctl, which drive the running application:
   layout apply <intent> | -      change the layout; the intent is JSON, read from
                                  standard input when given as -
   workspaces                     list the workspaces, and say which is on show
+  profiles                       list the profiles: the shells, WSL distributions and
+                                 SSH hosts a terminal can be started in
   commands                       list the commands there are
   command <id> [<arguments>]     run a command; its arguments are a JSON object
   quit                           close the application
@@ -243,6 +247,7 @@ fn spawn(words: &mut Words) -> Result<AppRequestBody, String> {
             })?,
             "--window" => placed(SpawnPlace::Window {})?,
             "--cwd" => spec.cwd = Some(value(words, "--cwd", "a directory")?),
+            "--profile" => spec.profile = Some(value(words, "--profile", "a profile's id")?),
             "--size" => spec.size = Some(size(&value(words, "--size", "a size")?)?),
             "--env" => {
                 let pair = value(words, "--env", "a variable as name=value")?;
@@ -436,6 +441,10 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
         "workspaces" => {
             nothing_more(words, "workspaces")?;
             AppRequestBody::Workspaces {}
+        }
+        "profiles" => {
+            nothing_more(words, "profiles")?;
+            AppRequestBody::Profiles {}
         }
         "commands" => {
             nothing_more(words, "commands")?;
@@ -701,6 +710,7 @@ mod tests {
             spawned,
             AppRequestBody::Spawn {
                 spec: OpenSpec {
+                    profile: None,
                     launcher: Some(Launcher::Shell {
                         program: "bash".to_owned(),
                         args: vec!["-l".to_owned(), "--norc".to_owned()],
