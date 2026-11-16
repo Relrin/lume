@@ -547,6 +547,16 @@ impl Shell for WindowShell {
         }
     }
 
+    fn copy_text(&self, text: String) {
+        let app = self.app.clone();
+        tauri::async_runtime::spawn(async move {
+            let clipboard = app.state::<crate::clipboard::ClipboardThread>();
+            if let Err(error) = clipboard.write(text).await {
+                tracing::warn!(%error, "the clipboard could not be written");
+            }
+        });
+    }
+
     fn close_window(&self, label: &str) {
         let Some(window) = self.app.get_webview_window(label) else {
             return;

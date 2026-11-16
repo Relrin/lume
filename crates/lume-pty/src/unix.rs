@@ -23,8 +23,8 @@ use std::time::{Duration, Instant};
 use portable_pty::{CommandBuilder, MasterPty, native_pty_system};
 
 use crate::{
-    Child, ChildKiller, CommandSpec, ExitStatus, IDENTITY_ENV, Pty, PtyRead, PtySize, PtySystem,
-    ReadStop,
+    Child, ChildKiller, CommandSpec, ExitStatus, ForegroundProbe, ForegroundProcess, IDENTITY_ENV,
+    Pty, PtyRead, PtySize, PtySystem, ReadStop,
 };
 
 /// The terminal type programs are told. The terminal behaves as xterm does in every way
@@ -234,6 +234,120 @@ impl Pty for UnixPty {
         }
         self.master.resize(portable_size(size)).map_err(other)
     }
+
+    fn foreground_probe(&self) -> Option<Arc<dyn ForegroundProbe>> {
+        // A descriptor of its own, so the probe works for as long as it is kept,
+        // whatever becomes of the terminal's reader and writer.
+        let master = MasterPty::as_raw_fd(&*self.master)?;
+        let fd = duplicate(master).ok()?;
+        Some(Arc::new(UnixForeground {
+            fd,
+            exited: Arc::clone(&self.exited),
+        }))
+    }
+}
+
+/// Asks the terminal which process group has it. A terminal's input goes to one
+/// process group at a time, and a shell puts each command line it runs in a group of
+/// its own, so the group that has the terminal is the command line in the foreground.
+struct UnixForeground {
+    fd: OwnedFd,
+    /// Set once the terminal's program has been waited for.
+    exited: Arc<AtomicBool>,
+}
+
+impl ForegroundProbe for UnixForeground {
+    fn foreground(&self) -> Option<ForegroundProcess> {
+        // Once the program that led the terminal's session has ended, the terminal
+        // has nothing in its foreground worth naming.
+        if self.exited.load(Ordering::SeqCst) {
+            return None;
+        }
+        // SAFETY: the descriptor is open for as long as `self` is alive.
+        let group = unsafe { libc::tcgetpgrp(self.fd.as_raw_fd()) };
+        if group <= 0 {
+            return None;
+        }
+        // A group is numbered after the process that leads it: the first program of
+        // the command line. If that one has ended and others of the line run on, there
+        // is no name to be had this way.
+        let name = process_name(group).filter(|name| !name.is_empty())?;
+        Some(ForegroundProcess {
+            pid: group as u32,
+            name,
+        })
+    }
+}
+
+/// The longest name the kernel keeps for a process. A name of exactly this length may
+/// have been cut short.
+#[cfg(any(target_os = "linux", target_os = "android", test))]
+const KERNEL_NAME_BYTES: usize = 15;
+
+/// The name to show for a process, given the short name the kernel keeps for it and
+/// the first word of its command line, if that could be read. The kernel's name is
+/// what the process calls itself, so it is preferred; the command line is used only to
+/// give back the end of a name the kernel cut short.
+#[cfg(any(target_os = "linux", target_os = "android", test))]
+fn name_from(kernel: &str, first_argument: Option<&str>) -> String {
+    let kernel = kernel.trim_end_matches('\n');
+    if kernel.len() == KERNEL_NAME_BYTES
+        && let Some(file) = first_argument.and_then(|argument| argument.rsplit('/').next())
+        && file.len() > kernel.len()
+        && file.starts_with(kernel)
+    {
+        return file.to_owned();
+    }
+    kernel.to_owned()
+}
+
+/// The name of a running process.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn process_name(pid: libc::pid_t) -> Option<String> {
+    let kernel = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    // The command line is one string of arguments, each ended by a zero byte.
+    let line = std::fs::read(format!("/proc/{pid}/cmdline")).ok();
+    let first = line
+        .as_deref()
+        .and_then(|line| line.split(|&byte| byte == 0).next())
+        .and_then(|first| std::str::from_utf8(first).ok());
+    Some(name_from(&kernel, first))
+}
+
+/// The name of a running process: the file name of the program it runs, or the name
+/// the kernel keeps for it where the path cannot be had.
+#[cfg(target_os = "macos")]
+fn process_name(pid: libc::pid_t) -> Option<String> {
+    // Room for the longest name the kernel keeps, which is half of this.
+    const NAME_BYTES: usize = 64;
+    let text = |buffer: &[u8], written: libc::c_int| {
+        let len = usize::try_from(written).ok().filter(|&len| len > 0)?;
+        let bytes = buffer.get(..len)?;
+        let end = bytes.iter().position(|&byte| byte == 0).unwrap_or(len);
+        Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
+    };
+
+    let mut path = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: the buffer is valid for the length given, which is the length the call
+    // asks for.
+    let written = unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
+    let from_path = text(&path, written)
+        .and_then(|path| path.rsplit('/').next().map(str::to_owned))
+        .filter(|name| !name.is_empty());
+    if from_path.is_some() {
+        return from_path;
+    }
+
+    let mut name = [0u8; NAME_BYTES];
+    // SAFETY: the buffer is valid for the length given.
+    let written = unsafe { libc::proc_name(pid, name.as_mut_ptr().cast(), name.len() as u32) };
+    text(&name, written)
+}
+
+/// On systems this crate has no way of asking, a process has no name.
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
+fn process_name(_pid: libc::pid_t) -> Option<String> {
+    None
 }
 
 impl Drop for UnixPty {
@@ -400,5 +514,35 @@ impl ChildKiller for UnixKiller {
             .name("pty-kill".to_owned())
             .spawn(watchdog)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_kernels_name_is_shown_and_a_name_it_cut_short_is_completed() {
+        assert_eq!(name_from("vim\n", Some("/usr/bin/vim")), "vim");
+        // What the process calls itself is preferred to how it was started.
+        assert_eq!(name_from("pip\n", Some("/usr/bin/python3")), "pip");
+        assert_eq!(name_from("bash\n", Some("-bash")), "bash");
+        assert_eq!(name_from("top\n", None), "top");
+        // Fifteen bytes may be the start of a longer name.
+        assert_eq!(
+            name_from(
+                "systemd-journal\n",
+                Some("/usr/lib/systemd/systemd-journald")
+            ),
+            "systemd-journald"
+        );
+        assert_eq!(
+            name_from("exactly-fifteen\n", Some("/bin/exactly-fifteen")),
+            "exactly-fifteen"
+        );
+        assert_eq!(
+            name_from("gnome-terminal-\n", Some("/usr/bin/python3")),
+            "gnome-terminal-"
+        );
     }
 }

@@ -387,6 +387,47 @@ def scroll_flood() -> str:
     return "".join(f"{i:05}\r\n" for i in range(1, 5001)) + "end"
 
 
+def base64_text(text: str) -> str:
+    import base64
+
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def hostile_reports() -> str:
+    """What a shell reports about itself, said by output that is no shell's: a file that
+    was printed, or a program on another machine."""
+    out = []
+    out.append("$ cat notes-from-somewhere.txt\r\n")
+    # A directory on another machine, one that claims to be this machine's, one that
+    # hides a line break and the start of a title in its escapes, and one that is no
+    # directory.
+    out.append(OSC + "7;file://elsewhere/etc" + ST)
+    out.append(OSC + "7;file://localhost/" + ST)
+    out.append(OSC + "7;file://localhost/tmp/%0a%1b%5d2;taken" + BEL)
+    out.append(OSC + "7;javascript:alert(1)" + ST)
+    # A command nobody ran, whose line carries a line break and a control sequence, its
+    # end, and an end with no beginning and a status no command returns.
+    out.append(OSC + "133;C;cmdline_url=rm%20-rf%20~%0a%1b%5b2J" + ST)
+    out.append(OSC + "133;D;0" + ST)
+    out.append(OSC + "133;D;-999999999999" + ST)
+    # A status that asks for a password, which is only ever shown; then statuses that
+    # break a rule each: text that is not base64, text with a line break in it, a
+    # record's path that is a path of files, a name too long, a report too long.
+    out.append(OSC + "7501;state=blocked:kind=auth:app=sudo:msg=" + base64_text("Password:") + ST)
+    out.append(OSC + "7501;state=error:msg=!!!" + ST)
+    out.append(OSC + "7501;state=working:msg=" + base64_text("one\ntwo") + ST)
+    out.append(OSC + "7501;state=working:id=/etc/passwd" + ST)
+    out.append(OSC + "7501;state=done:app=" + "a" * 40 + ST)
+    out.append(OSC + "7501;state=idle:msg=" + "QUFB" * 1200 + ST)
+    # A directory too long to be one, and a report longer than anything is kept for.
+    out.append(OSC + "7;file://localhost/" + "d" * 3000 + ST)
+    out.append(OSC + "7501;state=idle:app=" + "x" * 20000 + ST)
+    # Asking what is understood gets no answer that could be read as typing.
+    out.append(OSC + "7501;?" + ST)
+    out.append("done\r\n$ ")
+    return "".join(out)
+
+
 def main():
     write("01-plain-shell", "A shell session: prompts, backspace, tabs, scrolling, soft wrap, carriage return", 80, 24, plain_shell())
     write("02-colors-attributes", "SGR colours and attributes: 16, 256 and direct colour, bold, italic, underline styles", 80, 24, colors_and_attributes())
@@ -406,6 +447,7 @@ def main():
     write("15-hostile-limits", "Hostile: an oversized title, numbers past every limit, pictures, notifications, an unended string, bytes that are not UTF-8", 40, 8, hostile_limits())
     write("16-scroll-flood", "Five thousand lines through a six-row screen", 20, 6, scroll_flood())
     write("17-full-reset", "A full reset after a program left a title, a directory, modes, the alternate screen and colours behind", 40, 6, full_reset())
+    write("18-hostile-reports", "Hostile: what a shell reports about itself, said by output that is no shell's: directories of other machines, commands nobody ran, statuses that break the rules", 60, 6, hostile_reports())
 
 
 if __name__ == "__main__":

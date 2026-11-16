@@ -4,6 +4,11 @@
 //! writes to it, one waits for the program to end. Everything else happens in one async
 //! task, which owns all of the session's state and is the only thing that touches it.
 //!
+//! Besides moving output, the task looks at it as it goes by for what the program
+//! reports about itself (its title, its directory, its commands), asks the system now
+//! and then which program has the terminal, and passes both on as events, in their
+//! place in the output.
+//!
 //! Backpressure is the absence of work. The reading thread hands each read to the task
 //! through a queue two reads long. When the task has nowhere to put more output (no
 //! client, or a client that has granted no credit) it stops taking from that queue, the
@@ -16,19 +21,22 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use lume_proto::{
-    BytesKind, CellPx, ClientFacts, ErrorCode, ExitStatus, HydrateMode, Message, Notification,
-    ProtoError, ResponseBody, SendWindow, SessionId, SessionInfo, SessionStats, TermSize, encode,
-    encode_bytes,
+    Body, BytesKind, CellPx, ClientFacts, ErrorCode, ExitStatus, Foreground, HydrateMode, Message,
+    Notification, ProgramState, ProgramStatus, ProtoError, ResponseBody, SendWindow, SessionEvent,
+    SessionId, SessionInfo, SessionState, SessionStats, TermSize, encode, encode_bytes,
 };
-use lume_pty::{Child, ChildKiller, Pty, PtySize, ReadStop};
+use lume_pty::{Child, ChildKiller, ForegroundProbe, ForegroundProcess, Pty, PtySize, ReadStop};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::Host;
 use crate::conn::Outbox;
 use crate::pending::{Flush, Pending, Segment};
+use crate::scan::{Report, Scanner};
+use crate::ssh_exit::{self, Tail};
 use crate::tuning::{
-    COALESCE_MAX_BYTES, COMMAND_QUEUE, EXIT_DRAIN_TIMEOUT, INPUT_BACKLOG_MAX, READ_CHUNK,
-    READ_QUEUE_CHUNKS, SEND_BATCH_BYTES, UNATTACHED_EXIT_LINGER,
+    ACTIVITY_INTERVAL, COALESCE_MAX_BYTES, COMMAND_QUEUE, EVENT_WINDOW, EVENTS_PER_WINDOW_MAX,
+    EXIT_DRAIN_TIMEOUT, FOREGROUND_SETTLE, INPUT_BACKLOG_MAX, READ_CHUNK, READ_QUEUE_CHUNKS,
+    SEND_BATCH_BYTES, STATE_STATUSES_MAX_BYTES, UNATTACHED_EXIT_LINGER,
 };
 
 /// Identifies one attachment of a session. A frame from a client names the attachment
@@ -131,6 +139,9 @@ pub(crate) struct Start {
     pub(crate) owner: Outbox,
     pub(crate) pre_attach_bytes: usize,
     pub(crate) resize_pulls_scrollback: bool,
+    /// The program is the OpenSSH client, whose last words say how its connection
+    /// ended.
+    pub(crate) ssh: bool,
 }
 
 fn thread(name: &str, run: impl FnOnce() + Send + 'static) -> io::Result<()> {
@@ -151,8 +162,10 @@ pub(crate) fn start(start: Start) -> io::Result<SessionHandle> {
         size,
         owner,
         pre_attach_bytes,
+        ssh,
         ..
     } = start;
+    let probe = pty.foreground_probe();
     let mut reader = pty.take_reader()?;
     let mut writer = pty.take_writer()?;
     let stopper = reader.stopper();
@@ -224,6 +237,7 @@ pub(crate) fn start(start: Start) -> io::Result<SessionHandle> {
     }));
 
     let (command_tx, commands) = mpsc::channel(COMMAND_QUEUE);
+    let (poll_tx, polled) = mpsc::channel(1);
     let session = Session {
         host,
         id,
@@ -258,6 +272,19 @@ pub(crate) fn start(start: Start) -> io::Result<SessionHandle> {
         read_bytes: 0,
         sent_bytes: 0,
         shared: Arc::clone(&shared),
+        scanner: Scanner::new(),
+        found: Vec::new(),
+        seen: SessionState::default(),
+        tail: ssh.then(Tail::new),
+        window_start: Instant::now(),
+        window_events: 0,
+        resync_at: None,
+        last_activity: None,
+        probe,
+        poll_tx,
+        polled,
+        poll_at: None,
+        polling: false,
     };
     tokio::spawn(session.run());
 
@@ -331,6 +358,56 @@ struct Session {
     read_bytes: u64,
     sent_bytes: u64,
     shared: Arc<Mutex<Shared>>,
+
+    scanner: Scanner,
+    /// What the scanner found in the read being handled.
+    found: Vec<Report>,
+    /// What the session's reports add up to, as far as the output has been read.
+    seen: SessionState,
+    /// The end of the output, kept where it will be read for how the session ended.
+    tail: Option<Tail>,
+    /// When the current count of passed-on reports began, and the count.
+    window_start: Instant,
+    window_events: u32,
+    /// When to tell the client the whole state, because reports were left out.
+    resync_at: Option<Instant>,
+    /// When the session last said it printed while its view was not being typed in.
+    last_activity: Option<Instant>,
+
+    /// The way to ask which program has the terminal.
+    probe: Option<Arc<dyn ForegroundProbe>>,
+    poll_tx: mpsc::Sender<Option<ForegroundProcess>>,
+    polled: mpsc::Receiver<Option<ForegroundProcess>>,
+    /// When to ask next.
+    poll_at: Option<Instant>,
+    /// An answer is on its way.
+    polling: bool,
+}
+
+/// The earlier of two times that may each be unset.
+fn sooner(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
+
+/// Roughly how many bytes a status record takes when it is sent. Text may need
+/// escaping, which at worst doubles it.
+fn weight(status: &ProgramStatus) -> usize {
+    let len = |text: &Option<String>| text.as_ref().map_or(0, String::len);
+    64 + len(&status.id) + len(&status.app) + 2 * (len(&status.title) + len(&status.message))
+}
+
+/// A session's whole state as one event. A state with more status records than one
+/// event can carry goes without the ones reported longest ago.
+fn whole(state: &SessionState) -> SessionEvent {
+    let mut state = state.clone();
+    let mut total: usize = state.statuses.iter().map(weight).sum();
+    while total > STATE_STATUSES_MAX_BYTES && !state.statuses.is_empty() {
+        total -= weight(&state.statuses.remove(0));
+    }
+    SessionEvent::State { state }
 }
 
 /// Resolves at `deadline`, or never if there is none.
@@ -349,6 +426,7 @@ impl Session {
                 break;
             }
             let ingest = self.can_ingest();
+            let poll = self.can_poll();
             // In order of urgency. Commands come first so that credit and kills are seen
             // even while output floods in; output comes before the timers so that a timer
             // which fell due while output was held back does not fire ahead of it.
@@ -369,6 +447,9 @@ impl Session {
                     self.on_exit(status.unwrap_or(ExitStatus::Unknown)).await;
                 }
                 () = at(self.flush_at) => self.flush().await,
+                found = self.polled.recv() => self.on_polled(found.flatten()).await,
+                () = at(self.poll_at), if poll => self.poll(),
+                () = at(self.resync_at) => self.resync().await,
                 () = at(self.drain_at), if ingest => self.on_drain_timeout().await,
                 () = at(self.linger_at) => {
                     self.linger_at = None;
@@ -435,6 +516,160 @@ impl Session {
     /// hold back: the bytes go on to the client exactly as they came.
     fn observe(&mut self, bytes: &[u8]) {
         self.read_bytes += bytes.len() as u64;
+        if let Some(tail) = &mut self.tail {
+            tail.push(bytes);
+        }
+        if self.ending.is_some() {
+            return;
+        }
+        let Self { scanner, found, .. } = self;
+        scanner.feed(bytes, |report| {
+            // A run of bells is one bell.
+            if report != Report::Bell || found.last() != Some(&Report::Bell) {
+                found.push(report);
+            }
+        });
+    }
+
+    /// Passes on what was found in the output read last. Called once that output is
+    /// queued, so that a report follows the bytes that made it.
+    fn report(&mut self, now: Instant) {
+        let mut found = std::mem::take(&mut self.found);
+        for report in found.drain(..) {
+            self.on_report(report, now);
+        }
+        // Kept for the next read, so that it is not allocated anew each time.
+        self.found = found;
+
+        let unwatched = self
+            .attachment
+            .as_ref()
+            .is_some_and(|attachment| !attachment.facts.focused);
+        let due = self
+            .last_activity
+            .is_none_or(|last| now.saturating_duration_since(last) >= ACTIVITY_INTERVAL);
+        if unwatched && due {
+            self.last_activity = Some(now);
+            self.emit(SessionEvent::Activity, now);
+        }
+    }
+
+    fn on_report(&mut self, report: Report, now: Instant) {
+        match report {
+            // Shells set the same title and directory at every prompt; only a change
+            // is worth telling.
+            Report::Title(title) => {
+                if self.seen.title.as_deref().unwrap_or_default() != title {
+                    self.emit(SessionEvent::Title { title }, now);
+                }
+            }
+            Report::Cwd(url) => {
+                if self.seen.cwd.as_deref() != Some(url.as_str()) {
+                    self.emit(SessionEvent::Cwd { url }, now);
+                }
+            }
+            Report::Bell => self.emit(SessionEvent::Bell, now),
+            Report::Prompt => {
+                // A prompt means the command line is over, whether or not the shell
+                // said so, and with it the work a program said it was in the middle of.
+                if self.seen.command_running() {
+                    self.emit(SessionEvent::CommandFinished { exit: None }, now);
+                }
+                let unfinished = |status: &ProgramStatus| {
+                    matches!(status.state, ProgramState::Working | ProgramState::Blocked)
+                };
+                if self.seen.statuses.iter().any(unfinished) {
+                    self.seen.statuses.retain(|status| !unfinished(status));
+                    self.emit(whole(&self.seen), now);
+                }
+                self.poll_soon(now);
+            }
+            Report::CommandStarted(command) => {
+                self.emit(SessionEvent::CommandStarted { command }, now);
+                self.poll_soon(now);
+            }
+            Report::CommandFinished(exit) => {
+                // A shell that says a command ended when none began has nothing to say.
+                if self.seen.command_running() {
+                    self.emit(SessionEvent::CommandFinished { exit }, now);
+                }
+                self.poll_soon(now);
+            }
+            Report::Status(status) => self.emit(SessionEvent::ProgramStatus(status), now),
+        }
+    }
+
+    /// Takes a report into the session's state and queues it for the client, unless
+    /// too many were queued lately; then the client is told the whole state once the
+    /// rush is over.
+    fn emit(&mut self, event: SessionEvent, now: Instant) {
+        self.seen.apply(&event);
+        if now.saturating_duration_since(self.window_start) >= EVENT_WINDOW {
+            self.window_start = now;
+            self.window_events = 0;
+        }
+        if self.window_events >= EVENTS_PER_WINDOW_MAX {
+            self.resync_at
+                .get_or_insert(self.window_start + EVENT_WINDOW);
+            return;
+        }
+        self.window_events += 1;
+        self.pending.push_event(event);
+    }
+
+    /// Tells the client the whole state, after reports had to be left out.
+    async fn resync(&mut self) {
+        self.resync_at = None;
+        self.pending.push_event(whole(&self.seen));
+        self.flush().await;
+    }
+
+    fn shown(&self) -> bool {
+        self.attachment
+            .as_ref()
+            .is_some_and(|attachment| attachment.facts.visible)
+    }
+
+    /// Whether to ask which program has the terminal when the time comes.
+    fn can_poll(&self) -> bool {
+        !self.polling && self.probe.is_some() && self.exit.is_none() && self.ending.is_none()
+    }
+
+    /// Has the program that has the terminal looked up shortly: something just
+    /// happened that usually changes it.
+    fn poll_soon(&mut self, now: Instant) {
+        self.poll_at = sooner(self.poll_at, Some(now + FOREGROUND_SETTLE));
+    }
+
+    /// Asks which program has the terminal. The answer comes back to the task; asking
+    /// may block for a moment, so it is done off the async threads.
+    fn poll(&mut self) {
+        self.poll_at = None;
+        let Some(probe) = self.probe.clone() else {
+            return;
+        };
+        self.polling = true;
+        let answer = self.poll_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let _ = answer.blocking_send(probe.foreground());
+        });
+    }
+
+    async fn on_polled(&mut self, found: Option<ForegroundProcess>) {
+        self.polling = false;
+        let now = Instant::now();
+        // While a client shows the session it is asked again, and sooner if something
+        // asked for it meanwhile.
+        let next = self.shown().then(|| self.host.next_poll(now));
+        self.poll_at = sooner(self.poll_at, next);
+        let Some(ForegroundProcess { pid, name }) = found else {
+            return;
+        };
+        let foreground = Foreground { pid, name };
+        if self.seen.foreground.as_ref() != Some(&foreground) && self.ending.is_none() {
+            self.emit(SessionEvent::Foreground(foreground), now);
+            self.flush().await;
+        }
     }
 
     async fn on_chunk(&mut self, bytes: Vec<u8>) {
@@ -448,7 +683,9 @@ impl Session {
             // Nobody wants the output of a session that is being ended.
             return;
         }
-        match self.pending.push_bytes(bytes, now, self.last_input) {
+        let flush = self.pending.push_bytes(bytes, now, self.last_input);
+        self.report(now);
+        match flush {
             Flush::Now => self.flush().await,
             Flush::At(at) => self.flush_at = Some(self.flush_at.map_or(at, |set| set.min(at))),
         }
@@ -488,6 +725,14 @@ impl Session {
             return;
         }
         self.exit_queued = true;
+        if let Some(tail) = &self.tail
+            && self.ending.is_none()
+        {
+            // Said whatever was said before: how a session ended is not left out.
+            let ended = SessionEvent::Disconnected(ssh_exit::classify(status, tail));
+            self.seen.apply(&ended);
+            self.pending.push_event(ended);
+        }
         self.pending.push_exit(status);
         self.owner
             .notify(Notification::SessionExited {
@@ -557,13 +802,19 @@ impl Session {
                 }
             }
             Command::Facts { attachment, facts } => {
-                if let Some(attachment) = self.current(attachment) {
-                    tracing::trace!(
-                        focused = facts.focused,
-                        visible = facts.visible,
-                        "client facts updated"
-                    );
-                    attachment.facts = facts;
+                let Some(attachment) = self.current(attachment) else {
+                    return;
+                };
+                let was = std::mem::replace(&mut attachment.facts, facts);
+                let (focused, visible) = (attachment.facts.focused, attachment.facts.visible);
+                tracing::trace!(focused, visible, "client facts updated");
+                if was.focused != focused {
+                    // The next output while nobody types here is said again at once.
+                    self.last_activity = None;
+                }
+                if visible && !was.visible {
+                    // A session that comes on show is brought up to date.
+                    self.poll_at = sooner(self.poll_at, Some(Instant::now()));
                 }
             }
             Command::Credit { attachment, bytes } => {
@@ -627,8 +878,25 @@ impl Session {
             // The connection went away while this was being handled.
             return None;
         }
+        // What the session has reported so far goes first. Reports still waiting
+        // behind unsent output follow in their place; they are older, and applying
+        // them again ends in the same state.
+        if !self.seen.is_empty() {
+            let mut state = Vec::new();
+            append(
+                &mut state,
+                &Message::new(stream, Body::Event(whole(&self.seen))),
+            );
+            if !outbox.frames(state).await {
+                return None;
+            }
+        }
         let id = self.next_attachment;
         self.next_attachment += 1;
+        if facts.visible {
+            self.poll_at = sooner(self.poll_at, Some(Instant::now()));
+        }
+        self.last_activity = None;
         self.attachment = Some(Attachment {
             id,
             stream,
@@ -665,6 +933,7 @@ impl Session {
             self.observe(&bytes);
             if self.ending.is_none() {
                 let _ = self.pending.push_bytes(bytes, now, self.last_input);
+                self.report(now);
             }
         }
 
@@ -710,16 +979,13 @@ impl Session {
                     encode_bytes(stream, BytesKind::Data, &bytes, &mut batch);
                 }
                 Segment::Resized(size) => {
-                    append(
-                        &mut batch,
-                        &Message::new(stream, lume_proto::Body::Resized(size)),
-                    );
+                    append(&mut batch, &Message::new(stream, Body::Resized(size)));
+                }
+                Segment::Event(event) => {
+                    append(&mut batch, &Message::new(stream, Body::Event(event)));
                 }
                 Segment::Exit(status) => {
-                    append(
-                        &mut batch,
-                        &Message::new(stream, lume_proto::Body::Exit(status)),
-                    );
+                    append(&mut batch, &Message::new(stream, Body::Exit(status)));
                     self.exit_delivered = true;
                 }
             }
@@ -737,7 +1003,8 @@ impl Session {
     }
 }
 
-/// Appends a fixed-size frame, which cannot fail to encode.
+/// Appends a marker's frame. Markers are small, and reports are kept within what one
+/// frame carries, so this does not fail; if it did, the marker would be left out.
 fn append(batch: &mut Vec<u8>, message: &Message) {
     if let Err(error) = encode(message, batch) {
         tracing::error!(%error, "a marker frame could not be encoded");

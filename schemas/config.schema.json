@@ -960,15 +960,20 @@
     },
     "layout": {
       "default": {
-        "new-pane-cwd": "workspace",
+        "new-pane-cwd": "inherit",
         "tab-placement": "top"
       },
       "description": "Where things are placed in a window.",
       "properties": {
         "new-pane-cwd": {
-          "default": "workspace",
+          "default": "inherit",
           "description": "The directory a new pane's program starts in.",
           "oneOf": [
+            {
+              "const": "inherit",
+              "description": "The directory of the pane the new one is opened from, where its shell says\nwhich that is; otherwise as `workspace`.",
+              "type": "string"
+            },
             {
               "const": "workspace",
               "description": "The workspace's folder, or the home directory if it has none.",

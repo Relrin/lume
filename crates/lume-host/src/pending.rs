@@ -1,9 +1,14 @@
 //! What a session has read from its terminal and not yet sent, in order.
 //!
-//! Besides output bytes the queue holds the two markers that must reach a client at an
-//! exact place in the output: the terminal was resized here, and the program ended
-//! here. A marker never overtakes the bytes in front of it, and bytes are only released
-//! against credit, so a marker behind unsent bytes waits with them.
+//! Besides output bytes the queue holds the markers that must reach a client at an
+//! exact place in the output: the terminal was resized here, the program ended here,
+//! and the session reported this here. A marker never overtakes the bytes in front of
+//! it, and bytes are only released against credit, so a marker behind unsent bytes
+//! waits with them.
+//!
+//! Reports are kept in bounds here, since a client that is not taking output is not
+//! taking them either: of the kinds where only the latest matters one is kept, and of
+//! all kinds together no more than [`EVENTS_PENDING_MAX`].
 //!
 //! The queue also decides when waiting output should be sent; see [`Pending::push_bytes`].
 
@@ -11,9 +16,11 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use lume_proto::tuning::MAX_PAYLOAD;
-use lume_proto::{ExitStatus, TermSize};
+use lume_proto::{ExitStatus, SessionEvent, TermSize};
 
-use crate::tuning::{COALESCE_MAX_BYTES, COALESCE_MAX_DELAY, ECHO_IMMEDIATE_WINDOW};
+use crate::tuning::{
+    COALESCE_MAX_BYTES, COALESCE_MAX_DELAY, ECHO_IMMEDIATE_WINDOW, EVENTS_PENDING_MAX,
+};
 
 /// One thing to send.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,6 +28,7 @@ pub(crate) enum Segment {
     /// Output, at most one frame's worth.
     Bytes(Vec<u8>),
     Resized(TermSize),
+    Event(SessionEvent),
     Exit(ExitStatus),
 }
 
@@ -40,7 +48,23 @@ enum Entry {
         sent: usize,
     },
     Resized(TermSize),
+    Event(SessionEvent),
     Exit(ExitStatus),
+}
+
+/// Whether a later report of the kind of `event` makes an earlier one worthless: the
+/// kinds that say how something is now, and the ones that only say that something
+/// happened, of which once is enough.
+fn latest_only(event: &SessionEvent) -> bool {
+    matches!(
+        event,
+        SessionEvent::Title { .. }
+            | SessionEvent::Cwd { .. }
+            | SessionEvent::Bell
+            | SessionEvent::Foreground(_)
+            | SessionEvent::Activity
+            | SessionEvent::State { .. }
+    )
 }
 
 #[derive(Debug, Default)]
@@ -48,6 +72,8 @@ pub(crate) struct Pending {
     entries: VecDeque<Entry>,
     /// Output bytes queued and not yet popped.
     bytes: usize,
+    /// Reports queued and not yet popped.
+    events: usize,
     /// When the oldest unsent output was queued. Its wait is what the delay limits.
     oldest: Option<Instant>,
 }
@@ -107,6 +133,31 @@ impl Pending {
         }
     }
 
+    /// Queues something the session reported, behind the output that is waiting.
+    pub(crate) fn push_event(&mut self, event: SessionEvent) {
+        if self.events > 0 && latest_only(&event) {
+            let kind = std::mem::discriminant(&event);
+            self.remove_event(|queued| std::mem::discriminant(queued) == kind);
+        }
+        if self.events >= EVENTS_PENDING_MAX {
+            self.remove_event(|_| true);
+        }
+        self.events += 1;
+        self.entries.push_back(Entry::Event(event));
+    }
+
+    /// Takes out the oldest queued report that `which` picks.
+    fn remove_event(&mut self, which: impl Fn(&SessionEvent) -> bool) {
+        let found = self
+            .entries
+            .iter()
+            .position(|entry| matches!(entry, Entry::Event(event) if which(event)));
+        if let Some(at) = found {
+            self.entries.remove(at);
+            self.events -= 1;
+        }
+    }
+
     /// Marks the place where the program ended. Nothing is queued after it.
     pub(crate) fn push_exit(&mut self, status: ExitStatus) {
         self.entries.push_back(Entry::Exit(status));
@@ -150,6 +201,14 @@ impl Pending {
                 let size = *size;
                 self.entries.pop_front();
                 Segment::Resized(size)
+            }
+            Entry::Event(_) => {
+                self.events -= 1;
+                match self.entries.pop_front() {
+                    Some(Entry::Event(event)) => Segment::Event(event),
+                    // The front was just seen to be a report.
+                    _ => return None,
+                }
             }
             Entry::Exit(status) => {
                 let status = *status;
@@ -293,6 +352,81 @@ mod tests {
         assert_eq!(pending.pop(PLENTY), Some(Segment::Bytes(b"x".to_vec())));
         assert_eq!(pending.pop(PLENTY), Some(Segment::Resized(size(110, 50))));
         assert_eq!(pending.pop(PLENTY), None);
+    }
+
+    fn title(text: &str) -> SessionEvent {
+        SessionEvent::Title {
+            title: text.to_owned(),
+        }
+    }
+
+    fn started(command: &str) -> SessionEvent {
+        SessionEvent::CommandStarted {
+            command: Some(command.to_owned()),
+        }
+    }
+
+    fn drain(pending: &mut Pending) -> Vec<Segment> {
+        std::iter::from_fn(|| pending.pop(PLENTY)).collect()
+    }
+
+    #[test]
+    fn a_report_keeps_its_place_behind_the_output_and_needs_no_credit() {
+        let mut pending = Pending::new();
+        let now = Instant::now();
+        pending.push_bytes(b"before".to_vec(), now, None);
+        pending.push_event(title("one"));
+        pending.push_bytes(b"after".to_vec(), now, None);
+
+        assert_eq!(pending.pop(0), None);
+        assert_eq!(
+            pending.pop(PLENTY),
+            Some(Segment::Bytes(b"before".to_vec()))
+        );
+        assert_eq!(pending.pop(0), Some(Segment::Event(title("one"))));
+        assert_eq!(pending.pop(0), None);
+        assert_eq!(pending.pop(PLENTY), Some(Segment::Bytes(b"after".to_vec())));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn of_a_kind_where_the_latest_is_all_that_matters_one_report_waits() {
+        let mut pending = Pending::new();
+        let now = Instant::now();
+        pending.push_event(title("one"));
+        pending.push_event(SessionEvent::Bell);
+        pending.push_bytes(b"x".to_vec(), now, None);
+        pending.push_event(started("make"));
+        pending.push_event(title("two"));
+        pending.push_event(SessionEvent::Bell);
+        // What a command line did is not replaced by what the next one did.
+        pending.push_event(started("ls"));
+
+        assert_eq!(
+            drain(&mut pending),
+            [
+                Segment::Bytes(b"x".to_vec()),
+                Segment::Event(started("make")),
+                Segment::Event(title("two")),
+                Segment::Event(SessionEvent::Bell),
+                Segment::Event(started("ls")),
+            ]
+        );
+    }
+
+    #[test]
+    fn reports_nobody_takes_do_not_pile_up() {
+        let mut pending = Pending::new();
+        for number in 0..EVENTS_PENDING_MAX + 10 {
+            pending.push_event(started(&number.to_string()));
+        }
+        let waiting = drain(&mut pending);
+        assert_eq!(waiting.len(), EVENTS_PENDING_MAX);
+        // The oldest went.
+        assert_eq!(waiting[0], Segment::Event(started("10")));
+        // And the count is right again afterwards.
+        pending.push_event(started("next"));
+        assert_eq!(drain(&mut pending), [Segment::Event(started("next"))]);
     }
 
     #[test]

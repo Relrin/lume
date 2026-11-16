@@ -128,3 +128,12 @@ pub const SETTINGS_SECTION_MAX_BYTES: usize = 48;
 /// The largest picture shown behind the panes. A larger file is refused, not read: the
 /// whole of it is handed to the page.
 pub const BACKGROUND_IMAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// How many reports of sessions may wait for a client that follows them and is slow to
+/// take them. One that falls further behind is told the sessions' whole state instead
+/// of what it missed.
+pub const SESSION_NEWS_BACKLOG: usize = 1024;
+
+/// The folder, in the folder of the application's state, that the scripts are written
+/// to with which shells are asked to report their directory and their commands.
+pub const SHELL_INTEGRATION_DIR: &str = "shell-integration";

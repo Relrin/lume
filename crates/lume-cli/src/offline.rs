@@ -18,7 +18,7 @@ use lume_config::{
 };
 use serde_json::{Value, json};
 
-use crate::args::Offline;
+use crate::args::{IntegrationShell, Offline};
 
 /// The exit status when the command did what it was asked and found nothing wrong.
 const DONE: u8 = 0;
@@ -54,10 +54,31 @@ pub fn run(command: Offline, dirs: Option<&Dirs>, out: &mut dyn Write, err: &mut
             err,
         ),
         Offline::ThemeImport { file, name } => import(&file, name.as_deref(), dirs, out, err),
+        Offline::ShellIntegration { shell } => {
+            write!(out, "{}", integration_script(shell)).map(|()| DONE)
+        }
     };
     // Output that cannot be written (a closed pipe) is nothing to report, and there
     // would be nowhere to report it.
     result.unwrap_or(FAILED)
+}
+
+/// The script that has `shell` report its directory and its commands. It is the one
+/// the application loads into shells it starts itself, which is why it is safe to put
+/// in a start-up file: loaded a second time, it does nothing.
+fn integration_script(shell: IntegrationShell) -> &'static str {
+    match shell {
+        IntegrationShell::Bash => {
+            include_str!("../../../resources/shell-integration/lume.bash")
+        }
+        IntegrationShell::Zsh => include_str!("../../../resources/shell-integration/lume.zsh"),
+        IntegrationShell::Fish => {
+            include_str!("../../../resources/shell-integration/lume.fish")
+        }
+        IntegrationShell::PowerShell => {
+            include_str!("../../../resources/shell-integration/lume.ps1")
+        }
+    }
 }
 
 /// What is wrong with the look and the keys under some settings: themes that are not
@@ -668,5 +689,25 @@ mod tests {
         });
         assert_eq!(status, FAILED);
         assert!(err.starts_with("lume: "));
+    }
+
+    #[test]
+    fn the_script_of_each_shell_is_printed_as_it_is() {
+        let sandbox = Sandbox::new("integration");
+        for shell in [
+            IntegrationShell::Bash,
+            IntegrationShell::Zsh,
+            IntegrationShell::Fish,
+            IntegrationShell::PowerShell,
+        ] {
+            let (status, out, err) = sandbox.run(Offline::ShellIntegration { shell });
+            assert_eq!((status, err.as_str()), (DONE, ""), "{shell:?}");
+            assert_eq!(out, integration_script(shell));
+            // Each reports the directory and marks the prompt, whatever its language.
+            assert!(out.contains("file://"), "{shell:?} reports no directory");
+            assert!(out.contains("133;"), "{shell:?} marks no prompt");
+            // A script that is to be read by a Linux shell has Linux line endings.
+            assert!(!out.contains('\r'), "{shell:?} has carriage returns");
+        }
     }
 }

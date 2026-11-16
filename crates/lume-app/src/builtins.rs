@@ -121,6 +121,27 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.pane.reconnect",
+        "Reconnect or Restart Pane",
+        "Pane",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.pane.copy-cwd",
+        "Copy Working Directory",
+        "Pane",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.pane.open-cwd",
+        "Open Working Directory in File Manager",
+        "Pane",
+        Runs::Core,
+        true,
+    ),
+    (
         "lume.pane.focus-left",
         "Focus Pane on the Left",
         "Pane",
@@ -432,6 +453,9 @@ fn arguments(id: &str) -> Option<Value> {
         )),
         "lume.pane.close"
         | "lume.pane.duplicate"
+        | "lume.pane.reconnect"
+        | "lume.pane.copy-cwd"
+        | "lume.pane.open-cwd"
         | "lume.pane.zoom"
         | "lume.pane.float"
         | "lume.pane.minimise"
@@ -593,11 +617,36 @@ fn terminal() -> NewContent {
     NewContent::Terminal(SpawnRequest::default())
 }
 
-/// A new terminal that runs `profile`, or the default one if none is named.
-fn terminal_with(profile: Option<String>) -> NewContent {
+/// A new terminal that runs `profile`, or the default one if none is named, opened
+/// from the pane `from`: it starts in the directory that pane's shell is in, where
+/// that is known and the new terminal will be in the same place.
+async fn terminal_with(
+    context: &Context<'_>,
+    profile: Option<String>,
+    from: Option<PaneId>,
+) -> NewContent {
+    let cwd = match from {
+        Some(from) => context.panes.inherited_dir(from, profile.as_deref()).await,
+        None => None,
+    };
     NewContent::Terminal(SpawnRequest {
         profile,
+        cwd,
         ..SpawnRequest::default()
+    })
+}
+
+/// The directory the shell in the pane a command means is in. A pane whose shell has
+/// not said where it is has none to give.
+async fn live_dir(
+    context: &Context<'_>,
+    args: &Value,
+) -> Result<(lume_session::Launcher, String), CommandError> {
+    let pane = context.pane(args)?;
+    context.panes.live_dir(pane).await.ok_or_else(|| {
+        CommandError::not_found(format!(
+            "the shell in pane {pane} has not said which directory it is in"
+        ))
     })
 }
 
@@ -631,7 +680,7 @@ async fn split(context: &Context<'_>, args: &Value, dir: Dir) -> Result<Intent, 
         pane,
         dir,
         ratio: UNITS / 2,
-        content: terminal_with(named.or_else(inherited)),
+        content: terminal_with(context, named.or_else(inherited), Some(pane)).await,
     })
 }
 
@@ -670,7 +719,13 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
         "lume.app.whats-new" => return open_link(format!("{REPOSITORY}/releases")).await,
         "lume.tab.new" => Intent::TabNew {
             window,
-            content: terminal_with(profile(context, args).await?),
+            // A terminal opened from the window's pane starts where that pane is.
+            content: terminal_with(
+                context,
+                profile(context, args).await?,
+                panes.focused_pane(window),
+            )
+            .await,
             index: None,
             activate: true,
         },
@@ -680,7 +735,7 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
                 .ok_or_else(|| CommandError::bad_request("which profile: `profile`"))?;
             Intent::TabNew {
                 window,
-                content: terminal_with(Some(named)),
+                content: terminal_with(context, Some(named), panes.focused_pane(window)).await,
                 index: None,
                 activate: true,
             }
@@ -735,6 +790,11 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
                 CommandError::bad_request(format!("pane {pane} is not a terminal"))
             })?;
             // The same thing again, beside it: what was asked for, not the session.
+            // It starts where the first one's shell is now, or else where that started.
+            let cwd = match panes.live_dir(pane).await {
+                Some((_, dir)) => Some(dir),
+                None => terminal.cwd,
+            };
             Intent::Split {
                 pane,
                 dir: Dir::Right,
@@ -743,11 +803,39 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
                     backend: terminal.backend,
                     profile: terminal.profile,
                     launcher: terminal.launcher,
-                    cwd: terminal.cwd,
+                    cwd,
                     env: terminal.env,
                     size: None,
                 }),
             }
+        }
+        "lume.pane.reconnect" => {
+            let pane = context.pane(args)?;
+            return panes.restart(pane).await.map(drop);
+        }
+        "lume.pane.copy-cwd" => {
+            let (_, dir) = live_dir(context, args).await?;
+            context.shell.copy_text(dir);
+            return Ok(());
+        }
+        "lume.pane.open-cwd" => {
+            let folder = match live_dir(context, args).await? {
+                // A distribution's directory is reached from this machine as a share.
+                (lume_session::Launcher::Wsl { distro, .. }, dir) => {
+                    lume_session::wsl::linux_to_unc(&distro, &dir).ok_or_else(|| {
+                        CommandError::bad_request(format!(
+                            "`{dir}` has no path the file manager could be given"
+                        ))
+                    })?
+                }
+                (_, dir) => dir,
+            };
+            let opened = tokio::task::spawn_blocking(move || {
+                crate::opener::open_folder(std::path::Path::new(&folder))
+            });
+            return opened
+                .await
+                .map_err(|error| CommandError::internal(error.to_string()))?;
         }
         "lume.pane.focus-left" => Intent::FocusDir {
             window,
@@ -829,7 +917,13 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
             },
         },
         "lume.window.new" => Intent::WindowNew {
-            content: terminal_with(profile(context, args).await?),
+            // A terminal opened from the window's pane starts where that pane is.
+            content: terminal_with(
+                context,
+                profile(context, args).await?,
+                panes.focused_pane(window),
+            )
+            .await,
             bounds: None,
         },
         "lume.window.close" => {

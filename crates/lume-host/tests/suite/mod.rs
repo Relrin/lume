@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 
 use lume_proto::tuning::MAX_PAYLOAD;
 use lume_proto::{
-    Body, CellPx, ClientKind, ErrorCode, ExitStatus, HydrateMode, Message, Notification,
-    PROTO_VERSION, ProtoError, RequestBody, Responder, ResponseBody, SessionId,
+    Body, CellPx, ClientKind, CommandState, ErrorCode, ExitStatus, HydrateMode, Message,
+    Notification, PROTO_VERSION, ProgramState, ProtoError, RequestBody, Responder, ResponseBody,
+    SessionEvent, SessionId,
 };
 
 use crate::support::{self, Harness, MARK_OUTPUT, PRINT_MARK, PRINT_SIZE, STEP, size};
@@ -38,6 +39,10 @@ macro_rules! host_suite {
             a_malformed_frame_closes_the_connection,
             a_closed_connection_leaves_no_program_running,
             a_flood_with_no_credit_leaves_memory_flat,
+            what_a_program_reports_arrives_as_events_behind_its_output,
+            a_client_that_attaches_is_told_what_was_reported_before,
+            the_program_that_has_the_terminal_is_reported,
+            output_nobody_is_watching_is_reported_now_and_then,
         );
     };
     (@cases $harness:ty; $($case:ident),* $(,)?) => {
@@ -374,6 +379,9 @@ pub async fn output_then_exit_arrive_in_order<H: Harness>() {
                 assert_eq!(status, ExitStatus::Code(4));
                 break;
             }
+            // What the session reported (the terminal sets a title, for one) is not
+            // what is being looked at here.
+            Body::Event(_) => {}
             other => panic!("unexpected {other:?}"),
         }
     }
@@ -613,5 +621,157 @@ pub async fn a_flood_with_no_credit_leaves_memory_flat<H: Harness>() {
         Ok(ResponseBody::Killed {})
     );
     assert!(matches!(client.marker(1).await, Body::Exit(_)));
+    host.shutdown().await;
+}
+
+/// The reports [`support::reports_then_waits`] makes, as they should arrive.
+fn expected_reports() -> Vec<SessionEvent> {
+    vec![
+        SessionEvent::Title {
+            title: "lume-title-k7q".to_owned(),
+        },
+        SessionEvent::Cwd {
+            url: "file://box/srv/www%20x".to_owned(),
+        },
+        SessionEvent::CommandStarted {
+            command: Some("make test".to_owned()),
+        },
+        SessionEvent::CommandFinished { exit: Some(3) },
+    ]
+}
+
+pub async fn what_a_program_reports_arrives_as_events_behind_its_output<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::reports_then_waits(MARK_OUTPUT)).await;
+    client.attach_with_credit(session, 1).await;
+    client.read_until(1, MARK_OUTPUT).await;
+
+    // In the order the program made them. A terminal may set a title of its own
+    // before the program does, so other titles are passed over.
+    for expected in expected_reports() {
+        let same_kind = |event: &SessionEvent| match (&expected, event) {
+            (SessionEvent::Title { title }, SessionEvent::Title { title: other }) => title == other,
+            (wanted, event) => {
+                std::mem::discriminant(wanted) == std::mem::discriminant(event)
+                    && !matches!(event, SessionEvent::Title { .. })
+            }
+        };
+        let event = client.event(1, "what the program said", same_kind).await;
+        assert_eq!(event, expected);
+    }
+    let status = client
+        .event(1, "the program's status", |event| {
+            matches!(event, SessionEvent::ProgramStatus(_))
+        })
+        .await;
+    let SessionEvent::ProgramStatus(status) = status else {
+        unreachable!("matched as a status");
+    };
+    assert_eq!(status.state, ProgramState::Done);
+    assert_eq!(status.app.as_deref(), Some("make"));
+    host.shutdown().await;
+}
+
+pub async fn a_client_that_attaches_is_told_what_was_reported_before<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::reports_then_waits(MARK_OUTPUT)).await;
+    client.attach_with_credit(session, 1).await;
+    client.read_until(1, MARK_OUTPUT).await;
+    client
+        .event(1, "the program's status", |event| {
+            matches!(event, SessionEvent::ProgramStatus(_))
+        })
+        .await;
+    client.send(Message::new(1, Body::Detach)).await;
+    client
+        .list_until("the session is not free", |sessions| !sessions[0].attached)
+        .await;
+
+    // The second attachment starts with everything the first was told one by one.
+    let attached = client.attach(session, 2).await;
+    assert!(
+        matches!(attached, Ok(ResponseBody::Attached { .. })),
+        "{attached:?}"
+    );
+    let whole = client
+        .event(2, "the state so far", |event| {
+            matches!(event, SessionEvent::State { .. })
+        })
+        .await;
+    let SessionEvent::State { state } = whole else {
+        unreachable!("matched as a state");
+    };
+    assert_eq!(state.title.as_deref(), Some("lume-title-k7q"));
+    assert_eq!(state.cwd.as_deref(), Some("file://box/srv/www%20x"));
+    assert_eq!(
+        state.command,
+        Some(CommandState::Finished { exit: Some(3) })
+    );
+    assert_eq!(state.statuses.len(), 1, "{:?}", state.statuses);
+    assert_eq!(state.statuses[0].state, ProgramState::Done);
+    host.shutdown().await;
+}
+
+pub async fn the_program_that_has_the_terminal_is_reported<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::shell()).await;
+    let pid = client.only_session().await.pid;
+    client.attach_with_credit(session, 1).await;
+    let event = client
+        .event(1, "the program that has the terminal", |event| {
+            matches!(event, SessionEvent::Foreground(_))
+        })
+        .await;
+    let SessionEvent::Foreground(foreground) = event else {
+        unreachable!("matched as a foreground program");
+    };
+    let shell = if cfg!(windows) { "cmd" } else { "sh" };
+    assert_eq!(foreground.name, shell);
+    assert_eq!(Some(foreground.pid), pid);
+    host.shutdown().await;
+}
+
+pub async fn output_nobody_is_watching_is_reported_now_and_then<H: Harness>() {
+    let is_activity = |event: &SessionEvent| matches!(event, SessionEvent::Activity);
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::shell()).await;
+    client.attach_with_credit(session, 1).await;
+    client.type_line(1, PRINT_MARK).await;
+    client.read_until(1, MARK_OUTPUT).await;
+    // The view has the keyboard, so its output is being watched.
+    assert_eq!(
+        client
+            .event_within(1, Duration::from_millis(300), is_activity)
+            .await,
+        None
+    );
+
+    let mut facts = support::facts();
+    facts.focused = false;
+    client.send(Message::new(1, Body::Facts(facts))).await;
+    client.type_line(1, PRINT_MARK).await;
+    client
+        .event(1, "output behind the user's back", is_activity)
+        .await;
+    // Said once for a burst of output, not for every piece of it.
+    client.read_until(1, MARK_OUTPUT).await;
+    assert_eq!(
+        client
+            .event_within(1, Duration::from_millis(300), is_activity)
+            .await,
+        None
+    );
     host.shutdown().await;
 }

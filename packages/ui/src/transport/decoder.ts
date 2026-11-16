@@ -7,6 +7,7 @@
  * a framing error nobody knows where the next frame starts.
  */
 
+import { EventError, sessionEvent } from "./events.ts";
 import { CONTROL_STREAM, HEADER_LEN, type HostFrame, Kind, KIND_MORE } from "./frames.ts";
 import { type ExitStatus, isTermSize, type SessionEvent, type TermSize } from "./types.ts";
 
@@ -301,11 +302,10 @@ function exit(bytes: Uint8Array): ExitStatus {
 }
 
 function event(value: unknown): SessionEvent {
-  if (typeof value === "object" && value !== null) {
-    const { type, title, url } = value as { type?: unknown; title?: unknown; url?: unknown };
-    if (type === "title" && typeof title === "string") return { type, title };
-    if (type === "cwd" && typeof url === "string") return { type, url };
-    if (type === "bell") return { type };
+  try {
+    return sessionEvent(value);
+  } catch (error) {
+    if (error instanceof EventError) throw bad(Kind.Event, error.message);
+    throw error;
   }
-  throw bad(Kind.Event, "not a session event");
 }

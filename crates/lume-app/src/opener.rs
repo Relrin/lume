@@ -83,6 +83,18 @@ pub fn open(link: &str) -> Result<(), CommandError> {
     }
 }
 
+/// Shows a folder of this machine in the file manager.
+pub fn open_folder(path: &Path) -> Result<(), CommandError> {
+    if !path.is_dir() {
+        return Err(CommandError::not_found(format!(
+            "{} is not a folder that is there",
+            path.display()
+        )));
+    }
+    open_directory(path)
+        .map_err(|error| CommandError::internal(format!("the folder could not be opened: {error}")))
+}
+
 /// The extension of the files a user configures the application with.
 const SETTINGS_EXTENSION: &str = "toml";
 

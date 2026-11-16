@@ -5,11 +5,12 @@
 
 use lume_proto::tuning::MAX_PAYLOAD;
 use lume_proto::{
-    BackendCaps, Body, CellPx, ClientFacts, ClientKind, ColorScheme, Control, DecodeError,
-    ErrorCode, ExitStatus, FrameDecoder, HydrateKinds, HydrateMode, HydratePayload, Launcher,
-    Message, Notification, Palette, ProtoError, Request, RequestBody, Responder, Response,
-    ResponseBody, Rgb, Role, SessionEvent, SessionId, SessionInfo, SessionStats, SpawnSpec,
-    TermSize,
+    BackendCaps, BlockKind, Body, CellPx, ClientFacts, ClientKind, ColorScheme, CommandState,
+    Control, DecodeError, DisconnectReason, Disconnected, ErrorCode, ExitStatus, Foreground,
+    FrameDecoder, HydrateKinds, HydrateMode, HydratePayload, Launcher, Message, Notification,
+    Palette, ProgramState, ProgramStatus, ProtoError, Request, RequestBody, Responder, Response,
+    ResponseBody, Rgb, Role, SessionEvent, SessionId, SessionInfo, SessionState, SessionStats,
+    SpawnSpec, TermSize,
 };
 use proptest::collection::vec;
 use proptest::option;
@@ -106,6 +107,7 @@ fn spawn_spec() -> impl Strategy<Value = SpawnSpec> {
             cwd,
             env,
             size,
+            shell_integration: false,
         })
 }
 
@@ -264,11 +266,97 @@ fn terminal_bytes() -> impl Strategy<Value = Vec<u8>> {
     ]
 }
 
+fn program_status() -> impl Strategy<Value = ProgramStatus> {
+    (
+        select(vec![
+            ProgramState::Idle,
+            ProgramState::Working,
+            ProgramState::Done,
+            ProgramState::Blocked,
+            ProgramState::Error,
+            ProgramState::Clear,
+        ]),
+        option::of(text()),
+        option::of(select(vec![
+            BlockKind::Permission,
+            BlockKind::Question,
+            BlockKind::Auth,
+        ])),
+        option::of(0..=100u8),
+        option::of(text()),
+        option::of(text()),
+        option::of(text()),
+    )
+        .prop_map(
+            |(state, id, kind, progress, app, title, message)| ProgramStatus {
+                state,
+                id,
+                kind,
+                progress,
+                app,
+                title,
+                message,
+            },
+        )
+}
+
+fn foreground() -> impl Strategy<Value = Foreground> {
+    (any::<u32>(), text()).prop_map(|(pid, name)| Foreground { pid, name })
+}
+
+fn disconnected() -> impl Strategy<Value = Disconnected> {
+    (
+        select(vec![
+            DisconnectReason::Exited,
+            DisconnectReason::Closed,
+            DisconnectReason::AuthFailed,
+            DisconnectReason::HostKey,
+            DisconnectReason::Unreachable,
+            DisconnectReason::ConnectionLost,
+            DisconnectReason::Failed,
+        ]),
+        option::of(text()),
+    )
+        .prop_map(|(reason, detail)| Disconnected { reason, detail })
+}
+
+fn session_state() -> impl Strategy<Value = SessionState> {
+    let command = prop_oneof![
+        option::of(text()).prop_map(|command| CommandState::Running { command }),
+        option::of(any::<i32>()).prop_map(|exit| CommandState::Finished { exit }),
+    ];
+    (
+        option::of(text()),
+        option::of(text()),
+        option::of(command),
+        vec(program_status(), 0..3),
+        option::of(foreground()),
+        option::of(disconnected()),
+    )
+        .prop_map(
+            |(title, cwd, command, statuses, foreground, disconnected)| SessionState {
+                title,
+                cwd,
+                command,
+                statuses,
+                foreground,
+                disconnected,
+            },
+        )
+}
+
 fn event() -> impl Strategy<Value = SessionEvent> {
     prop_oneof![
         text().prop_map(|title| SessionEvent::Title { title }),
         text().prop_map(|url| SessionEvent::Cwd { url }),
         Just(SessionEvent::Bell),
+        option::of(text()).prop_map(|command| SessionEvent::CommandStarted { command }),
+        option::of(any::<i32>()).prop_map(|exit| SessionEvent::CommandFinished { exit }),
+        program_status().prop_map(SessionEvent::ProgramStatus),
+        foreground().prop_map(SessionEvent::Foreground),
+        Just(SessionEvent::Activity),
+        disconnected().prop_map(SessionEvent::Disconnected),
+        session_state().prop_map(|state| SessionEvent::State { state }),
     ]
 }
 

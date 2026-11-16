@@ -32,6 +32,7 @@ use tokio::task::AbortHandle;
 
 use crate::error::CommandError;
 use crate::marks::Marks;
+use crate::sessions::SessionStates;
 use crate::tuning::CARRIER_BATCH_MAX;
 
 /// The other end of the carrier is gone.
@@ -86,6 +87,8 @@ pub struct Link {
     runtime: Handle,
     on_exit: OnExit,
     marks: Arc<Marks>,
+    /// Where what the sessions report is noted on its way to the page.
+    reports: Arc<SessionStates>,
 }
 
 struct LinkState {
@@ -117,6 +120,7 @@ impl Link {
         runtime: &Handle,
         on_exit: OnExit,
         marks: Arc<Marks>,
+        reports: Arc<SessionStates>,
     ) -> Arc<Self> {
         let (outgoing, queued) = mpsc::unbounded_channel();
         let writer = runtime.spawn(write_loop(queued, carrier)).abort_handle();
@@ -134,6 +138,7 @@ impl Link {
             runtime: runtime.clone(),
             on_exit,
             marks,
+            reports,
         })
     }
 
@@ -199,6 +204,7 @@ impl Link {
                     self.outgoing.clone(),
                     Arc::clone(&self.on_exit),
                     Arc::clone(&self.marks),
+                    Arc::clone(&self.reports),
                 );
                 let pump = self.runtime.spawn(forwarding).abort_handle();
                 state.streams.insert(
@@ -416,6 +422,7 @@ async fn pump(
     outgoing: mpsc::UnboundedSender<Queued>,
     on_exit: OnExit,
     marks: Arc<Marks>,
+    reports: Arc<SessionStates>,
 ) {
     let mut exited = false;
     while let Some(frame) = output.next().await {
@@ -425,7 +432,10 @@ async fn pump(
                 Body::Data(bytes)
             }
             OutputFrame::Resized(size) => Body::Resized(size),
-            OutputFrame::Event(event) => Body::Event(event),
+            OutputFrame::Event(event) => {
+                reports.on_event(&session, &event);
+                Body::Event(event)
+            }
             OutputFrame::Exit(status) => {
                 exited = true;
                 on_exit(&session, Some(status));
@@ -572,6 +582,7 @@ mod tests {
             &Handle::current(),
             Arc::new(|_, _| {}),
             Arc::new(Marks::start()),
+            SessionStates::new(),
         )
     }
 

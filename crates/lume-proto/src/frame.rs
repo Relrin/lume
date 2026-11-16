@@ -8,9 +8,10 @@
 
 use crate::control::Control;
 use crate::error::{DecodeError, EncodeError};
+use crate::event::SessionEvent;
 use crate::payload::{self, HydratePayload};
 use crate::tuning::{MAX_CONTROL_MESSAGE, MAX_HYDRATE, MAX_PAYLOAD};
-use crate::types::{CellPx, ClientFacts, ExitStatus, SessionEvent, TermSize};
+use crate::types::{CellPx, ClientFacts, ExitStatus, TermSize};
 
 /// The stream that carries the control plane.
 pub const CONTROL_STREAM: u32 = 0;

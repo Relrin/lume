@@ -13,6 +13,7 @@ usage: lume [--endpoint <name>] [--workspace <name>] [-e <program> [<arg>...]]
        lume config schema | path | check [<file>]
        lume keymap [--platform windows|macos|linux] [--workspace <name>] [--json]
        lume theme import <file> [--name <name>]
+       lume shell-integration bash|zsh|fish|powershell
        lume --help | --version
 
 Without a command, lume starts the application, or brings its window to the front if
@@ -44,6 +45,11 @@ Commands of lume ctl, which drive the running application:
   workspaces                     list the workspaces, and say which is on show
   profiles                       list the profiles: the shells, WSL distributions and
                                  SSH hosts a terminal can be started in
+  events [<target>]              follow what terminals report: titles, directories,
+                                 commands that start and end, the program that has
+                                 the terminal, how a session ended. One JSON object a
+                                 line, of every session or of the one named, until
+                                 interrupted, or for --timeout seconds if that is given
   commands                       list the commands there are
   command <id> [<arguments>]     run a command; its arguments are a JSON object
   quit                           close the application
@@ -65,6 +71,10 @@ Commands on the configuration, which need no application running:
   theme import <file>            make a theme from a Ghostty theme file and put it in
                                  the themes folder; --name names it (the file's name
                                  if not given)
+  shell-integration <shell>      print the script that has a shell report its
+                                 directory and its commands, for a start-up file of
+                                 your own: on a machine reached over SSH, or for a
+                                 shell lume does not set up by itself
 
 Exit status: 0 done, 1 refused or failed (for config check: something is wrong), 2
 arguments not understood, 3 a wait ran out of time, 4 the application is not running.";
@@ -110,6 +120,17 @@ pub enum Offline {
     },
     /// Make a theme from another terminal's colour scheme.
     ThemeImport { file: String, name: Option<String> },
+    /// Print the script that has a shell report its directory and its commands.
+    ShellIntegration { shell: IntegrationShell },
+}
+
+/// A shell there is a reporting script for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntegrationShell {
+    Bash,
+    Zsh,
+    Fish,
+    PowerShell,
 }
 
 /// One request to the running application.
@@ -119,6 +140,9 @@ pub struct Ctl {
     pub request: AppRequestBody,
     /// How long the application may take to answer a request that waits.
     pub timeout: Duration,
+    /// How long to follow the sessions, for the request that does: as long as
+    /// `--timeout` said, or until interrupted if it was not given.
+    pub follow_for: Option<Duration>,
     /// Print a captured screen as its lines instead of as JSON.
     pub plain: bool,
     /// The request's intent is to be read from standard input.
@@ -354,11 +378,15 @@ fn nothing_more(words: &mut Words, command: &str) -> Result<(), String> {
 fn ctl(words: &mut Words) -> Result<Ctl, String> {
     let mut endpoint = None;
     let mut timeout = DEFAULT_TIMEOUT;
+    let mut follow_for = None;
     let command = loop {
         let word = words.next().ok_or("ctl needs a command; see lume --help")?;
         match word.as_str() {
             "--endpoint" => endpoint = Some(value(words, "--endpoint", "a name")?),
-            "--timeout" => timeout = seconds(&value(words, "--timeout", "a number of seconds")?)?,
+            "--timeout" => {
+                timeout = seconds(&value(words, "--timeout", "a number of seconds")?)?;
+                follow_for = Some(timeout);
+            }
             _ => break word,
         }
     };
@@ -446,6 +474,18 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
             nothing_more(words, "profiles")?;
             AppRequestBody::Profiles {}
         }
+        "events" => {
+            let mut target = Target::default();
+            while let Some(word) = words.next() {
+                if !target.take(&word, words)? {
+                    return Err(format!("events does not take {word}"));
+                }
+            }
+            AppRequestBody::Events {
+                pane: target.pane,
+                session: target.session,
+            }
+        }
         "commands" => {
             nothing_more(words, "commands")?;
             AppRequestBody::Commands {}
@@ -484,9 +524,28 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
         endpoint,
         request,
         timeout,
+        follow_for,
         plain,
         intent_from_input,
     })
+}
+
+fn shell_integration(words: &mut Words) -> Result<Offline, String> {
+    const SHELLS: &str = "bash, zsh, fish or powershell";
+    let shell = match words.next().as_deref() {
+        Some("bash") => IntegrationShell::Bash,
+        Some("zsh") => IntegrationShell::Zsh,
+        Some("fish") => IntegrationShell::Fish,
+        Some("powershell" | "pwsh") => IntegrationShell::PowerShell,
+        Some(other) => {
+            return Err(format!(
+                "{other} is not a shell lume has a script for ({SHELLS})"
+            ));
+        }
+        None => return Err(format!("lume shell-integration needs a shell: {SHELLS}")),
+    };
+    nothing_more(words, "lume shell-integration")?;
+    Ok(Offline::ShellIntegration { shell })
 }
 
 fn config(words: &mut Words) -> Result<Offline, String> {
@@ -585,6 +644,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
             "config" => return config(&mut words).map(Command::Offline),
             "keymap" => return keymap(&mut words).map(Command::Offline),
             "theme" => return theme(&mut words).map(Command::Offline),
+            "shell-integration" => return shell_integration(&mut words).map(Command::Offline),
             other => return Err(format!("{other} is not something lume knows")),
         }
     }
@@ -1023,5 +1083,69 @@ mod tests {
         assert!(parsed(&["theme", "import"]).is_err());
         assert!(parsed(&["theme", "import", "a", "b"]).is_err());
         assert!(parsed(&["theme", "import", "a", "--name"]).is_err());
+    }
+
+    #[test]
+    fn shell_integration_takes_the_shell_whose_script_to_print() {
+        let script = |shell| Offline::ShellIntegration { shell };
+        assert_eq!(
+            offline(&["shell-integration", "bash"]),
+            script(IntegrationShell::Bash)
+        );
+        assert_eq!(
+            offline(&["shell-integration", "zsh"]),
+            script(IntegrationShell::Zsh)
+        );
+        assert_eq!(
+            offline(&["shell-integration", "fish"]),
+            script(IntegrationShell::Fish)
+        );
+        // PowerShell goes by two names.
+        for name in ["powershell", "pwsh"] {
+            assert_eq!(
+                offline(&["shell-integration", name]),
+                script(IntegrationShell::PowerShell)
+            );
+        }
+        assert!(parsed(&["shell-integration"]).is_err());
+        assert!(parsed(&["shell-integration", "cmd"]).is_err());
+        assert!(parsed(&["shell-integration", "bash", "zsh"]).is_err());
+    }
+
+    #[test]
+    fn events_follow_every_session_or_the_one_named_for_as_long_as_was_said() {
+        let followed = |args: &[&str]| match parsed(args) {
+            Ok(Command::Ctl(ctl)) => (ctl.request, ctl.follow_for),
+            other => panic!("not a request: {other:?}"),
+        };
+        assert_eq!(
+            followed(&["ctl", "events"]),
+            (
+                AppRequestBody::Events {
+                    pane: None,
+                    session: None
+                },
+                None
+            )
+        );
+        assert_eq!(
+            followed(&["ctl", "--timeout", "5", "events", "--pane", "p3"]),
+            (
+                AppRequestBody::Events {
+                    pane: Some("p3".to_owned()),
+                    session: None
+                },
+                Some(Duration::from_secs(5))
+            )
+        );
+        assert_eq!(
+            followed(&["ctl", "events", "--session", "00000000000000ab"]).0,
+            AppRequestBody::Events {
+                pane: None,
+                session: Some(id())
+            }
+        );
+        assert!(parsed(&["ctl", "events", "all"]).is_err());
+        assert!(parsed(&["ctl", "events", "--pane"]).is_err());
     }
 }

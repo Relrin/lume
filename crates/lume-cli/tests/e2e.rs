@@ -1302,3 +1302,241 @@ fn closing_ends_every_shell_and_the_log_holds_nothing_that_was_typed() {
     }
     let _ = std::fs::remove_file(log);
 }
+
+/// What `lume ctl events` prints for one pane, read as it comes.
+struct Follower {
+    child: Child,
+    reports: std::sync::mpsc::Receiver<Value>,
+    /// Every report read so far, so that one that came early can still be asked for.
+    seen: std::cell::RefCell<Vec<Value>>,
+}
+
+impl Follower {
+    /// Starts following `pane`. Returns once the application has said it is.
+    fn of(app: &App, pane: &str) -> Self {
+        use std::io::BufRead;
+
+        let mut child = Command::new(lume())
+            .args(["ctl", "--endpoint", &app.endpoint, "events", "--pane", pane])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("lume runs");
+        let printed = child.stdout.take().expect("what lume prints");
+        let (found, reports) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(printed).lines() {
+                let Ok(line) = line else { return };
+                let report = serde_json::from_str(&line).unwrap_or(Value::String(line));
+                if found.send(report).is_err() {
+                    return;
+                }
+            }
+        });
+        let follower = Self {
+            child,
+            reports,
+            seen: std::cell::RefCell::new(Vec::new()),
+        };
+        let answer = match follower.reports.recv_timeout(START) {
+            Ok(answer) => answer,
+            Err(_) => panic!("the application never said it was following the pane"),
+        };
+        assert_eq!(answer["type"], "following", "{answer}");
+        follower
+    }
+
+    /// What `wanted` gives for the first report it gives anything for, among those
+    /// that have come and those still to come.
+    fn until<T>(&self, what: &str, wanted: impl Fn(&Value) -> Option<T>) -> T {
+        if let Some(found) = self.seen.borrow().iter().find_map(&wanted) {
+            return found;
+        }
+        let deadline = Instant::now() + START;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let Ok(report) = self.reports.recv_timeout(left) else {
+                panic!(
+                    "{what} was never reported; what was: {:?}",
+                    self.seen.borrow()
+                );
+            };
+            let found = wanted(&report);
+            self.seen.borrow_mut().push(report);
+            if let Some(found) = found {
+                return found;
+            }
+        }
+    }
+
+    /// The first directory reported that ends as `ending` does, however it is told:
+    /// as a report of its own, or as part of how the session stands.
+    fn directory_ending(&self, ending: &str) -> String {
+        self.until(&format!("a directory ending in {ending}"), |report| {
+            let event = &report["event"];
+            let url = match event["type"].as_str()? {
+                "cwd" => event["url"].as_str()?,
+                "state" => event["state"]["cwd"].as_str()?,
+                _ => return None,
+            };
+            url.ends_with(ending).then(|| url.to_owned())
+        })
+    }
+
+    /// The first program reported to have the terminal, told either way.
+    fn foreground(&self) -> String {
+        self.until("the program that has the terminal", |report| {
+            let event = &report["event"];
+            let name = match event["type"].as_str()? {
+                "foreground" => event["name"].as_str()?,
+                "state" => event["state"]["foreground"]["name"].as_str()?,
+                _ => return None,
+            };
+            Some(name.to_owned())
+        })
+    }
+}
+
+impl Drop for Follower {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// A folder for a shell to go to, whose name needs escaping in a URL, and how that
+/// name reads once it is escaped.
+fn awkward_folder(app: &App) -> (PathBuf, &'static str) {
+    let folder = app.home.join("lume e2e \u{e9}");
+    std::fs::create_dir_all(&folder).expect("a folder to work in");
+    (folder, "lume%20e2e%20%C3%A9")
+}
+
+/// A path as it is typed into a shell: with forward slashes, which every shell takes.
+fn typed(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// The bash to run here: the one on the path, or on Windows the one Git brings.
+fn bash() -> Option<String> {
+    if cfg!(windows) {
+        let program_files = std::env::var_os("ProgramFiles")?;
+        let git = Path::new(&program_files)
+            .join("Git")
+            .join("bin")
+            .join("bash.exe");
+        git.is_file().then(|| git.to_string_lossy().into_owned())
+    } else {
+        on_path("bash").then(|| "bash".to_owned())
+    }
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_shell_reports_where_it_is_and_what_it_runs_and_keeps_its_own_prompt() {
+    let app = App::start();
+    app.status_with_session();
+    let Some(bash) = bash() else {
+        eprintln!("skipped: there is no bash on this machine");
+        app.quit();
+        return;
+    };
+    let (folder, escaped) = awkward_folder(&app);
+
+    // A start-up file of the user's own, with a prompt and an alias in it. It is read
+    // as it would be anywhere, and nothing is written to it.
+    let rc = app.home.join("bashrc");
+    std::fs::write(
+        &rc,
+        "PS1='lume-prompt> '\nalias greet='echo \"lume-${LUME_MARK}-hello\"'\n",
+    )
+    .expect("a start-up file");
+    let before = std::fs::read(&rc).expect("the start-up file");
+    let mark = format!("LUME_MARK={MARK}");
+    let spawned = app
+        .ctl(&[
+            "spawn",
+            "--env",
+            &mark,
+            "--env",
+            "HISTFILE=/dev/null",
+            "--",
+            &bash,
+            "--noprofile",
+            "--rcfile",
+            &typed(&rc),
+        ])
+        .ok("starting bash");
+    let pane = pane_of(&spawned);
+    let follower = Follower::of(&app, &pane);
+
+    // The shell's own prompt and alias are as its start-up file made them.
+    app.wait_text_in(&pane, "lume-prompt>");
+    app.type_line_in(&pane, "greet");
+    app.wait_text_in(&pane, &format!("lume-{MARK}-hello"));
+
+    // Where it goes is reported, in a form that survives a blank and an accent.
+    app.type_line_in(&pane, &format!("cd '{}'", typed(&folder)));
+    let url = follower.directory_ending(escaped);
+    assert!(url.starts_with("file://"), "{url}");
+
+    // A command that fails is reported with its line and its exit code.
+    app.type_line_in(&pane, "(exit 3)");
+    follower.until("the command starting", |report| {
+        let event = &report["event"];
+        (event["type"] == "command_started" && event["command"] == "(exit 3)").then_some(())
+    });
+    follower.until("the command ending with its exit code", |report| {
+        let event = &report["event"];
+        (event["type"] == "command_finished" && event["exit"] == 3).then_some(())
+    });
+
+    // The program that has the terminal is the shell.
+    assert_eq!(follower.foreground(), "bash");
+
+    // A pane opened from it starts where it is.
+    let split = format!(r#"{{"pane":"{pane}"}}"#);
+    app.ctl(&["command", "lume.pane.split-right", &split])
+        .ok("splitting the pane");
+    let layout = app.layout();
+    let beside = tabs_of(&layout)
+        .into_iter()
+        .find(|tab| tab.contains(&pane))
+        .expect("the tab of the pane")
+        .into_iter()
+        .find(|other| *other != pane)
+        .expect("the new pane");
+    let started_in = content_of(&layout, &beside)["cwd"]
+        .as_str()
+        .expect("where the new pane started")
+        .to_owned();
+    assert_eq!(Path::new(&started_in), folder, "{layout}");
+
+    // And the start-up file is as it was.
+    assert_eq!(std::fs::read(&rc).expect("the start-up file"), before);
+
+    // PowerShell, where there is one. It is started as a user starts it, so its line
+    // editor keeps a history: nothing is typed into it. What it says by itself, at
+    // its first prompt, is where it is.
+    if cfg!(windows) && on_path("powershell") {
+        let spawned = app
+            .ctl(&[
+                "spawn",
+                "--cwd",
+                &folder.to_string_lossy(),
+                "--",
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+            ])
+            .ok("starting PowerShell");
+        let follower = Follower::of(&app, &pane_of(&spawned));
+        let url = follower.directory_ending(escaped);
+        assert!(url.starts_with("file://"), "{url}");
+        assert_eq!(follower.foreground(), "powershell");
+    } else {
+        eprintln!("skipped PowerShell: this machine has none");
+    }
+    app.quit();
+}

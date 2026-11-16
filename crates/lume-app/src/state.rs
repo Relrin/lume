@@ -39,6 +39,7 @@ use crate::carrier::{Carrier, Link, OnExit, PageAnswer, SessionKey};
 use crate::error::CommandError;
 use crate::marks::Marks;
 use crate::panes::Panes;
+use crate::sessions::SessionStates;
 use crate::tuning::{EXIT_POLL_INTERVAL, EXITS_KEPT};
 use crate::window;
 
@@ -128,6 +129,8 @@ pub struct AppState {
     /// The panes of the terminal windows. An application that shows no terminals, such
     /// as one started to run a test suite, has none.
     panes: OnceLock<Arc<Panes>>,
+    /// What the sessions have reported about themselves.
+    reports: Arc<SessionStates>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -159,6 +162,7 @@ impl AppState {
             shown: Notify::new(),
             marks,
             panes: OnceLock::new(),
+            reports: SessionStates::new(),
         })
     }
 
@@ -170,6 +174,11 @@ impl AppState {
     /// The panes of the terminal windows, if the application shows terminals.
     pub fn panes(&self) -> Option<&Arc<Panes>> {
         self.panes.get()
+    }
+
+    /// What the sessions have reported about themselves.
+    pub fn reports(&self) -> &Arc<SessionStates> {
+        &self.reports
     }
 
     /// The session backends.
@@ -204,10 +213,12 @@ impl AppState {
         let exits = Arc::clone(&self.exits);
         let exited = Arc::clone(&self.exited);
         let state = Arc::downgrade(self);
+        let reports = Arc::clone(&self.reports);
         let on_exit: OnExit = Arc::new(move |key, status| match status {
             Some(status) => {
                 lock(&exits).record(key, status);
                 exited.notify_waiters();
+                reports.on_exit(key, status);
                 // A pane whose program has ended closes, or stays to say so.
                 if let Some(state) = state.upgrade()
                     && let Some(panes) = state.panes()
@@ -222,7 +233,14 @@ impl AppState {
                 }
             }
         });
-        let link = Link::open(id, carrier, &self.runtime, on_exit, Arc::clone(&self.marks));
+        let link = Link::open(
+            id,
+            carrier,
+            &self.runtime,
+            on_exit,
+            Arc::clone(&self.marks),
+            Arc::clone(&self.reports),
+        );
         let replaced = lock(&self.links).insert(label.to_owned(), link);
         if let Some(replaced) = replaced {
             // Another open for the same webview finished in between; the newest wins.
@@ -460,6 +478,7 @@ impl AppState {
         if let Some(Holder::Orphan { timer, .. }) = lock(&self.sessions).remove(key) {
             timer.abort();
         }
+        self.reports.forget(key);
         Ok(self.router.get(&key.backend)?.kill(key.session).await?)
     }
 

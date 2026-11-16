@@ -89,8 +89,10 @@
 [layout]
 # Where the list of tabs is: "top", "left" or "right".
 # tab-placement = "top"
-# Where a new pane's program starts: "workspace" (the workspace's folder) or "home".
-# new-pane-cwd = "workspace"
+# Where a new pane's program starts: "inherit" (where the shell of the pane it is
+# opened from is, if that shell says; otherwise as "workspace"), "workspace" (the
+# workspace's folder) or "home".
+# new-pane-cwd = "inherit"
 
 [renderer]
 # What terminals are drawn with: "auto", "webgpu", "webgl2" or "canvas2d".

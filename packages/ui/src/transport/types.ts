@@ -52,11 +52,81 @@ export interface ClientFacts {
 /** How a session's program ended. */
 export type ExitStatus = { readonly code: number } | { readonly signal: number } | "unknown";
 
-/** Something a session noticed in its program's output. */
+/** How a program's work stands, as the program reports it. `clear` takes a report back. */
+export type ProgramState = "idle" | "working" | "done" | "blocked" | "error" | "clear";
+
+/** What a blocked program is waiting for. */
+export type BlockKind = "permission" | "question" | "auth";
+
+/** One report of a program's status. A report replaces the record with its `id` whole. */
+export interface ProgramStatus {
+  readonly state: ProgramState;
+  /** Which record this is, as a path such as `build/test`. Without one, the root record. */
+  readonly id?: string;
+  readonly kind?: BlockKind;
+  /** How far the work has come, from 0 to 100. */
+  readonly progress?: number;
+  /** A short name for the program, such as `cargo`. */
+  readonly app?: string;
+  readonly title?: string;
+  /** One line for a person to read. */
+  readonly message?: string;
+}
+
+/** The program that has a terminal: the one that reads what is typed. */
+export interface Foreground {
+  readonly pid: number;
+  /** The program's name, without its folder. */
+  readonly name: string;
+}
+
+/** Why the connection a session ran over ended. */
+export type DisconnectReason =
+  "exited" | "closed" | "auth_failed" | "host_key" | "unreachable" | "connection_lost" | "failed";
+
+export interface Disconnected {
+  readonly reason: DisconnectReason;
+  /** The last line the client printed, where it had one. */
+  readonly detail?: string;
+}
+
+/** Where a shell is with the command lines it runs. */
+export type CommandState =
+  | { readonly state: "running"; readonly command?: string }
+  | { readonly state: "finished"; readonly exit?: number };
+
+/** What a session's reports add up to: the latest of each kind. */
+export interface SessionState {
+  readonly title?: string;
+  /** The working directory as last reported, as a URL. */
+  readonly cwd?: string;
+  readonly command?: CommandState;
+  /** The status records there are, the one reported longest ago first. */
+  readonly statuses?: readonly ProgramStatus[];
+  readonly foreground?: Foreground;
+  readonly disconnected?: Disconnected;
+}
+
+/**
+ * Something a session reports besides its output. All of it is what a program printed
+ * or what the system said about it: good for showing, and for nothing else.
+ */
 export type SessionEvent =
   | { readonly type: "title"; readonly title: string }
   | { readonly type: "cwd"; readonly url: string }
-  | { readonly type: "bell" };
+  | { readonly type: "bell" }
+  | { readonly type: "command_started"; readonly command?: string }
+  | { readonly type: "command_finished"; readonly exit?: number }
+  | ({ readonly type: "program_status" } & ProgramStatus)
+  | ({ readonly type: "foreground" } & Foreground)
+  /** The session printed something while its view did not have the keyboard. */
+  | { readonly type: "activity" }
+  | ({ readonly type: "disconnected" } & Disconnected)
+  /**
+   * Everything the session has reported so far, in one piece. It replaces what was
+   * held and is not news: nothing in it has just happened.
+   */
+  | { readonly type: "state"; readonly state: SessionState };
 
 /** Which side answers the questions a program asks its terminal. */
 export type Responder = "client" | "backend";

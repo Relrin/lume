@@ -53,6 +53,7 @@ fn shell() -> SpawnSpec {
         cwd: None,
         env: vec![("LUME_MARK".to_owned(), "k7q".to_owned())],
         size: size(80, 24),
+        shell_integration: false,
     }
 }
 

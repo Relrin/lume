@@ -45,6 +45,7 @@ mod panes;
 mod profiles;
 mod registry;
 mod services;
+mod sessions;
 mod state;
 mod synthetic;
 #[cfg(test)]
@@ -79,8 +80,14 @@ use crate::window::WindowShell;
 
 /// Starts the backend for sessions on this machine and puts it in a router.
 fn local_sessions(router: &Router) -> Option<Arc<LocalBackend>> {
+    let config = HostConfig {
+        // Without a folder of its own the host asks no shell to report anything.
+        shell_integration_dir: Dirs::resolve()
+            .map(|dirs| dirs.state.join(tuning::SHELL_INTEGRATION_DIR)),
+        ..HostConfig::default()
+    };
     // The backend's tasks live on Tauri's runtime, which is the one commands run on.
-    let started = tauri::async_runtime::block_on(LocalBackend::in_process(HostConfig::default()));
+    let started = tauri::async_runtime::block_on(LocalBackend::in_process(config));
     match started {
         Ok(local) => {
             let local = Arc::new(local);

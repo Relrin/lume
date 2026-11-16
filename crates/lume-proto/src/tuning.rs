@@ -22,3 +22,7 @@ pub const MAX_CONTROL_MESSAGE: usize = 1024 * 1024;
 
 /// The largest hydrate message after its frames are joined.
 pub const MAX_HYDRATE: usize = 64 * 1024 * 1024;
+
+/// The most status records kept for one session. A program may report a record for
+/// each of its jobs; beyond this the record reported longest ago is forgotten.
+pub const STATUS_RECORDS_MAX: usize = 64;

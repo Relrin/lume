@@ -394,6 +394,12 @@ export class TerminalView implements FrameView {
     this.#elements = undefined;
     this.#scrollbar = "";
     this.#inputAt = "";
+    // A view that is not on show has neither the keyboard nor anyone looking at it,
+    // and its session is told so: what it prints from here on is printed unwatched.
+    this.#setFocused(false);
+    if (this.#reportTimer !== undefined) window.clearTimeout(this.#reportTimer);
+    this.#reportTimer = undefined;
+    this.#report();
   }
 
   /** Unmounts, detaches from the session and frees what the view allocated. */
@@ -642,8 +648,9 @@ export class TerminalView implements FrameView {
 
   #report(): void {
     const session = this.#session;
-    if (!session || !this.#renderer) return;
-    session.requestSize(this.gridSize(), this.cellPx());
+    if (!session) return;
+    // Only a view that is laid out knows what size it is; the rest it always knows.
+    if (this.#renderer) session.requestSize(this.gridSize(), this.cellPx());
     const facts = this.facts();
     const key = JSON.stringify(facts);
     if (key !== this.#lastFacts) {

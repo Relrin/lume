@@ -184,6 +184,7 @@ pub async fn session_spawn(
         cwd: spec.cwd.or_else(home),
         env: spec.env,
         size: spec.size,
+        shell_integration: false,
     };
     state.spawn(webview.label(), carrier, &backend, spec).await
 }

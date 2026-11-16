@@ -8,11 +8,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use lume_proto::{
-    BackendCaps, Body, CellPx, ClientFacts, ClientKind, ColorScheme, Control, ErrorCode,
-    ExitStatus, FrameDecoder, HydrateKinds, HydrateMode, HydratePayload, Kind, Launcher, Message,
-    Notification, PROTO_VERSION, Palette, ProtoError, Request, RequestBody, Responder, Response,
-    ResponseBody, Rgb, Role, SessionEvent, SessionId, SessionInfo, SessionStats, SpawnSpec,
-    TermSize, encode,
+    BackendCaps, BlockKind, Body, CellPx, ClientFacts, ClientKind, ColorScheme, CommandState,
+    Control, DisconnectReason, Disconnected, ErrorCode, ExitStatus, Foreground, FrameDecoder,
+    HydrateKinds, HydrateMode, HydratePayload, Kind, Launcher, Message, Notification,
+    PROTO_VERSION, Palette, ProgramState, ProgramStatus, ProtoError, Request, RequestBody,
+    Responder, Response, ResponseBody, Rgb, Role, SessionEvent, SessionId, SessionInfo,
+    SessionState, SessionStats, SpawnSpec, TermSize, encode,
 };
 use serde_json::{Value, json};
 
@@ -139,6 +140,7 @@ fn client_messages() -> Vec<Message> {
                     cwd: Some("C:\\Users\\someone".to_owned()),
                     env: vec![("LANG".to_owned(), "en_GB.UTF-8".to_owned())],
                     size: size(80, 24),
+                    shell_integration: false,
                 },
             },
         ),
@@ -261,6 +263,75 @@ fn host_messages() -> Vec<Message> {
             code: ErrorCode::ProtocolError,
             message: "unknown frame kind 0x7f".to_owned(),
         })),
+    ]
+    .into_iter()
+    // Added after the messages above were pinned, and so after them: what was
+    // recorded before is still the beginning of what is recorded now.
+    .chain(
+        later_events()
+            .into_iter()
+            .map(|event| Message::new(4, Body::Event(event))),
+    )
+    .collect()
+}
+
+/// One of every event a session reports besides a title, a directory and a bell, in
+/// each of its shapes.
+fn later_events() -> Vec<SessionEvent> {
+    let status = ProgramStatus {
+        state: ProgramState::Blocked,
+        id: Some("deploy/us-east".to_owned()),
+        kind: Some(BlockKind::Permission),
+        progress: Some(40),
+        app: Some("terraform".to_owned()),
+        title: Some("Plan".to_owned()),
+        message: Some("Apply 3 resources?".to_owned()),
+    };
+    let foreground = Foreground {
+        pid: 4242,
+        name: "vim".to_owned(),
+    };
+    let disconnected = Disconnected {
+        reason: DisconnectReason::ConnectionLost,
+        detail: Some("client_loop: send disconnect: Broken pipe".to_owned()),
+    };
+    vec![
+        SessionEvent::CommandStarted {
+            command: Some("make test".to_owned()),
+        },
+        SessionEvent::CommandStarted { command: None },
+        SessionEvent::CommandFinished { exit: Some(-1) },
+        SessionEvent::CommandFinished { exit: None },
+        SessionEvent::ProgramStatus(status.clone()),
+        SessionEvent::ProgramStatus(ProgramStatus::new(ProgramState::Clear, None)),
+        SessionEvent::Foreground(foreground.clone()),
+        SessionEvent::Activity,
+        SessionEvent::Disconnected(disconnected.clone()),
+        SessionEvent::Disconnected(Disconnected {
+            reason: DisconnectReason::Exited,
+            detail: None,
+        }),
+        SessionEvent::State {
+            state: SessionState {
+                title: Some("~/src".to_owned()),
+                cwd: Some("file://host/home/someone/src".to_owned()),
+                command: Some(CommandState::Running {
+                    command: Some("vim notes.md".to_owned()),
+                }),
+                statuses: vec![status, ProgramStatus::new(ProgramState::Done, None)],
+                foreground: Some(foreground),
+                disconnected: Some(disconnected),
+            },
+        },
+        SessionEvent::State {
+            state: SessionState {
+                command: Some(CommandState::Finished { exit: Some(2) }),
+                ..SessionState::default()
+            },
+        },
+        SessionEvent::State {
+            state: SessionState::default(),
+        },
     ]
 }
 

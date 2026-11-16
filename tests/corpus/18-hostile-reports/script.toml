@@ -1,0 +1,3 @@
+description = "Hostile: what a shell reports about itself, said by output that is no shell's: directories of other machines, commands nobody ran, statuses that break the rules"
+cols = 60
+rows = 6

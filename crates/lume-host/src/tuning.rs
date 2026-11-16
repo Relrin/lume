@@ -63,3 +63,75 @@ pub const OUTBOX_PIECES: usize = 32;
 
 /// How many frames from a client may wait for one session to handle them.
 pub const COMMAND_QUEUE: usize = 256;
+
+/// The most of one control string the host keeps while it looks for its end. A longer
+/// one is passed over whole: no report is that long, and a program that never ends a
+/// string must not make the host keep what it prints.
+pub const OSC_MAX_BYTES: usize = 8 * 1024;
+
+/// The most characters of a title that leave the host.
+pub const TITLE_MAX_CHARS: usize = 256;
+
+/// The longest working directory, as a URL, that is taken as one. A longer one is
+/// dropped, not cut: a path cut short is another path.
+pub const CWD_MAX_BYTES: usize = 2048;
+
+/// The most characters of a command line that leave the host.
+pub const COMMAND_MAX_CHARS: usize = 1024;
+
+/// The limits of a program's status report. A report beyond one of them is dropped
+/// whole.
+pub const STATUS_SEQUENCE_MAX_BYTES: usize = 4096;
+pub const STATUS_KEY_MAX_BYTES: usize = 16;
+/// A program's name.
+pub const STATUS_APP_MAX_BYTES: usize = 32;
+/// A record's path: all of it, one step of it, and how many steps.
+pub const STATUS_ID_MAX_BYTES: usize = 128;
+pub const STATUS_SEGMENT_MAX_BYTES: usize = 32;
+pub const STATUS_ID_DEPTH_MAX: usize = 8;
+/// A record's label, as it is sent and as it reads.
+pub const STATUS_TITLE_MAX_ENCODED: usize = 256;
+pub const STATUS_TITLE_MAX_BYTES: usize = 192;
+/// A record's line of text, as it is sent and as it reads.
+pub const STATUS_MESSAGE_MAX_ENCODED: usize = 2732;
+pub const STATUS_MESSAGE_MAX_BYTES: usize = 2048;
+
+/// The most reports a session keeps for a client that is not taking them. Beyond it
+/// the oldest goes: what a session reports is its latest state, and an old report is
+/// worth least.
+pub const EVENTS_PENDING_MAX: usize = 256;
+
+/// The most reports a session passes on in [`EVENT_WINDOW`]. A program can print
+/// reports far faster than anyone can read them, and each costs more to pass on than
+/// the bytes that made it. Beyond this they are left out, and when the window ends the
+/// client is told the state they added up to.
+pub const EVENTS_PER_WINDOW_MAX: u32 = 200;
+pub const EVENT_WINDOW: Duration = Duration::from_secs(1);
+
+/// The most the status records in a session's whole state may come to when the state
+/// is sent in one piece, which has to fit one frame with room for the rest of the
+/// state. A state with more goes without its oldest records.
+pub const STATE_STATUSES_MAX_BYTES: usize = 32 * 1024;
+
+/// How often a session that prints while its view does not have the keyboard says so.
+pub const ACTIVITY_INTERVAL: Duration = Duration::from_secs(1);
+
+/// How often the program that has a session's terminal is looked up while a client
+/// shows the session.
+pub const FOREGROUND_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+/// How long after a shell says a command started or ended the program that has the
+/// terminal is looked up. The shell says it a moment before the command is running,
+/// and a reading of the system's processes may be reused for a tenth of a second, so
+/// this is a little longer than that.
+pub const FOREGROUND_SETTLE: Duration = Duration::from_millis(120);
+
+/// How much of the end of an SSH client's output is kept, to tell from its last words
+/// how the connection ended.
+pub const SSH_TAIL_BYTES: usize = 1024;
+
+/// How many of the client's last lines are looked at for that.
+pub const SSH_TAIL_LINES: usize = 3;
+
+/// The most characters of the client's last line that are passed on.
+pub const SSH_DETAIL_MAX_CHARS: usize = 200;

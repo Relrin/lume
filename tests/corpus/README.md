@@ -86,6 +86,7 @@ it. Each golden was read against its input by hand when it was created.
 | `06` to `11` | What programs switch on and ask: scroll regions, keyboard and mouse modes, synchronized output, a shell's reports about itself, an editor starting up, and the questions a program asks its terminal, with the answers |
 | `12` to `15` | Hostile streams: going for the clipboard, trying to have a title or a request sent back as input, links that are not what they seem, and numbers and strings past every limit |
 | `16`, `17` | A flood through a small screen, and a full reset after a program left state behind |
+| `18` | Hostile: the reports of a shell, made by output that is not a shell's. The session host reads the same recording in its scanner's tests, which hold what it passes on and what it drops |
 
 The hostile recordings are also fed to a terminal set up as the product sets it up, in
 `packages/ui/test/hostile.test.ts`, which checks what the product's own limits add.

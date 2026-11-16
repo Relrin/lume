@@ -23,7 +23,14 @@ import {
   SCROLLBACK_MAX_LINES,
 } from "../limits.ts";
 import type { Attachment, StreamFrame } from "../transport/client.ts";
-import type { CellPx, ClientFacts, ColorScheme, ExitStatus, TermSize } from "../transport/types.ts";
+import type {
+  CellPx,
+  ClientFacts,
+  ColorScheme,
+  ExitStatus,
+  SessionEvent,
+  TermSize,
+} from "../transport/types.ts";
 
 /** What a session tells whoever shows it. Each is optional. */
 export interface SessionHooks {
@@ -36,6 +43,11 @@ export interface SessionHooks {
   /** The program set its title. Not sanitised. */
   title?(title: string): void;
   bell?(): void;
+  /**
+   * The session reported something besides its output: what its shell runs, where it
+   * is, which program has the terminal, how the session ended.
+   */
+  reported?(event: SessionEvent): void;
   /** The program asked to put text on a clipboard, and the text is within the size cap. */
   clipboardWrite?(text: string, location: ClipboardLocation): void;
 }
@@ -174,7 +186,9 @@ export class TerminalSession {
         }
         break;
       case "event":
-        // The terminal reads titles and bells out of the output itself.
+        // The terminal reads titles and bells out of the output itself. What else a
+        // session reports is for whoever shows more than the terminal.
+        this.#hooks.reported?.(frame.event);
         break;
       case "exit":
         this.#exit = frame.status;

@@ -12,14 +12,19 @@
 //! and the program in it blocks on its next write.
 
 mod conn;
+mod integration;
 mod launch;
 mod pending;
+mod scan;
 mod session;
+mod ssh_exit;
 pub mod tuning;
 
 use std::collections::HashMap;
 use std::io;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::Instant;
 
 use lume_proto::{
     BackendCaps, DecodeError, ErrorCode, HydrateKinds, ProtoError, Responder, SessionId,
@@ -41,6 +46,9 @@ pub struct HostConfig {
     pub pre_attach_bytes: usize,
     /// The most sessions the host runs at once.
     pub max_sessions: usize,
+    /// A folder the host may write its shell scripts to. Without one, no shell is
+    /// asked to report anything, whatever a session's description says.
+    pub shell_integration_dir: Option<PathBuf>,
 }
 
 impl Default for HostConfig {
@@ -50,6 +58,7 @@ impl Default for HostConfig {
             pty: lume_pty::native(),
             pre_attach_bytes: tuning::PRE_ATTACH_BYTES,
             max_sessions: tuning::MAX_SESSIONS,
+            shell_integration_dir: None,
         }
     }
 }
@@ -67,6 +76,11 @@ pub enum ServeError {
 pub struct Host {
     config: HostConfig,
     sessions: Mutex<HashMap<SessionId, SessionHandle>>,
+    /// Where the shell scripts were written, once the first session that wants them
+    /// has been started. `None` inside: there is nowhere to write them, or it failed.
+    scripts: OnceLock<Option<PathBuf>>,
+    /// When the host started. Things sessions do at intervals are counted from here.
+    started: Instant,
 }
 
 impl Host {
@@ -74,7 +88,34 @@ impl Host {
         Arc::new(Self {
             config,
             sessions: Mutex::new(HashMap::new()),
+            scripts: OnceLock::new(),
+            started: Instant::now(),
         })
+    }
+
+    /// The next moment after `now` at which sessions look up the program that has
+    /// their terminal. Every session looks at the same moments, because reading the
+    /// system's list of processes costs milliseconds and one reading serves all that
+    /// ask within a short while of each other.
+    pub(crate) fn next_poll(&self, now: Instant) -> Instant {
+        let interval = tuning::FOREGROUND_POLL_INTERVAL;
+        let since = now.saturating_duration_since(self.started);
+        let ticks = since.as_millis() / interval.as_millis().max(1) + 1;
+        self.started + interval * u32::try_from(ticks).unwrap_or(u32::MAX)
+    }
+
+    /// The folder the shell scripts are in, written on first use.
+    fn scripts(&self) -> Option<PathBuf> {
+        self.scripts
+            .get_or_init(|| {
+                let root = self.config.shell_integration_dir.as_deref()?;
+                integration::install(root)
+                    .inspect_err(|error| {
+                        tracing::warn!(%error, "the shell scripts could not be written");
+                    })
+                    .ok()
+            })
+            .clone()
     }
 
     /// Serves one client until it disconnects. Sessions the client started end with the
@@ -142,16 +183,20 @@ impl Host {
         }
 
         let size = spec.size;
-        let Launch { command, program } = launch::launch(spec)?;
-
-        // Starting a process blocks for a moment, so it runs off the async threads.
+        let ssh = matches!(spec.launcher, lume_proto::Launcher::Ssh { .. });
+        // Starting a process blocks for a moment, and so may writing the scripts, so
+        // both run off the async threads.
+        let host = Arc::clone(self);
         let pty_system = Arc::clone(&self.config.pty);
         let spawned = tokio::task::spawn_blocking(move || {
-            pty_system.spawn(&command, PtySize::cells(size.cols(), size.rows()))
+            let scripts = spec.shell_integration.then(|| host.scripts()).flatten();
+            let Launch { command, program } = launch::launch(spec, scripts.as_deref())?;
+            let started = pty_system.spawn(&command, PtySize::cells(size.cols(), size.rows()));
+            Ok::<_, ProtoError>(started.map(|(pty, child)| (pty, child, program)))
         })
         .await
-        .map_err(|error| ProtoError::new(ErrorCode::Internal, error.to_string()))?;
-        let (pty, child) = spawned.map_err(|error| {
+        .map_err(|error| ProtoError::new(ErrorCode::Internal, error.to_string()))??;
+        let (pty, child, program) = spawned.map_err(|error| {
             let code = match error.kind() {
                 io::ErrorKind::NotFound | io::ErrorKind::InvalidInput => ErrorCode::InvalidSpec,
                 _ => ErrorCode::SpawnFailed,
@@ -170,6 +215,7 @@ impl Host {
             owner,
             pre_attach_bytes: self.config.pre_attach_bytes,
             resize_pulls_scrollback: self.config.pty.resize_pulls_scrollback(),
+            ssh,
         })
         .map_err(|error| ProtoError::new(ErrorCode::SpawnFailed, error.to_string()))?;
         self.sessions().insert(id, handle);

@@ -17,14 +17,15 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use lume_config::Profile;
 use lume_config::schema::{CloseOnExit, NewPaneCwd, TabPlacement, TerminalConfig};
+use lume_config::{Profile, ShellIntegration};
 use lume_layout::{
     Applied, Area, ChangeStream, Intent, LayoutAuthority, LayoutChange, LayoutEvent,
     LayoutSnapshot, LocalLayout, NewContent, Pane, PaneContent, PaneId, PanelContent, PanelId,
     SpawnFailure, SpawnRequest, Spawner, Started, Store, UNITS, WindowId, Workspace, needs,
 };
 use lume_proto::app::{AppReplyBody, PageRequestBody};
+use lume_session::start_dir_from_report;
 use lume_session::{
     BackendId, ExitStatus, Launcher, SessionId, SpawnSpec, TermSize, default_shell,
 };
@@ -98,7 +99,7 @@ fn start_dir(asked: Option<&str>, root: Option<&str>, new_panes: NewPaneCwd) -> 
     }
     // A pane that had a directory belongs to the workspace's work, whatever new panes
     // are set to start in.
-    let in_root = asked.is_some() || new_panes == NewPaneCwd::Workspace;
+    let in_root = asked.is_some() || new_panes != NewPaneCwd::Home;
     if let Some(dir) = root.filter(|_| in_root).filter(there) {
         return Some(dir.to_owned());
     }
@@ -165,19 +166,15 @@ fn distro_dir(asked: Option<&str>) -> Option<String> {
     (linux || Path::new(dir).is_dir()).then(|| dir.to_owned())
 }
 
-/// Works out what a pane's session is started with. A pane that names its program
-/// runs it as named. Any other runs its profile; a profile that names no program runs
-/// the user's shell with the profile's arguments. With neither, it is the shell of the
-/// settings.
-fn plan_start(
-    request: &SpawnRequest,
+/// What a pane runs. A pane that names its program runs it as named. Any other runs
+/// its profile; a profile that names no program runs the user's shell with the
+/// profile's arguments. With neither, it is the shell of the settings.
+fn planned_launcher(
+    named: Option<&Launcher>,
     profile: Option<&Profile>,
     terminal: &TerminalConfig,
-    root: Option<&str>,
-    new_panes: NewPaneCwd,
-) -> Start {
-    let profile = profile.filter(|_| request.launcher.is_none());
-    let launcher = match (&request.launcher, profile) {
+) -> Launcher {
+    match (named, profile) {
         (Some(launcher), _) => launcher.clone(),
         (None, Some(profile)) => match &profile.launcher {
             Launcher::Shell {
@@ -199,7 +196,37 @@ fn plan_start(
             launcher => launcher.clone(),
         },
         (None, None) => start_launcher(&terminal.shell, &terminal.shell_args),
-    };
+    }
+}
+
+/// Whether two sessions are in the same place, so that a directory of one is a
+/// directory of the other: both on this machine, or both in the same Linux
+/// distribution as the same user.
+fn same_place(one: &Launcher, other: &Launcher) -> bool {
+    match (one, other) {
+        (Launcher::Shell { .. }, Launcher::Shell { .. }) => true,
+        (
+            Launcher::Wsl { distro, user },
+            Launcher::Wsl {
+                distro: other_distro,
+                user: other_user,
+            },
+        ) => distro.eq_ignore_ascii_case(other_distro) && user == other_user,
+        _ => false,
+    }
+}
+
+/// Works out what a pane's session is started with: what it runs, where, and with
+/// which variables.
+fn plan_start(
+    request: &SpawnRequest,
+    profile: Option<&Profile>,
+    terminal: &TerminalConfig,
+    root: Option<&str>,
+    new_panes: NewPaneCwd,
+) -> Start {
+    let profile = profile.filter(|_| request.launcher.is_none());
+    let launcher = planned_launcher(request.launcher.as_ref(), profile, terminal);
 
     let from_profile = profile.and_then(|profile| profile.cwd.as_deref());
     let cwd = match &launcher {
@@ -293,11 +320,17 @@ impl Spawner for PaneSpawner {
             resolved.workspace.root.as_deref(),
             resolved.config.layout.new_pane_cwd,
         );
+        // A shell is asked to report its directory and its commands unless the
+        // profile it was started from says not to.
+        let shell_integration = profile
+            .as_ref()
+            .is_none_or(|profile| profile.shell_integration == ShellIntegration::Auto);
         let spec = SpawnSpec {
-            launcher,
+            launcher: launcher.clone(),
             cwd: cwd.clone(),
             env,
             size: request.size.unwrap_or_else(default_size),
+            shell_integration,
         };
         let session = state
             .router()
@@ -306,6 +339,14 @@ impl Spawner for PaneSpawner {
             .spawn(spec)
             .await
             .map_err(Self::failure)?;
+        // What the session runs decides later what a directory it reports is good for.
+        state.reports().started(
+            SessionKey {
+                backend: backend.clone(),
+                session,
+            },
+            launcher,
+        );
         Ok(Started {
             backend,
             session,
@@ -676,6 +717,10 @@ impl Panes {
             if self.alive(&key).await {
                 return Ok(key);
             }
+            // What the program that ended said about itself is not true of the next.
+            if let Some(state) = self.state.upgrade() {
+                state.reports().forget(&key);
+            }
         }
         let request = SpawnRequest {
             backend: terminal.backend.clone(),
@@ -710,6 +755,78 @@ impl Panes {
                 Err(error.into())
             }
         }
+    }
+
+    /// The directory a terminal opened from `source` starts in, if it is to start
+    /// where that pane's shell is: the settings say new panes do, the shell has said
+    /// where it is, the new terminal (which runs `profile`, or the default one) will
+    /// be in the same place as the pane, and the directory checks out.
+    pub async fn inherited_dir(&self, source: PaneId, profile: Option<&str>) -> Option<String> {
+        let resolved = self.config.current();
+        if resolved.config.layout.new_pane_cwd != NewPaneCwd::Inherit {
+            return None;
+        }
+        let key = self.session_of(source)?;
+        let (running, url) = self.state.upgrade()?.reports().reported_dir(&key)?;
+        let wanted = profile
+            .map(str::to_owned)
+            .or_else(|| self.profiles.default_id());
+        let profile = match &wanted {
+            Some(id) => Some(self.profiles.resolve(id).await?),
+            None => None,
+        };
+        let planned = planned_launcher(None, profile.as_ref(), &resolved.config.terminal);
+        if !same_place(&running, &planned) {
+            return None;
+        }
+        // Looking at a directory may take a moment, in a distribution above all.
+        tokio::task::spawn_blocking(move || start_dir_from_report(&running, &url))
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// The directory the shell in `pane` is in, as a path of this machine or of the
+    /// pane's distribution, with what the pane runs. `None` where the shell has not
+    /// said, or what it said does not hold up.
+    pub async fn live_dir(&self, pane: PaneId) -> Option<(Launcher, String)> {
+        let key = self.session_of(pane)?;
+        let (running, url) = self.state.upgrade()?.reports().reported_dir(&key)?;
+        tokio::task::spawn_blocking(move || {
+            let dir = start_dir_from_report(&running, &url)?;
+            Some((running, dir))
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    /// Starts the program of a pane again, once it has ended: the same profile, in the
+    /// same pane. For a pane whose connection to another machine was lost this is
+    /// connecting again.
+    pub async fn restart(&self, pane: PaneId) -> Result<SessionKey, CommandError> {
+        let _one_at_a_time = self.starting.lock().await;
+        let window = self
+            .workspace()
+            .window_of(pane)
+            .ok_or_else(|| CommandError::not_found(format!("there is no pane {pane}")))?;
+        // The new program gets the grid the old one had, which is the pane's.
+        let mut size = None;
+        if let Some(key) = self.session_of(pane)
+            && let Some(state) = self.state.upgrade()
+            && let Ok(backend) = state.router().get(&key.backend)
+            && let Ok(sessions) = backend.list().await
+            && let Some(info) = sessions.iter().find(|info| info.id == key.session)
+        {
+            if info.exit.is_none() {
+                return Err(CommandError::bad_request(format!(
+                    "the program in pane {pane} is still running"
+                )));
+            }
+            size = Some(info.size);
+        }
+        self.start_one(window, pane, size.unwrap_or_else(default_size))
+            .await
     }
 
     /// Acts on the end of a session's program: its pane closes, or stays to say how
@@ -913,12 +1030,56 @@ impl Panes {
         }
     }
 
+    /// The directories the shells in the panes are in now, as far as they have said
+    /// and the say-so holds up: for each such pane, where its session would be started
+    /// to be back where it is.
+    fn live_dirs(&self) -> Vec<(PaneId, Launcher, String)> {
+        let Some(state) = self.state.upgrade() else {
+            return Vec::new();
+        };
+        let workspace = self.workspace();
+        workspace
+            .panes()
+            .into_iter()
+            .filter_map(|pane| {
+                let terminal = terminal_of(pane)?;
+                let key = SessionKey {
+                    backend: self.backend_of(terminal),
+                    session: terminal.session?,
+                };
+                let (launcher, url) = state.reports().reported_dir(&key)?;
+                Some((pane.id, launcher, url))
+            })
+            .collect()
+    }
+
+    /// The workspace as it is written to its file: each pane with the directory its
+    /// shell is in now, where that is known, in place of the one it was started in.
+    /// Looks at the file system.
+    fn to_save(mut workspace: Workspace, live: Vec<(PaneId, Launcher, String)>) -> Workspace {
+        for (pane, launcher, url) in live {
+            let Some(dir) = start_dir_from_report(&launcher, &url) else {
+                continue;
+            };
+            if let Some(Pane {
+                content: PaneContent::Terminal(terminal),
+                ..
+            }) = workspace.pane_mut(pane)
+            {
+                terminal.cwd = Some(dir);
+            }
+        }
+        workspace
+    }
+
     /// Writes the workspace to its file.
     pub(crate) async fn save(&self) {
         let _one_at_a_time = self.saving.lock().await;
         let workspace = self.workspace();
+        let live = self.live_dirs();
         let store = Arc::clone(&self.store);
         let written = tokio::task::spawn_blocking(move || {
+            let workspace = Self::to_save(workspace, live);
             store.save(&workspace, env!("CARGO_PKG_VERSION"), now_unix_ms())
         })
         .await;
@@ -940,9 +1101,10 @@ impl Panes {
         if self.closing.swap(true, Ordering::Relaxed) {
             return;
         }
+        let workspace = Self::to_save(self.workspace(), self.live_dirs());
         let saved = self
             .store
-            .save(&self.workspace(), env!("CARGO_PKG_VERSION"), now_unix_ms());
+            .save(&workspace, env!("CARGO_PKG_VERSION"), now_unix_ms());
         if let Err(error) = saved {
             tracing::error!(%error, "the workspace could not be saved");
         }
@@ -2058,6 +2220,245 @@ mod tests {
         app.state.shutdown().await;
     }
 
+    /// The URL a shell on this machine reports when it is in `dir`.
+    fn reported(dir: &Path) -> String {
+        let machine = lume_session::cwd::machine_name().unwrap();
+        let path = dir
+            .to_string_lossy()
+            .replace('\\', "/")
+            .replace('%', "%25")
+            .replace(' ', "%20");
+        let slash = if path.starts_with('/') { "" } else { "/" };
+        format!("file://{machine}{slash}{path}")
+    }
+
+    fn says_it_is_in(app: &Running, key: &SessionKey, url: &str) {
+        let event = lume_session::SessionEvent::Cwd {
+            url: url.to_owned(),
+        };
+        app.state.reports().on_event(key, &event);
+    }
+
+    fn context(app: &Running) -> crate::builtins::Context<'_> {
+        crate::builtins::Context {
+            panes: &app.panes,
+            config: &app.panes.config,
+            shell: app.shell.as_ref(),
+            window: app.window,
+            asker: crate::services::Asker::Outside,
+        }
+    }
+
+    fn cwd_of(app: &Running, pane: PaneId) -> Option<String> {
+        app.panes.terminal(pane).and_then(|terminal| terminal.cwd)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_terminal_opened_from_a_pane_starts_where_that_panes_shell_is() {
+        let app = running("inherit", "").await;
+        let here = app._dir.dirs().config;
+        let pane = only_pane(&app);
+        let key = start(&app, pane).await;
+
+        // A shell that has not said where it is gives nothing to go by.
+        assert_eq!(app.panes.inherited_dir(pane, None).await, None);
+        says_it_is_in(&app, &key, &reported(&here));
+        let found = app.panes.inherited_dir(pane, None).await.unwrap();
+        assert_eq!(Path::new(&found), here);
+
+        // A split is opened from the pane that is split.
+        crate::builtins::run(&context(&app), "lume.pane.split-right", &json!({}))
+            .await
+            .unwrap();
+        let opened: Vec<PaneId> = app
+            .panes
+            .workspace()
+            .panes()
+            .iter()
+            .map(|pane| pane.id)
+            .filter(|opened| *opened != pane)
+            .collect();
+        assert_eq!(opened.len(), 1);
+        for opened in opened {
+            assert_eq!(cwd_of(&app, opened).as_deref().map(Path::new), Some(&*here));
+        }
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_directory_that_does_not_check_out_is_not_started_in() {
+        let app = running("spoof", "").await;
+        let here = app._dir.dirs().config;
+        let pane = only_pane(&app);
+        let key = start(&app, pane).await;
+        let machine = lume_session::cwd::machine_name().unwrap();
+
+        // Another machine's directory, though one of that name is here too.
+        let elsewhere = reported(&here).replacen(&machine, "some-other-machine", 1);
+        says_it_is_in(&app, &key, &elsewhere);
+        assert_eq!(app.panes.inherited_dir(pane, None).await, None);
+        // A directory that is not there.
+        says_it_is_in(&app, &key, &reported(&here.join("gone")));
+        assert_eq!(app.panes.inherited_dir(pane, None).await, None);
+        // Something that is no directory at all.
+        says_it_is_in(&app, &key, "javascript:alert(1)");
+        assert_eq!(app.panes.inherited_dir(pane, None).await, None);
+
+        // A split still opens, where panes start when nothing says otherwise.
+        crate::builtins::run(&context(&app), "lume.pane.split-right", &json!({}))
+            .await
+            .unwrap();
+        let home = std::env::home_dir().map(|home| home.to_string_lossy().into_owned());
+        let opened = app.panes.workspace().panes()[1].id;
+        assert_eq!(cwd_of(&app, opened), home);
+        // Nothing a shell reports moves the workspace's own folder.
+        assert_eq!(app.panes.config.current().workspace.root, None);
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_on_another_machine_never_gives_a_directory() {
+        let app = running("remote", "").await;
+        let here = app._dir.dirs().config;
+        let pane = only_pane(&app);
+        let key = start(&app, pane).await;
+        // The report is as good as one gets, but the session is said to run elsewhere.
+        app.state.reports().started(
+            key.clone(),
+            Launcher::Ssh {
+                host: "box".to_owned(),
+                user: None,
+                port: None,
+                extra_args: Vec::new(),
+                client: None,
+            },
+        );
+        says_it_is_in(&app, &key, &reported(&here));
+        assert_eq!(app.panes.inherited_dir(pane, None).await, None);
+        assert_eq!(app.panes.live_dir(pane).await, None);
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn new_panes_keep_to_the_workspace_when_the_settings_say_so() {
+        let app = running("inherit-off", "[layout]\nnew-pane-cwd = \"workspace\"\n").await;
+        let here = app._dir.dirs().config;
+        let pane = only_pane(&app);
+        let key = start(&app, pane).await;
+        says_it_is_in(&app, &key, &reported(&here));
+        assert_eq!(app.panes.inherited_dir(pane, None).await, None);
+        // Where the shell is can still be asked for.
+        let (_, dir) = app.panes.live_dir(pane).await.unwrap();
+        assert_eq!(Path::new(&dir), here);
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_workspaces_file_remembers_where_each_shell_is_now() {
+        let dir = TempDir::new("live");
+        plain_shell(&dir, "");
+        let dirs = dir.dirs();
+        let app = running_in(dir).await;
+        let here = dirs.config.clone();
+        let pane = only_pane(&app);
+        let key = start(&app, pane).await;
+        says_it_is_in(&app, &key, &reported(&here));
+
+        app.panes.save().await;
+        // The layout itself is not changed by where a shell goes.
+        let home = std::env::home_dir().map(|home| home.to_string_lossy().into_owned());
+        assert_eq!(cwd_of(&app, pane), home);
+        app.panes.close();
+        app.state.shutdown().await;
+
+        let again = running_in(TempDir::at(dirs)).await;
+        let kept = cwd_of(&again, only_pane(&again)).unwrap();
+        assert_eq!(Path::new(&kept), here);
+        again.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_pane_whose_program_ended_is_started_again_and_one_that_runs_is_not() {
+        let app = running("restart", "").await;
+        let (carrier, id) = page(&app).await;
+        let pane = only_pane(&app);
+        let first = start(&app, pane).await;
+        attach(&app, id, &first, 1).await;
+        says_it_is_in(&app, &first, "file://somewhere/else");
+
+        let refused = app.panes.restart(pane).await.unwrap_err();
+        assert_eq!(refused.code, "bad_request");
+        assert_eq!(app.panes.session_of(pane), Some(first.clone()));
+
+        type_into(&app, id, 1, "exit 3\r").await;
+        until("the program's end", || app.state.ended(&first)).await;
+        let second = app.panes.restart(pane).await.unwrap();
+        assert_ne!(second, first);
+        assert_eq!(app.panes.session_of(pane), Some(second.clone()));
+        // What the first program said about itself went with it.
+        assert_eq!(app.state.reports().state(&first), None);
+        // The page is told, so that it shows the new session.
+        until("the pane's new session", || {
+            notices(&carrier, "layout_changed")
+                .iter()
+                .any(|notice| notice.to_string().contains(&second.session.to_string()))
+        })
+        .await;
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_directory_of_a_pane_is_copied_and_refused_where_it_is_not_known() {
+        let app = running("copy", "").await;
+        let here = app._dir.dirs().config;
+        let pane = only_pane(&app);
+        let key = start(&app, pane).await;
+        let refused = crate::builtins::run(&context(&app), "lume.pane.copy-cwd", &json!({}))
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, "not_found");
+
+        says_it_is_in(&app, &key, &reported(&here));
+        crate::builtins::run(&context(&app), "lume.pane.copy-cwd", &json!({}))
+            .await
+            .unwrap();
+        let copied = app.shell.copied();
+        assert_eq!(copied.len(), 1);
+        assert_eq!(Path::new(&copied[0]), here);
+        app.state.shutdown().await;
+    }
+
+    #[test]
+    fn two_sessions_are_in_one_place_on_this_machine_or_in_one_distribution() {
+        let shell = |program: &str| Launcher::Shell {
+            program: program.to_owned(),
+            args: Vec::new(),
+            login: false,
+        };
+        let wsl = |distro: &str, user: Option<&str>| Launcher::Wsl {
+            distro: distro.to_owned(),
+            user: user.map(str::to_owned),
+        };
+        let ssh = Launcher::Ssh {
+            host: "box".to_owned(),
+            user: None,
+            port: None,
+            extra_args: Vec::new(),
+            client: None,
+        };
+        assert!(same_place(&shell("pwsh"), &shell("cmd.exe")));
+        assert!(same_place(&wsl("Ubuntu", None), &wsl("ubuntu", None)));
+        assert!(!same_place(&wsl("Ubuntu", None), &wsl("Debian", None)));
+        assert!(!same_place(
+            &wsl("Ubuntu", None),
+            &wsl("Ubuntu", Some("root"))
+        ));
+        assert!(!same_place(&shell("bash"), &wsl("Ubuntu", None)));
+        // Two connections to one machine are still not this machine.
+        assert!(!same_place(&ssh, &ssh));
+        assert!(!same_place(&ssh, &shell("bash")));
+    }
+
     #[test]
     fn equal_shares_add_up_to_a_whole() {
         for count in 1..=20 {
@@ -2084,6 +2485,10 @@ mod tests {
         );
         assert_eq!(
             start_dir(None, Some(&here), NewPaneCwd::Workspace),
+            Some(here.clone())
+        );
+        assert_eq!(
+            start_dir(None, Some(&here), NewPaneCwd::Inherit),
             Some(here.clone())
         );
         assert_eq!(start_dir(None, Some(&here), NewPaneCwd::Home), home);

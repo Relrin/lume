@@ -296,6 +296,10 @@ pub struct SpawnSpec {
     /// Variables set on top of the host's own environment.
     pub env: Vec<(String, String)>,
     pub size: TermSize,
+    /// Have the shell report its directory and its commands, where the host knows how
+    /// to ask that shell without touching the user's own start-up files.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shell_integration: bool,
 }
 
 /// Counters a host keeps per session. They describe the flow of output, never its content.
@@ -358,21 +362,6 @@ pub struct BackendCaps {
     pub server_layout: bool,
     pub responder: Responder,
     pub hydrate: HydrateKinds,
-}
-
-/// Something a session reports besides its output.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-#[non_exhaustive]
-pub enum SessionEvent {
-    Title {
-        title: String,
-    },
-    /// The working directory the program reported, as a URL.
-    Cwd {
-        url: String,
-    },
-    Bell,
 }
 
 #[cfg(test)]

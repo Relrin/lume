@@ -135,6 +135,32 @@ pub trait Pty: Send {
     fn take_writer(&mut self) -> io::Result<Box<dyn Write + Send>>;
 
     fn resize(&self, size: PtySize) -> io::Result<()>;
+
+    /// A way to ask which program has the terminal, for as long as the caller keeps it.
+    /// `None` where the platform offers no way.
+    fn foreground_probe(&self) -> Option<Arc<dyn ForegroundProbe>> {
+        None
+    }
+}
+
+/// The program that has a terminal: the one that reads what is typed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForegroundProcess {
+    pub pid: u32,
+    /// The program's file name without its folder, and on Windows without `.exe`.
+    /// Never empty.
+    pub name: String,
+}
+
+/// Finds the program that has a terminal. Cheap enough to ask once a second; it may
+/// block for a few milliseconds, so it is called off the async threads.
+///
+/// The answer is a guess that is right for the common cases. A shell that runs one
+/// program is answered with that program. Programs left running in the background, and
+/// pipelines of several, are answered with whichever the system makes easiest to find.
+pub trait ForegroundProbe: Send + Sync {
+    /// `None` when the terminal's program has ended or the system would not say.
+    fn foreground(&self) -> Option<ForegroundProcess>;
 }
 
 /// The output of a terminal. `read` blocks until there are bytes, and returns `Ok(0)`

@@ -15,6 +15,7 @@ pub mod app;
 mod control;
 mod decode;
 mod error;
+mod event;
 mod flow;
 mod frame;
 mod payload;
@@ -27,6 +28,10 @@ pub use control::{
 };
 pub use decode::{ControlDecoder, FrameDecoder};
 pub use error::{DecodeError, EncodeError, ErrorCode, FlowError, ProtoError};
+pub use event::{
+    BlockKind, CommandState, DisconnectReason, Disconnected, Foreground, ProgramState,
+    ProgramStatus, SessionEvent, SessionState,
+};
 pub use flow::{Granter, ReceiveWindow, SendWindow};
 pub use frame::{
     Body, BytesKind, CONTROL_STREAM, Header, Kind, Message, Role, encode, encode_bytes,
@@ -35,8 +40,8 @@ pub use frame::{
 pub use payload::HydratePayload;
 pub use types::{
     BackendCaps, BackendId, CellPx, ClientFacts, ColorScheme, ExitStatus, HydrateKinds,
-    InvalidSize, Launcher, Palette, Responder, Rgb, SessionEvent, SessionId, SessionInfo,
-    SessionStats, SpawnSpec, StreamId, TermSize,
+    InvalidSize, Launcher, Palette, Responder, Rgb, SessionId, SessionInfo, SessionStats,
+    SpawnSpec, StreamId, TermSize,
 };
 
 /// The protocol version this crate speaks.

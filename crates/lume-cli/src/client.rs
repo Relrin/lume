@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use lume_ipc::{Endpoint, Stream};
 use lume_proto::app::{
-    APP_PROTO_VERSION, AppError, AppMessage, AppReply, AppRequest, AppRequestBody, AppResponse,
-    ENDPOINT_NAME,
+    APP_PROTO_VERSION, AppError, AppEvent, AppMessage, AppReply, AppRequest, AppRequestBody,
+    AppResponse, ENDPOINT_NAME,
 };
 use lume_proto::{ClientKind, ControlDecoder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -108,8 +108,10 @@ impl Client {
                     }
                     // An answer to nothing this connection is waiting for.
                     AppMessage::Response(_) => {}
-                    AppMessage::Request(_) => {
-                        return Err(io::Error::other("the application sent a request"));
+                    AppMessage::Request(_) | AppMessage::Event(_) => {
+                        return Err(io::Error::other(
+                            "the application sent something that is not an answer",
+                        ));
                     }
                 }
             }
@@ -119,6 +121,29 @@ impl Client {
                     io::ErrorKind::UnexpectedEof,
                     "the application closed the connection",
                 ));
+            }
+            self.decoder.push(&chunk[..read]);
+        }
+    }
+
+    /// The next thing a session reported, on a connection that has asked to follow
+    /// sessions. `None` once the application has closed the connection.
+    pub async fn event(&mut self) -> io::Result<Option<AppEvent>> {
+        let mut chunk = vec![0; READ_CHUNK];
+        loop {
+            while let Some(json) = self.decoder.next().map_err(io::Error::other)? {
+                match AppMessage::decode(&json).map_err(io::Error::other)? {
+                    AppMessage::Event(event) => return Ok(Some(event)),
+                    // An answer to something this connection no longer waits for.
+                    AppMessage::Response(_) => {}
+                    AppMessage::Request(_) => {
+                        return Err(io::Error::other("the application sent a request"));
+                    }
+                }
+            }
+            let read = self.io.read(&mut chunk).await?;
+            if read == 0 {
+                return Ok(None);
             }
             self.decoder.push(&chunk[..read]);
         }

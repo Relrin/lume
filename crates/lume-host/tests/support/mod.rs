@@ -16,7 +16,7 @@ use lume_host::{Host, HostConfig};
 use lume_proto::{
     Body, CONTROL_STREAM, CellPx, ClientFacts, ClientKind, ColorScheme, Control, FrameDecoder,
     Launcher, Message, Notification, PROTO_VERSION, Palette, ProtoError, Request, RequestBody,
-    ResponseBody, Role, SessionId, SessionInfo, SpawnSpec, TermSize, encode,
+    ResponseBody, Role, SessionEvent, SessionId, SessionInfo, SpawnSpec, TermSize, encode,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -69,6 +69,7 @@ fn spec(program: &str, args: &[&str]) -> SpawnSpec {
         cwd: None,
         env: vec![("LUME_MARK".to_owned(), MARK.to_owned())],
         size: size(80, 24),
+        shell_integration: false,
     }
 }
 
@@ -121,6 +122,48 @@ pub fn prints_then_exits(text: &str, code: u32) -> SpawnSpec {
         )
     } else {
         spec("/bin/sh", &["-c", &format!("echo {text}; exit {code}")])
+    }
+}
+
+/// A program that reports what a shell with integration reports (a title, a
+/// directory, a command that starts and fails, a status), then prints `done` and
+/// waits for input.
+pub fn reports_then_waits(done: &str) -> SpawnSpec {
+    // What each control string says, between the introducer and the terminator.
+    const REPORTS: [&str; 5] = [
+        "2;lume-title-k7q",
+        "7;file://box/srv/www%20x",
+        "133;C;cmdline_url=make%20test",
+        "133;D;3",
+        "7501;state=done:app=make",
+    ];
+    if cfg!(windows) {
+        let writes: String = REPORTS
+            .iter()
+            .map(|report| format!("[Console]::Out.Write($e+']{report}'+$e+'\\');"))
+            .collect();
+        spec(
+            "powershell.exe",
+            &[
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!(
+                    "$e=[string][char]27;{writes}[Console]::Out.WriteLine('{done}');\
+                     [void][Console]::In.ReadLine()"
+                ),
+            ],
+        )
+    } else {
+        let writes: String = REPORTS
+            .iter()
+            .map(|report| format!("printf '\\033]%s\\033\\\\' '{report}';"))
+            .collect();
+        spec(
+            "/bin/sh",
+            &["-c", &format!("{writes} echo {done}; read reply")],
+        )
     }
 }
 
@@ -357,11 +400,43 @@ impl Client {
         {}
     }
 
-    /// The next message on `stream` that is not output.
+    /// The next message on `stream` that is neither output nor something the session
+    /// reported: a mark of where the terminal was resized or the program ended.
     pub async fn marker(&mut self, stream: u32) -> Body {
-        let is_marker =
-            |message: &Message| message.stream == stream && !matches!(message.body, Body::Data(_));
+        let is_marker = |message: &Message| {
+            message.stream == stream && !matches!(message.body, Body::Data(_) | Body::Event(_))
+        };
         self.expect("a marker", is_marker).await.body
+    }
+
+    /// The oldest report on `stream` for which `wanted` holds, if one arrives within
+    /// `wait`.
+    pub async fn event_within(
+        &mut self,
+        stream: u32,
+        wait: Duration,
+        wanted: impl Fn(&SessionEvent) -> bool,
+    ) -> Option<SessionEvent> {
+        let is_wanted = |message: &Message| {
+            message.stream == stream && matches!(&message.body, Body::Event(event) if wanted(event))
+        };
+        match self.find(wait, is_wanted).await?.body {
+            Body::Event(event) => Some(event),
+            _ => unreachable!("matched as an event"),
+        }
+    }
+
+    /// Like [`event_within`](Self::event_within), but the report must arrive.
+    pub async fn event(
+        &mut self,
+        stream: u32,
+        what: &str,
+        wanted: impl Fn(&SessionEvent) -> bool,
+    ) -> SessionEvent {
+        match self.event_within(stream, STEP, wanted).await {
+            Some(event) => event,
+            None => panic!("{what} was never reported; kept: {:?}", self.stash),
+        }
     }
 
     /// The next notification on the control stream.

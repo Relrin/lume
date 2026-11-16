@@ -38,8 +38,9 @@ use super::api::ConPtyApi;
 use super::child::{ChildEnd, WinChild};
 use super::cmdline::{command_line, plain_path, resolve_program, wide};
 use super::env::Environment;
+use super::foreground::WinForeground;
 use super::{check, check_hresult};
-use crate::{CommandSpec, Pty, PtyRead, PtySize, ReadStop};
+use crate::{CommandSpec, ForegroundProbe, Pty, PtyRead, PtySize, ReadStop};
 
 /// Flags passed when a pseudoconsole is created. None are set:
 ///
@@ -298,6 +299,7 @@ pub(crate) fn spawn(
     let pty = WinPty {
         console,
         end: end.clone(),
+        pid: process.dwProcessId,
         reader: Some(File::from(output_read)),
         writer: Some(File::from(input_write)),
     };
@@ -309,6 +311,8 @@ pub(crate) struct WinPty {
     console: Arc<Console>,
     /// How to end the program when the terminal is dropped.
     end: ChildEnd,
+    /// The process id of the program that was started.
+    pid: u32,
     reader: Option<File>,
     writer: Option<File>,
 }
@@ -336,6 +340,10 @@ impl Pty for WinPty {
 
     fn resize(&self, size: PtySize) -> io::Result<()> {
         self.console.resize(size)
+    }
+
+    fn foreground_probe(&self) -> Option<Arc<dyn ForegroundProbe>> {
+        Some(Arc::new(WinForeground::new(self.end.process(), self.pid)))
     }
 }
 

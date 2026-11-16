@@ -23,11 +23,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::control::ClientKind;
 use crate::error::{DecodeError, EncodeError};
+use crate::event::SessionEvent;
 use crate::frame::{Kind, encode_control_json};
 use crate::types::{BackendId, ExitStatus, Launcher, SessionId, SessionInfo, TermSize};
 
 /// The version of the control endpoint's messages this crate speaks.
-pub const APP_PROTO_VERSION: u32 = 4;
+pub const APP_PROTO_VERSION: u32 = 5;
 
 /// The name the control endpoint is served under, and looked for, when none is given.
 ///
@@ -73,6 +74,30 @@ pub mod codes {
 pub enum AppMessage {
     Request(AppRequest),
     Response(AppResponse),
+    /// Something a session reported, sent to a client that asked to follow sessions.
+    Event(AppEvent),
+}
+
+/// What there is to tell about a session: something it reported, or how its program
+/// ended.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionNews {
+    Event(SessionEvent),
+    Exit(ExitStatus),
+}
+
+/// One piece of news about one session. In JSON the news sits beside the names:
+/// `{"pane": "p3", "session": "…", "event": {"type": "cwd", …}}`, or `"exit"` in
+/// place of `"event"`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppEvent {
+    /// The pane that shows the session, where one does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    pub session: SessionId,
+    #[serde(flatten)]
+    pub what: SessionNews,
 }
 
 impl AppMessage {
@@ -256,6 +281,20 @@ pub enum AppRequestBody {
     Workspaces {},
     /// Lists the profiles there are: the ways to start a terminal.
     Profiles {},
+    /// Follows what sessions report: titles, directories, commands that start and
+    /// end, the program that has the terminal, a program's status, and how each
+    /// session ends. Of one pane or session if one is named, else of all.
+    ///
+    /// This is the one request that does not end with its answer. After the answer
+    /// the application sends an [`AppMessage::Event`] for each report, beginning with
+    /// the state of every session followed as it stands, until the client closes the
+    /// connection. No further request is read from it.
+    Events {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<SessionId>,
+    },
     /// Lists the commands there are.
     Commands {},
     /// Runs a command, in the window named or the one the user is working in.
@@ -501,6 +540,8 @@ pub enum AppReplyBody {
     Ran {
         command: String,
     },
+    /// The sessions are being followed: their reports come next on this connection.
+    Following {},
     /// The grid a pane that is about to be made will have. Only a page answers this.
     Estimated {
         size: TermSize,

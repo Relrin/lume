@@ -205,5 +205,148 @@
       }
     },
     "stream": 0
+  },
+  {
+    "event": {
+      "command": "make test",
+      "type": "command_started"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "type": "command_started"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "exit": -1,
+      "type": "command_finished"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "type": "command_finished"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "app": "terraform",
+      "id": "deploy/us-east",
+      "kind": "permission",
+      "message": "Apply 3 resources?",
+      "progress": 40,
+      "state": "blocked",
+      "title": "Plan",
+      "type": "program_status"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "state": "clear",
+      "type": "program_status"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "name": "vim",
+      "pid": 4242,
+      "type": "foreground"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "type": "activity"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "detail": "client_loop: send disconnect: Broken pipe",
+      "reason": "connection_lost",
+      "type": "disconnected"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "reason": "exited",
+      "type": "disconnected"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "state": {
+        "command": {
+          "command": "vim notes.md",
+          "state": "running"
+        },
+        "cwd": "file://host/home/someone/src",
+        "disconnected": {
+          "detail": "client_loop: send disconnect: Broken pipe",
+          "reason": "connection_lost"
+        },
+        "foreground": {
+          "name": "vim",
+          "pid": 4242
+        },
+        "statuses": [
+          {
+            "app": "terraform",
+            "id": "deploy/us-east",
+            "kind": "permission",
+            "message": "Apply 3 resources?",
+            "progress": 40,
+            "state": "blocked",
+            "title": "Plan"
+          },
+          {
+            "state": "done"
+          }
+        ],
+        "title": "~/src"
+      },
+      "type": "state"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "state": {
+        "command": {
+          "exit": 2,
+          "state": "finished"
+        }
+      },
+      "type": "state"
+    },
+    "kind": "event",
+    "stream": 4
+  },
+  {
+    "event": {
+      "state": {},
+      "type": "state"
+    },
+    "kind": "event",
+    "stream": 4
   }
 ]

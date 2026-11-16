@@ -479,8 +479,11 @@ pub enum TabPlacement {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum NewPaneCwd {
-    /// The workspace's folder, or the home directory if it has none.
+    /// The directory of the pane the new one is opened from, where its shell says
+    /// which that is; otherwise as `workspace`.
     #[default]
+    Inherit,
+    /// The workspace's folder, or the home directory if it has none.
     Workspace,
     /// The home directory.
     Home,

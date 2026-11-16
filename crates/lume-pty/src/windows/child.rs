@@ -54,6 +54,12 @@ impl ChildEnd {
         }
     }
 
+    /// The child's process. Whoever holds it keeps the child's process id from being
+    /// given to another process.
+    pub(crate) fn process(&self) -> Arc<OwnedHandle> {
+        Arc::clone(&self.process)
+    }
+
     fn has_exited(&self) -> bool {
         // SAFETY: the handle is open for as long as `self.process` is alive. A zero
         // timeout only asks whether the process has ended.

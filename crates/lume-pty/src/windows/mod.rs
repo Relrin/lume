@@ -6,6 +6,7 @@ mod cmdline;
 mod conpty;
 pub(crate) mod console;
 mod env;
+mod foreground;
 mod loader;
 
 use std::io;

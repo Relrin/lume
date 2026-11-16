@@ -19,14 +19,17 @@ use std::time::Duration;
 use lume_ipc::{Endpoint, Listener};
 use lume_layout::{Bounds, Dir, Intent, NewContent, PaneId, SpawnRequest, UNITS, WindowId};
 use lume_proto::app::{
-    APP_PROTO_VERSION, AppError, AppMessage, AppReply, AppReplyBody, AppRequest, AppRequestBody,
-    AppResponse, AppSession, Direction, Focused, PageRequestBody, SpawnPlace, codes,
+    APP_PROTO_VERSION, AppError, AppEvent, AppMessage, AppReply, AppReplyBody, AppRequest,
+    AppRequestBody, AppResponse, AppSession, Direction, Focused, PageRequestBody, SessionNews,
+    SpawnPlace, codes,
 };
-use lume_proto::{ClientKind, ControlDecoder, SessionId, negotiate};
+use lume_proto::{ClientKind, ControlDecoder, SessionEvent, SessionId, negotiate};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::broadcast::error::RecvError;
 
 use crate::carrier::{Link, SessionKey};
 use crate::services::{Asker, Services};
+use crate::sessions::News;
 use crate::tuning::{PAGE_ANSWER_TIMEOUT, PAGE_OPEN_TIMEOUT, WAIT_MAX, WAIT_SLACK};
 use crate::window::label_of;
 
@@ -53,6 +56,8 @@ pub trait Shell: Send + Sync + 'static {
     /// Shows the settings window, at a section if one is named: opens it in the middle
     /// of the screen the window `from` is on, or brings it forward if it is open.
     fn open_settings(&self, section: Option<&str>, from: Option<WindowId>);
+    /// Puts text on the clipboard, replacing what was there.
+    fn copy_text(&self, text: String);
     /// Asks a window to close as pressing its own close control does, which may put a
     /// question to the user first.
     fn ask_close(&self, window: WindowId);
@@ -72,6 +77,16 @@ enum Then {
     Carry,
     /// The application was asked to close; it does once the client has its answer.
     Quit,
+    /// The client asked to follow sessions; their reports are sent to it from here on.
+    Follow(Followed),
+}
+
+/// Which sessions a client follows: the one in a pane, whichever that is at the time,
+/// one session, or with neither named, all of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Followed {
+    pane: Option<PaneId>,
+    session: Option<SessionId>,
 }
 
 fn reply(effect: impl Into<String>, body: AppReplyBody) -> Result<AppReply, AppError> {
@@ -254,6 +269,15 @@ impl Control {
     }
 
     async fn handle(&self, body: AppRequestBody) -> (Result<AppReply, AppError>, Then) {
+        if let AppRequestBody::Events { pane, session } = &body {
+            return match self.followed(pane.as_deref(), *session).await {
+                Ok(followed) => (
+                    reply("following what sessions report", AppReplyBody::Following {}),
+                    Then::Follow(followed),
+                ),
+                Err(error) => (Err(error), Then::Carry),
+            };
+        }
         let quit = matches!(body, AppRequestBody::Quit {});
         let result = self.carry_out(body).await;
         let then = if quit && result.is_ok() {
@@ -262,6 +286,90 @@ impl Control {
             Then::Carry
         };
         (result, then)
+    }
+
+    /// Which sessions a request to follow them means. A pane or a session that is
+    /// named has to be there.
+    async fn followed(
+        &self,
+        pane: Option<&str>,
+        session: Option<SessionId>,
+    ) -> Result<Followed, AppError> {
+        let pane = match pane {
+            Some(_) => Some(self.place(pane, None).await?.pane),
+            None => None,
+        };
+        if pane.is_none()
+            && let Some(session) = session
+        {
+            self.services.state.find(session).await?;
+        }
+        Ok(Followed {
+            pane,
+            session: session.filter(|_| pane.is_none()),
+        })
+    }
+
+    /// What a client that follows `followed` is told of one piece of news, if it is
+    /// told of it at all.
+    fn told(&self, followed: Followed, key: &SessionKey, what: SessionNews) -> Option<AppEvent> {
+        let pane = self.services.panes.pane_of(key);
+        let wanted = match followed {
+            Followed {
+                pane: Some(wanted), ..
+            } => pane == Some(wanted),
+            Followed {
+                session: Some(wanted),
+                ..
+            } => key.session == wanted,
+            _ => true,
+        };
+        wanted.then(|| AppEvent {
+            pane: pane.map(|pane| pane.to_string()),
+            session: key.session,
+            what,
+        })
+    }
+
+    /// Sends a client what the sessions it follows report, beginning with how each
+    /// stands, until the client goes.
+    async fn follow<S>(&self, io: &mut S, followed: Followed) -> io::Result<()>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        let reports = self.services.state.reports();
+        let (mut so_far, mut news) = reports.follow();
+        let mut chunk = vec![0; READ_CHUNK];
+        loop {
+            // First, and again whenever the client fell too far behind to be sent
+            // what it missed: every session's state as it stands.
+            for (key, state) in so_far.drain(..) {
+                let whole = SessionNews::Event(SessionEvent::State { state });
+                if let Some(event) = self.told(followed, &key, whole) {
+                    write_event(io, event).await?;
+                }
+            }
+            tokio::select! {
+                next = news.recv() => match next {
+                    Ok(News { key, what }) => {
+                        if let Some(event) = self.told(followed, &key, what) {
+                            write_event(io, event).await?;
+                        }
+                    }
+                    Err(RecvError::Lagged(missed)) => {
+                        tracing::debug!(missed, "a client that follows sessions fell behind");
+                        (so_far, news) = reports.follow();
+                    }
+                    Err(RecvError::Closed) => return Ok(()),
+                },
+                // Nothing more is taken from the client; this is how its leaving is seen.
+                read = io.read(&mut chunk) => {
+                    if read? == 0 {
+                        return Ok(());
+                    }
+                }
+            }
+        }
     }
 
     async fn carry_out(&self, body: AppRequestBody) -> Result<AppReply, AppError> {
@@ -647,6 +755,11 @@ impl Control {
                     AppReplyBody::Profiles { profiles },
                 )
             }
+            // Answered before it gets here, since its answer is not the end of it.
+            AppRequestBody::Events { .. } => Err(AppError::new(
+                codes::INTERNAL,
+                "a request to follow sessions was handled as a plain request",
+            )),
             AppRequestBody::Commands {} => {
                 let commands = registry.list();
                 let count = commands.len();
@@ -731,6 +844,15 @@ pub async fn serve(mut listener: Listener, control: Arc<Control>) {
     }
 }
 
+async fn write_event<S: AsyncWrite + Unpin>(io: &mut S, event: AppEvent) -> io::Result<()> {
+    let mut frames = Vec::new();
+    AppMessage::Event(event)
+        .encode(&mut frames)
+        .map_err(io::Error::other)?;
+    io.write_all(&frames).await?;
+    io.flush().await
+}
+
 async fn write_response<S: AsyncWrite + Unpin>(
     io: &mut S,
     id: u64,
@@ -798,8 +920,10 @@ where
         };
         let AppRequest { id, body } = match AppMessage::decode(&json).map_err(io::Error::other)? {
             AppMessage::Request(request) => request,
-            AppMessage::Response(_) => {
-                return Err(io::Error::other("a client sent a response"));
+            AppMessage::Response(_) | AppMessage::Event(_) => {
+                return Err(io::Error::other(
+                    "a client sent what only the application sends",
+                ));
             }
         };
 
@@ -821,9 +945,13 @@ where
 
         let (result, then) = control.handle(body).await;
         write_response(&mut io, id, result).await?;
-        if then == Then::Quit {
-            control.services.shell.quit();
-            return Ok(());
+        match then {
+            Then::Carry => {}
+            Then::Quit => {
+                control.services.shell.quit();
+                return Ok(());
+            }
+            Then::Follow(followed) => return control.follow(&mut io, followed).await,
         }
     }
 }
@@ -878,8 +1006,10 @@ pub async fn launch_running(
             AppMessage::Response(AppResponse {
                 result: Err(error), ..
             }) => return Err(io::Error::other(error)),
-            AppMessage::Request(_) => {
-                return Err(io::Error::other("the application sent a request"));
+            AppMessage::Request(_) | AppMessage::Event(_) => {
+                return Err(io::Error::other(
+                    "the application sent something that is not an answer",
+                ));
             }
         }
     }
@@ -910,9 +1040,17 @@ mod tests {
     struct Running {
         services: Arc<Services>,
         shell: Arc<FakeShell>,
+        control: Arc<Control>,
         client: Client,
         window: WindowId,
         _dir: TempDir,
+    }
+
+    impl Running {
+        /// A second connection to the endpoint.
+        fn connect(&self) -> Client {
+            connect(&self.control)
+        }
     }
 
     /// A client of the endpoint, speaking over an in-memory connection.
@@ -948,7 +1086,27 @@ mod tests {
                     assert_eq!(response.id, id);
                     response.result
                 }
-                AppMessage::Request(_) => panic!("the endpoint sent a request"),
+                other => panic!("the endpoint sent {other:?} for an answer"),
+            }
+        }
+
+        /// The next report the endpoint sends to a client that follows sessions.
+        async fn event(&mut self) -> AppEvent {
+            let mut chunk = vec![0; READ_CHUNK];
+            let json = loop {
+                if let Some(json) = self.decoder.next().unwrap() {
+                    break json;
+                }
+                let read = tokio::time::timeout(Duration::from_secs(20), self.io.read(&mut chunk))
+                    .await
+                    .expect("the endpoint sends a report")
+                    .unwrap();
+                assert_ne!(read, 0, "the endpoint closed the connection");
+                self.decoder.push(&chunk[..read]);
+            };
+            match AppMessage::decode(&json).unwrap() {
+                AppMessage::Event(event) => event,
+                other => panic!("the endpoint sent {other:?} for a report"),
             }
         }
 
@@ -1009,20 +1167,28 @@ mod tests {
             shell: shell.clone(),
         });
         let control = Control::new(Arc::clone(&services), Duration::from_millis(200));
+        let client = connect(&control);
+        Running {
+            services,
+            shell,
+            control,
+            client,
+            window,
+            _dir: dir,
+        }
+    }
+
+    /// A new connection to the endpoint, as another client would make.
+    fn connect(control: &Arc<Control>) -> Client {
+        let control = Arc::clone(control);
         let (ours, theirs) = tokio::io::duplex(64 * 1024);
         tokio::spawn(async move {
             let _ = serve_client(theirs, &control).await;
         });
-        Running {
-            services,
-            shell,
-            client: Client {
-                io: ours,
-                decoder: ControlDecoder::new(),
-                next_id: 1,
-            },
-            window,
-            _dir: dir,
+        Client {
+            io: ours,
+            decoder: ControlDecoder::new(),
+            next_id: 1,
         }
     }
 
@@ -1291,6 +1457,137 @@ mod tests {
                 status: ExitStatus::Code(7)
             }
         );
+        stop(app).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_client_that_follows_sessions_is_told_how_they_stand_and_what_they_report() {
+        let mut app = running("follow").await;
+        app.client.hello().await;
+        let (_page, pane, key) = shown(&app).await;
+
+        // What is not there cannot be followed, and the connection stays an ordinary one.
+        let missing = app
+            .client
+            .ask(AppRequestBody::Events {
+                pane: Some("p999".to_owned()),
+                session: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(missing.code, codes::NOT_FOUND);
+        let missing = app
+            .client
+            .ask(AppRequestBody::Events {
+                pane: None,
+                session: SessionId::new(0x0bad_0bad),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(missing.code, codes::NOT_FOUND);
+
+        let mut follower = app.connect();
+        follower.hello().await;
+        let following = follower
+            .ask(AppRequestBody::Events {
+                pane: Some(pane.to_string()),
+                session: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(following.body, AppReplyBody::Following {});
+
+        // The program that has the terminal is looked up when a page shows the
+        // session. The follower learns of it as part of how the session stands, or as
+        // a report of its own, whichever way round the two happened.
+        let name = loop {
+            let event = follower.event().await;
+            assert_eq!(event.pane, Some(pane.to_string()));
+            assert_eq!(event.session, key.session);
+            let foreground = match event.what {
+                SessionNews::Event(SessionEvent::Foreground(foreground)) => Some(foreground),
+                SessionNews::Event(SessionEvent::State { state }) => state.foreground,
+                _ => None,
+            };
+            if let Some(foreground) = foreground {
+                break foreground.name;
+            }
+        };
+        if cfg!(windows) {
+            assert_eq!(name, "cmd");
+        } else {
+            assert!(!name.is_empty());
+        }
+
+        app.client
+            .ask(AppRequestBody::Send {
+                pane: Some(pane.to_string()),
+                session: None,
+                text: "exit 3\r".to_owned(),
+            })
+            .await
+            .unwrap();
+        loop {
+            if let SessionNews::Exit(status) = follower.event().await.what {
+                assert_eq!(status, ExitStatus::Code(3));
+                break;
+            }
+        }
+        stop(app).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_follower_of_one_pane_hears_nothing_of_the_others() {
+        let mut app = running("follow-one").await;
+        app.client.hello().await;
+        let (_page, pane, key) = shown(&app).await;
+        let other = SessionKey {
+            backend: key.backend.clone(),
+            session: SessionId::new(0x0d0d).unwrap(),
+        };
+        let title = |text: &str| SessionEvent::Title {
+            title: text.to_owned(),
+        };
+
+        let mut follower = app.connect();
+        follower.hello().await;
+        follower
+            .ask(AppRequestBody::Events {
+                pane: Some(pane.to_string()),
+                session: None,
+            })
+            .await
+            .unwrap();
+        let reports = app.services.state.reports();
+        reports.on_event(&other, &title("not this one"));
+        reports.on_event(&key, &title("lume-k7q"));
+        loop {
+            let event = follower.event().await;
+            assert_eq!(event.session, key.session);
+            if event.what == SessionNews::Event(title("lume-k7q")) {
+                break;
+            }
+        }
+
+        // With nothing named, every session is followed, in a pane or not.
+        let mut all = app.connect();
+        all.hello().await;
+        all.ask(AppRequestBody::Events {
+            pane: None,
+            session: None,
+        })
+        .await
+        .unwrap();
+        reports.on_event(&other, &title("this one too"));
+        loop {
+            let event = all.event().await;
+            if event.session == other.session
+                && event.what == SessionNews::Event(title("this one too"))
+            {
+                assert_eq!(event.pane, None);
+                break;
+            }
+        }
         stop(app).await;
     }
 

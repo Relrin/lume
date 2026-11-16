@@ -4,6 +4,10 @@
 //! `{"ok":true,"effect":…}` with the fields of its answer beside it; one that was not
 //! prints `{"ok":false,"code":…,"message":…}`. The exit status says the same in a form a
 //! shell can branch on.
+//!
+//! One request has more than an answer: `events` follows what the sessions report, and
+//! prints each report as a line of its own after the answer, for as long as it is left
+//! to run.
 
 use std::time::Duration;
 
@@ -66,18 +70,38 @@ fn request(ctl: &Ctl) -> Result<AppRequestBody, Failure> {
     Ok(AppRequestBody::LayoutApply { intent })
 }
 
-async fn ask(ctl: &Ctl) -> Result<AppReply, Failure> {
+async fn ask(ctl: &Ctl) -> Result<(AppReply, Client), Failure> {
     let request = request(ctl)?;
     let endpoint = endpoint(ctl.endpoint.as_deref()).map_err(Failure::Broken)?;
     let mut client = Client::connect(&endpoint).await?;
     let limit = answer_limit(&request, ctl.timeout);
-    client.ask(request, limit).await
+    let reply = client.ask(request, limit).await?;
+    Ok((reply, client))
+}
+
+/// Prints what the sessions report, a line each, until the application closes the
+/// connection or `limit` has passed.
+async fn follow(client: &mut Client, limit: Option<Duration>) -> Result<(), Failure> {
+    let reports = async {
+        while let Some(event) = client.event().await.map_err(Failure::Broken)? {
+            match serde_json::to_string(&event) {
+                Ok(line) => println!("{line}"),
+                Err(error) => return Err(Failure::Broken(std::io::Error::other(error))),
+            }
+        }
+        Ok(())
+    };
+    match limit {
+        // Running out of the time that was asked for is how this ends well.
+        Some(limit) => tokio::time::timeout(limit, reports).await.unwrap_or(Ok(())),
+        None => reports.await,
+    }
 }
 
 /// Sends the request, prints the answer and returns the exit status.
 pub async fn run(ctl: Ctl) -> u8 {
-    match ask(&ctl).await {
-        Ok(reply) => {
+    let asked = match ask(&ctl).await {
+        Ok((reply, mut client)) => {
             match (&reply.body, ctl.plain) {
                 (AppReplyBody::Screen { lines, .. }, true) => {
                     for line in lines {
@@ -86,8 +110,15 @@ pub async fn run(ctl: Ctl) -> u8 {
                 }
                 _ => println!("{}", success(&reply)),
             }
-            EXIT_OK
+            match reply.body {
+                AppReplyBody::Following {} => follow(&mut client, ctl.follow_for).await,
+                _ => Ok(()),
+            }
         }
+        Err(failure) => Err(failure),
+    };
+    match asked {
+        Ok(()) => EXIT_OK,
         Err(Failure::Refused(error)) => {
             println!("{}", failure(&error.code, &error.message));
             if error.code == codes::TIMEOUT {

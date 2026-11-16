@@ -138,6 +138,7 @@ pub fn shell() -> SpawnSpec {
         cwd: None,
         env: vec![("LUME_MARK".to_owned(), "k7q".to_owned())],
         size: size(80, 24),
+        shell_integration: false,
     }
 }
 
@@ -214,6 +215,8 @@ pub struct FakeShell {
     settings: Mutex<Vec<Option<String>>>,
     /// The windows that were asked to close, in order.
     asked_to_close: Mutex<Vec<lume_layout::WindowId>>,
+    /// What was put on the clipboard, in order.
+    copied: Mutex<Vec<String>>,
 }
 
 impl FakeShell {
@@ -244,6 +247,14 @@ impl FakeShell {
     /// The sections the settings window was asked to show, in order.
     pub fn settings(&self) -> Vec<Option<String>> {
         self.settings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// What was put on the clipboard, in order.
+    pub fn copied(&self) -> Vec<String> {
+        self.copied
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
@@ -301,6 +312,13 @@ impl crate::control::Shell for FakeShell {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(section.map(str::to_owned));
+    }
+
+    fn copy_text(&self, text: String) {
+        self.copied
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(text);
     }
 
     fn ask_close(&self, window: lume_layout::WindowId) {

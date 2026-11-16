@@ -9,10 +9,13 @@
 //! words that name a distribution, a machine or a user are refused when the tool would
 //! read them as options.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use lume_proto::{ErrorCode, Launcher, ProtoError, SpawnSpec};
 use lume_pty::{CommandSpec, IDENTITY_ENV};
+
+use crate::integration;
 
 /// The program to start for a session, and what the session is listed as running.
 pub(crate) struct Launch {
@@ -55,52 +58,57 @@ struct Machine<'a> {
     /// The folders of `PATH`, in order.
     path: &'a [PathBuf],
     is_file: &'a dyn Fn(&Path) -> bool,
-    /// The variables the user already has cross into a distribution, as `WSLENV`
-    /// lists them.
-    wslenv: Option<&'a str>,
+    /// A variable of this program's own environment, which a session starts with.
+    var: &'a dyn Fn(&str) -> Option<String>,
 }
 
 /// The list of variables that cross into a distribution: the ones the user already
-/// has cross, the ones that say what terminal this is, and the session's own. A
-/// distribution is given none of this machine's variables unless they are listed, so
-/// without this a program in it could not tell that the terminal draws 24-bit colour,
-/// and a profile's variables would stop at `wsl.exe`.
-fn crossing(own: Option<&str>, env: &[(String, String)]) -> String {
-    let mut names: Vec<&str> = own
+/// has cross, the ones that say what terminal this is, the session's own, and `more`,
+/// whose entries may carry marks as the user's may. A distribution is given none of
+/// this machine's variables unless they are listed, so without this a program in it
+/// could not tell that the terminal draws 24-bit colour, and a profile's variables
+/// would stop at `wsl.exe`.
+fn crossing(own: Option<&str>, env: &[(String, String)], more: &[String]) -> String {
+    let mut entries: Vec<&str> = own
         .map(|own| own.split(':').filter(|name| !name.is_empty()).collect())
         .unwrap_or_default();
     let wanted = IDENTITY_ENV
         .iter()
         .map(|(name, _)| *name)
         .chain(env.iter().map(|(name, _)| name.as_str()))
-        .filter(|name| *name != WSLENV);
-    for name in wanted {
-        // An entry may carry flags after a slash, as in `HOME/p`.
-        let listed = names
+        .chain(more.iter().map(String::as_str));
+    for entry in wanted {
+        // An entry may carry marks after a slash, as in `HOME/p`. A variable is
+        // listed once, and the user's way of listing it is the one that stays.
+        let name = integration::listed_name(entry);
+        let listed = entries
             .iter()
-            .any(|entry| entry.split('/').next() == Some(name));
-        if !listed {
-            names.push(name);
+            .any(|listed| integration::listed_name(listed) == name);
+        if name != WSLENV && !listed {
+            entries.push(entry);
         }
     }
-    names.join(":")
+    entries.join(":")
 }
 
 /// The program a session's launcher asks for, with its arguments and environment.
-pub(crate) fn launch(spec: SpawnSpec) -> Result<Launch, ProtoError> {
+///
+/// `scripts` is the folder the shell scripts are in, when the session's shell is to be
+/// asked to report its directory and its commands.
+pub(crate) fn launch(spec: SpawnSpec, scripts: Option<&Path>) -> Result<Launch, ProtoError> {
     let system_root = std::env::var_os("SystemRoot").map(PathBuf::from);
-    let wslenv = std::env::var(WSLENV).ok();
     let path: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect())
         .unwrap_or_default();
     launch_on(
         spec,
+        scripts,
         &Machine {
             os: Os::this(),
             system_root: system_root.as_deref(),
             path: &path,
             is_file: &|candidate| candidate.is_file(),
-            wslenv: wslenv.as_deref(),
+            var: &|name| std::env::var(name).ok(),
         },
     )
 }
@@ -197,9 +205,13 @@ fn no_ssh_client(os: Os) -> ProtoError {
     )
 }
 
-fn launch_on(spec: SpawnSpec, machine: &Machine<'_>) -> Result<Launch, ProtoError> {
+fn launch_on(
+    spec: SpawnSpec,
+    scripts: Option<&Path>,
+    machine: &Machine<'_>,
+) -> Result<Launch, ProtoError> {
     let asked = spec.env;
-    let env = asked
+    let env: Vec<(OsString, OsString)> = asked
         .iter()
         .map(|(name, value)| (name.into(), value.into()))
         .collect();
@@ -213,6 +225,10 @@ fn launch_on(spec: SpawnSpec, machine: &Machine<'_>) -> Result<Launch, ProtoErro
             command.login = login;
             command.cwd = spec.cwd.map(Into::into);
             command.env = env;
+            if let Some(scripts) = scripts {
+                let windows = machine.os == Os::Windows;
+                integration::hook_shell(&mut command, &program, scripts, windows, machine.var);
+            }
             Ok(Launch { command, program })
         }
         Launcher::Wsl { distro, user } => {
@@ -234,14 +250,21 @@ fn launch_on(spec: SpawnSpec, machine: &Machine<'_>) -> Result<Launch, ProtoErro
             command = command.arg("--cd").arg(dir);
             // A session that lists the crossing variables itself is listing them in
             // place of the user's own list, as setting any variable does.
+            let inherited = (machine.var)(WSLENV);
             let own = asked
                 .iter()
                 .rev()
                 .find(|(name, _)| name == WSLENV)
                 .map(|(_, list)| list.as_str())
-                .or(machine.wslenv);
-            let list = crossing(own, &asked);
+                .or(inherited.as_deref());
             command.env = env;
+            // The shell inside is asked to report through variables, which reach it
+            // only if they are listed with the rest.
+            let more = match scripts {
+                Some(scripts) => integration::hook_distro(&mut command.env, scripts, own),
+                None => Vec::new(),
+            };
+            let list = crossing(own, &asked, &more);
             command.env.retain(|(name, _)| name != WSLENV);
             command.env.push((WSLENV.into(), list.into()));
             Ok(Launch {
@@ -299,6 +322,7 @@ mod tests {
             cwd: None,
             env: Vec::new(),
             size: TermSize::new(80, 24).unwrap(),
+            shell_integration: false,
         }
     }
 
@@ -327,6 +351,19 @@ mod tests {
         files: &[&str],
         run: impl FnOnce(&Machine<'_>) -> T,
     ) -> T {
+        with_vars(os, root, path, files, &[], run)
+    }
+
+    /// A machine that has exactly the files named, in a program that was itself
+    /// started with the variables named.
+    fn with_vars<T>(
+        os: Os,
+        root: Option<&str>,
+        path: &[&str],
+        files: &[&str],
+        vars: &[(&str, &str)],
+        run: impl FnOnce(&Machine<'_>) -> T,
+    ) -> T {
         let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
         let path: Vec<PathBuf> = path.iter().map(PathBuf::from).collect();
         let root = root.map(PathBuf::from);
@@ -335,8 +372,21 @@ mod tests {
             system_root: root.as_deref(),
             path: &path,
             is_file: &|candidate| files.iter().any(|file| file == candidate),
-            wslenv: None,
+            var: &|name| {
+                vars.iter()
+                    .find(|(set, _)| *set == name)
+                    .map(|(_, value)| (*value).to_owned())
+            },
         })
+    }
+
+    /// What a command sets a variable to.
+    fn set_to(command: &CommandSpec, name: &str) -> Option<String> {
+        command
+            .env
+            .iter()
+            .find(|(set, _)| set == name)
+            .map(|(_, value)| value.to_string_lossy().into_owned())
     }
 
     /// A folder that is absolute on the machine the tests run on.
@@ -372,7 +422,7 @@ mod tests {
         asked.cwd = Some("/tmp".to_owned());
         asked.env = vec![("A".to_owned(), "b".to_owned())];
         let launch = with_files(Os::Linux, None, &[], &[], |machine| {
-            launch_on(asked, machine)
+            launch_on(asked, None, machine)
         })
         .unwrap();
         assert_eq!(launch.program, "sh");
@@ -394,7 +444,7 @@ mod tests {
         asked.cwd = Some("/srv/www".to_owned());
         asked.env = vec![("A".to_owned(), "b".to_owned())];
         let launch = with_files(Os::Windows, Some(&root), &[], &[&program], |machine| {
-            launch_on(asked, machine)
+            launch_on(asked, None, machine)
         })
         .unwrap();
         assert_eq!(launch.program, program);
@@ -433,22 +483,149 @@ mod tests {
     fn the_variables_that_cross_into_a_distribution_keep_the_users_own_list() {
         let set = |name: &str| (name.to_owned(), "x".to_owned());
         assert_eq!(
-            crossing(None, &[]),
+            crossing(None, &[], &[]),
             "COLORTERM:TERM_PROGRAM:TERM_PROGRAM_VERSION"
         );
         // What the user lists stays first and keeps its flags; nothing is listed twice.
         assert_eq!(
             crossing(
                 Some("GOPATH/p:COLORTERM/u::EDITOR"),
-                &[set("EDITOR"), set("B")]
+                &[set("EDITOR"), set("B")],
+                &[]
             ),
             "GOPATH/p:COLORTERM/u:EDITOR:TERM_PROGRAM:TERM_PROGRAM_VERSION:B"
         );
         // The list itself is not one of the variables that cross.
         assert_eq!(
-            crossing(None, &[set("WSLENV")]),
+            crossing(None, &[set("WSLENV")], &[]),
             "COLORTERM:TERM_PROGRAM:TERM_PROGRAM_VERSION"
         );
+    }
+
+    #[test]
+    fn a_shell_is_asked_to_report_only_when_there_are_scripts_for_it() {
+        let scripts = PathBuf::from(folder("scripts"));
+        let shell = |program: &str| {
+            let mut asked = spec(Launcher::Shell {
+                program: program.to_owned(),
+                args: vec!["-i".to_owned()],
+                login: false,
+            });
+            asked.env = vec![("A".to_owned(), "b".to_owned())];
+            asked
+        };
+        let vars = [("ZDOTDIR", "/home/me/.zsh")];
+
+        // Without scripts nothing is added, whatever the shell.
+        let plain = with_vars(Os::Linux, None, &[], &[], &vars, |machine| {
+            launch_on(shell("/bin/zsh"), None, machine)
+        })
+        .unwrap();
+        assert_eq!(words(&plain.command), ["-i"]);
+        assert_eq!(
+            plain.command.env,
+            [(OsString::from("A"), OsString::from("b"))]
+        );
+
+        // With them, the shell's own way in is used, and what this program was
+        // started with is what the shell is told the user had.
+        let hooked = with_vars(Os::Linux, None, &[], &[], &vars, |machine| {
+            launch_on(shell("/bin/zsh"), Some(&scripts), machine)
+        })
+        .unwrap();
+        assert_eq!(hooked.program, "/bin/zsh");
+        assert_eq!(words(&hooked.command), ["-i"]);
+        assert_eq!(set_to(&hooked.command, "A").as_deref(), Some("b"));
+        assert_eq!(
+            set_to(&hooked.command, "ZDOTDIR"),
+            Some(scripts.join("zsh").to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            set_to(&hooked.command, "LUME_ZSH_ZDOTDIR").as_deref(),
+            Some("/home/me/.zsh")
+        );
+        assert_eq!(
+            set_to(&hooked.command, "LUME_SHELL_INTEGRATION").as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            set_to(&hooked.command, "LUME_SHELL_INTEGRATION_DIR"),
+            Some(scripts.to_string_lossy().into_owned())
+        );
+
+        // A program that is no shell we know is started as it was asked for.
+        let other = with_vars(Os::Linux, None, &[], &[], &vars, |machine| {
+            launch_on(shell("/usr/bin/nu"), Some(&scripts), machine)
+        })
+        .unwrap();
+        assert_eq!(other.command, plain_command("/usr/bin/nu"));
+    }
+
+    /// What `shell` in the test above comes to when nothing is added to it.
+    fn plain_command(program: &str) -> CommandSpec {
+        CommandSpec::new(program).arg("-i").env("A", "b")
+    }
+
+    #[test]
+    fn a_distribution_is_sent_what_its_shell_needs_to_report() {
+        let root = folder("Windows");
+        let program = file(&root, &["System32", "wsl.exe"]);
+        let scripts = PathBuf::from(folder("scripts"));
+        let mut asked = spec(wsl("Ubuntu", None));
+        asked.env = vec![("A".to_owned(), "b".to_owned())];
+        let launch = with_files(Os::Windows, Some(&root), &[], &[&program], |machine| {
+            launch_on(asked, Some(&scripts), machine)
+        })
+        .unwrap();
+        // Its arguments are as they are without the scripts.
+        assert_eq!(words(&launch.command), ["-d", "Ubuntu", "--cd", "~"]);
+        // Each variable is listed once, and the two that are folders of this machine
+        // are marked to be spelt as the distribution spells them.
+        assert_eq!(
+            set_to(&launch.command, "WSLENV").as_deref(),
+            Some(
+                "COLORTERM:TERM_PROGRAM:TERM_PROGRAM_VERSION:A:LUME_SHELL_INTEGRATION:\
+                 LUME_SHELL_INTEGRATION_DIR/p:PROMPT_COMMAND:ZDOTDIR/p"
+            )
+        );
+        assert_eq!(
+            set_to(&launch.command, "LUME_SHELL_INTEGRATION_DIR"),
+            Some(scripts.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            set_to(&launch.command, "ZDOTDIR"),
+            Some(scripts.join("zsh").to_string_lossy().into_owned())
+        );
+        assert!(
+            set_to(&launch.command, "PROMPT_COMMAND")
+                .is_some_and(|line| line.contains("bash/bootstrap.bash"))
+        );
+        assert_eq!(set_to(&launch.command, "A").as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn a_folder_the_user_already_sends_into_the_distribution_is_not_replaced() {
+        let root = folder("Windows");
+        let program = file(&root, &["System32", "wsl.exe"]);
+        let scripts = PathBuf::from(folder("scripts"));
+        let vars = [("WSLENV", "ZDOTDIR:GOPATH/p")];
+        let launch = with_vars(
+            Os::Windows,
+            Some(&root),
+            &[],
+            &[&program],
+            &vars,
+            |machine| launch_on(spec(wsl("Ubuntu", None)), Some(&scripts), machine),
+        )
+        .unwrap();
+        assert_eq!(
+            set_to(&launch.command, "WSLENV").as_deref(),
+            Some(
+                "ZDOTDIR:GOPATH/p:COLORTERM:TERM_PROGRAM:TERM_PROGRAM_VERSION:\
+                 LUME_SHELL_INTEGRATION:LUME_SHELL_INTEGRATION_DIR/p:PROMPT_COMMAND"
+            )
+        );
+        assert_eq!(set_to(&launch.command, "ZDOTDIR"), None);
     }
 
     #[test]
@@ -456,7 +633,7 @@ mod tests {
         let root = folder("Windows");
         let program = file(&root, &["System32", "wsl.exe"]);
         let launch = with_files(Os::Windows, Some(&root), &[], &[&program], |machine| {
-            launch_on(spec(wsl("Debian", None)), machine)
+            launch_on(spec(wsl("Debian", None)), None, machine)
         })
         .unwrap();
         assert_eq!(words(&launch.command), ["-d", "Debian", "--cd", "~"]);
@@ -472,7 +649,7 @@ mod tests {
             Some(&root),
             &[&elsewhere],
             &[&planted],
-            |machine| launch_on(spec(wsl("Ubuntu", None)), machine),
+            |machine| launch_on(spec(wsl("Ubuntu", None)), None, machine),
         )
         .err()
         .unwrap();
@@ -484,7 +661,7 @@ mod tests {
     fn a_distribution_cannot_be_started_off_windows() {
         for os in [Os::Linux, Os::Macos] {
             let error = with_files(os, None, &[], &[], |machine| {
-                launch_on(spec(wsl("Ubuntu", None)), machine)
+                launch_on(spec(wsl("Ubuntu", None)), None, machine)
             })
             .err()
             .unwrap();
@@ -556,7 +733,7 @@ mod tests {
         });
         asked.cwd = Some("/tmp".to_owned());
         let launch = with_files(Os::Linux, None, &[], &[], |machine| {
-            launch_on(asked, machine)
+            launch_on(asked, None, machine)
         })
         .unwrap();
         assert_eq!(launch.program, "my-ssh");
@@ -573,7 +750,7 @@ mod tests {
         let bin = folder("bin");
         let client = file(&bin, &["ssh"]);
         let launch = with_files(Os::Macos, None, &[&bin], &[&client], |machine| {
-            launch_on(spec(ssh("work")), machine)
+            launch_on(spec(ssh("work")), None, machine)
         })
         .unwrap();
         assert_eq!(launch.program, client);
@@ -589,7 +766,7 @@ mod tests {
             (Os::Linux, "openssh-client"),
         ] {
             let error = with_files(os, None, &[], &[], |machine| {
-                launch_on(spec(ssh("work")), machine)
+                launch_on(spec(ssh("work")), None, machine)
             })
             .err()
             .unwrap();
@@ -605,7 +782,7 @@ mod tests {
             let wsl = file(&root, &["System32", "wsl.exe"]);
             let ssh = file(&root, &["System32", "OpenSSH", "ssh.exe"]);
             let error = with_files(Os::Windows, Some(&root), &[], &[&wsl, &ssh], |machine| {
-                launch_on(spec(launcher), machine)
+                launch_on(spec(launcher), None, machine)
             })
             .err()
             .expect("the launcher was accepted");

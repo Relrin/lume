@@ -14,6 +14,7 @@
 //! session id, and asks the router for the backend.
 
 mod backend;
+pub mod cwd;
 mod local;
 pub mod profiles;
 mod router;
@@ -25,13 +26,15 @@ pub mod wsl;
 use lume_proto::ProtoError;
 
 pub use backend::{Attachment, FrameStream, Hydrate, InputSink, OutputFrame, SessionBackend};
+pub use cwd::start_dir_from_report;
 pub use local::LocalBackend;
 /// What an in-process host is built from, for [`LocalBackend::in_process`].
 pub use lume_host::HostConfig;
 pub use lume_proto::{
-    BackendCaps, BackendId, CellPx, ClientFacts, ColorScheme, ErrorCode, ExitStatus, HydrateKinds,
-    Launcher, Palette, Responder, Rgb, SessionEvent, SessionId, SessionInfo, SessionStats,
-    SpawnSpec, TermSize,
+    BackendCaps, BackendId, CellPx, ClientFacts, ColorScheme, CommandState, DisconnectReason,
+    Disconnected, ErrorCode, ExitStatus, Foreground, HydrateKinds, Launcher, Palette, ProgramState,
+    ProgramStatus, Responder, Rgb, SessionEvent, SessionId, SessionInfo, SessionState,
+    SessionStats, SpawnSpec, TermSize,
 };
 pub use profiles::{DetectOptions, Detected, detect};
 pub use router::Router;
