@@ -391,6 +391,28 @@ impl Panes {
         })
     }
 
+    /// Whether a program still runs in a pane of `window`: whether closing the window
+    /// would end something.
+    pub fn runs_something(&self, window: WindowId) -> bool {
+        let Some(state) = self.state.upgrade() else {
+            return false;
+        };
+        let workspace = self.workspace();
+        let Some(window) = workspace.window(window) else {
+            return false;
+        };
+        window.panes().into_iter().any(|pane| {
+            terminal_of(pane)
+                .and_then(|terminal| {
+                    Some(SessionKey {
+                        backend: self.backend_of(terminal),
+                        session: terminal.session?,
+                    })
+                })
+                .is_some_and(|key| !state.ended(&key))
+        })
+    }
+
     /// Whether a session is in a pane of `window`: whether that window's page may
     /// attach to it.
     pub fn owns(&self, window: WindowId, key: &SessionKey) -> bool {
@@ -1184,6 +1206,30 @@ mod tests {
         // Started again, it gets a new session.
         let again = start(&app, first).await;
         assert_ne!(again, failing);
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_window_runs_something_until_the_programs_of_its_panes_have_ended() {
+        let app = running("runs", "").await;
+        let pane = only_pane(&app);
+        // A pane whose session has not been started runs nothing.
+        assert!(!app.panes.runs_something(app.window));
+
+        let (_carrier, id) = page(&app).await;
+        let session = start(&app, pane).await;
+        assert!(app.panes.runs_something(app.window));
+
+        attach(&app, id, &session, 1).await;
+        type_into(&app, id, 1, "exit 3\r").await;
+        let panes = Arc::clone(&app.panes);
+        let window = app.window;
+        until("the program to have ended", || {
+            !panes.runs_something(window)
+        })
+        .await;
+        // The pane is still there, with nothing running in it.
+        assert!(app.panes.workspace().pane(pane).is_some());
         app.state.shutdown().await;
     }
 

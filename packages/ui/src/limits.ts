@@ -6,14 +6,22 @@
  * defined here and nowhere else.
  */
 
-/** How many lines a terminal keeps after they scroll off the screen. */
-export const SCROLLBACK_MAX_LINES = 10_000;
+/**
+ * The most lines a terminal keeps after they scroll off the screen, whatever the
+ * configuration asks for. It is the most the configuration may ask for.
+ */
+export const SCROLLBACK_MAX_LINES = 100_000;
+
+/** How many lines a terminal keeps when the configuration does not say. */
+export const SCROLLBACK_DEFAULT_LINES = 10_000;
 
 /**
  * How much memory those lines may take. Both limits apply: long or heavily styled lines
- * reach this one first.
+ * reach this one first. It holds the most lines there may be at a width of more than
+ * two hundred columns. Every terminal of a window shares one memory that grows and is
+ * never given back, so this is also what one terminal can cost the window for good.
  */
-export const SCROLLBACK_MAX_BYTES = 64 * 1024 * 1024;
+export const SCROLLBACK_MAX_BYTES = 192 * 1024 * 1024;
 
 /**
  * The largest text a program may put on the clipboard. Programs may write the clipboard

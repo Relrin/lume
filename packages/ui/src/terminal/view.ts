@@ -27,6 +27,8 @@ import {
   isPasteSafe,
   Mode,
   MouseEncoder,
+  newHighlights,
+  Search,
   selectAll,
   SelectionGesture,
   selectionText,
@@ -36,6 +38,7 @@ import {
   type KeyEncoder,
   type KeyInput,
   type MouseButton,
+  type SearchStatus,
   type Vt,
 } from "@lume/vt";
 
@@ -65,6 +68,9 @@ import {
   MAC_OPTION_AS_ALT,
   PINNED_SIZE_TIMEOUT_MS,
   REPORT_INTERVAL_MS,
+  SEARCH_CLEAR_ROWS,
+  SEARCH_MATCHES_MAX,
+  SEARCH_REFEED_INTERVAL_MS,
 } from "../tuning.ts";
 import {
   pasteDecision,
@@ -155,7 +161,33 @@ export interface ViewServices {
   focused(): void;
   /** Starts a new session in place of one whose program has ended. */
   restart(): void;
+  /**
+   * Told that a search of the terminal has caught up with what the terminal now holds
+   * and shows: there may be more for it to look through, and other numbers to show.
+   */
+  searched(): void;
 }
+
+/** Which way a search steps from the match it is at: to older text, or to newer. */
+export type SearchDirection = "older" | "newer";
+
+/** How far a search of a terminal has come. */
+export interface SearchProgress {
+  /**
+   * What the search can do next. `idle`: nothing is being looked for. `held`: the
+   * terminal has just been resized and the search waits for it to settle.
+   */
+  readonly status: SearchStatus | "idle" | "held";
+  /** How many matches it has found so far. */
+  readonly total: number;
+  /** Which match it is at, counted from the newest, which is 0. */
+  readonly selected: number | undefined;
+  /** It has found as many as it counts and has stopped looking for more. */
+  readonly capped: boolean;
+}
+
+/** The progress of a search that is not looking for anything. */
+const NO_SEARCH: SearchProgress = { status: "idle", total: 0, selected: undefined, capped: false };
 
 /** The visible screen of a view's terminal. Columns and rows count from zero. */
 export interface ViewScreen {
@@ -202,6 +234,21 @@ export class TerminalView implements FrameView {
   /** The id of the session being shown. */
   #shown: string | undefined;
   #gesture: SelectionGesture | undefined;
+  /** The search of the session's terminal, while there is something to look for. */
+  #search: Search | undefined;
+  /** What is being looked for. It outlives the session: a new one is searched too. */
+  #needle = "";
+  /** The runs the search last found in the viewport. One list, refilled. */
+  readonly #highlights = newHighlights();
+  /** What the terminal held and showed when the search was last brought up to date. */
+  #searchStamp = "";
+  /** The search must be brought up to date at the next frame whatever the stamp says. */
+  #searchTouched = false;
+  /** The newest match is to be selected as soon as there is one: a new search began. */
+  #searchSelects = false;
+  /** Until when the search waits for a resized terminal to settle, in page time. */
+  #searchHeldUntil = 0;
+  #searchHoldTimer: number | undefined;
   /**
    * A size the terminal was told to have whatever fits the view, and the grid that
    * fitted when it was told. The size holds until another grid fits: a caller's choice
@@ -290,6 +337,8 @@ export class TerminalView implements FrameView {
       },
     );
     this.#renderer.setFocused(this.#focused);
+    // A new renderer has none of the runs a search found.
+    this.#searchTouched = true;
 
     const { root, input } = elements;
     this.#listen(input, "keydown", (event) => this.#onKeyDown(event));
@@ -647,6 +696,7 @@ export class TerminalView implements FrameView {
         },
         resized: () => {
           this.#updateGeometry();
+          this.#holdSearch();
           this.#notify();
         },
         // Nothing is said of it: what the program printed last is on the screen, and
@@ -658,6 +708,8 @@ export class TerminalView implements FrameView {
     });
     this.#session = opened;
     this.#gesture = new SelectionGesture(opened.terminal);
+    // What was being looked for is looked for in the new session too.
+    if (this.#needle !== "") this.#beginSearch();
     this.#setMessage("");
     this.#updateGeometry();
     opened.start();
@@ -690,6 +742,7 @@ export class TerminalView implements FrameView {
   #dropSession(): void {
     this.#gesture?.free();
     this.#gesture = undefined;
+    this.#endSearch();
     this.#session?.dispose();
     this.#session = undefined;
     this.#shown = undefined;
@@ -811,6 +864,7 @@ export class TerminalView implements FrameView {
     const renderer = this.#renderer;
     const session = this.#session;
     if (!renderer || !session) return;
+    const searched = this.#feedSearch(renderer, session);
     const frame = session.state.update();
     if (this.#hoverStale) {
       this.#hoverStale = false;
@@ -823,6 +877,169 @@ export class TerminalView implements FrameView {
     session.state.markDrawn();
     this.#placeInput(frame.cursor);
     this.#updateScrollbar();
+    if (searched) this.#services.searched();
+  }
+
+  // Searching.
+
+  /**
+   * Looks for `text` in the terminal from now on, scrollback included, in place of
+   * whatever was being looked for. An empty text ends the search. The looking itself
+   * is done by `searchPump`, a little at a time.
+   */
+  search(text: string): void {
+    if (text === this.#needle) return;
+    this.#needle = text;
+    if (text === "") {
+      this.#endSearch();
+      this.#renderer?.setHighlights(undefined);
+      this.#markDirty();
+      return;
+    }
+    this.#beginSearch();
+  }
+
+  /**
+   * Goes to the next match in a direction and brings it into view. After the oldest
+   * comes the newest, and the other way about.
+   */
+  searchStep(direction: SearchDirection): void {
+    const search = this.#search;
+    if (!search) return;
+    this.#searchSelects = false;
+    if (!(direction === "older" ? search.next() : search.previous())) return;
+    this.#revealMatch(search);
+  }
+
+  /**
+   * Has the search look through more of the terminal for about `budgetMs` and says
+   * where that left it. While the answer's status is `running` or `feed-required` and
+   * it is not capped, there is more to look through.
+   */
+  searchPump(budgetMs: number): SearchProgress {
+    const search = this.#search;
+    if (!search) return NO_SEARCH;
+    if (this.#searchHeld()) return { ...this.#progress(search), status: "held" };
+    const before = search.total();
+    search.pump(budgetMs, SEARCH_MATCHES_MAX);
+    if (this.#searchSelects && search.total() > 0) {
+      this.#searchSelects = false;
+      if (search.next()) this.#revealMatch(search);
+    } else if (search.total() !== before) {
+      // More was found, some of it perhaps in the viewport.
+      this.#searchTouched = true;
+      this.#markDirty();
+    }
+    return this.#progress(search);
+  }
+
+  /** How far the search has come. */
+  searchProgress(): SearchProgress {
+    const search = this.#search;
+    if (!search) return NO_SEARCH;
+    const progress = this.#progress(search);
+    return this.#searchHeld() ? { ...progress, status: "held" } : progress;
+  }
+
+  #progress(search: Search): SearchProgress {
+    const total = search.total();
+    return {
+      status: search.status(),
+      total,
+      selected: search.selectedIndex(),
+      capped: total >= SEARCH_MATCHES_MAX,
+    };
+  }
+
+  /** Starts looking for the needle in the session's terminal, if there is a session. */
+  #beginSearch(): void {
+    const terminal = this.#session?.terminal;
+    if (!terminal) return;
+    this.#search ??= new Search(terminal);
+    this.#search.setNeedle(this.#needle);
+    this.#searchSelects = true;
+    this.#searchTouched = true;
+    this.#markDirty();
+    // A view without elements draws no frame to say so from.
+    this.#services.searched();
+  }
+
+  /** Frees the search. What was being looked for is kept. */
+  #endSearch(): void {
+    if (this.#searchHoldTimer !== undefined) window.clearTimeout(this.#searchHoldTimer);
+    this.#searchHoldTimer = undefined;
+    this.#searchHeldUntil = 0;
+    this.#search?.free();
+    this.#search = undefined;
+    this.#searchStamp = "";
+    this.#highlights.count = 0;
+  }
+
+  #searchHeld(): boolean {
+    return this.#searchHeldUntil !== 0 && performance.now() < this.#searchHeldUntil;
+  }
+
+  /**
+   * Has the search wait a moment: the terminal was resized. Its lines are laid out
+   * anew, the search starts from nothing, and a window being dragged to a new size is
+   * resized many times a second.
+   */
+  #holdSearch(): void {
+    if (!this.#search) return;
+    this.#searchHeldUntil = performance.now() + SEARCH_REFEED_INTERVAL_MS;
+    // Where the matches were says nothing of where they are now.
+    this.#highlights.count = 0;
+    this.#renderer?.setHighlights(undefined);
+    if (this.#searchHoldTimer !== undefined) window.clearTimeout(this.#searchHoldTimer);
+    this.#searchHoldTimer = window.setTimeout(() => {
+      this.#searchHoldTimer = undefined;
+      this.#searchHeldUntil = 0;
+      this.#searchTouched = true;
+      this.#markDirty();
+      this.#services.searched();
+    }, SEARCH_REFEED_INTERVAL_MS);
+  }
+
+  /**
+   * Brings the search up to date with the terminal before a frame is drawn, if the
+   * terminal has changed or been scrolled since it last was, and hands the renderer
+   * the matches now in the viewport. Returns whether it did.
+   *
+   * It is done here and nowhere else so that what is highlighted is never a frame
+   * behind what is drawn, and a frame that changes nothing a search can see, such as
+   * the cursor blinking, costs a search nothing.
+   */
+  #feedSearch(renderer: CellRenderer, session: TerminalSession): boolean {
+    const search = this.#search;
+    if (!search || this.#searchHeld()) return false;
+    const { terminal } = session;
+    const { total, offset } = terminal.scrollbar();
+    const stamp = `${terminal.revision},${total},${offset}`;
+    if (!this.#searchTouched && stamp === this.#searchStamp) return false;
+    this.#searchTouched = false;
+    this.#searchStamp = stamp;
+    search.feed();
+    search.readViewport(this.#highlights);
+    renderer.setHighlights(this.#highlights);
+    return true;
+  }
+
+  /**
+   * Scrolls the match the search is at into view, to the middle of the pane, unless it
+   * is in view already and clear of the search bar.
+   */
+  #revealMatch(search: Search): void {
+    const terminal = this.#session?.terminal;
+    const row = search.selectedRow();
+    if (terminal && row !== undefined) {
+      const { offset, length } = terminal.scrollbar();
+      const clear = Math.min(SEARCH_CLEAR_ROWS, Math.max(0, length - 1));
+      if (row < offset + clear || row >= offset + length) {
+        terminal.scrollToRow(Math.max(0, row - Math.floor(length / 2)));
+      }
+    }
+    this.#searchTouched = true;
+    this.#markDirty();
   }
 
   #markDirty(): void {

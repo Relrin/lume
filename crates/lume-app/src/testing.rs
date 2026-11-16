@@ -180,6 +180,11 @@ impl TempDir {
         Self { root, owned: false }
     }
 
+    /// The directory itself.
+    pub fn path(&self) -> &std::path::Path {
+        &self.root
+    }
+
     /// Where the configuration and the state of the test's application go.
     pub fn dirs(&self) -> lume_config::Dirs {
         lume_config::Dirs {
@@ -205,6 +210,10 @@ pub struct FakeShell {
     closed: Mutex<Vec<String>>,
     /// The labels of the windows that are open.
     open: Mutex<Vec<String>>,
+    /// The sections the settings window was asked to show, in order.
+    settings: Mutex<Vec<Option<String>>>,
+    /// The windows that were asked to close, in order.
+    asked_to_close: Mutex<Vec<lume_layout::WindowId>>,
 }
 
 impl FakeShell {
@@ -227,6 +236,22 @@ impl FakeShell {
     /// The labels of the windows that are open, in the order they were opened.
     pub fn open(&self) -> Vec<String> {
         self.open
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The sections the settings window was asked to show, in order.
+    pub fn settings(&self) -> Vec<Option<String>> {
+        self.settings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The windows that were asked to close, in order.
+    pub fn asked_to_close(&self) -> Vec<lume_layout::WindowId> {
+        self.asked_to_close
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
@@ -270,4 +295,18 @@ impl crate::control::Shell for FakeShell {
     }
 
     fn set_title_bar(&self, _custom: bool) {}
+
+    fn open_settings(&self, section: Option<&str>, _from: Option<lume_layout::WindowId>) {
+        self.settings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(section.map(str::to_owned));
+    }
+
+    fn ask_close(&self, window: lume_layout::WindowId) {
+        self.asked_to_close
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(window);
+    }
 }

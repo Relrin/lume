@@ -30,7 +30,7 @@ pub use lume_proto::{
     SpawnSpec, TermSize,
 };
 pub use router::Router;
-pub use shell::default_shell;
+pub use shell::{KnownShell, default_shell, known_shells};
 
 /// Why a session operation failed.
 #[derive(Debug, thiserror::Error)]

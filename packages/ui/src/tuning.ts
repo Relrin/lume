@@ -151,3 +151,34 @@ export const NOTICES_MAX = 4;
  * panel that is being dragged must be let go to be docked at that side.
  */
 export const PANEL_DROP_FRACTION = 1 / 3;
+
+/** How far one press of an arrow key moves a divider or the edge of a dock area. */
+export const SEPARATOR_KEY_STEP_PX = 16;
+
+/**
+ * How long a search works at a stretch before it lets the page do something else, in
+ * milliseconds. A search of a long scrollback is many such stretches.
+ */
+export const SEARCH_SLICE_MS = 4;
+
+/**
+ * The shortest time between two searches of what a terminal has newly printed, and how
+ * long a search waits after its terminal was resized before it starts again.
+ */
+export const SEARCH_REFEED_INTERVAL_MS = 100;
+
+/** How long after the last key typed into a search bar the search begins. */
+export const SEARCH_QUERY_DEBOUNCE_MS = 120;
+
+/**
+ * The most matches a search counts. What a search costs to keep up to date with its
+ * terminal, in time and in memory, grows with what it has found, and a single letter
+ * can be found in a long scrollback millions of times.
+ */
+export const SEARCH_MATCHES_MAX = 10_000;
+
+/**
+ * How many rows at the top of a pane the search bar may cover. A match that is selected
+ * there is scrolled to the middle of the pane, as one outside the viewport is.
+ */
+export const SEARCH_CLEAR_ROWS = 2;

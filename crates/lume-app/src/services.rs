@@ -122,6 +122,7 @@ impl Services {
                     config: &self.config,
                     shell: self.shell.as_ref(),
                     window,
+                    asker,
                 };
                 builtins::run(&context, id, args).await
             }

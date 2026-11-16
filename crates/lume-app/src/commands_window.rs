@@ -1,5 +1,6 @@
-//! The commands a terminal window's page calls about its own window, and about the
-//! workspaces there are.
+//! The commands a page calls about its own window, and about the workspaces there are.
+//! The pages that draw their own title bar call them: a terminal window's, and the
+//! settings window's.
 //!
 //! A window without the system's title bar has its bar drawn by the page, and the page
 //! asks here for what a title bar does: taking hold of the window to move it, and the
@@ -11,11 +12,11 @@ use std::sync::Arc;
 
 use lume_proto::app::WorkspaceEntry;
 use serde::Serialize;
-use tauri::{State, WebviewWindow};
+use tauri::{Manager, State, WebviewWindow};
 
 use crate::error::CommandError;
 use crate::services::Services;
-use crate::window::{self, Control, WindowState};
+use crate::window::{self, Control, WindowShell, WindowState};
 
 type Shared<'a> = State<'a, Arc<Services>>;
 
@@ -32,11 +33,24 @@ pub fn window_drag(window: WebviewWindow) -> Result<(), CommandError> {
 
 /// Does what one of a window's controls does to the calling window: `minimise`,
 /// `maximise`, which also undoes itself, or `close`.
+///
+/// Closing may be answered with a question: the page is told `close_requested`, asks
+/// the user, and closes again with `confirmed` set once they have agreed.
 #[tauri::command]
-pub fn window_control(window: WebviewWindow, action: String) -> Result<(), CommandError> {
+pub fn window_control(
+    window: WebviewWindow,
+    action: String,
+    confirmed: Option<bool>,
+) -> Result<(), CommandError> {
     let control = Control::named(&action).ok_or_else(|| {
         CommandError::bad_request(format!("a window has no control called `{action}`"))
     })?;
+    if control == Control::Close
+        && confirmed == Some(true)
+        && let Some(windows) = window.app_handle().try_state::<Arc<WindowShell>>()
+    {
+        windows.confirm_close(window.label());
+    }
     window::control(&window, control).map_err(failed)
 }
 

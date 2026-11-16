@@ -12,7 +12,7 @@
  */
 
 import { GridRenderer } from "./core.ts";
-import type { RenderFrame } from "./frame.ts";
+import { HIGHLIGHT_STRIDE, type Highlights, type RenderFrame } from "./frame.ts";
 import type {
   CellMetrics,
   CellRenderer,
@@ -74,6 +74,8 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
   #focused = true;
   #cursorVisible = true;
   #underlines: readonly UnderlineRange[] = [];
+  /** The highlighted runs as last given, kept to hand to the tier that takes over. */
+  readonly #highlights: Highlights = { data: new Int32Array(0), count: 0 };
 
   #inner: GridRenderer;
   #canvas: Canvas;
@@ -144,6 +146,16 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
     this.#inner.setUnderlines(this.#underlines);
   }
 
+  setHighlights(highlights: Highlights | undefined): void {
+    const count = highlights?.count ?? 0;
+    const length = count * HIGHLIGHT_STRIDE;
+    const kept = this.#highlights;
+    if (kept.data.length < length) kept.data = new Int32Array(length);
+    if (highlights) kept.data.set(highlights.data.subarray(0, length));
+    kept.count = count;
+    this.#inner.setHighlights(kept);
+  }
+
   gridSize(): { cols: number; rows: number } {
     return this.#inner.gridSize();
   }
@@ -196,6 +208,7 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
       inner.setFocused(this.#focused);
       inner.setCursorVisible(this.#cursorVisible);
       inner.setUnderlines(this.#underlines);
+      inner.setHighlights(this.#highlights);
       if (this.#size.width > 0 && this.#size.height > 0) {
         this.#surface.setCssSize(canvas, this.#size);
         inner.resize(this.#size, this.#dpr);

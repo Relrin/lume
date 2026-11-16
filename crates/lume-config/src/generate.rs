@@ -8,7 +8,7 @@
 use serde_json::{Map, Value};
 
 use crate::schema::config_schema;
-use crate::theme::{default_tokens, theme_schema};
+use crate::theme::{default_tokens, light_tokens, theme_schema};
 use crate::tokens::typescript;
 
 /// Which of the generated files a file is.
@@ -71,7 +71,7 @@ pub fn generated_files() -> Vec<Generated> {
         Generated {
             kind: GeneratedKind::Tokens,
             path: "packages/tokens/src/generated.ts",
-            text: typescript(&defaults),
+            text: typescript(&defaults, &light_tokens()),
         },
         Generated {
             kind: GeneratedKind::Tokens,

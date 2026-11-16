@@ -84,6 +84,29 @@
   }
 
   /*
+   * The picture behind the panes, when the configuration names one. It reaches past
+   * the window's edge by as much as it is blurred, so the blur does not fade it out
+   * along the edge.
+   */
+  .shell-background {
+    position: absolute;
+    top: calc(-1 * var(--lume-background-blur));
+    left: calc(-1 * var(--lume-background-blur));
+    z-index: 0;
+    width: calc(100% + 2 * var(--lume-background-blur));
+    max-width: none;
+    height: calc(100% + 2 * var(--lume-background-blur));
+    object-fit: cover;
+    opacity: var(--lume-opacity-background-image);
+    filter: blur(var(--lume-background-blur));
+    pointer-events: none;
+  }
+
+  .shell-background[data-shown="false"] {
+    display: none;
+  }
+
+  /*
    * The bar along the top. Its menus drop over the panes, so it lies above the rest of
    * the window. When the window is narrow the tabs give way first: they shrink and
    * then scroll, and the parts at either end stay whole.
@@ -736,8 +759,15 @@
     background: color-mix(in srgb, var(--lume-color-accent) 55%, transparent);
   }
 
-  .dock-resize[data-dragging="true"]::after {
+  .dock-resize[data-dragging="true"]::after,
+  .dock-resize:focus-visible::after {
     background: var(--lume-color-accent);
+  }
+
+  /* An edge that has the keyboard shows its line, and needs no ring around the gap. */
+  .dock-resize:focus-visible,
+  .divider:focus-visible {
+    outline: none;
   }
 
   /* The side a panel that is being dragged would be docked at. */
@@ -1286,7 +1316,8 @@
     background: color-mix(in srgb, var(--lume-color-accent) 55%, transparent);
   }
 
-  .divider[data-dragging="true"]::after {
+  .divider[data-dragging="true"]::after,
+  .divider:focus-visible::after {
     background: var(--lume-color-accent);
   }
 
@@ -1404,6 +1435,116 @@
     border-right: var(--lume-size-border) solid var(--lume-color-border);
     border-top-right-radius: 6px;
     pointer-events: none;
+  }
+
+  /*
+   * The bar a pane is searched from. It takes no room of its own: it lies over the top
+   * right corner of the terminal, so opening it does not change the terminal's size.
+   */
+
+  .search-anchor {
+    position: relative;
+    z-index: 3;
+    flex-shrink: 0;
+    height: 0;
+    /* The bar does without some of its parts in a narrow pane. */
+    container-type: inline-size;
+  }
+
+  .search-bar {
+    @apply bg-popover text-ink;
+    position: absolute;
+    top: 8px;
+    right: 14px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    max-width: calc(100% - 28px);
+    height: 32px;
+    padding: 0 4px 0 10px;
+    /* In a pane narrower than its field, what does not fit is cut off inside it. */
+    overflow: hidden;
+    font-size: 12.5px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    box-shadow: var(--lume-shadow-popover);
+    animation: search-in 140ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .search-bar:focus-within {
+    border-color: var(--lume-color-border-focus);
+  }
+
+  @keyframes search-in {
+    from {
+      opacity: 0;
+      translate: 0 -4px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .search-bar {
+      animation: none;
+    }
+  }
+
+  .search-field {
+    @apply text-ink;
+    flex: 1 1 150px;
+    width: 150px;
+    min-width: 40px;
+    height: 100%;
+    padding: 0;
+    font: inherit;
+    background: none;
+    border: 0;
+    outline: none;
+  }
+
+  .search-field::placeholder {
+    @apply text-ink-muted;
+  }
+
+  .search-count {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    min-width: 34px;
+    padding: 0 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .search-bar[data-none="true"] .search-count {
+    color: var(--lume-color-status-danger);
+  }
+
+  .search-button {
+    width: 24px;
+    height: 24px;
+  }
+
+  .search-button:disabled {
+    cursor: default;
+    opacity: var(--lume-opacity-disabled);
+  }
+
+  .search-button:disabled:hover {
+    background: none;
+  }
+
+  /* A narrow pane's bar does without what Enter and the field say as well. */
+  @container (max-width: 250px) {
+    .search-count {
+      display: none;
+    }
+  }
+
+  @container (max-width: 200px) {
+    .search-step {
+      display: none;
+    }
   }
 
   /* The command palette: a field and a list, near the top of the window. */
@@ -1669,6 +1810,507 @@
   .prompt-actions .prompt-proceed {
     @apply bg-accent text-accent-ink;
     border-color: transparent;
+  }
+
+  /*
+   * The settings window: a bar of its own where the page draws the title bar, a list
+   * of pages down the left, and the page on show beside it.
+   */
+
+  .settings-window {
+    /* The shades its controls are drawn in: steps from the card towards the text. */
+    --settings-raised: color-mix(in srgb, var(--lume-color-text) 7%, var(--lume-color-card));
+    --settings-pressed: color-mix(in srgb, var(--lume-color-text) 12%, var(--lume-color-card));
+    --settings-off: color-mix(in srgb, var(--lume-color-text) 22%, var(--lume-color-card));
+    --settings-quiet: color-mix(in srgb, var(--lume-color-text) 78%, var(--lume-color-text-muted));
+
+    @apply bg-surface text-ink;
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    font-size: 13px;
+    line-height: 1.45;
+    user-select: none;
+  }
+
+  .settings-titlebar {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    height: 40px;
+    padding-left: 14px;
+    border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+    font-size: 12.5px;
+  }
+
+  .settings-titlebar-name {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .settings-titlebar .window-controls {
+    height: 100%;
+  }
+
+  .settings-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* The list of pages, and the field that searches every page. */
+
+  .settings-side {
+    @apply bg-card;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    width: 236px;
+    padding: 10px 10px 12px;
+    border-right: var(--lume-size-border) solid var(--lume-color-border);
+  }
+
+  .settings-search {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    margin-bottom: 10px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: var(--settings-raised);
+  }
+
+  .settings-search:focus-within {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
+
+  .settings-search input {
+    @apply text-ink;
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: none;
+    font-size: 12.5px;
+    user-select: text;
+  }
+
+  .settings-search input::placeholder {
+    @apply text-ink-muted;
+  }
+
+  .settings-nav {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    gap: 1px;
+    overflow: auto;
+  }
+
+  .settings-nav h4 {
+    @apply text-ink-muted;
+    margin: 12px 8px 3px;
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+
+  .settings-nav h4:first-child {
+    margin-top: 2px;
+  }
+
+  .settings-nav-item {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 9px;
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 7px;
+    color: var(--settings-quiet);
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 120ms ease;
+  }
+
+  .settings-nav-item > svg {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+  }
+
+  .settings-nav-item:hover {
+    background: var(--settings-raised);
+  }
+
+  .settings-nav-item[aria-current="page"] {
+    @apply text-ink;
+    background: var(--settings-pressed);
+  }
+
+  .settings-nav-item[aria-current="page"] > svg {
+    @apply text-ink;
+  }
+
+  .settings-nav-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .settings-nav-meta {
+    @apply text-ink-muted;
+    font-size: 10.5px;
+  }
+
+  /* The page on show: its name over what scrolls. */
+
+  .settings-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .settings-head {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 10px;
+    height: 46px;
+    padding: 10px 22px 5px;
+    border-bottom: var(--lume-size-border) solid transparent;
+    transition: border-color 120ms ease-out;
+  }
+
+  /* A line under the name once something has scrolled beneath it. */
+  .settings-head[data-scrolled="true"] {
+    border-bottom-color: var(--lume-color-border);
+  }
+
+  .settings-head h1 {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 30px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .settings-meta {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    font-size: 11.5px;
+    line-height: 30px;
+    white-space: nowrap;
+  }
+
+  .settings-head-space {
+    flex: 1;
+  }
+
+  .settings-scroll {
+    flex: 1;
+    padding: 0 22px 32px;
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--settings-off) transparent;
+    scrollbar-gutter: stable;
+  }
+
+  /*
+   * Every page keeps the same column of settings. The column beside it is a page's
+   * own to fill, and stays empty on a page that shows nothing there. In a narrow
+   * window the second column gives way first, so the settings stay readable.
+   */
+  .settings-split {
+    display: grid;
+    grid-template-columns: minmax(min(100%, 420px), 760px) minmax(0, 360px);
+    align-items: start;
+    gap: 22px;
+  }
+
+  .settings-column {
+    min-width: 0;
+  }
+
+  .settings-preview {
+    position: sticky;
+    top: 12px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 10px;
+    background: var(--lume-color-control);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .settings-intro {
+    @apply text-ink-muted;
+    margin: 2px 0 14px 2px;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  .settings-empty {
+    @apply text-ink-muted;
+    padding: 60px 0;
+    text-align: center;
+  }
+
+  .settings-group h2 {
+    margin: 16px 0 6px 2px;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  .settings-rows {
+    @apply bg-card;
+    padding: 0 12px;
+    border-radius: 10px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .settings-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 44px;
+    padding: 8px 0;
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: 4px;
+  }
+
+  .settings-row:first-child {
+    border-top: 0;
+  }
+
+  /* A row a search found is pressed to go to its page. */
+  .settings-row[data-hit="true"] {
+    cursor: pointer;
+  }
+
+  /* The row a search led to is marked for a moment. */
+  .settings-row[data-flash="true"] {
+    animation: settings-flash 1100ms ease-out;
+  }
+
+  @keyframes settings-flash {
+    0%,
+    30% {
+      background-color: color-mix(in srgb, var(--lume-color-status-info) 16%, transparent);
+    }
+
+    100% {
+      background-color: transparent;
+    }
+  }
+
+  .settings-label {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .settings-label > div:first-child {
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .settings-label > div + div {
+    @apply text-ink-muted;
+    margin-top: 1px;
+    font-size: 11.5px;
+  }
+
+  .settings-label > .settings-note {
+    @apply text-warning;
+  }
+
+  .settings-label > .settings-problem {
+    @apply text-danger;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+
+  /* The controls. */
+
+  .settings-switch {
+    position: relative;
+    flex-shrink: 0;
+    width: 34px;
+    height: 20px;
+    border-radius: 10px;
+    background: var(--settings-off);
+    cursor: pointer;
+    transition: background-color 160ms ease-out;
+  }
+
+  .settings-switch::after {
+    @apply bg-ink;
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    box-shadow: 0 1px 2px var(--lume-color-overlay);
+    transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .settings-switch[aria-checked="true"] {
+    @apply bg-accent;
+  }
+
+  .settings-switch[aria-checked="true"]::after {
+    @apply bg-accent-ink;
+    transform: translateX(14px);
+  }
+
+  .settings-select {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+    max-width: 220px;
+  }
+
+  .settings-select > select {
+    @apply text-ink;
+    min-width: 0;
+    max-width: 100%;
+    height: 28px;
+    padding: 0 28px 0 10px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: 7px;
+    background: var(--settings-raised);
+    font-size: 12.5px;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    appearance: none;
+  }
+
+  /* The mark that says there are more choices, over the control's right end. */
+  .settings-select > svg {
+    @apply text-ink-muted;
+    position: absolute;
+    top: 50%;
+    right: 9px;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .settings-segmented {
+    display: inline-flex;
+    flex-shrink: 0;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--lume-color-control);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .settings-segmented > button {
+    @apply text-ink-muted;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .settings-segmented > button[aria-pressed="true"] {
+    @apply text-ink;
+    background: var(--settings-pressed);
+  }
+
+  .settings-text {
+    @apply text-ink;
+    flex: 0 1 260px;
+    min-width: 0;
+    height: 28px;
+    padding: 0 10px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: 7px;
+    background: var(--settings-raised);
+    font-size: 12.5px;
+    user-select: text;
+  }
+
+  .settings-text::placeholder {
+    @apply text-ink-muted;
+  }
+
+  .settings-button {
+    @apply text-ink;
+    flex-shrink: 0;
+    height: 28px;
+    padding: 0 11px;
+    border-radius: 7px;
+    background: var(--settings-pressed);
+    font-size: 12.5px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 120ms ease-out;
+  }
+
+  .settings-button:hover {
+    background: var(--settings-off);
+  }
+
+  .settings-button[data-primary="true"] {
+    @apply bg-accent text-accent-ink;
+    font-weight: 600;
+  }
+
+  /* A button that is only words until it is pointed at: it names a file. */
+  .settings-button[data-quiet="true"] {
+    @apply text-ink-muted;
+    background: transparent;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+  }
+
+  .settings-button[data-quiet="true"]:hover {
+    @apply bg-control-hover text-ink;
+  }
+
+  .settings-button:active,
+  .settings-segmented > button:active {
+    transform: scale(0.97);
+  }
+
+  .settings-switch:focus-visible,
+  .settings-select > select:focus-visible,
+  .settings-segmented > button:focus-visible,
+  .settings-text:focus-visible,
+  .settings-button:focus-visible,
+  .settings-nav-item:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .settings-switch,
+    .settings-switch::after,
+    .settings-button,
+    .settings-head {
+      transition: none;
+    }
+
+    .settings-row[data-flash="true"] {
+      animation: none;
+    }
   }
 
   /* What the window shows when it cannot start, or is asked only to report on the webview. */

@@ -1,9 +1,12 @@
 //! `cargo xtask bench`: measure the application and hold the numbers to their budgets.
 //!
-//! Most of the measuring is done by the benchmark suite inside the application's
-//! webview. How long the application takes to start is measured here, from outside, by
-//! starting it and asking it how far it has come. The numbers are then compared with
-//! the limits in `tests/bench/budgets.toml`, and a number outside its limit fails the run.
+//! Most of the measuring is done inside the application's webview, by three suites:
+//! one times a terminal against a real session, one times the window's own page under
+//! load, and the suite that checks the page counts the renders terminal output causes
+//! there, which must be none. How long the application takes to start is measured here,
+//! from outside, by starting it and asking it how far it has come. The numbers are put
+//! in one report and compared with the limits in `tests/bench/budgets.toml`, and a
+//! number outside its limit fails the run.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -29,6 +32,13 @@ const POLL: Duration = Duration::from_millis(20);
 
 /// How long the screen must stay as it is, with text at the cursor, to count as a prompt.
 const PROMPT_SETTLED: Duration = Duration::from_millis(200);
+
+/// What the suite that times the window's page reports, each under the name it has
+/// in the one report.
+const PAGE_NUMBERS: [&str; 4] = ["panes16", "drag", "tabSwitch", "search"];
+
+/// What is taken from the report of the suite that checks the window's page.
+const PAGE_CHECKS: [&str; 3] = ["outputCommits", "outputBytes", "switchCommits"];
 
 /// The limits of one profile, by the path of the number in the report.
 type Limits = BTreeMap<String, Limit>;
@@ -316,6 +326,39 @@ fn time_starts(profile: Profile) -> Result<Value> {
     Ok(report)
 }
 
+/// Puts what the two suites of the window's page reported into the one report: the
+/// numbers of the one that times it, and the counts of renders of the one that checks
+/// it under `chrome`. What either could not do joins the report's problems.
+fn merge_page(report: &mut Value, measure: &Value, chrome: &Value) {
+    for name in PAGE_NUMBERS {
+        if let Some(numbers) = measure.get(name) {
+            report[name] = numbers.clone();
+        }
+    }
+    let mut checks = serde_json::Map::new();
+    for name in PAGE_CHECKS {
+        if let Some(count) = chrome.get(name) {
+            checks.insert(name.to_owned(), count.clone());
+        }
+    }
+    report["chrome"] = Value::Object(checks);
+
+    let mut problems: Vec<Value> = report["problems"].as_array().cloned().unwrap_or_default();
+    for (suite, from) in [("measure", measure), ("chrome", chrome)] {
+        let said = from["error"].as_str().into_iter().chain(
+            from["problems"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str),
+        );
+        for problem in said {
+            problems.push(Value::from(format!("{suite}: {problem}")));
+        }
+    }
+    report["problems"] = Value::Array(problems);
+}
+
 /// Measures the release build and compares the numbers with the limits of `profile`.
 pub fn run(profile: &str) -> Result<()> {
     let limits = load_limits(profile)?;
@@ -323,6 +366,11 @@ pub fn run(profile: &str) -> Result<()> {
     println!("bench: running the benchmark suite in the webview (about two minutes)");
     let suite = suites::run_in_webview(Profile::Release, "bench", &[])?;
     let mut report = suite.json;
+    println!("bench: timing the window's page with many panes, a drag and tab switches");
+    let measure = suites::run_measure(Profile::Release)?;
+    println!("bench: counting the renders terminal output causes in the window's page");
+    let chrome = suites::run_chrome(Profile::Release)?;
+    merge_page(&mut report, &measure.json, &chrome.json);
     println!("bench: timing {STARTS} starts of the application");
     report["startup"] = time_starts(Profile::Release)?;
 
@@ -363,6 +411,12 @@ pub fn run(profile: &str) -> Result<()> {
     }
     if !suite.passed {
         bail!("the benchmark suite did not finish every measurement");
+    }
+    if !measure.passed {
+        bail!("the window's page was not timed in every way it should be");
+    }
+    if !chrome.passed {
+        bail!("the window's page does not hold to what it must");
     }
     Ok(())
 }
@@ -439,6 +493,51 @@ mod tests {
             }
         }
         assert!(load_limits("nonesuch").is_err());
+    }
+
+    #[test]
+    fn the_numbers_of_the_windows_page_join_the_one_report() {
+        let mut report = json!({ "transport": { "mibPerSecond": 60.0 }, "problems": ["old"] });
+        let measure = json!({
+            "ok": false,
+            "panes16": { "webgl2": { "framesPerSecond": 144.0 } },
+            "drag": { "framesPerSecond": 143.9 },
+            "tabSwitch": {},
+            "problems": ["the divider was dragged and went 0 pixels"],
+        });
+        let chrome = json!({
+            "ok": true,
+            "outputCommits": 0,
+            "outputBytes": 4096,
+            "switchCommits": 1,
+            "renderers": { "firstTab": 2 },
+            "problems": [],
+        });
+        merge_page(&mut report, &measure, &chrome);
+
+        assert_eq!(
+            number_at(&report, "panes16.webgl2.framesPerSecond"),
+            Some(144.0)
+        );
+        assert_eq!(number_at(&report, "drag.framesPerSecond"), Some(143.9));
+        assert_eq!(number_at(&report, "chrome.outputCommits"), Some(0.0));
+        assert_eq!(number_at(&report, "transport.mibPerSecond"), Some(60.0));
+        // A tier or a switch that was not timed has no number, and nothing is made up.
+        assert_eq!(number_at(&report, "tabSwitch.webgl2Ms"), None);
+        assert!(report.get("search").is_none());
+        assert!(report["chrome"].get("renderers").is_none());
+        assert_eq!(
+            report["problems"],
+            json!(["old", "measure: the divider was dragged and went 0 pixels"])
+        );
+    }
+
+    #[test]
+    fn a_suite_that_stopped_with_an_error_says_so_in_the_report() {
+        let mut report = json!({});
+        merge_page(&mut report, &json!({ "error": "no window" }), &json!({}));
+        assert_eq!(report["problems"], json!(["measure: no window"]));
+        assert_eq!(report["chrome"], json!({}));
     }
 
     #[test]

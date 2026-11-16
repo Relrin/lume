@@ -1,0 +1,224 @@
+/**
+ * Shared by the settings tests: a schema in the shape the configuration's has, small
+ * enough to read, the lists a machine would add to it, and a configuration to show.
+ */
+
+import { DEFAULT_TOKENS } from "@lume/tokens";
+
+import type { ConfigView } from "../src/core/types.ts";
+import type { SettingsLists } from "../src/settings/model.ts";
+
+/** A schema in the shape the configuration's has, small enough to read. */
+export const SCHEMA = {
+  type: "object",
+  "x-lume-pages": [
+    {
+      id: "appearance",
+      label: "Appearance",
+      icon: "appearance",
+      group: "Application",
+      blurb: "Theme, colours and type.",
+      groups: ["Theme", "Panes"],
+    },
+    {
+      id: "terminal",
+      label: "Terminal",
+      icon: "terminal",
+      group: "Application",
+      blurb: "Cursor and scrollback.",
+      groups: ["Cursor"],
+    },
+  ],
+  // The keys are out of order on purpose: nothing may depend on their order.
+  properties: {
+    terminal: {
+      type: "object",
+      properties: {
+        "cursor-blink": {
+          type: "boolean",
+          default: true,
+          "x-lume-settings": {
+            page: "terminal",
+            group: "Cursor",
+            order: 20,
+            label: "Blinking cursor",
+            control: "switch",
+          },
+        },
+        "cursor-style": {
+          default: "block",
+          oneOf: [
+            { const: "block", type: "string" },
+            { const: "bar", type: "string" },
+            { const: "underline", type: "string" },
+          ],
+          "x-lume-settings": {
+            page: "terminal",
+            group: "Cursor",
+            order: 10,
+            label: "Cursor style",
+            control: "segmented",
+          },
+        },
+        shell: {
+          type: ["string", "null"],
+          "x-lume-settings": {
+            page: "terminal",
+            group: "Shell",
+            order: 30,
+            label: "Default shell",
+            control: "select",
+            list: "shells",
+            unset: "System default",
+          },
+        },
+      },
+    },
+    window: {
+      type: "object",
+      properties: {
+        "title-bar": {
+          anyOf: [
+            {
+              oneOf: [
+                { const: "custom", type: "string" },
+                { const: "system", type: "string" },
+              ],
+            },
+            { type: "null" },
+          ],
+          "x-lume-settings": {
+            page: "appearance",
+            group: "Panes",
+            order: 90,
+            label: "Title bar",
+            control: "segmented",
+            options: [
+              { value: "custom", label: "Lume" },
+              { value: "system", label: "System" },
+            ],
+          },
+        },
+      },
+    },
+    font: {
+      type: "object",
+      properties: {
+        family: {
+          type: "string",
+          default: "JetBrains Mono",
+          "x-lume-settings": {
+            page: "appearance",
+            group: "Theme",
+            order: 30,
+            label: "Terminal font",
+            control: "select",
+            list: "fonts",
+          },
+        },
+      },
+    },
+    appearance: {
+      type: "object",
+      properties: {
+        "background-image": {
+          type: ["string", "null"],
+          "x-lume-settings": {
+            page: "appearance",
+            group: "Panes",
+            order: 80,
+            label: "Picture",
+            help: "The path of an image file.",
+            control: "text",
+            unset: "None",
+          },
+        },
+        "card-radius": {
+          type: ["number", "null"],
+          "x-lume-settings": {
+            page: "appearance",
+            group: "Panes",
+            order: 40,
+            label: "Panel corners",
+            control: "select",
+            options: [
+              { value: 0, label: "0 px" },
+              { value: 6, label: "6 px" },
+              { value: 10, label: "10 px" },
+            ],
+            unset: "Theme\u2019s",
+            token: "radius.card",
+            unit: "px",
+          },
+        },
+        "theme-dark": {
+          type: "string",
+          default: "lume-dark",
+          "x-lume-settings": {
+            page: "appearance",
+            group: "Theme",
+            order: 20,
+            label: "In dark mode",
+            control: "select",
+            list: "themes",
+            when: { path: "appearance.theme", is: "unset" },
+          },
+        },
+        theme: {
+          type: ["string", "null"],
+          "x-lume-settings": {
+            page: "appearance",
+            group: "Theme",
+            order: 10,
+            label: "Theme",
+            help: "Colours for every window.",
+            control: "select",
+            list: "themes",
+            unset: "Follow system",
+          },
+        },
+        tokens: { type: "object", additionalProperties: true },
+      },
+    },
+  },
+};
+
+/** What a machine has to choose from. */
+export const LISTS: SettingsLists = {
+  themes: [
+    { id: "lume-dark", name: "Lume Dark", scheme: "dark", builtin: true },
+    { id: "lume-light", name: "Lume Light", scheme: "light", builtin: true },
+    { id: "ember", name: "Ember", scheme: "dark", builtin: false },
+  ],
+  fonts: ["Cascadia Mono", "Consolas"],
+  shells: [{ name: "PowerShell", program: "pwsh.exe" }],
+  workspaces: ["default", "notes"],
+};
+
+/**
+ * A configuration in use: `changes` replace parts of the view, and `appearance` adds
+ * settings to that section.
+ */
+export function view(changes: Partial<ConfigView> = {}, appearance: Record<string, unknown> = {}) {
+  const made: ConfigView = {
+    revision: 1,
+    platform: "windows",
+    scheme: "dark",
+    theme: { id: "lume-dark", scheme: "dark" },
+    config: {
+      appearance: { "pane-header": "always", "theme-dark": "lume-dark", ...appearance },
+      terminal: { "scrollback-lines": 10_000, "cursor-style": "bar", "cursor-blink": false },
+      layout: { "tab-placement": "top" },
+      renderer: { tier: "auto" },
+      font: { family: "JetBrains Mono" },
+      window: {},
+    },
+    sources: {},
+    problems: [],
+    tokens: DEFAULT_TOKENS,
+    keymap: { bindings: [] },
+    title_bar: "custom",
+    ...changes,
+  };
+  return made;
+}

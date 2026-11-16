@@ -623,6 +623,17 @@ pub fn default_tokens() -> ResolvedTokens {
     .0
 }
 
+/// The built-in light theme with the default settings.
+pub fn light_tokens() -> ResolvedTokens {
+    resolve_tokens(
+        &Config::default(),
+        &BTreeMap::new(),
+        &Themes::builtin(),
+        ColorScheme::Light,
+    )
+    .0
+}
+
 /// The JSON Schema of one token's value.
 fn value_schema(kind: TokenKind, doc: &str) -> Value {
     match kind {

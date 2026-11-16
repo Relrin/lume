@@ -50,6 +50,12 @@ pub trait Shell: Send + Sync + 'static {
     fn layout_windows(&self) -> Vec<String>;
     /// Draws every window with the page's own title bar, or with the system's.
     fn set_title_bar(&self, custom: bool);
+    /// Shows the settings window, at a section if one is named: opens it in the middle
+    /// of the screen the window `from` is on, or brings it forward if it is open.
+    fn open_settings(&self, section: Option<&str>, from: Option<WindowId>);
+    /// Asks a window to close as pressing its own close control does, which may put a
+    /// question to the user first.
+    fn ask_close(&self, window: WindowId);
 }
 
 /// What a request needs to be carried out.
@@ -1490,6 +1496,52 @@ mod tests {
             .unwrap();
         assert_eq!(app.shell.quits(), 1);
         assert_eq!(app.services.panes.workspace().windows.len(), 1);
+        stop(app).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_settings_are_opened_by_a_command_at_the_section_named() {
+        let mut app = running("settings").await;
+        app.client.hello().await;
+        let run = |args: serde_json::Value| AppRequestBody::Command {
+            id: "lume.settings.open".to_owned(),
+            args,
+            window: None,
+        };
+
+        app.client.ask(run(serde_json::Value::Null)).await.unwrap();
+        app.client
+            .ask(run(serde_json::json!({ "section": "appearance" })))
+            .await
+            .unwrap();
+        assert_eq!(
+            app.shell.settings(),
+            vec![None, Some("appearance".to_owned())]
+        );
+        // Showing the settings changes nothing in the layout.
+        assert_eq!(app.services.panes.workspace().windows.len(), 1);
+        stop(app).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_window_closed_from_its_own_page_is_asked_to_close_and_not_closed_outright() {
+        let app = running("ask-close").await;
+        let window = app.services.panes.workspace().windows[0].id;
+
+        app.services
+            .run_command(
+                window,
+                "lume.window.close",
+                &serde_json::Value::Null,
+                crate::services::Asker::Page,
+            )
+            .await
+            .unwrap();
+        // The window is asked, as its close control asks: whether the user is asked
+        // first is decided where a window's closing is.
+        assert_eq!(app.shell.asked_to_close(), vec![window]);
+        assert_eq!(app.shell.quits(), 0);
+        assert_eq!(app.shell.closed(), Vec::<String>::new());
         stop(app).await;
     }
 

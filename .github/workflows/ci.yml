@@ -145,6 +145,15 @@ jobs:
       - name: Smoke test through WebDriver (Windows)
         if: runner.os == 'Windows'
         run: cargo xtask smoke
+      # The window as the smoke test saw it, with two panes, in the dark look and in
+      # the light. For people to look at: nothing compares them.
+      - name: Keep the pictures of the window
+        if: always() && runner.os != 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: window-${{ matrix.os }}
+          path: target/smoke
+          if-no-files-found: warn
 
   bench:
     name: Benchmarks (${{ matrix.os }})

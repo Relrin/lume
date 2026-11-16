@@ -8,6 +8,7 @@ export {
   FIXED_FRAMES,
   FOREGROUND,
   fullRedrawFrame,
+  highlights,
   makeFrame,
   markDrawn,
   PALETTE,

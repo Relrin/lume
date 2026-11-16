@@ -35,6 +35,7 @@ import type { Intent, PaneId } from "../layout/types.ts";
 import { createPaletteStore, type PaletteStore } from "../palette/store.ts";
 import { PaneTitles } from "../panes/titles.ts";
 import { PaneViews } from "../panes/views.ts";
+import { SearchController } from "../search/controller.ts";
 import { createStatusStore, type StatusStore } from "../status/registry.ts";
 import { currentPlatform, KeyLayout } from "../terminal/keyboard.ts";
 import { PromptStore } from "../terminal/prompts.ts";
@@ -45,6 +46,8 @@ import { TauriCarrier, type Carrier } from "../transport/carrier.ts";
 import { CommandError } from "../transport/types.ts";
 import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX } from "../tuning.ts";
 import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
+import { closeRequested, mayRun } from "./closing.ts";
+import { focusBar } from "./focus-bar.ts";
 import { NoticeStore, sentence } from "./notices.ts";
 
 /** The page's prompts. Created with the module so a component can show them at once. */
@@ -75,8 +78,18 @@ export interface ShellApp {
   readonly cardDrag: CardDrag;
   /** The panel that is being dragged to another side of the window, if one is. */
   readonly panelDrag: PanelDragStore;
-  /** How many renderers of each kind are alive, and what their glyphs take. */
-  stats(): RenderStats;
+  /** The searches of the window's panes. */
+  readonly search: SearchController;
+  /**
+   * How many renderers of each kind are alive and what their glyphs take, and how much
+   * memory the terminals of the window hold between them.
+   */
+  stats(): RenderStats & { readonly wasmBytes: number };
+  /**
+   * Ends the page's work: its views, its renderers and what it listens to. The window
+   * never does this; a test that starts a page more than once does, between two.
+   */
+  dispose(): void;
 }
 
 /** The parts of the keyboard-layout interface some webviews offer. */
@@ -106,6 +119,9 @@ const NO_CONTEXT: ReadonlySet<string> = new Set();
 
 /** The context of a key pressed while the command palette is on show. */
 const PALETTE_CONTEXT: ReadonlySet<string> = new Set(["palette"]);
+
+/** A pane's search bar, as an element is asked whether it is in one. */
+const SEARCH_BAR = "[data-search-bar]";
 
 /**
  * The parts of the window that keep the keys pressed in them: a terminal offers its
@@ -227,12 +243,33 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       if (layout.getState().floats[pane]) contexts.add("floating");
       return shortcuts.handle(event, contexts);
     },
+    keyboard: (pane) => search.setKeyboard(pane, "terminal"),
+    searched: (pane) => search.touched(pane),
+  });
+  // A search works in stretches with the page's other work between them. A message to
+  // oneself is the soonest a task can be had that still lets a frame or a key in
+  // first: a timer of no length is made to wait some milliseconds.
+  const turns = new MessageChannel();
+  const waiting: (() => void)[] = [];
+  turns.port1.onmessage = () => waiting.shift()?.();
+  const search = new SearchController({
+    target: (pane) => views.get(pane),
+    soon: (task) => {
+      waiting.push(task);
+      turns.port2.postMessage(null);
+    },
+    setTimer: (task, ms) => window.setTimeout(task, ms),
+    clearTimer: (timer) => window.clearTimeout(timer),
+    now: () => performance.now(),
   });
   const commands = new Commands({
     store: commandStore,
     client,
     views,
     palette,
+    search,
+    mayRun: (id, args) => mayRun({ layout, config, views, prompts, client, notices }, id, args),
+    focusBar: () => focusBar(),
     failed: (message) => notices.push("error", sentence(message)),
   });
   const cardDrag = new CardDrag({
@@ -296,6 +333,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         break;
       case "window_state":
         windowState.getState().set(notice);
+        break;
+      case "close_requested":
+        void closeRequested({ layout, config, views, prompts, client, notices });
         break;
       case "notice":
         notices.push(notice.level, notice.message);
@@ -371,9 +411,13 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   // The keyboard and the window's title follow the layout's focus.
 
   // While the palette is on show the keyboard is the palette's, and when the palette
-  // is put away the keyboard goes back to where the user was working.
+  // is put away the keyboard goes back to where the user was working: the terminal of
+  // the focused pane, or that pane's search bar if they were typing there.
   const refocus = (): void => {
-    if (!palette.getState().shown) views.focus();
+    if (palette.getState().shown) return;
+    const pane = selectFocus(layout.getState());
+    if (pane !== null && search.focusBar(pane)) return;
+    views.focus();
   };
   let paletteShown = false;
   palette.subscribe((state) => {
@@ -386,8 +430,14 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   const retitle = (): void => {
     document.title = (focus === null ? undefined : titles.get(focus)) ?? DEFAULT_TITLE;
   };
+  let epoch: number | undefined;
   layout.subscribe((state) => {
     if (!state.ready) return;
+    // The searches follow the panes: another layout altogether has none of them, and
+    // a pane that is gone takes its search with it.
+    if (epoch !== undefined && epoch !== state.epoch) search.reset();
+    epoch = state.epoch;
+    queueMicrotask(() => search.prune(views.panes()));
     const now = selectFocus(state);
     const tab = selectActiveTab(state);
     if (now === focus && tab === active) return;
@@ -400,28 +450,38 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   titles.subscribe((pane) => {
     if (pane === focus) retitle();
   });
-  window.addEventListener("focus", () => {
+  const onWindowFocus = (): void => {
     // The keyboard comes back to the terminal unless something else in the window
     // was using it: a dialog, or a field being typed in.
     const using = document.activeElement;
     if (using === null || using === document.body) refocus();
-  });
+  };
+  window.addEventListener("focus", onWindowFocus);
   // Keys pressed while the keyboard is with the window's own controls, not with a
-  // terminal, are offered to the bindings that hold everywhere.
-  window.addEventListener(
-    "keydown",
-    (event) => {
-      const where = event.target;
-      if (!(where instanceof Element)) return;
-      if (where.closest(KEEPS_KEYS)) return;
-      const contexts = palette.getState().shown ? PALETTE_CONTEXT : NO_CONTEXT;
-      if (shortcuts.handle(event, contexts)) {
-        event.preventDefault();
-        event.stopPropagation();
+  // terminal, are offered to the bindings that hold everywhere, and to those that
+  // hold where the keyboard is.
+  const onWindowKey = (event: KeyboardEvent): void => {
+    const where = event.target;
+    if (!(where instanceof Element)) return;
+    if (where.closest(KEEPS_KEYS)) return;
+    let contexts = NO_CONTEXT;
+    if (palette.getState().shown) {
+      contexts = PALETTE_CONTEXT;
+    } else if (where.closest(SEARCH_BAR)) {
+      // A search bar is not its terminal: a key that copies from a terminal, say,
+      // must be left to the field.
+      const pane = where.closest<HTMLElement>("[data-pane]")?.dataset.pane;
+      contexts = new Set(["search"]);
+      if (pane !== undefined && layout.getState().floats[pane]) {
+        contexts = new Set(["search", "floating"]);
       }
-    },
-    true,
-  );
+    }
+    if (shortcuts.handle(event, contexts)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+  window.addEventListener("keydown", onWindowKey, true);
 
   // The window's own buttons show what the window is doing, which only the core knows.
   client.windowState().then(
@@ -459,7 +519,18 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     windowState,
     cardDrag,
     panelDrag,
-    stats: () => host.stats(),
+    search,
+    stats: () => ({ ...host.stats(), wasmBytes: vt.memoryBytes }),
+    dispose: () => {
+      window.removeEventListener("focus", onWindowFocus);
+      window.removeEventListener("keydown", onWindowKey, true);
+      onNotice = () => undefined;
+      onRequest = () => undefined;
+      search.reset();
+      turns.port1.close();
+      views.dispose();
+      host.dispose();
+    },
   };
 }
 

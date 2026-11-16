@@ -41,9 +41,12 @@ function gapsOf(node: TreeNode, found: Gap[] = []): Gap[] {
   return found;
 }
 
-/** A gap between two panes, which the pointer can take hold of to resize them. */
+/**
+ * A gap between two panes, which the pointer can take hold of to resize them and the
+ * arrow keys can move.
+ */
 function DividerHandle({ split, index, axis }: Gap) {
-  const { area } = useShell();
+  const { area, views } = useShell();
   const handle = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = handle.current;
@@ -55,9 +58,16 @@ function DividerHandle({ split, index, axis }: Gap) {
       className="divider"
       data-axis={axis}
       role="separator"
+      // Reached with the Tab key, and then moved with the arrow keys. Where it stands
+      // is written to it by what places it.
+      tabIndex={0}
       aria-orientation={axis === "row" ? "vertical" : "horizontal"}
       aria-label={axis === "row" ? "Resize columns" : "Resize rows"}
       title="Drag to resize; double-click to make equal"
+      onKeyDown={(event) => {
+        // Escape gives the keyboard back to the terminal, as it does in the bar.
+        if (event.key === "Escape") views.focus();
+      }}
     />
   );
 }
@@ -114,11 +124,16 @@ export function TabArea() {
   return (
     <main ref={container} className="tab-area">
       {ready && tab === null && !floats && <EmptyWindow />}
-      {shown.map((pane) => (
-        <PaneCard key={`${epoch}:${pane}`} pane={pane} header={header} />
-      ))}
+      {/*
+       * The handles come before the cards, so that the Tab key reaches them from the
+       * bar above: a terminal keeps the Tab key for its program, and nothing that
+       * follows a card can be tabbed to from it. Where each lies is not decided here.
+       */}
       {gaps.map((gap) => (
         <DividerHandle key={`${gap.split}:${gap.index}`} {...gap} />
+      ))}
+      {shown.map((pane) => (
+        <PaneCard key={`${epoch}:${pane}`} pane={pane} header={header} />
       ))}
       <FloatingLayer />
       <MinimisedTray />

@@ -4,14 +4,15 @@
  *
  * A command that changes the layout, the configuration or the application is carried
  * out in the core, and the page only asks. A command that acts on what only the page
- * has is carried out here: a terminal's selection and scrollback, the size of the
- * window's text, and the command palette.
+ * has is carried out here: a terminal's selection and scrollback, searching it, the
+ * size of the window's text, and the command palette.
  */
 
 import type { CoreClient } from "../core/client.ts";
 import type { PaneId } from "../layout/types.ts";
 import type { PaletteStore } from "../palette/store.ts";
 import type { PaneViews } from "../panes/views.ts";
+import type { SearchController } from "../search/controller.ts";
 import type { TerminalAction } from "../terminal/keymap.ts";
 import type { TerminalView } from "../terminal/view.ts";
 import { CommandError } from "../transport/types.ts";
@@ -36,6 +37,11 @@ export interface CommandServices {
   readonly client: CoreClient;
   readonly views: PaneViews;
   readonly palette: PaletteStore;
+  readonly search: SearchController;
+  /** Asks the user before a command that closes something, if they want to be asked. */
+  mayRun(id: string, args: unknown): Promise<boolean>;
+  /** Moves the keyboard to the window's bar. */
+  focusBar(): void;
   /** Tells the user that a command they ran could not be carried out. */
   failed(message: string): void;
 }
@@ -43,6 +49,11 @@ export interface CommandServices {
 function paneOf(args: unknown): PaneId | undefined {
   if (typeof args !== "object" || args === null || !("pane" in args)) return undefined;
   return typeof args.pane === "string" ? args.pane : undefined;
+}
+
+function queryOf(args: unknown): string | undefined {
+  if (typeof args !== "object" || args === null || !("query" in args)) return undefined;
+  return typeof args.query === "string" ? args.query : undefined;
 }
 
 /** Runs commands in this window. */
@@ -70,9 +81,27 @@ export class Commands {
       }
       return;
     }
-    client.commandRun(id, args).catch((error: unknown) => {
+    const report = (error: unknown) =>
       failed(error instanceof Error ? error.message : String(error));
-    });
+    // The user may want to be asked before a pane with a program in it is closed.
+    this.#services
+      .mayRun(id, args)
+      .then((may) => (may ? client.commandRun(id, args) : undefined))
+      .catch(report);
+  }
+
+  /** The pane a command acts on: the one its arguments name, or the focused one. */
+  #pane(args: unknown): PaneId {
+    const { views } = this.#services;
+    const named = paneOf(args);
+    const pane = named ?? views.focused()?.pane;
+    if (pane === undefined || !views.get(pane)) {
+      throw new CommandError(
+        "not_shown",
+        named === undefined ? "no pane has the keyboard" : `there is no pane ${named}`,
+      );
+    }
+    return pane;
   }
 
   /** The view a command acts on: the pane its arguments name, or the focused one. */
@@ -94,7 +123,7 @@ export class Commands {
    * cannot be: there is no such command here, or nothing for it to act on.
    */
   runInPage(id: string, args: unknown = null): void {
-    const { views, palette } = this.#services;
+    const { views, palette, search } = this.#services;
     const action = TERMINAL_ACTIONS[id];
     if (action !== undefined) {
       this.#view(args).perform(action);
@@ -112,6 +141,29 @@ export class Commands {
         return;
       case "lume.palette.open":
         palette.getState().toggle();
+        return;
+      case "lume.search.open": {
+        const pane = this.#pane(args);
+        search.open(pane, queryOf(args));
+        // A bar that was on show already is given the keyboard; a new one takes it.
+        search.focusBar(pane, true);
+        return;
+      }
+      case "lume.search.next":
+      case "lume.search.previous": {
+        const pane = this.#pane(args);
+        if (!search.of(pane).open) search.open(pane);
+        search.step(pane, id === "lume.search.next" ? "older" : "newer");
+        return;
+      }
+      case "lume.search.close": {
+        const pane = this.#pane(args);
+        search.close(pane);
+        if (views.focused()?.pane === pane) views.focus();
+        return;
+      }
+      case "lume.window.focus-bar":
+        this.#services.focusBar();
         return;
       default:
         throw new CommandError("not_found", `the page has no command called ${id}`);

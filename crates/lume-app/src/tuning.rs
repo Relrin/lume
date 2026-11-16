@@ -107,3 +107,15 @@ pub const APP_FILE: &str = "app.json";
 
 /// The id of the panel that lists a window's tabs.
 pub const TAB_LIST_PANEL: &str = "lume.tabs";
+
+/// How large the settings window opens, and the smallest it may be made: width and
+/// height, in the pixels a window's size is counted in.
+pub const SETTINGS_WINDOW_SIZE: (u32, u32) = (980, 680);
+pub const SETTINGS_WINDOW_MIN_SIZE: (u32, u32) = (720, 480);
+
+/// The longest name a section of the settings may have, in bytes.
+pub const SETTINGS_SECTION_MAX_BYTES: usize = 48;
+
+/// The largest picture shown behind the panes. A larger file is refused, not read: the
+/// whole of it is handed to the page.
+pub const BACKGROUND_IMAGE_MAX_BYTES: u64 = 16 * 1024 * 1024;

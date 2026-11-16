@@ -59,6 +59,11 @@ impl PrivateDirs {
         Ok(dirs)
     }
 
+    /// The settings file of an application that uses these folders.
+    pub fn config_file(&self) -> PathBuf {
+        self.config.join("config.toml")
+    }
+
     /// Has a program that is about to be started, and whatever it starts, use these
     /// folders.
     pub fn apply(&self, command: &mut Command) {

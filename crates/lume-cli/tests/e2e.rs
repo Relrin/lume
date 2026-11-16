@@ -29,6 +29,13 @@ const WAIT: &str = "60";
 /// differs from the command as typed: the screen then shows the output, not the echo.
 const MARK: &str = "k7q";
 
+/// How long the settings window is given to open before the test goes on. Nothing a
+/// script can ask says whether it is there.
+const SETTINGS_WINDOW_UP: Duration = Duration::from_secs(2);
+
+/// How many numbered lines are printed for a search to look through: several screens.
+const SEARCHED_LINES: u32 = 300;
+
 const APPLICATION: &str = if cfg!(windows) {
     "lume-gui.exe"
 } else {
@@ -273,6 +280,39 @@ impl App {
             .iter()
             .filter_map(|session| session["info"]["pid"].as_u64())
             .map(|pid| pid as u32)
+            .collect()
+    }
+
+    /// Waits until the application's process has ended of its own accord, and checks
+    /// that it ended well.
+    fn until_closed(mut self, what: &str) {
+        let mut child = self.child.take().expect("the application is running");
+        let deadline = Instant::now() + START;
+        loop {
+            if let Some(status) = child.try_wait().expect("the application can be waited for") {
+                assert!(status.success(), "the application ended with {status}");
+                break;
+            }
+            if Instant::now() >= deadline {
+                // Not left running: the test has failed, and its shells go with it.
+                self.child = Some(child);
+                panic!("{what}");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        if !self.keep_home {
+            let _ = std::fs::remove_dir_all(&self.home);
+        }
+    }
+
+    /// The lines on the screen of the pane that has the keyboard.
+    fn screen(&self) -> Vec<String> {
+        let captured = self.ctl(&["capture"]).ok("capture");
+        captured["lines"]
+            .as_array()
+            .expect("the lines of a screen")
+            .iter()
+            .map(|line| line.as_str().unwrap_or_default().to_owned())
             .collect()
     }
 
@@ -1018,6 +1058,87 @@ fn two_windows_show_one_workspace_and_closing_one_ends_what_ran_in_it() {
     app.type_line_in(&first, "echo still-here");
     app.wait_text_in(&first, "still-here");
     app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_pane_is_searched_by_command_and_goes_on_taking_what_is_typed() {
+    let app = App::start();
+    app.status_with_session();
+    // More numbered lines than a screen holds, so that there is scrollback to search.
+    let print = if cfg!(windows) {
+        format!("for /L %i in (1,1,{SEARCHED_LINES}) do @echo lume-line-%i-end")
+    } else {
+        format!(
+            "i=1; while [ $i -le {SEARCHED_LINES} ]; do echo lume-line-$i-end; i=$((i+1)); done"
+        )
+    };
+    app.type_line(&print);
+    let last = format!("lume-line-{SEARCHED_LINES}-end");
+    app.wait_text(&last);
+
+    // The search is the page's own, and is asked for through the application. What it
+    // scrolls into view is not what a program sees as its screen, which stays as it is.
+    app.ctl(&[
+        "command",
+        "lume.search.open",
+        r#"{"query":"lume-line-7-end"}"#,
+    ])
+    .ok("opening the search");
+    app.ctl(&["command", "lume.search.next"])
+        .ok("the next match");
+    app.ctl(&["command", "lume.search.previous"])
+        .ok("the match before");
+    assert!(
+        app.screen().iter().any(|line| line.contains(&last)),
+        "searching changed the screen a program sees: {:?}",
+        app.screen()
+    );
+
+    // A pane there is none of cannot be searched, and saying so breaks nothing.
+    let refused = app.ctl(&["command", "lume.search.open", r#"{"pane":"p999"}"#]);
+    assert_ne!(refused.status, 0, "{}", refused.json);
+
+    app.ctl(&["command", "lume.search.close"])
+        .ok("closing the search");
+    app.type_line("echo after-the-search");
+    app.wait_text("after-the-search");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn the_application_ends_with_its_last_terminal_though_the_settings_are_open() {
+    let app = App::start();
+    app.status_with_session();
+    app.ctl(&[
+        "command",
+        "lume.settings.open",
+        r#"{"section":"appearance"}"#,
+    ])
+    .ok("opening the settings");
+    std::thread::sleep(SETTINGS_WINDOW_UP);
+    // Asked for again, the window that is open is the one shown.
+    app.ctl(&["command", "lume.settings.open"])
+        .ok("showing the settings again");
+    // The settings are no window of the workspace: it has the one it had.
+    let layout = app.layout();
+    assert_eq!(
+        layout["workspace"]["windows"]
+            .as_array()
+            .expect("the windows")
+            .len(),
+        1,
+        "{layout}"
+    );
+    // A section that could not be one is refused nothing and opens nothing odd.
+    app.ctl(&["command", "lume.settings.open", r#"{"section":"../x#y"}"#])
+        .ok("a section that is none");
+
+    // The shell of the only pane ends, its pane, tab and window close, and nothing is
+    // left to keep the application running: not the settings window either.
+    app.type_line("exit");
+    app.until_closed("the application went on with only its settings to show");
 }
 
 #[test]

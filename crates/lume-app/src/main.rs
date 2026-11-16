@@ -24,6 +24,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
+mod background;
 mod bounds;
 mod builtins;
 mod carrier;
@@ -55,6 +56,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use lume_config::schema::Confirm;
 use lume_config::{ColorScheme, Dirs};
 use lume_ipc::Listener;
 use lume_layout::{Intent, Store};
@@ -427,6 +429,10 @@ fn main() -> ExitCode {
             commands_config::config_set,
             commands_config::config_unset,
             commands_config::config_open,
+            commands_config::config_schema,
+            commands_config::themes_list,
+            commands_config::shells_list,
+            commands_config::background_image,
             commands_window::window_drag,
             commands_window::window_control,
             commands_window::window_state,
@@ -447,6 +453,8 @@ fn main() -> ExitCode {
                     state.retire(&label);
                     if let Some(windows) = windows {
                         windows.forget(&label);
+                        // The settings do not outlive the last window with terminals.
+                        windows.close_settings_with(&label);
                     }
                 }
                 WindowEvent::ThemeChanged(theme) => {
@@ -486,6 +494,26 @@ fn main() -> ExitCode {
                     else {
                         return;
                     };
+                    // A window in which something still runs may be set to ask first.
+                    // Its page puts the question, and closes the window again with the
+                    // user's agreement, which is used up here.
+                    let always = config.as_ref().is_some_and(|config| {
+                        config.current().config.window.confirm_close == Confirm::Always
+                    });
+                    let asked = windows.is_some_and(|windows| windows.take_confirmed(&label));
+                    let page = state.page_of(&label);
+                    if window::close_asks(
+                        always,
+                        panes.runs_something(window),
+                        page.is_some(),
+                        asked,
+                    ) {
+                        api.prevent_close();
+                        if let Some(page) = page {
+                            page.notify(&serde_json::json!({ "type": "close_requested" }));
+                        }
+                        return;
+                    }
                     if let Some(windows) = windows {
                         windows.keep_place(&label);
                     }

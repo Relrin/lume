@@ -587,9 +587,25 @@ fn typescript_literal(value: &Value) -> String {
     }
 }
 
+/// One set of values written as a TypeScript constant of every token.
+fn typescript_values(ts: &mut String, doc: &str, name: &str, values: &ResolvedTokens) {
+    ts.push_str(&format!("\n/** {doc} */\n"));
+    ts.push_str(&format!("export const {name}: Tokens = {{\n"));
+    for token in TOKENS {
+        if let Some(value) = values.get(token.name) {
+            ts.push_str(&format!(
+                "  \"{}\": {},\n",
+                token.name,
+                typescript_literal(&value.to_json())
+            ));
+        }
+    }
+    ts.push_str("};\n");
+}
+
 /// The TypeScript module that describes the token set, with `defaults` as the values
-/// a page starts from.
-pub fn typescript(defaults: &ResolvedTokens) -> String {
+/// a page starts from and `light` as the built-in light theme's.
+pub fn typescript(defaults: &ResolvedTokens, light: &ResolvedTokens) -> String {
     let mut ts = String::from(GENERATED_NOTE_TS);
 
     ts.push_str("\n/** What kind of value a token holds. */\nexport type TokenKind =\n");
@@ -641,18 +657,18 @@ pub fn typescript(defaults: &ResolvedTokens) -> String {
     }
     ts.push_str("}\n");
 
-    ts.push_str("\n/** The built-in dark theme with the default settings. */\n");
-    ts.push_str("export const DEFAULT_TOKENS: Tokens = {\n");
-    for token in TOKENS {
-        if let Some(value) = defaults.get(token.name) {
-            ts.push_str(&format!(
-                "  \"{}\": {},\n",
-                token.name,
-                typescript_literal(&value.to_json())
-            ));
-        }
-    }
-    ts.push_str("};\n");
+    typescript_values(
+        &mut ts,
+        "The built-in dark theme with the default settings.",
+        "DEFAULT_TOKENS",
+        defaults,
+    );
+    typescript_values(
+        &mut ts,
+        "The built-in light theme with the default settings.",
+        "LIGHT_TOKENS",
+        light,
+    );
 
     ts.push_str("\n/** Whether the built-in dark theme is a light or a dark one. */\n");
     let scheme = match defaults.scheme {

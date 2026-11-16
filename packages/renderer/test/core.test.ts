@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
 
+import { blendOver } from "../src/color.ts";
 import { ATLAS_PAGE_SIZE, LINE_RECTS_PER_CELL } from "../src/constants.ts";
 import { GridRenderer } from "../src/core.ts";
-import { CursorShape, rgba, UnderlineStyle, type RenderFrame } from "../src/frame.ts";
+import {
+  CursorShape,
+  HighlightKind,
+  rgba,
+  UnderlineStyle,
+  type RenderFrame,
+} from "../src/frame.ts";
 import { GLYPH, GLYPH_FLAG_COLOR, RECT, type Plane } from "../src/layout.ts";
 import {
+  BACKGROUND,
   FakeFonts,
   FIXED_FRAMES,
+  highlights,
   makeFrame,
   markDrawn,
   PALETTE,
@@ -221,6 +230,7 @@ describe("building the records of a frame", () => {
   it("builds every frame of the fixed set", () => {
     for (const fixed of FIXED_FRAMES) {
       const { renderer, backend } = setup();
+      renderer.setHighlights(fixed.highlights?.());
       renderer.draw(fixed.build());
       expect(backend.presents.length, fixed.name).toBe(1);
     }
@@ -526,6 +536,133 @@ describe("what reaches the tier", () => {
     renderer.draw(frame);
     expect(rect(backend.planes!.background, 2 * 80)!.color).toBe(TEST_THEME.selectionBackground);
     expect([...backend.last.repaint!].flatMap((dirty, row) => (dirty ? [row] : []))).toEqual([2]);
+  });
+
+  it("lays a search's colour over the cells it found, and the selection over that", () => {
+    const { renderer, backend } = setup();
+    const frame = makeFrame(80, 24);
+    putText(frame, 0, 0, "abcdef", { fg: PALETTE[1]! });
+    putText(frame, 6, 0, "gh", { fg: PALETTE[1]!, bg: PALETTE[4]! });
+    select(frame, 0, 3, 3);
+    renderer.setHighlights(
+      highlights([
+        [0, 1, 3, HighlightKind.Match],
+        [0, 4, 4, HighlightKind.Active],
+        [0, 6, 6, HighlightKind.Match],
+      ]),
+    );
+    renderer.draw(frame);
+    const planes = backend.planes!;
+    // A cell that was not found keeps the default background: no record at all.
+    expect(rect(planes.background, 0)).toBeUndefined();
+    // The found colour is translucent, and is mixed here with what is under it.
+    expect(rect(planes.background, 1)!.color).toBe(blendOver(TEST_THEME.searchMatch, BACKGROUND));
+    expect(rect(planes.background, 1)!.color >>> 24).toBe(255);
+    expect(rect(planes.background, 6)!.color).toBe(blendOver(TEST_THEME.searchMatch, PALETTE[4]!));
+    expect(glyph(planes.glyph, 1)!.color).toBe(PALETTE[1]);
+    expect(rect(planes.background, 3)!.color).toBe(TEST_THEME.selectionBackground);
+    expect(rect(planes.background, 4)!.color).toBe(TEST_THEME.searchActive);
+    expect(glyph(planes.glyph, 4)!.color).toBe(TEST_THEME.searchActiveText);
+    expect(rect(planes.background, 7)!.color).toBe(PALETTE[4]);
+  });
+
+  it("keeps the text colour of the match a search is at when the theme sets none", () => {
+    const theme: TerminalTheme = { ...TEST_THEME };
+    delete theme.searchActiveText;
+    const { renderer, backend } = setup(theme);
+    const frame = makeFrame(80, 24);
+    putText(frame, 0, 0, "ab", { fg: PALETTE[1]! });
+    renderer.setHighlights(highlights([[0, 0, 1, HighlightKind.Active]]));
+    renderer.draw(frame);
+    expect(glyph(backend.planes!.glyph, 0)!.color).toBe(PALETTE[1]);
+  });
+
+  it("highlights both cells of a wide character when a run ends on its first", () => {
+    const { renderer, backend } = setup();
+    const frame = makeFrame(80, 24);
+    putText(frame, 0, 0, "a漢b");
+    renderer.setHighlights(highlights([[0, 0, 1, HighlightKind.Active]]));
+    renderer.draw(frame);
+    const planes = backend.planes!;
+    expect(rect(planes.background, 1)!.color).toBe(TEST_THEME.searchActive);
+    expect(rect(planes.background, 2)!.color).toBe(TEST_THEME.searchActive);
+    expect(rect(planes.background, 3)).toBeUndefined();
+  });
+
+  it("rebuilds only the rows whose highlights changed", () => {
+    const { renderer, backend } = setup();
+    const frame = makeFrame(80, 24);
+    for (let row = 0; row < 6; row++) putText(frame, 0, row, "abcdef");
+    const dirtyRows = () =>
+      [...backend.last.repaint!].flatMap((dirty, row) => (dirty ? [row] : []));
+
+    renderer.setHighlights(
+      highlights([
+        [1, 0, 2, HighlightKind.Match],
+        [3, 0, 2, HighlightKind.Match],
+      ]),
+    );
+    drawn(renderer, frame);
+    backend.clear();
+
+    // The same runs again: nothing to draw.
+    renderer.setHighlights(
+      highlights([
+        [3, 0, 2, HighlightKind.Match],
+        [1, 0, 2, HighlightKind.Match],
+      ]),
+    );
+    renderer.draw(frame);
+    expect(backend.presents.length).toBe(0);
+
+    // One run becomes the one the search is at, one goes, one comes.
+    renderer.setHighlights(
+      highlights([
+        [1, 0, 2, HighlightKind.Active],
+        [4, 1, 1, HighlightKind.Match],
+      ]),
+    );
+    renderer.draw(frame);
+    expect(dirtyRows()).toEqual([1, 3, 4]);
+    expect(rect(backend.planes!.background, 80)!.color).toBe(TEST_THEME.searchActive);
+    expect(rect(backend.planes!.background, 3 * 80)).toBeUndefined();
+    backend.clear();
+
+    renderer.setHighlights(undefined);
+    renderer.draw(frame);
+    expect(dirtyRows()).toEqual([1, 4]);
+    expect(rect(backend.planes!.background, 80)).toBeUndefined();
+    backend.clear();
+    renderer.setHighlights(undefined);
+    renderer.draw(frame);
+    expect(backend.presents.length).toBe(0);
+  });
+
+  it("ignores the part of a highlight that is outside the grid", () => {
+    const { renderer, backend } = setup();
+    const frame = makeFrame(80, 24);
+    renderer.setHighlights(
+      highlights([
+        [-1, 0, 5, HighlightKind.Match],
+        [24, 0, 5, HighlightKind.Match],
+        [2, -3, 1, HighlightKind.Active],
+        [3, 78, 200, HighlightKind.Active],
+      ]),
+    );
+    renderer.draw(frame);
+    const planes = backend.planes!;
+    expect(rect(planes.background, 2 * 80)!.color).toBe(TEST_THEME.searchActive);
+    expect(rect(planes.background, 2 * 80 + 2)).toBeUndefined();
+    expect(rect(planes.background, 3 * 80 + 79)!.color).toBe(TEST_THEME.searchActive);
+    expect(rect(planes.background, 4 * 80)).toBeUndefined();
+  });
+
+  it("lays the highlights out again when the grid changes size", () => {
+    const { renderer, backend } = setup();
+    renderer.setHighlights(highlights([[1, 0, 0, HighlightKind.Active]]));
+    drawn(renderer, makeFrame(80, 24));
+    renderer.draw(makeFrame(40, 12));
+    expect(rect(backend.planes!.background, 40)!.color).toBe(TEST_THEME.searchActive);
   });
 
   it("applies a new size with the next frame and redraws everything", () => {

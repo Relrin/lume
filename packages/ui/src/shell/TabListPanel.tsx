@@ -4,7 +4,8 @@
  *
  * Each row is a tab as the top bar shows one, laid out for a column: pressed to show
  * the tab, dragged up or down to another place, renamed in place, closed by its
- * button or the middle button.
+ * button or the middle button. With the keyboard on a tab, the up and down arrows
+ * move it to the tab's neighbours.
  */
 
 import { useStore } from "zustand";
@@ -35,6 +36,7 @@ export function TabListPanel() {
       <button
         type="button"
         className="control tab-column-new"
+        aria-label="New tab"
         title={`New tab${newHint}`}
         onPointerDown={(event) => event.preventDefault()}
         onClick={() => app.commands.run("lume.tab.new")}

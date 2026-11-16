@@ -17,9 +17,28 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use lume_config::schema::TitleBar;
 use lume_config::{
-    ColorScheme, ConfigError, ConfigStore, Dirs, Platform, Problem, Resolved, WatchEvent, Watcher,
+    ColorScheme, ConfigError, ConfigStore, Dirs, Platform, Problem, Resolved, TokenValue,
+    WatchEvent, Watcher,
 };
+use serde::Serialize;
 use serde_json::{Map, Value, json};
+
+use crate::background;
+
+/// The token that names the picture behind the panes.
+const BACKGROUND_IMAGE: &str = "background.image";
+
+/// One of the themes there are to choose from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ThemeEntry {
+    /// What the settings call it.
+    pub id: String,
+    /// What a person calls it.
+    pub name: String,
+    pub scheme: ColorScheme,
+    /// Whether it comes with the application, not from a file of the user's.
+    pub builtin: bool,
+}
 
 /// Takes what pages are to be told.
 type Tell = Arc<dyn Fn(Value) + Send + Sync>;
@@ -255,6 +274,33 @@ impl ConfigService {
         Ok(())
     }
 
+    /// The themes there are: the ones that come with the application and the user's
+    /// own, in the order of their ids.
+    pub fn themes(&self) -> Vec<ThemeEntry> {
+        self.current()
+            .themes
+            .iter()
+            .map(|theme| ThemeEntry {
+                id: theme.id.clone(),
+                name: theme.name.clone(),
+                scheme: theme.scheme,
+                builtin: theme.file.is_none(),
+            })
+            .collect()
+    }
+
+    /// The file of the picture shown behind the panes, if the theme in use or the
+    /// settings name one.
+    pub fn background_file(&self) -> Option<PathBuf> {
+        let (tokens, _) = self.current().tokens(*lock(&self.scheme));
+        match tokens.get(BACKGROUND_IMAGE)? {
+            TokenValue::Image(Some(written)) => {
+                Some(background::resolve(&self.dirs().config, written))
+            }
+            _ => None,
+        }
+    }
+
     /// The file a page may ask to have opened: the user's `config.toml`, or the file of
     /// the workspace in use.
     pub fn file(&self, which: &str) -> Option<PathBuf> {
@@ -284,6 +330,52 @@ mod tests {
             let _ = told.send(notice);
         });
         (service, notices)
+    }
+
+    #[test]
+    fn the_themes_listed_are_the_built_in_ones_and_the_users_own() {
+        let dir = TempDir::new("themes");
+        let themes = dir.dirs().themes_dir();
+        std::fs::create_dir_all(&themes).unwrap();
+        std::fs::write(
+            themes.join("ember.toml"),
+            "name = \"Ember\"\nscheme = \"dark\"\ninherits = \"lume-dark\"\n",
+        )
+        .unwrap();
+        let service = ConfigService::load(dir.dirs(), None);
+
+        let listed = service.themes();
+        let ids: Vec<&str> = listed.iter().map(|theme| theme.id.as_str()).collect();
+        assert_eq!(ids, ["ember", "lume-dark", "lume-light"]);
+        assert_eq!(listed[0].name, "Ember");
+        assert!(!listed[0].builtin);
+        assert!(listed[1].builtin);
+        assert_eq!(listed[2].scheme, ColorScheme::Light);
+        assert_eq!(
+            serde_json::to_value(&listed[2]).unwrap(),
+            json!({ "id": "lume-light", "name": listed[2].name, "scheme": "light", "builtin": true })
+        );
+    }
+
+    #[test]
+    fn the_picture_behind_the_panes_is_the_file_the_settings_name() {
+        let dir = TempDir::new("background-file");
+        let service = ConfigService::load(dir.dirs(), None);
+        assert_eq!(service.background_file(), None);
+
+        std::fs::create_dir_all(&dir.dirs().config).unwrap();
+        service
+            .set("appearance.background-image", &json!("wall.png"))
+            .unwrap();
+        assert_eq!(
+            service.background_file(),
+            Some(dir.dirs().config.join("wall.png"))
+        );
+        // No picture again once the setting is emptied.
+        service
+            .set("appearance.background-image", &json!(""))
+            .unwrap();
+        assert_eq!(service.background_file(), None);
     }
 
     #[test]

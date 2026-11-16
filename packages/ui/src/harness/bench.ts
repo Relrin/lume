@@ -14,7 +14,7 @@
 import { fullRedrawFrame } from "@lume/renderer/testing";
 import type { Vt } from "@lume/vt";
 
-import { SCROLLBACK_MAX_BYTES, SCROLLBACK_MAX_LINES } from "../limits.ts";
+import { SCROLLBACK_DEFAULT_LINES, SCROLLBACK_MAX_BYTES } from "../limits.ts";
 import { DEFAULT_APPEARANCE, factsPalette } from "../theme.ts";
 import { TauriCarrier } from "../transport/carrier.ts";
 import { TransportClient, type Attachment } from "../transport/client.ts";
@@ -313,7 +313,7 @@ async function drawUnderFlood(
   const renderer = pane.renderer;
   if (!renderer) throw new Error(pane.error ?? "no renderer tier is available");
   const { term, state } = benchTerminal(vt, BENCH_COLS, BENCH_ROWS, {
-    lines: SCROLLBACK_MAX_LINES,
+    lines: SCROLLBACK_DEFAULT_LINES,
     bytes: SCROLLBACK_MAX_BYTES,
   });
   fit(pane, state.update(), window.devicePixelRatio);
@@ -475,7 +475,7 @@ export async function runBench(vt: Vt, progress: (text: string) => void): Promis
     );
     intoTerminal = await measure("flooding a terminal", async () => {
       const { term, state } = benchTerminal(vt, BENCH_COLS, BENCH_ROWS, {
-        lines: SCROLLBACK_MAX_LINES,
+        lines: SCROLLBACK_DEFAULT_LINES,
         bytes: SCROLLBACK_MAX_BYTES,
       });
       try {

@@ -12,10 +12,13 @@ import {
   CursorShape,
   DirtyState,
   GLYPH_CLUSTER_TAG,
+  HIGHLIGHT_STRIDE,
+  HighlightKind,
   NO_SELECTION,
   rgba,
   UNDERLINE_SHIFT,
   UnderlineStyle,
+  type Highlights,
   type RenderFrame,
 } from "../frame.ts";
 
@@ -164,6 +167,18 @@ export function select(frame: RenderFrame, row: number, start: number, end: numb
   frame.selectionEnd[row] = end;
 }
 
+/**
+ * A list of highlighted runs, each given as its row, first column, last column
+ * (inclusive) and `HighlightKind`.
+ */
+export function highlights(
+  runs: readonly (readonly [number, number, number, number])[],
+): Highlights {
+  const data = new Int32Array(runs.length * HIGHLIGHT_STRIDE);
+  runs.forEach((run, index) => data.set(run, index * HIGHLIGHT_STRIDE));
+  return { data, count: runs.length };
+}
+
 /** Show the cursor at a cell in a `CursorShape`. */
 export function setCursor(frame: RenderFrame, x: number, y: number, shape: number): void {
   Object.assign(frame.cursor, { visible: true, x, y, shape });
@@ -295,6 +310,32 @@ function selection(): MutableFrame {
   return frame;
 }
 
+/** Text in which the word "match" was searched for, on plain and coloured cells. */
+function searched(): MutableFrame {
+  const frame = makeFrame(COLS, ROWS);
+  putText(frame, 0, 0, "the first match is on plain text, and a match follows it");
+  putText(frame, 0, 1, "a match on colour", { bg: PALETTE[4]!, fg: PALETTE[15]! });
+  putText(frame, 0, 2, "a match in a selection", { fg: PALETTE[2]! });
+  putText(frame, 10, 3, "one that wraps at the end of this row and goes on to the next one: mat");
+  putText(frame, 0, 4, "ch, underlined", { underline: UnderlineStyle.Single });
+  putText(frame, 0, 6, "no highlight on this row at all");
+  select(frame, 2, 0, 9);
+  return frame;
+}
+
+/** The runs of "match" in `searched`, with the one in row `active` being the one a search is at. */
+function searchedRuns(active: number): Highlights {
+  const kind = (row: number) => (row === active ? HighlightKind.Active : HighlightKind.Match);
+  return highlights([
+    [0, 10, 14, kind(0)],
+    [0, 40, 44, HighlightKind.Match],
+    [1, 2, 6, kind(1)],
+    [2, 2, 6, kind(2)],
+    [3, 77, 79, kind(3)],
+    [4, 0, 1, kind(3)],
+  ]);
+}
+
 /**
  * A full screen in which every cell holds a glyph that depends on `variant`, so drawing
  * two variants in turn changes every cell. Colours change every few cells, as they do
@@ -323,6 +364,8 @@ export function fullRedrawFrame(variant: number, cols = 200, rows = 60): Mutable
 export interface FixedFrame {
   name: string;
   build(): MutableFrame;
+  /** The runs to highlight when drawing it, if it has any. */
+  highlights?(): Highlights;
 }
 
 /** The fixed frame set. */
@@ -336,5 +379,7 @@ export const FIXED_FRAMES: readonly FixedFrame[] = [
   { name: "cursor-underline", build: () => cursorFrame(CursorShape.Underline) },
   { name: "cursor-hollow", build: () => cursorFrame(CursorShape.HollowBlock) },
   { name: "selection", build: selection },
+  { name: "search-matches", build: searched, highlights: () => searchedRuns(-1) },
+  { name: "search-active", build: searched, highlights: () => searchedRuns(3) },
   { name: "full-200x60", build: () => fullRedrawFrame(0) },
 ];

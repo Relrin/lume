@@ -7,6 +7,7 @@
 // read, so they are the one set of numbers written out here.
 export const SUCCESS = 0;
 export const OUT_OF_MEMORY = -1;
+export const INVALID_VALUE = -2;
 export const OUT_OF_SPACE = -3;
 export const NO_VALUE = -4;
 export const UNSUPPORTED = -8;

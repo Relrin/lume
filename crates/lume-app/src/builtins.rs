@@ -22,6 +22,7 @@ use crate::error::CommandError;
 use crate::opener;
 use crate::panes::{Panes, equal_ratios};
 use crate::registry::{CommandSpec, Owner, Registry, Runs};
+use crate::services::Asker;
 use crate::workspaces::Find;
 
 /// One row of the table of commands: id, title, category, where it runs, and whether
@@ -248,11 +249,47 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.settings.open",
+        "Settings",
+        "Application",
+        Runs::Core,
+        true,
+    ),
+    (
         "lume.palette.open",
         "Command Palette",
         "View",
         Runs::Page,
         false,
+    ),
+    (
+        "lume.search.open",
+        "Find in Terminal",
+        "Search",
+        Runs::Page,
+        true,
+    ),
+    ("lume.search.next", "Find Next", "Search", Runs::Page, true),
+    (
+        "lume.search.previous",
+        "Find Previous",
+        "Search",
+        Runs::Page,
+        true,
+    ),
+    (
+        "lume.search.close",
+        "Close Find",
+        "Search",
+        Runs::Page,
+        true,
+    ),
+    (
+        "lume.window.focus-bar",
+        "Move Keyboard to the Window's Bar",
+        "Window",
+        Runs::Page,
+        true,
     ),
     ("lume.terminal.copy", "Copy", "Terminal", Runs::Page, true),
     ("lume.terminal.paste", "Paste", "Terminal", Runs::Page, true),
@@ -393,6 +430,23 @@ fn arguments(id: &str) -> Option<Value> {
             json!({ "name": { "type": "string", "description": "The workspace's new name" } }),
             &["name"],
         )),
+        "lume.search.open" => Some(object(
+            json!({
+                "query": { "type": "string", "description": "The text to look for" },
+                "pane": pane,
+            }),
+            &[],
+        )),
+        "lume.search.next" | "lume.search.previous" | "lume.search.close" => {
+            Some(object(json!({ "pane": pane }), &[]))
+        }
+        "lume.settings.open" => Some(object(
+            json!({ "section": {
+                "type": "string",
+                "description": "The page of the settings to show",
+            } }),
+            &[],
+        )),
         "lume.workspace.set-root" => Some(object(
             json!({ "root": {
                 "type": "string",
@@ -432,6 +486,8 @@ pub struct Context<'a> {
     pub shell: &'a dyn Shell,
     /// The window the command was run in.
     pub window: WindowId,
+    /// Who asked for the command.
+    pub asker: Asker,
 }
 
 /// One of a command's arguments, if it was given.
@@ -525,6 +581,13 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
                 .and_then(|file| url::Url::from_file_path(file).ok())
                 .ok_or_else(|| CommandError::not_found("the application keeps no log"))?;
             return open_link(shown.into()).await;
+        }
+        "lume.settings.open" => {
+            let section: Option<String> = argument(args, "section")?;
+            context
+                .shell
+                .open_settings(section.as_deref(), Some(window));
+            return Ok(());
         }
         "lume.app.report-issue" => return open_link(format!("{REPOSITORY}/issues/new")).await,
         "lume.app.whats-new" => return open_link(format!("{REPOSITORY}/releases")).await,
@@ -658,6 +721,13 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
             bounds: None,
         },
         "lume.window.close" => {
+            // Asked for in the window itself, it is the window's own close control by
+            // another name, and the user may be asked first. Asked for from outside,
+            // nobody is there to answer.
+            if context.asker == Asker::Page {
+                context.shell.ask_close(window);
+                return Ok(());
+            }
             // The last window closes the application, which keeps the layout as it
             // is; any other takes its tabs with it.
             if panes.workspace().windows.len() <= 1 {
@@ -729,23 +799,42 @@ mod tests {
     }
 
     #[test]
-    fn every_default_key_runs_a_command_there_is_or_one_still_to_come() {
-        // The keys bound out of the box name these commands, which are not made yet.
-        const TO_COME: [&str; 2] = ["lume.search.open", "lume.settings.open"];
+    fn every_default_key_runs_a_command_there_is() {
         let registry = registry();
         for platform in lume_config::Platform::ALL {
             for binding in lume_config::default_bindings(platform) {
-                let known = registry.get(&binding.command).is_some()
-                    || TO_COME.contains(&binding.command.as_str());
-                assert!(known, "{} on {platform:?}", binding.command);
+                assert!(
+                    registry.get(&binding.command).is_some(),
+                    "{} on {platform:?}",
+                    binding.command
+                );
             }
         }
-        for id in TO_COME {
-            assert!(
-                registry.get(id).is_none(),
-                "{id} is made now: take it off the list"
-            );
+    }
+
+    #[test]
+    fn searching_runs_in_the_page_and_the_settings_open_in_the_application() {
+        let registry = registry();
+        for id in [
+            "lume.search.open",
+            "lume.search.next",
+            "lume.search.previous",
+            "lume.search.close",
+            "lume.window.focus-bar",
+        ] {
+            let spec = registry.get(id).unwrap();
+            assert_eq!(spec.runs, Runs::Page, "{id}");
+            assert!(spec.palette, "{id}");
         }
+        let open = registry.get("lume.search.open").unwrap().args.unwrap();
+        assert_eq!(open["properties"]["query"]["type"], "string");
+        assert_eq!(open["required"], json!([]));
+        let settings = registry.get("lume.settings.open").unwrap();
+        assert_eq!(settings.runs, Runs::Core);
+        assert_eq!(
+            settings.args.unwrap()["properties"]["section"]["type"],
+            "string"
+        );
     }
 
     #[test]

@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import { Vt, type ClipboardLocation } from "@lume/vt";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { OSC52_WRITE_MAX_BYTES, SCROLLBACK_MAX_LINES } from "../src/limits.ts";
+import {
+  OSC52_WRITE_MAX_BYTES,
+  SCROLLBACK_DEFAULT_LINES,
+  SCROLLBACK_MAX_LINES,
+} from "../src/limits.ts";
 import { TerminalSession, type SessionHooks } from "../src/terminal/session.ts";
 import { DEFAULT_APPEARANCE, terminalColors } from "../src/theme.ts";
 import type { CellPx, ClientFacts, ExitStatus, Responder } from "../src/transport/types.ts";
@@ -209,9 +213,33 @@ describe("a terminal session", () => {
     for (let i = 0; i < 25; i++) attachment.data(chunk);
     const kept = session.terminal.scrollbar().total;
     // The limit is applied a page of memory at a time.
-    expect(kept).toBeGreaterThan(SCROLLBACK_MAX_LINES * 0.9);
-    expect(kept).toBeLessThan(SCROLLBACK_MAX_LINES * 1.2);
+    expect(kept).toBeGreaterThan(SCROLLBACK_DEFAULT_LINES * 0.9);
+    expect(kept).toBeLessThan(SCROLLBACK_DEFAULT_LINES * 1.2);
     session.dispose();
+  });
+
+  it("keeps as many lines as it is asked to, and never more than a terminal may", () => {
+    const kept = (asked: number, written: number): number => {
+      const attachment = new FakeAttachment("client");
+      const session = new TerminalSession(vt, attachment, {
+        colors: terminalColors(DEFAULT_APPEARANCE),
+        scheme: "dark",
+        cellPx: CELL,
+        scrollbackLines: asked,
+      });
+      session.start();
+      const chunk = "x\r\n".repeat(1000);
+      for (let lines = 0; lines < written; lines += 1000) attachment.data(chunk);
+      const total = session.terminal.scrollbar().total;
+      session.dispose();
+      return total;
+    };
+    const few = kept(3000, 12_000);
+    expect(few).toBeGreaterThan(3000 * 0.9);
+    expect(few).toBeLessThan(3000 * 1.5);
+    const most = kept(SCROLLBACK_MAX_LINES * 10, SCROLLBACK_MAX_LINES * 1.5);
+    expect(most).toBeGreaterThan(SCROLLBACK_MAX_LINES * 0.9);
+    expect(most).toBeLessThan(SCROLLBACK_MAX_LINES * 1.2);
   });
 
   it("replays output it is given to start from", () => {

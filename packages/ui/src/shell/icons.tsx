@@ -188,6 +188,26 @@ export function SearchIcon({ size = 15 }: { size?: number }) {
   );
 }
 
+/** A dot with rays about it: how the application as a whole behaves. */
+export function GeneralIcon({ size = 15 }: { size?: number }) {
+  return (
+    <Icon size={size} weight={1.8}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1" />
+    </Icon>
+  );
+}
+
+/** A disc, one half of it filled: how things look. */
+export function AppearanceIcon({ size = 15 }: { size?: number }) {
+  return (
+    <Icon size={size} weight={1.8}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" />
+    </Icon>
+  );
+}
+
 /** A line that forks: a branch of a repository. */
 export function BranchIcon({ size = 13 }: { size?: number }) {
   return (

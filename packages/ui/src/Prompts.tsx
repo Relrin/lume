@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
+import { closingText } from "./shell/closing.ts";
 import type { Prompt, PromptStore } from "./terminal/prompts.ts";
 
 export function Prompts({ store }: { store: PromptStore }) {
@@ -49,6 +50,13 @@ function describe(prompt: Prompt): Described {
         title: "Open this location?",
         body: <pre className="prompt-preview">{prompt.target}</pre>,
         proceed: "Open",
+        dismiss: "Cancel",
+      };
+    case "close":
+      return {
+        title: `Close this ${prompt.closing.what}?`,
+        body: <p>{closingText(prompt.closing)}</p>,
+        proceed: "Close",
         dismiss: "Cancel",
       };
     case "notice":

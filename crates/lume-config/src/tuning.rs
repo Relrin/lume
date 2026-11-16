@@ -13,12 +13,31 @@ pub const THEME_INHERIT_MAX: usize = 4;
 /// How many edits a misspelt key may be away from a known one to be suggested.
 pub const SUGGEST_MAX_DISTANCE: usize = 2;
 
-/// The most lines of scrollback a terminal may be asked to keep.
-pub const SCROLLBACK_LINES_MAX: u32 = 200_000;
+/// The most lines of scrollback a terminal may be asked to keep. Every terminal of a
+/// window keeps its lines in one memory that only grows, so the limit is what a window
+/// full of terminals can hold.
+pub const SCROLLBACK_LINES_MAX: u32 = 100_000;
 
 /// The smallest and largest font size, in CSS pixels.
 pub const FONT_SIZE_MIN: f64 = 6.0;
 pub const FONT_SIZE_MAX: f64 = 72.0;
+
+/// What the settings window offers for a setting that is a size or a share: the first
+/// value, the last, and the step between them. The file takes any value the setting
+/// allows; these are the ones there is a choice for.
+pub const SETTINGS_TERMINAL_TEXT_SIZES: (f64, f64, f64) = (10.0, 24.0, 1.0);
+pub const SETTINGS_INTERFACE_TEXT_SIZES: (f64, f64, f64) = (11.0, 16.0, 1.0);
+pub const SETTINGS_LINE_HEIGHTS: (f64, f64, f64) = (1.0, 1.6, 0.1);
+pub const SETTINGS_CORNER_RADII: (f64, f64, f64) = (0.0, 18.0, 2.0);
+pub const SETTINGS_GAPS: (f64, f64, f64) = (0.0, 16.0, 2.0);
+pub const SETTINGS_PADDINGS: (f64, f64, f64) = (0.0, 16.0, 2.0);
+pub const SETTINGS_DIMMINGS: (f64, f64, f64) = (0.0, 0.5, 0.1);
+pub const SETTINGS_BLURS: (f64, f64, f64) = (0.0, 40.0, 4.0);
+pub const SETTINGS_OPACITIES: (f64, f64, f64) = (0.1, 1.0, 0.1);
+
+/// The counts of scrollback lines the settings window offers.
+pub const SETTINGS_SCROLLBACK_LINES: [u32; 5] =
+    [1_000, 5_000, 10_000, 50_000, SCROLLBACK_LINES_MAX];
 
 /// The longest name a workspace may have, in characters.
 pub const WORKSPACE_NAME_MAX: usize = 64;

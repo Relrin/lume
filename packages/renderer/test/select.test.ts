@@ -7,8 +7,10 @@ import {
   type Surface,
   type TierFactory,
 } from "../src/select.ts";
+import { HighlightKind } from "../src/frame.ts";
 import {
   FakeFonts,
+  highlights,
   makeFrame,
   markDrawn,
   putText,
@@ -199,6 +201,21 @@ describe("losing a tier", () => {
     renderer.draw(f);
     // One rectangle: the run. The cursor, which would add four, stays hidden.
     expect(made.webgl2[0]!.last.overlayRects).toBe(1);
+  });
+
+  it("carries the highlighted runs over to the next tier", () => {
+    const { renderer, made } = started();
+    const f = frame();
+    const runs = highlights([[0, 0, 0, HighlightKind.Active]]);
+    renderer.setHighlights(runs);
+    // The caller refills its list; what was given is what is kept.
+    runs.count = 0;
+    renderer.draw(f);
+    made.webgpu[0]!.lose();
+    renderer.draw(f);
+    const background = made.webgl2[0]!.planes!.background;
+    const color = new DataView(background.bytes.buffer).getUint32(8, true);
+    expect(color).toBe(TEST_THEME.searchActive);
   });
 
   it("falls through a tier that cannot be started", () => {

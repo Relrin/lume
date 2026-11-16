@@ -5,9 +5,10 @@
 //! every registered command would be allowed by default.
 
 /// Every command the web UI may be granted. The capability files grant a terminal
-/// window its commands and the reporting window its two; the three that start, end and
-/// list sessions directly, and the last three, are granted only when the application
-/// is started to run a test suite.
+/// window its commands, the settings window the few about the configuration and its
+/// own window, and the reporting window its two; the three that start, end and list
+/// sessions directly, and the last three, are granted only when the application is
+/// started to run a test suite.
 const COMMANDS: &[&str] = &[
     "webview_info",
     "probe_done",
@@ -31,6 +32,10 @@ const COMMANDS: &[&str] = &[
     "config_set",
     "config_unset",
     "config_open",
+    "config_schema",
+    "themes_list",
+    "shells_list",
+    "background_image",
     "window_drag",
     "window_control",
     "window_state",

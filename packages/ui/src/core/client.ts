@@ -19,6 +19,8 @@ import type {
   Notice,
   PaneStart,
   SessionsStarted,
+  ShellEntry,
+  ThemeEntry,
   WindowAction,
   WindowState,
   WorkspaceList,
@@ -32,6 +34,17 @@ export interface CoreEvents {
   request(message: unknown): void;
   /** The core can no longer be reached: this page's carrier was replaced, or broke. */
   failure(error: Error): void;
+}
+
+/**
+ * Bytes as the core hands them over: a buffer where the webview can fetch one, a list
+ * of numbers where it cannot, and nothing at all for no bytes.
+ */
+function bytesOf(raw: unknown): Uint8Array {
+  if (raw instanceof Uint8Array) return raw;
+  if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
+  if (Array.isArray(raw)) return Uint8Array.from(raw as number[]);
+  return new Uint8Array(0);
 }
 
 function isNotice(message: unknown): message is Extract<ControlMessage, { notify: Notice }> {
@@ -96,6 +109,34 @@ export class CoreClient {
     return this.transport.command("config_open", { file });
   }
 
+  /** What the settings are and may be: a JSON Schema of the configuration. */
+  configSchema(): Promise<unknown> {
+    return this.transport.command("config_schema");
+  }
+
+  /** The themes there are to choose from. */
+  themesList(): Promise<ThemeEntry[]> {
+    return this.transport.command("themes_list");
+  }
+
+  /** The shells found on this machine. */
+  shellsList(): Promise<ShellEntry[]> {
+    return this.transport.command("shells_list");
+  }
+
+  /** The fixed-width fonts installed on this machine. */
+  fontFamilies(): Promise<string[]> {
+    return this.transport.command("font_families");
+  }
+
+  /**
+   * The picture the configuration puts behind the panes, as the bytes of its file.
+   * Empty when there is none.
+   */
+  async backgroundImage(): Promise<Uint8Array> {
+    return bytesOf(await this.transport.command<unknown>("background_image"));
+  }
+
   /** Every command there is. */
   commandsList(): Promise<CommandSpec[]> {
     return this.transport.command("commands_list");
@@ -111,9 +152,15 @@ export class CoreClient {
     return this.transport.command("window_drag");
   }
 
-  /** Minimises or closes this page's window, or maximises it or puts it back. */
-  windowControl(action: WindowAction): Promise<void> {
-    return this.transport.command("window_control", { action });
+  /**
+   * Minimises or closes this page's window, or maximises it or puts it back.
+   * `confirmed` says the user has already agreed to a close that asks first.
+   */
+  windowControl(action: WindowAction, confirmed = false): Promise<void> {
+    return this.transport.command(
+      "window_control",
+      confirmed ? { action, confirmed: true } : { action },
+    );
   }
 
   /** What this page's window is doing on the desktop. */

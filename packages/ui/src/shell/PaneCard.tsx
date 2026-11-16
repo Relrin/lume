@@ -4,7 +4,8 @@
  * The card renders a handful of elements once and hands them over: its own element to
  * the controller that places the cards, and the terminal's elements to the pane's view,
  * which works on them directly from then on. Nothing a terminal does makes the card
- * render again, and neither does moving or resizing it.
+ * render again, and neither does moving or resizing it. The bar a pane is searched
+ * from lies over the top of its terminal and is rendered when it comes and goes.
  *
  * A card is moved by its header. A card in a tab is dragged to another place among the
  * tab's cards; a card that floats over the tabs is dragged wherever it is wanted, and
@@ -17,6 +18,7 @@ import { useStore } from "zustand";
 import { FLOAT_EDGES } from "../layout/floats.ts";
 import { selectFocus } from "../layout/selectors.ts";
 import type { PaneId } from "../layout/types.ts";
+import { SearchBar } from "../search/SearchBar.tsx";
 import { StatusSlotItems } from "../status/StatusItem.tsx";
 import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
@@ -259,13 +261,16 @@ export function PaneCard({
       data-focused={focused}
       data-floating={floating}
       aria-label={`Pane ${pane}`}
-      onPointerDown={() => {
-        // A press anywhere on a card gives its terminal the keyboard.
+      onPointerDown={(event) => {
+        // A press anywhere on a card gives its terminal the keyboard, except on the
+        // search bar, which keeps it.
+        if ((event.target as Element).closest("[data-search-bar]")) return;
         const view = app.views.get(pane);
         if (view && (!focused || !view.hasFocus)) view.focus();
       }}
     >
       {(header || floating) && <PaneHeader pane={pane} focused={focused} floating={floating} />}
+      <SearchBar pane={pane} />
       <div className="terminal" ref={root}>
         <div className="terminal-surface" ref={surface} />
         <textarea

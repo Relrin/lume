@@ -27,6 +27,7 @@ import { computeRects, unitRectToPx } from "../layout/geometry.ts";
 import { panesOf, selectFocus, selectWindowPanes } from "../layout/selectors.ts";
 import type { LayoutState, LayoutStore } from "../layout/store.ts";
 import type { PaneContent, PaneId } from "../layout/types.ts";
+import { SCROLLBACK_DEFAULT_LINES } from "../limits.ts";
 import { rendererTheme, type Appearance } from "../theme.ts";
 import { CommandError, type TermSize } from "../transport/types.ts";
 import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX } from "../tuning.ts";
@@ -39,7 +40,10 @@ import {
 import type { PaneTitles } from "./titles.ts";
 
 /** What every view of the window shares. */
-export type SharedServices = Omit<ViewServices, "shortcut" | "title" | "focused" | "restart">;
+export type SharedServices = Omit<
+  ViewServices,
+  "shortcut" | "title" | "focused" | "restart" | "searched"
+>;
 
 /** What the views need from their surroundings. */
 export interface ViewsServices {
@@ -54,6 +58,10 @@ export interface ViewsServices {
   appearance(): Appearance;
   /** Offers a key pressed in a pane's terminal to the shell's own bindings. */
   shortcut(pane: PaneId, event: KeyboardEvent, alternateScreen: boolean): boolean;
+  /** Told that a pane's terminal has taken the keyboard. */
+  keyboard(pane: PaneId): void;
+  /** Told that the search of a pane's terminal has caught up with the terminal. */
+  searched(pane: PaneId): void;
 }
 
 /** One pane's view and what is known of its session. */
@@ -97,6 +105,11 @@ export class PaneViews {
   /** The view of a pane, if the pane is a terminal of this window. */
   get(pane: PaneId): TerminalView | undefined {
     return this.#entries.get(pane)?.view;
+  }
+
+  /** The panes that have a view. */
+  panes(): ReadonlySet<PaneId> {
+    return new Set(this.#entries.keys());
   }
 
   /** The pane that has the keyboard, and its view. */
@@ -159,7 +172,7 @@ export class PaneViews {
         style: terminal?.["cursor-style"] ?? "block",
         blink: terminal?.["cursor-blink"] ?? true,
       },
-      scrollbackLines: terminal?.["scrollback-lines"] ?? 10_000,
+      scrollbackLines: terminal?.["scrollback-lines"] ?? SCROLLBACK_DEFAULT_LINES,
       zoomPx: this.#zoomPx,
     };
   }
@@ -254,6 +267,7 @@ export class PaneViews {
         title: (title) => titles.set(pane, title),
         focused: () => this.#tookFocus(pane),
         restart: () => this.restart(pane),
+        searched: () => this.#services.searched(pane),
       },
       this.#settings(),
     );
@@ -327,6 +341,7 @@ export class PaneViews {
 
   #tookFocus(pane: PaneId): void {
     const { layout, client } = this.#services;
+    this.#services.keyboard(pane);
     if (selectFocus(layout.getState()) === pane) return;
     client.layoutApply({ type: "focus", target: { type: "pane", pane } }).catch(() => undefined);
   }

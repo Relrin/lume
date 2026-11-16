@@ -3,7 +3,7 @@
  */
 
 import type { GlyphAtlas } from "./atlas/atlas.ts";
-import type { RenderFrame } from "./frame.ts";
+import type { Highlights, RenderFrame } from "./frame.ts";
 import type { PlaneName, Planes } from "./layout.ts";
 
 /** A way of drawing: the best one a webview supports is used. */
@@ -41,6 +41,12 @@ export interface TerminalTheme {
   selectionBackground: number;
   /** Text inside the selection. Without it selected text keeps its colour. */
   selectionForeground?: number;
+  /** Behind text a search found. It may be translucent: the cell's own colour shows through. */
+  searchMatch: number;
+  /** Behind the match a search is at. */
+  searchActive: number;
+  /** Text of that match. Without it the text keeps its colour. */
+  searchActiveText?: number;
   /** Space between the edge of the surface and the grid, in CSS pixels. */
   padding: number;
 }
@@ -100,6 +106,12 @@ export interface CellRenderer {
    * run's text colour: the link the pointer is over. Replaces the runs set before.
    */
   setUnderlines(ranges: readonly UnderlineRange[]): void;
+  /**
+   * Highlight these runs of cells: what a search found. Replaces the runs set before;
+   * `undefined` or an empty list removes them. The list is copied, so the caller may
+   * refill it. A selection is drawn over a highlight.
+   */
+  setHighlights(highlights: Highlights | undefined): void;
   /** The grid that fits the surface at its current size. */
   gridSize(): { cols: number; rows: number };
   /** Draw a frame. Rows the frame does not flag as changed are not rebuilt. */

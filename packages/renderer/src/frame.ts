@@ -67,6 +67,27 @@ export const GLYPH_CLUSTER_TAG = 0x8000_0000;
 /** A `selectionStart` entry for a row with no selected cells. */
 export const NO_SELECTION = -1;
 
+/** What a highlighted run of cells is. */
+export const HighlightKind = {
+  /** Text a search found. */
+  Match: 1,
+  /** The match a search is at. */
+  Active: 2,
+} as const;
+
+/** How many numbers of `Highlights.data` describe one run. */
+export const HIGHLIGHT_STRIDE = 4;
+
+/**
+ * Runs of cells to highlight, in viewport rows and columns. `data` holds `count` runs of
+ * `HIGHLIGHT_STRIDE` numbers each: the row, the first column, the last column
+ * (inclusive) and a `HighlightKind`. One object is refilled, not made anew each time.
+ */
+export interface Highlights {
+  data: Int32Array;
+  count: number;
+}
+
 /** The cursor as it should be drawn. */
 export interface FrameCursor {
   /** Whether to draw it at all: shown by the program and inside the viewport. */

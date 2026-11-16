@@ -12,6 +12,7 @@ import {
   DEFAULT_SCHEME,
   DEFAULT_TOKENS,
   terminalAppearance,
+  type Rgba,
   type TerminalAppearance,
 } from "@lume/tokens";
 import type { Rgb, TerminalColors } from "@lume/vt";
@@ -65,12 +66,28 @@ export function factsPalette(appearance: Appearance): Palette {
   };
 }
 
+/** How bright a colour looks, from 0 for black to 1 for white. */
+function luminance(color: Rgb): number {
+  const linear = (channel: number) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b);
+}
+
+/** How well two colours can be told apart, from 1 for the same colour to 21. */
+export function contrast(a: Rgb, b: Rgb): number {
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (light + 0.05) / (dark + 0.05);
+}
+
 /**
  * What the renderer draws with. `fontSizePx` is the size in use, which is the look's
  * own unless the window's text has been made larger or smaller.
  */
 export function rendererTheme(appearance: Appearance, fontSizePx: number): TerminalTheme {
   const pack = (color: Rgb) => rgba(color.r, color.g, color.b);
+  const packAlpha = (color: Rgba) => rgba(color.r, color.g, color.b, color.a);
   return {
     font: {
       family: appearance.fontFamily,
@@ -83,6 +100,14 @@ export function rendererTheme(appearance: Appearance, fontSizePx: number): Termi
     cursorText: pack(appearance.cursorText),
     selectionBackground: pack(appearance.selectionBackground),
     selectionForeground: pack(appearance.selectionForeground),
+    searchMatch: packAlpha(appearance.searchMatch),
+    searchActive: packAlpha(appearance.searchActive),
+    searchActiveText: pack(
+      contrast(appearance.foreground, appearance.searchActive) >=
+        contrast(appearance.background, appearance.searchActive)
+        ? appearance.foreground
+        : appearance.background,
+    ),
     padding: appearance.padding,
   };
 }

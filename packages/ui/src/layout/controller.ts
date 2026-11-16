@@ -10,6 +10,9 @@
  * is told a few times a second and once more when the pointer lets go, and what the
  * core then says the ratios are is what holds. A floating pane being moved or resized
  * is followed the same way, with a rectangle of its own.
+ *
+ * A divider that has the keyboard is moved by the arrow keys in the same way, a step
+ * at a time, and Enter gives the panes on either side of it the same share.
  */
 
 import type { Tokens } from "@lume/tokens";
@@ -22,6 +25,7 @@ import {
   FLOAT_INTENT_INTERVAL_MS,
   FLOAT_MIN_PX,
   PANE_MIN_PX,
+  SEPARATOR_KEY_STEP_PX,
 } from "../tuning.ts";
 import { shapeOf, type CardChrome } from "./estimate.ts";
 import { dragFloat, type FloatGrip } from "./floats.ts";
@@ -124,6 +128,8 @@ export class TabAreaController {
   readonly #dividers = new Map<string, HTMLElement>();
   /** What was last written to each element, so nothing is written twice. */
   readonly #written = new WeakMap<HTMLElement, string>();
+  /** What each divider was last said to stand at, for the same reason. */
+  readonly #valued = new WeakMap<HTMLElement, string>();
   readonly #boxListeners = new Set<() => void>();
 
   #container: HTMLElement | undefined;
@@ -252,11 +258,13 @@ export class TabAreaController {
     const move = (event: PointerEvent) => this.#onPointerMove(event);
     const up = (event: PointerEvent) => this.#onPointerUp(event);
     const equalise = () => this.equalise(split);
+    const pressed = (event: KeyboardEvent) => this.#onKey(split, index, event);
     element.addEventListener("pointerdown", down);
     element.addEventListener("pointermove", move);
     element.addEventListener("pointerup", up);
     element.addEventListener("pointercancel", up);
     element.addEventListener("dblclick", equalise);
+    element.addEventListener("keydown", pressed);
     this.layout();
     return () => {
       element.removeEventListener("pointerdown", down);
@@ -264,6 +272,7 @@ export class TabAreaController {
       element.removeEventListener("pointerup", up);
       element.removeEventListener("pointercancel", up);
       element.removeEventListener("dblclick", equalise);
+      element.removeEventListener("keydown", pressed);
       if (this.#dividers.get(key) === element) this.#dividers.delete(key);
     };
   }
@@ -295,8 +304,28 @@ export class TabAreaController {
     }
     for (const divider of this.#rects.dividers) {
       const element = this.#dividers.get(dividerKey(divider.split, divider.index));
-      if (element) this.#place(element, divider.rect);
+      if (!element) continue;
+      this.#place(element, divider.rect);
+      this.#value(element, divider);
     }
+  }
+
+  /**
+   * Says where a divider stands, for whoever cannot see it: how much of the two panes
+   * it lies between the first has, in hundredths, and how little either may have.
+   */
+  #value(element: HTMLElement, divider: Divider): void {
+    const both = divider.beforePx + divider.afterPx;
+    if (!(both > 0)) return;
+    const min = divider.axis === "row" ? PANE_MIN_PX.width : PANE_MIN_PX.height;
+    const least = Math.min(50, Math.round((100 * min) / both));
+    const now = Math.round((100 * divider.beforePx) / both);
+    const valued = `${now},${least}`;
+    if (this.#valued.get(element) === valued) return;
+    this.#valued.set(element, valued);
+    element.setAttribute("aria-valuenow", String(now));
+    element.setAttribute("aria-valuemin", String(least));
+    element.setAttribute("aria-valuemax", String(100 - least));
   }
 
   /**
@@ -453,6 +482,60 @@ export class TabAreaController {
     // A refusal while dragging is passed over: the next position is told anyway.
     sent.catch(() => undefined);
     return sent;
+  }
+
+  // Moving a divider with the keyboard.
+
+  #onKey(split: SplitId, index: number, event: KeyboardEvent): void {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const divider = this.#rects.dividers.find(
+      (candidate) => candidate.split === split && candidate.index === index,
+    );
+    if (!divider) return;
+    const back = divider.axis === "row" ? "ArrowLeft" : "ArrowUp";
+    const forward = divider.axis === "row" ? "ArrowRight" : "ArrowDown";
+    if (event.key === back) this.nudge(split, index, -SEPARATOR_KEY_STEP_PX);
+    else if (event.key === forward) this.nudge(split, index, SEPARATOR_KEY_STEP_PX);
+    else if (event.key === "Enter") this.equalise(split);
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  /**
+   * Moves a divider by `deltaPx` along its split's direction, as a short drag would:
+   * the panes follow at once, and the core is told where the divider now stands.
+   */
+  nudge(split: SplitId, index: number, deltaPx: number): void {
+    if (this.#drag) return;
+    const divider = this.#rects.dividers.find(
+      (candidate) => candidate.split === split && candidate.index === index,
+    );
+    // A divider moved again before the layout caught up goes on from where it is.
+    const held =
+      this.#override?.split === split
+        ? this.#override.ratios
+        : this.#services.layout.getState().splits[split]?.ratios;
+    if (!divider || !held) return;
+    const min = divider.axis === "row" ? PANE_MIN_PX.width : PANE_MIN_PX.height;
+    const ratios = dragRatios(held, index, deltaPx, divider.extentPx, this.gapPx(), min);
+    if (sameRatios(ratios, held)) return;
+    this.#release();
+    this.#override = { split, ratios };
+    this.layout();
+    const sent = this.#services.apply({ type: "resize", split, ratios: [...ratios] });
+    // The ratios stay as the key left them until the layout says the same.
+    void sent.then(
+      () => this.#onLayout(),
+      () => {
+        this.#release();
+        this.layout();
+      },
+    );
+    this.#settle = window.setTimeout(() => {
+      this.#release();
+      this.layout();
+    }, DIVIDER_SETTLE_TIMEOUT_MS);
   }
 
   /** Gives every child of a split the same share. */

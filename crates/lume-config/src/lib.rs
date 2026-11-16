@@ -31,6 +31,7 @@ pub mod keys;
 pub mod layers;
 pub mod paths;
 pub mod schema;
+pub mod settings;
 pub mod source;
 pub mod store;
 pub mod suggest;
@@ -51,7 +52,9 @@ pub use paths::{Dirs, Platform, check_workspace_name};
 pub use schema::{Config, WorkspaceSettings, config_schema, default_config_text};
 pub use source::{Problem, ProblemKind, Source};
 pub use store::{ConfigStore, Resolved, check_setting};
-pub use theme::{Theme, Themes, default_tokens, parse_theme, resolve_tokens, theme_schema};
+pub use theme::{
+    Theme, Themes, default_tokens, light_tokens, parse_theme, resolve_tokens, theme_schema,
+};
 pub use tokens::{Color, ResolvedTokens, TOKENS, TokenDef, TokenKind, TokenValue};
 pub use watch::{WatchEvent, Watcher};
 

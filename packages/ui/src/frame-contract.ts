@@ -25,6 +25,8 @@ const SHARED = [
   "UNDERLINE_MASK",
   "GLYPH_CLUSTER_TAG",
   "NO_SELECTION",
+  "HighlightKind",
+  "HIGHLIGHT_STRIDE",
 ] as const;
 
 /** The differences between the two packages' numbers, as text. Empty when they agree. */

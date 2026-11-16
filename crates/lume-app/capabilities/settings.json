@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "What the page of the settings window may call: the configuration, what there is to choose from, and its own window. It starts no session, sees no layout and runs no command. Nothing from Tauri's core plugins is granted.",
+  "windows": ["settings"],
+  "permissions": [
+    "allow-webview-info",
+    "allow-carrier-open",
+    "allow-carrier-send",
+    "allow-config-view",
+    "allow-config-set",
+    "allow-config-unset",
+    "allow-config-open",
+    "allow-config-schema",
+    "allow-themes-list",
+    "allow-shells-list",
+    "allow-font-families",
+    "allow-workspaces-list",
+    "allow-window-drag",
+    "allow-window-control",
+    "allow-window-state"
+  ]
+}

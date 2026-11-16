@@ -17,7 +17,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::paths::Platform;
-use crate::tuning::{FONT_SIZE_MAX, FONT_SIZE_MIN, SCROLLBACK_LINES_MAX};
+use crate::settings::{PAGES_KEY, Shown, pages};
+use crate::tuning::{
+    FONT_SIZE_MAX, FONT_SIZE_MIN, SCROLLBACK_LINES_MAX, SETTINGS_BLURS, SETTINGS_CORNER_RADII,
+    SETTINGS_DIMMINGS, SETTINGS_GAPS, SETTINGS_INTERFACE_TEXT_SIZES, SETTINGS_LINE_HEIGHTS,
+    SETTINGS_OPACITIES, SETTINGS_PADDINGS, SETTINGS_SCROLLBACK_LINES, SETTINGS_TERMINAL_TEXT_SIZES,
+};
+
+/// The two answers to whether closing asks first, as the settings window calls them.
+const CONFIRM_CHOICES: [(&str, &str); 2] = [("never", "Never"), ("always", "Always")];
 
 /// Everything that can be set in `config.toml`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -55,6 +63,10 @@ pub struct AppConfig {
     pub keep_running: bool,
     /// The workspace opened at start: a workspace's name, or `"last"` for the one
     /// that was open when the application closed.
+    #[schemars(extend("x-lume-settings" = Shown::select("general", "Startup", 10, "On launch")
+        .help("The workspace Lume opens with")
+        .options(&[("last", "Last workspace")])
+        .list("workspaces")))]
     pub start_workspace: String,
 }
 
@@ -95,12 +107,21 @@ pub struct WindowConfig {
     /// Who draws the title bar. Left out, the application draws it on Windows and
     /// macOS, and the window system does on Linux.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-lume-settings" = Shown::segmented("general", "Windows", 10, "Title bar")
+        .help("Who draws the bar at the top of a window")
+        .options(&[("custom", "Lume"), ("system", "System")])))]
     pub title_bar: Option<TitleBar>,
     /// Close a window when its last tab closes.
+    #[schemars(extend("x-lume-settings" = Shown::switch("general", "Windows", 20, "Close a window with its last tab")))]
     pub close_with_last_tab: bool,
     /// Whether closing a window with running programs asks first.
+    #[schemars(extend("x-lume-settings" = Shown::select("general", "Closing", 10, "Confirm before closing a window")
+        .help("Ask before closing a window while programs are still running in it")
+        .options(&CONFIRM_CHOICES)))]
     pub confirm_close: Confirm,
     /// Open windows where they were when the workspace was last open.
+    #[schemars(extend("x-lume-settings" = Shown::switch("general", "Windows", 30, "Restore window positions")
+        .help("Open windows where they were when the workspace was last open")))]
     pub restore_bounds: bool,
 }
 
@@ -166,36 +187,75 @@ pub struct AppearanceConfig {
     /// The theme to use whatever the system's colour scheme is. Left out, the theme
     /// follows the system: `theme-light` or `theme-dark`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Theme", 10, "Theme")
+        .help("Colours for every window, terminal and pane")
+        .list("themes")
+        .unset("Follow system")))]
     pub theme: Option<String>,
     /// The theme used when the system's colour scheme is light.
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Theme", 20, "In light mode")
+        .help("The theme used while the system is light")
+        .list("themes")
+        .when_unset("appearance.theme")))]
     pub theme_light: String,
     /// The theme used when the system's colour scheme is dark.
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Theme", 30, "In dark mode")
+        .help("The theme used while the system is dark")
+        .list("themes")
+        .when_unset("appearance.theme")))]
     pub theme_dark: String,
     /// The radius of a pane's corners, in pixels. Left out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 64.0))]
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Panes", 10, "Panel corners")
+        .lengths(SETTINGS_CORNER_RADII)
+        .unset("Theme's")
+        .token("radius.card")))]
     pub card_radius: Option<f64>,
     /// The space between panes and around them, in pixels. Left out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 64.0))]
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Panes", 20, "Gap between panes")
+        .lengths(SETTINGS_GAPS)
+        .unset("Theme's")
+        .token("space.gap")))]
     pub gap: Option<f64>,
     /// When a pane shows its header.
+    #[schemars(extend("x-lume-settings" = Shown::segmented("appearance", "Panes", 30, "Pane header")
+        .help("Auto hides it in a tab with a single pane")
+        .options(&[("always", "Always"), ("auto", "Auto"), ("never", "Never")])))]
     pub pane_header: PaneHeader,
     /// How much a pane without the focus is dimmed, from 0 (not at all) to 1. Left
     /// out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 1.0))]
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Panes", 40, "Dim unfocused panes")
+        .help("How much a pane without the keyboard is dimmed")
+        .shares(SETTINGS_DIMMINGS, Some("Off"))
+        .unset("Theme's")
+        .token("opacity.dim")))]
     pub dim_unfocused: Option<f64>,
     /// A picture shown behind the panes: the path of an image file.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-lume-settings" = Shown::text("appearance", "Background", 10, "Picture")
+        .help("The path of an image file shown behind the panes")
+        .unset("None")))]
     pub background_image: Option<String>,
     /// How much the picture is blurred, in pixels. Left out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 200.0))]
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Background", 20, "Blur")
+        .lengths(SETTINGS_BLURS)
+        .unset("Theme's")
+        .token("background.blur")))]
     pub background_blur: Option<f64>,
     /// How opaque the picture is, from 0 to 1. Left out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 1.0))]
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Background", 30, "Opacity")
+        .shares(SETTINGS_OPACITIES, None)
+        .unset("Theme's")
+        .token("opacity.background-image")))]
     pub background_opacity: Option<f64>,
     /// Design tokens set over the theme's, written as a theme file writes them: a
     /// table for each group, such as `[appearance.tokens.color]` with `accent = "#ff8800"`.
@@ -225,15 +285,21 @@ impl Default for AppearanceConfig {
 #[serde(default, rename_all = "kebab-case")]
 pub struct FontConfig {
     /// The font terminals are drawn in.
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Type", 20, "Terminal font").list("fonts")))]
     pub family: String,
     /// The fonts tried, in order, for a character the first has no glyph for, or when
     /// it is not installed.
     pub fallback: Vec<String>,
     /// The size of terminal text, in pixels.
     #[schemars(range(min = FONT_SIZE_MIN, max = FONT_SIZE_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Type", 30, "Terminal text size")
+        .lengths(SETTINGS_TERMINAL_TEXT_SIZES)))]
     pub size: f64,
     /// The height of a line of terminal text, as a multiple of the font's size.
     #[schemars(range(min = 0.8, max = 3.0))]
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Type", 40, "Line height")
+        .help("The height of a line of terminal text, as a multiple of its size")
+        .numbers(SETTINGS_LINE_HEIGHTS)))]
     pub line_height: f64,
     /// The weight of ordinary text, as fonts number weights: 400 is regular.
     #[schemars(range(min = 1, max = 1000))]
@@ -245,6 +311,8 @@ pub struct FontConfig {
     pub ui_family: String,
     /// The size of that text, in pixels.
     #[schemars(range(min = 8.0, max = 32.0))]
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Type", 10, "Interface text size")
+        .lengths(SETTINGS_INTERFACE_TEXT_SIZES)))]
     pub ui_size: f64,
 }
 
@@ -302,23 +370,47 @@ pub enum CloseOnExit {
 #[serde(default, rename_all = "kebab-case")]
 pub struct TerminalConfig {
     /// The program a new terminal runs. Empty, it is the user's own shell.
+    #[schemars(extend("x-lume-settings" = Shown::select("general", "Startup", 20, "Default shell")
+        .help("Used for new terminal tabs and panes")
+        .list("shells")
+        .unset("System default")))]
     pub shell: String,
     /// The arguments that program is started with.
     pub shell_args: Vec<String>,
     /// How many lines that have scrolled off the top are kept.
     #[schemars(range(min = 0, max = SCROLLBACK_LINES_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Buffer", 10, "Scrollback")
+        .help("Older lines are dropped past this limit. New terminals use it")
+        .lines(&SETTINGS_SCROLLBACK_LINES)))]
     pub scrollback_lines: u32,
     /// The cursor's shape, until a program chooses another.
+    #[schemars(extend("x-lume-settings" = Shown::segmented("terminal", "Cursor", 10, "Cursor style")
+        .options(&[("block", "Block"), ("bar", "Bar"), ("underline", "Underline")])))]
     pub cursor_style: CursorStyle,
     /// Whether the cursor blinks, until a program says otherwise.
+    #[schemars(extend("x-lume-settings" = Shown::switch("terminal", "Cursor", 20, "Blinking cursor")))]
     pub cursor_blink: bool,
     /// The space between a pane's edge and its text, in pixels. Left out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 64.0))]
+    #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Buffer", 20, "Padding")
+        .help("The space between a pane's edge and its text")
+        .lengths(SETTINGS_PADDINGS)
+        .unset("Theme's")
+        .token("space.padding")))]
     pub padding: Option<f64>,
     /// What happens to a pane when its program ends.
+    #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Closing", 10, "When a program ends")
+        .options(&[
+            ("clean", "Close the pane if it succeeded"),
+            ("always", "Always close the pane"),
+            ("never", "Keep the pane open"),
+        ])))]
     pub close_on_exit: CloseOnExit,
     /// Whether closing a pane asks first.
+    #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Closing", 20, "Confirm before closing a pane")
+        .help("Ask before closing a pane whose program is still running")
+        .options(&CONFIRM_CHOICES)))]
     pub confirm_close: Confirm,
 }
 
@@ -366,6 +458,9 @@ pub enum NewPaneCwd {
 #[serde(default, rename_all = "kebab-case")]
 pub struct LayoutConfig {
     /// Where the list of tabs is.
+    #[schemars(extend("x-lume-settings" = Shown::segmented("appearance", "Panes", 50, "Tab list")
+        .help("In the bar at the top, or in a panel at a side")
+        .options(&[("top", "Top"), ("left", "Left"), ("right", "Right")])))]
     pub tab_placement: TabPlacement,
     /// The directory a new pane's program starts in.
     pub new_pane_cwd: NewPaneCwd,
@@ -482,6 +577,11 @@ fn generate() -> Value {
         object.insert(
             "description".to_owned(),
             Value::from("The settings of config.toml."),
+        );
+        // The pages of the settings window, which the settings shown there name.
+        object.insert(
+            PAGES_KEY.to_owned(),
+            serde_json::to_value(pages()).unwrap_or_default(),
         );
     }
     schema

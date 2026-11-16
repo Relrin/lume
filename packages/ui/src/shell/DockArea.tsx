@@ -5,7 +5,8 @@
  * as the layout says; a side that is folded away or has no panels takes none. The
  * strip's inner edge is dragged to resize it. While it is dragged the strip follows
  * the pointer through its style, with nothing rendered; the core is told a few times a
- * second and once more when the pointer lets go.
+ * second and once more when the pointer lets go. An edge that has the keyboard is moved
+ * by the arrow keys, a step at a time.
  */
 
 import { useLayoutEffect, useRef } from "react";
@@ -18,6 +19,7 @@ import {
   DOCK_SIZE_MAX_PX,
   DOCK_SIZE_MIN_PX,
   DRAG_SETTLE_TIMEOUT_MS,
+  SEPARATOR_KEY_STEP_PX,
 } from "../tuning.ts";
 import { useShell } from "./context.ts";
 import { PanelHost } from "./PanelHost.tsx";
@@ -52,6 +54,7 @@ export function DockArea({ area }: { area: SideArea }) {
   const app = useShell();
   const dock = useStore(app.layout, (state) => (state.ready ? selectDock(state, area) : undefined));
   const strip = useRef<HTMLElement>(null);
+  const edge = useRef<HTMLDivElement>(null);
   const resize = useRef<Resize | null>(null);
   /** The size the pointer left the strip at, until the layout says the same. */
   const settling = useRef<{ size: number; timer: number } | null>(null);
@@ -66,6 +69,8 @@ export function DockArea({ area }: { area: SideArea }) {
     // Through the style object, which a policy that forbids style attributes allows.
     if (across) element.style.height = `${extent}px`;
     else element.style.width = `${extent}px`;
+    // The edge says how far the strip reaches, for whoever cannot see it.
+    edge.current?.setAttribute("aria-valuenow", String(extent));
   };
 
   useLayoutEffect(() => {
@@ -115,11 +120,44 @@ export function DockArea({ area }: { area: SideArea }) {
         <PanelHost key={panel.id} panel={panel} area={area} />
       ))}
       <div
+        ref={edge}
         className="dock-resize"
         role="separator"
+        // Reached with the Tab key, and then moved with the arrow keys.
+        tabIndex={0}
         aria-orientation={across ? "horizontal" : "vertical"}
         aria-label={`Resize ${NAMES[area].toLowerCase()}`}
+        aria-valuemin={DOCK_SIZE_MIN_PX}
+        aria-valuemax={DOCK_SIZE_MAX_PX}
         title="Drag to resize"
+        onKeyDown={(event) => {
+          if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+          // Escape gives the keyboard back to the terminal, as it does in the bar.
+          if (event.key === "Escape") {
+            app.views.focus();
+            return;
+          }
+          const element = strip.current;
+          const window = app.layout.getState().window;
+          if (!element || window === null || resize.current) return;
+          // An arrow moves the edge the way it points: the left strip grows as its
+          // edge goes right, the others as theirs go the other way.
+          const back = across ? "ArrowUp" : "ArrowLeft";
+          const forward = across ? "ArrowDown" : "ArrowRight";
+          if (event.key !== back && event.key !== forward) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const moved = event.key === forward ? SEPARATOR_KEY_STEP_PX : -SEPARATOR_KEY_STEP_PX;
+          const box = element.getBoundingClientRect();
+          const extent = Math.round(across ? box.height : box.width);
+          const next = clamp(extent + (area === "left" ? moved : -moved));
+          if (next === extent) return;
+          write(next);
+          app.client
+            .layoutApply({ type: "panel_resize", window, area, size: next })
+            // What the layout says the size is holds, whatever was asked for.
+            .catch(() => write(selectDock(app.layout.getState(), area)?.size ?? extent));
+        }}
         onPointerDown={(event) => {
           const element = strip.current;
           if (event.button !== 0 || resize.current || !element) return;

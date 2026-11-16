@@ -16,7 +16,12 @@ import {
   type Vt,
 } from "@lume/vt";
 
-import { OSC52_WRITE_MAX_BYTES, SCROLLBACK_MAX_BYTES, SCROLLBACK_MAX_LINES } from "../limits.ts";
+import {
+  OSC52_WRITE_MAX_BYTES,
+  SCROLLBACK_DEFAULT_LINES,
+  SCROLLBACK_MAX_BYTES,
+  SCROLLBACK_MAX_LINES,
+} from "../limits.ts";
 import type { Attachment, StreamFrame } from "../transport/client.ts";
 import type { CellPx, ClientFacts, ColorScheme, ExitStatus, TermSize } from "../transport/types.ts";
 
@@ -68,7 +73,7 @@ export class TerminalSession {
       cellWidthPx: options.cellPx.w,
       cellHeightPx: options.cellPx.h,
       scrollbackMaxLines: Math.min(
-        Math.max(0, options.scrollbackLines ?? SCROLLBACK_MAX_LINES),
+        Math.max(0, options.scrollbackLines ?? SCROLLBACK_DEFAULT_LINES),
         SCROLLBACK_MAX_LINES,
       ),
       scrollbackMaxBytes: SCROLLBACK_MAX_BYTES,

@@ -17,8 +17,13 @@
 //! A window is drawn with the system's title bar or without one. Without, the page
 //! draws the bar itself and asks for what a title bar does: moving the window, and
 //! the three controls at its end.
+//!
+//! The settings have a window of their own. It is no part of the layout: it shows no
+//! terminal, it is not kept with a workspace, and there is at most one. It is opened
+//! when asked for, brought forward when asked for again, and goes when the last window
+//! that shows terminals does.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use lume_layout::{Bounds, Intent, WindowId};
@@ -34,11 +39,23 @@ use crate::bounds::{Reading, Screen, clamp_bounds, merge_bounds};
 use crate::configsvc::ConfigService;
 use crate::control::Shell;
 use crate::state::AppState;
-use crate::tuning::{BOUNDS_DEBOUNCE, TITLE_MAX_BYTES};
+use crate::tuning::{
+    BOUNDS_DEBOUNCE, SETTINGS_SECTION_MAX_BYTES, SETTINGS_WINDOW_MIN_SIZE, SETTINGS_WINDOW_SIZE,
+    TITLE_MAX_BYTES,
+};
 
 /// The label of the window that shows no terminals: the webview report, or a test
 /// suite.
 pub const LABEL: &str = "main";
+
+/// The label of the window that shows the settings.
+pub const SETTINGS_LABEL: &str = "settings";
+
+/// The page the settings window shows.
+const SETTINGS_PAGE: &str = "settings.html";
+
+/// The settings window's title.
+const SETTINGS_TITLE: &str = "Settings";
 
 /// What the label of a window of the layout begins with.
 const LAYOUT_LABEL_PREFIX: &str = "w-";
@@ -55,6 +72,52 @@ pub fn window_of(label: &str) -> Option<WindowId> {
     let window = WindowId::new(number);
     // One spelling for each window: no sign, no leading zeros.
     (label_of(window) == label).then_some(window)
+}
+
+/// Whether a window with this label has a page that draws its own title bar when the
+/// system does not: a window of the layout, or the settings window.
+pub fn has_own_bar(label: &str) -> bool {
+    label == SETTINGS_LABEL || window_of(label).is_some()
+}
+
+/// The section of the settings a request names, if it could be one: a short word of
+/// lower-case letters, digits and hyphens. It becomes part of the page's address, so
+/// nothing else is let through.
+pub fn settings_section(asked: Option<&str>) -> Option<&str> {
+    asked.filter(|section| {
+        !section.is_empty()
+            && section.len() <= SETTINGS_SECTION_MAX_BYTES
+            && section
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    })
+}
+
+/// The address of the settings page, opened at a section if one is named.
+fn settings_address(section: Option<&str>) -> String {
+    match settings_section(section) {
+        Some(section) => format!("{SETTINGS_PAGE}#{section}"),
+        None => SETTINGS_PAGE.to_owned(),
+    }
+}
+
+/// Where a window of `size` goes to be in the middle of `area`: its top left corner.
+/// A window larger than the area starts at the area's own corner, so its title bar can
+/// be reached.
+fn centred(area: (i32, i32, u32, u32), size: (u32, u32)) -> (i32, i32) {
+    let (left, top, width, height) = area;
+    let spare = |room: u32, taken: u32| i32::try_from(room.saturating_sub(taken) / 2).unwrap_or(0);
+    (left + spare(width, size.0), top + spare(height, size.1))
+}
+
+/// Whether closing a window waits for its page to ask the user first.
+///
+/// It does when the configuration says closing a window always asks, something still
+/// runs in the window, there is a page to do the asking, and the user has not said yes
+/// already. A window whose page is gone closes: nothing could ask, and a window that
+/// cannot be closed is worse than a question that was not put.
+pub fn close_asks(always: bool, running: bool, page: bool, confirmed: bool) -> bool {
+    always && running && page && !confirmed
 }
 
 /// The window's title when the page has none worth showing.
@@ -160,6 +223,8 @@ pub struct WindowShell {
     moved: Mutex<HashMap<String, u64>>,
     /// What each window's page was last told the window is doing.
     told: Mutex<HashMap<String, WindowState>>,
+    /// The windows whose closing the user has agreed to, each until it next closes.
+    confirmed: Mutex<HashSet<String>>,
 }
 
 impl WindowShell {
@@ -170,13 +235,20 @@ impl WindowShell {
             config,
             moved: Mutex::new(HashMap::new()),
             told: Mutex::new(HashMap::new()),
+            confirmed: Mutex::new(HashSet::new()),
         })
     }
 
     /// The window the user is working in: the one that has the keyboard, else the one
     /// the layout says last had it, else any.
     fn front(&self) -> Option<WebviewWindow> {
-        let windows = self.app.webview_windows();
+        // The settings window is not one the user works in.
+        let windows: HashMap<String, WebviewWindow> = self
+            .app
+            .webview_windows()
+            .into_iter()
+            .filter(|(label, _)| window_of(label).is_some())
+            .collect();
         let focused = windows
             .values()
             .find(|window| window.is_focused().unwrap_or(false));
@@ -212,18 +284,12 @@ impl WindowShell {
             .collect()
     }
 
-    fn build(
+    /// Gives a window that is being made the title bar the configuration asks for.
+    fn with_title_bar<'a>(
         &self,
-        window: WindowId,
-        bounds: Option<Bounds>,
-    ) -> Result<WebviewWindow, Box<dyn std::error::Error>> {
-        let mut described = described(&self.app)?;
-        described.label = label_of(window);
+        builder: WebviewWindowBuilder<'a, tauri::Wry, AppHandle>,
+    ) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
         let custom = self.config.title_bar_custom();
-        // Shown once it is where it belongs, so it is not seen to jump there.
-        let builder = WebviewWindowBuilder::from_config(&self.app, &described)?
-            .on_document_title_changed(follow_title)
-            .visible(false);
         // A Mac keeps its three buttons and lays them over the page's own bar; elsewhere
         // a window without the system's bar has no frame at all.
         #[cfg(target_os = "macos")]
@@ -236,7 +302,90 @@ impl WindowShell {
         };
         #[cfg(not(target_os = "macos"))]
         let builder = builder.decorations(!custom);
-        let opened = builder.build()?;
+        builder
+    }
+
+    /// Opens the settings window at a section, in the middle of the screen the window
+    /// that asked is on.
+    fn build_settings(
+        &self,
+        section: Option<&str>,
+        from: Option<WindowId>,
+    ) -> Result<WebviewWindow, Box<dyn std::error::Error>> {
+        let mut described = described(&self.app)?;
+        described.label = SETTINGS_LABEL.to_owned();
+        described.title = SETTINGS_TITLE.to_owned();
+        described.url = WebviewUrl::App(settings_address(section).into());
+        described.width = f64::from(SETTINGS_WINDOW_SIZE.0);
+        described.height = f64::from(SETTINGS_WINDOW_SIZE.1);
+        described.min_width = Some(f64::from(SETTINGS_WINDOW_MIN_SIZE.0));
+        described.min_height = Some(f64::from(SETTINGS_WINDOW_MIN_SIZE.1));
+        // Shown once it is where it belongs, so it is not seen to jump there.
+        let builder = WebviewWindowBuilder::from_config(&self.app, &described)?.visible(false);
+        let opened = self.with_title_bar(builder).build()?;
+
+        let beside = from.and_then(|window| self.app.get_webview_window(&label_of(window)));
+        let screen = beside
+            .and_then(|window| window.current_monitor().ok().flatten())
+            .or_else(|| opened.current_monitor().ok().flatten());
+        if let Some(screen) = screen {
+            let area = screen.work_area();
+            let size = opened.outer_size()?;
+            let (x, y) = centred(
+                (
+                    area.position.x,
+                    area.position.y,
+                    area.size.width,
+                    area.size.height,
+                ),
+                (size.width, size.height),
+            );
+            opened.set_position(PhysicalPosition::new(x, y))?;
+        }
+        opened.show()?;
+        opened.set_focus()?;
+        Ok(opened)
+    }
+
+    /// Closes the settings window if no window that shows terminals is left but the
+    /// one called `closing`, which is on its way out. Without this the application
+    /// would go on with nothing but its settings to show.
+    pub fn close_settings_with(&self, closing: &str) {
+        if window_of(closing).is_none() {
+            return;
+        }
+        let others = self
+            .layout_windows()
+            .into_iter()
+            .any(|label| label != closing);
+        if !others {
+            self.close_window(SETTINGS_LABEL);
+        }
+    }
+
+    /// Notes that the user agreed to the closing of a window.
+    pub fn confirm_close(&self, label: &str) {
+        lock(&self.confirmed).insert(label.to_owned());
+    }
+
+    /// Whether the user agreed to the closing of a window. Asking uses the agreement
+    /// up: it holds for the one closing it was given for.
+    pub fn take_confirmed(&self, label: &str) -> bool {
+        lock(&self.confirmed).remove(label)
+    }
+
+    fn build(
+        &self,
+        window: WindowId,
+        bounds: Option<Bounds>,
+    ) -> Result<WebviewWindow, Box<dyn std::error::Error>> {
+        let mut described = described(&self.app)?;
+        described.label = label_of(window);
+        // Shown once it is where it belongs, so it is not seen to jump there.
+        let builder = WebviewWindowBuilder::from_config(&self.app, &described)?
+            .on_document_title_changed(follow_title)
+            .visible(false);
+        let opened = self.with_title_bar(builder).build()?;
 
         let restore = self.config.current().config.window.restore_bounds;
         let placement = bounds
@@ -337,7 +486,7 @@ impl WindowShell {
     /// Tells a window's page what the window is doing, if that has changed since the
     /// page was last told.
     pub fn tell_state(&self, label: &str) {
-        if window_of(label).is_none() {
+        if !has_own_bar(label) {
             return;
         }
         let Some(window) = self.app.get_webview_window(label) else {
@@ -361,6 +510,7 @@ impl WindowShell {
     pub fn forget(&self, label: &str) {
         lock(&self.moved).remove(label);
         lock(&self.told).remove(label);
+        lock(&self.confirmed).remove(label);
     }
 }
 
@@ -414,9 +564,43 @@ impl Shell for WindowShell {
             .collect()
     }
 
+    fn open_settings(&self, section: Option<&str>, from: Option<WindowId>) {
+        let Some(open) = self.app.get_webview_window(SETTINGS_LABEL) else {
+            if let Err(error) = self.build_settings(section, from) {
+                tracing::error!(%error, "the settings window could not be opened");
+            }
+            return;
+        };
+        // A window that is minimised or hidden is not brought forward by being focused.
+        let shown = open
+            .unminimize()
+            .and_then(|()| open.show())
+            .and_then(|()| open.set_focus());
+        if let Err(error) = shown {
+            tracing::debug!(%error, "the settings window could not be brought to the front");
+        }
+        if let Some(page) = self.state.page_of(SETTINGS_LABEL) {
+            page.notify(&json!({
+                "type": "settings_show",
+                "section": settings_section(section),
+            }));
+        }
+    }
+
+    fn ask_close(&self, window: WindowId) {
+        let Some(open) = self.app.get_webview_window(&label_of(window)) else {
+            return;
+        };
+        // Asked as the window's own control asks, so what closing means, and whether
+        // the user is asked first, is decided in one place.
+        if let Err(error) = open.close() {
+            tracing::debug!(%error, %window, "the window could not be asked to close");
+        }
+    }
+
     fn set_title_bar(&self, custom: bool) {
         for (label, window) in self.app.webview_windows() {
-            if window_of(&label).is_none() {
+            if !has_own_bar(&label) {
                 continue;
             }
             #[cfg(target_os = "macos")]
@@ -472,6 +656,51 @@ mod tests {
         for label in ["main", "w-", "w-012", "w-+12", "w12", "w-12 ", "x-12"] {
             assert_eq!(window_of(label), None, "{label}");
         }
+    }
+
+    #[test]
+    fn the_settings_window_is_no_window_of_the_layout_and_draws_its_own_bar() {
+        assert_eq!(window_of(SETTINGS_LABEL), None);
+        assert!(has_own_bar(SETTINGS_LABEL));
+        assert!(has_own_bar("w-3"));
+        assert!(!has_own_bar(LABEL));
+    }
+
+    #[test]
+    fn a_section_is_a_short_plain_word_and_anything_else_is_none() {
+        assert_eq!(settings_section(Some("appearance")), Some("appearance"));
+        assert_eq!(settings_section(Some("add-on-2")), Some("add-on-2"));
+        for asked in ["", "Appearance", "a b", "a#b", "a/b", "a?b=c", "..", "é"] {
+            assert_eq!(settings_section(Some(asked)), None, "{asked}");
+        }
+        let long = "a".repeat(SETTINGS_SECTION_MAX_BYTES + 1);
+        assert_eq!(settings_section(Some(&long)), None);
+        assert_eq!(settings_section(None), None);
+    }
+
+    #[test]
+    fn the_settings_page_opens_at_the_section_named() {
+        assert_eq!(settings_address(Some("terminal")), "settings.html#terminal");
+        assert_eq!(settings_address(None), "settings.html");
+        assert_eq!(settings_address(Some("x#y")), "settings.html");
+    }
+
+    #[test]
+    fn a_window_is_centred_on_its_screen_and_kept_inside_a_small_one() {
+        assert_eq!(centred((0, 0, 1920, 1040), (980, 680)), (470, 180));
+        // A second screen to the left of the main one, and above it.
+        assert_eq!(centred((-1280, -200, 1280, 984), (980, 680)), (-1130, -48));
+        assert_eq!(centred((100, 50, 800, 600), (980, 680)), (100, 50));
+    }
+
+    #[test]
+    fn closing_asks_only_when_told_to_with_something_running_and_a_page_to_ask() {
+        assert!(close_asks(true, true, true, false));
+        // The setting is off, nothing runs, no page could ask, or the user said yes.
+        assert!(!close_asks(false, true, true, false));
+        assert!(!close_asks(true, false, true, false));
+        assert!(!close_asks(true, true, false, false));
+        assert!(!close_asks(true, true, true, true));
     }
 
     #[test]

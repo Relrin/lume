@@ -40,6 +40,29 @@
 # What follows, until the prompt, is the shell's own start and is recorded only.
 "startup.outputMs.p50" = { max = 1000.0, unit = "ms" }
 
+# How often the window's components are drawn again because a terminal printed. A
+# terminal's output is drawn outside them, so the answer is never.
+"chrome.outputCommits" = { max = 0.0, unit = "renders" }
+
+# Sixteen panes in four tabs, all printing, four of them on show: the frames the page
+# is given each second, on each tier the webview offers.
+"panes16.webgpu.framesPerSecond" = { min = 60.0, unit = "frames/s", optional = true }
+"panes16.webgl2.framesPerSecond" = { min = 60.0, unit = "frames/s", optional = true }
+"panes16.canvas2d.framesPerSecond" = { min = 60.0, unit = "frames/s" }
+
+# A divider dragged to and fro between two panes that print.
+"drag.framesPerSecond" = { min = 60.0, unit = "frames/s" }
+
+# From a tab being asked for to its four panes being drawn again, where every pane
+# builds its glyphs anew: the middle one of several switches.
+"tabSwitch.webgl2Ms" = { max = 50.0, unit = "ms", optional = true }
+
+# A scrollback of a hundred thousand lines searched for a text on one line in a hundred:
+# until every line has been looked at, and the longest the search kept the page from
+# anything else on the way.
+"search.completeMs" = { max = 600.0, unit = "ms" }
+"search.maxSliceMs" = { max = 12.0, unit = "ms" }
+
 # Shared CI runners: no GPU, a virtual display, and neighbours. These limits catch a
 # change that makes something several times slower, and nothing finer than that.
 [ci]
@@ -54,3 +77,11 @@
 "flood.framesPerSecond" = { min = 10.0, unit = "frames/s" }
 "flood.inputToFrame.p95" = { max = 500.0, unit = "ms" }
 "startup.outputMs.p50" = { max = 10000.0, unit = "ms" }
+"chrome.outputCommits" = { max = 0.0, unit = "renders" }
+"panes16.webgpu.framesPerSecond" = { min = 10.0, unit = "frames/s", optional = true }
+"panes16.webgl2.framesPerSecond" = { min = 10.0, unit = "frames/s", optional = true }
+"panes16.canvas2d.framesPerSecond" = { min = 10.0, unit = "frames/s" }
+"drag.framesPerSecond" = { min = 10.0, unit = "frames/s" }
+"tabSwitch.webgl2Ms" = { max = 500.0, unit = "ms", optional = true }
+"search.completeMs" = { max = 15000.0, unit = "ms" }
+"search.maxSliceMs" = { max = 120.0, unit = "ms" }

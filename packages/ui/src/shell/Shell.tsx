@@ -1,10 +1,12 @@
 /**
  * The window: a bar along the top, the panes of the tab on show in the middle, and
- * whatever panels are docked at the left, the right and the bottom around them.
+ * whatever panels are docked at the left, the right and the bottom around them, all
+ * of it over the picture the configuration puts behind the panes, if it names one.
  */
 
 import { Palette } from "../palette/Palette.tsx";
 import { Prompts } from "../Prompts.tsx";
+import { Background } from "./Background.tsx";
 import type { ShellApp } from "./boot.ts";
 import { ShellContext } from "./context.ts";
 import { DockArea, DockDropPreview } from "./DockArea.tsx";
@@ -17,6 +19,7 @@ export function Shell({ app }: { app: ShellApp }) {
   return (
     <ShellContext value={app}>
       <div className="shell">
+        <Background />
         <TopBar />
         <div className="shell-body">
           <DockArea area="left" />

@@ -4,15 +4,23 @@
 //! from then on. Changing a setting writes it to the user's own file, comments and all
 //! else in the file kept, and the change then reaches every page the way a change made
 //! in an editor would.
+//!
+//! The page that shows the settings also asks what there is to choose from: what can be
+//! set at all, and the themes and the shells there are.
 
 use std::sync::Arc;
 
+use serde::Serialize;
 use serde_json::Value;
 use tauri::State;
+use tauri::ipc::Response;
 
+use crate::background;
+use crate::configsvc::ThemeEntry;
 use crate::error::CommandError;
 use crate::opener;
 use crate::services::Services;
+use crate::tuning::BACKGROUND_IMAGE_MAX_BYTES;
 
 type Shared<'a> = State<'a, Arc<Services>>;
 
@@ -46,6 +54,58 @@ pub async fn config_unset(services: Shared<'_>, path: String) -> Result<(), Comm
         .await
         .map_err(|error| CommandError::internal(error.to_string()))?
         .map_err(CommandError::from)
+}
+
+/// What can be set, as a JSON Schema: every setting with its kind, its limits and what
+/// it is for, and how the settings window shows the ones it shows.
+#[tauri::command]
+pub fn config_schema() -> Value {
+    lume_config::config_schema().clone()
+}
+
+/// The themes there are to choose from.
+#[tauri::command]
+pub fn themes_list(services: Shared<'_>) -> Vec<ThemeEntry> {
+    services.config.themes()
+}
+
+/// A shell a user can choose as the one new terminals run.
+#[derive(Debug, Serialize)]
+pub struct ShellEntry {
+    /// What a person calls it.
+    name: &'static str,
+    /// What `terminal.shell` is set to for it.
+    program: String,
+}
+
+/// The well-known shells installed on this machine.
+#[tauri::command]
+pub async fn shells_list() -> Result<Vec<ShellEntry>, CommandError> {
+    let shells = tokio::task::spawn_blocking(lume_session::known_shells)
+        .await
+        .map_err(|error| CommandError::internal(error.to_string()))?;
+    Ok(shells
+        .into_iter()
+        .map(|shell| ShellEntry {
+            name: shell.name,
+            program: shell.program,
+        })
+        .collect())
+}
+
+/// The picture shown behind the panes, as the bytes of its file; no bytes when the
+/// settings name no picture. The page says nothing of which file: it is the one the
+/// settings name and no other.
+#[tauri::command]
+pub async fn background_image(services: Shared<'_>) -> Result<Response, CommandError> {
+    let config = Arc::clone(&services.config);
+    let bytes = tokio::task::spawn_blocking(move || match config.background_file() {
+        Some(file) => background::read(&file, BACKGROUND_IMAGE_MAX_BYTES),
+        None => Ok(Vec::new()),
+    })
+    .await
+    .map_err(|error| CommandError::internal(error.to_string()))??;
+    Ok(Response::new(bytes))
 }
 
 /// Opens one of the user's settings files for editing: `config`, which is the default,

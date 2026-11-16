@@ -9,7 +9,11 @@ import { readFileSync } from "node:fs";
 import { hyperlinkAt, Vt, type ClipboardLocation } from "@lume/vt";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { LINK_SCHEMES_TO_CONFIRM, SCROLLBACK_MAX_LINES, TITLE_MAX_BYTES } from "../src/limits.ts";
+import {
+  LINK_SCHEMES_TO_CONFIRM,
+  SCROLLBACK_DEFAULT_LINES,
+  TITLE_MAX_BYTES,
+} from "../src/limits.ts";
 import { linkScheme } from "../src/terminal/links.ts";
 import { TerminalSession } from "../src/terminal/session.ts";
 import { sanitizeTitle } from "../src/terminal/title.ts";
@@ -152,7 +156,7 @@ describe("a program that pushes at every limit", () => {
   it("keeps no more history than the limit, however much is printed", () => {
     const { session } = feed("16-scroll-flood");
     const { terminal } = session;
-    expect(terminal.scrollbar().total).toBeLessThan(SCROLLBACK_MAX_LINES * 1.2);
+    expect(terminal.scrollbar().total).toBeLessThan(SCROLLBACK_DEFAULT_LINES * 1.2);
     expect(terminal.screenText().at(-1)).toBe("end");
     session.dispose();
   });

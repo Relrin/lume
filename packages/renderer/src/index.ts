@@ -15,12 +15,15 @@ export {
   CursorShape,
   DirtyState,
   GLYPH_CLUSTER_TAG,
+  HIGHLIGHT_STRIDE,
+  HighlightKind,
   NO_SELECTION,
   rgba,
   UNDERLINE_MASK,
   UNDERLINE_SHIFT,
   UnderlineStyle,
   type FrameCursor,
+  type Highlights,
   type RenderFrame,
 } from "./frame.ts";
 export { RenderHost, type RenderHostOptions } from "./host.ts";

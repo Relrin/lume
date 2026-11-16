@@ -20,6 +20,7 @@ import { runChrome } from "./chrome.ts";
 import { runCorpus } from "./corpus.ts";
 import "./harness.css";
 import { done, harnessInfo, type HarnessInfo } from "./host.ts";
+import { runMeasure } from "./measure.ts";
 import { runSnapshots } from "./snapshots.ts";
 
 /** What every suite's report has: whether it passed. */
@@ -37,7 +38,8 @@ function progress(text: string): void {
 async function runSuite(suite: string, info: HarnessInfo | null): Promise<SuiteReport> {
   checkFrameContract();
   // The window's own page starts its engine itself.
-  if (suite === "chrome") return runChrome(progress);
+  if (suite === "chrome") return runChrome(info, progress);
+  if (suite === "measure") return runMeasure(progress);
   const vt = await Vt.instantiate(fetch(wasmUrl));
   switch (suite) {
     case "corpus":

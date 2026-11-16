@@ -20,7 +20,7 @@
  * leaves its pictures where they can be collected and looked at.
  */
 
-import { GLYPH_CLUSTER_TAG, type RenderFrame } from "@lume/renderer";
+import { GLYPH_CLUSTER_TAG, type Highlights, type RenderFrame } from "@lume/renderer";
 import { FIXED_FRAMES } from "@lume/renderer/testing";
 import type { Vt } from "@lume/vt";
 
@@ -85,6 +85,8 @@ export interface SnapshotReport {
 interface Subject {
   readonly name: string;
   readonly frame: RenderFrame;
+  /** The runs to highlight when drawing it, if it has any. */
+  readonly highlights?: Highlights | undefined;
   free(): void;
 }
 
@@ -120,9 +122,10 @@ function engineDirectory(info: HarnessInfo | null): string | null {
 }
 
 function subjects(vt: Vt): Subject[] {
-  const fixed = FIXED_FRAMES.map(({ name, build }) => ({
+  const fixed = FIXED_FRAMES.map(({ name, build, highlights }) => ({
     name,
     frame: build(),
+    highlights: highlights?.(),
     free: () => undefined,
   }));
   const fed = Object.entries(terminalFrames(vt)).map(([name, open]) => {
@@ -167,6 +170,7 @@ export async function runSnapshots(
     const pictures = new Map<string, ImageData>();
     for (const pane of panes) {
       fit(pane, subject.frame, SNAPSHOT_PIXEL_RATIO);
+      pane.renderer?.setHighlights(subject.highlights);
       drawWhole(pane, subject.frame);
       // Read in the task that drew: a GPU canvas keeps its picture only until then.
       const canvas = canvasOf(pane);

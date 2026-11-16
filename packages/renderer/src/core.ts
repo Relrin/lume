@@ -13,7 +13,7 @@
 import { GlyphAtlas } from "./atlas/atlas.ts";
 import { FULL_UPLOAD_DIRTY_RATIO } from "./constants.ts";
 import { collectDirtyRows, rowRuns } from "./dirty.ts";
-import { NO_SELECTION, type RenderFrame } from "./frame.ts";
+import { HIGHLIGHT_STRIDE, NO_SELECTION, type Highlights, type RenderFrame } from "./frame.ts";
 import { buildOverlay, buildRow, type OverlayCounts } from "./instances.ts";
 import { createPlanes, type PlaneName, type Planes } from "./layout.ts";
 import { fontKey, gridSize, themeMetrics } from "./metrics.ts";
@@ -60,6 +60,17 @@ export class GridRenderer implements CellRenderer {
   #repaint = new Uint8Array(0);
   #selectionStart = new Int32Array(0);
   #selectionEnd = new Int32Array(0);
+
+  /** The highlighted runs as last given, and whether `#marks` has caught up with them. */
+  #highlights = new Int32Array(0);
+  #highlightCount = 0;
+  #highlightsStale = false;
+  /** Per cell: the `HighlightKind` its row was last built with, or zero. */
+  #marks = new Uint8Array(0);
+  /** Scratch of the same size, for working out the next `#marks`. */
+  #nextMarks = new Uint8Array(0);
+  /** Per row: 1 when its marks changed since it was built. */
+  #markRows = new Uint8Array(0);
 
   /** Everything must be rebuilt and redrawn on the next frame. */
   #force = true;
@@ -129,6 +140,17 @@ export class GridRenderer implements CellRenderer {
     this.#underlines = ranges.map((range) => ({ ...range }));
   }
 
+  setHighlights(highlights: Highlights | undefined): void {
+    const count = highlights?.count ?? 0;
+    if (count === 0 && this.#highlightCount === 0) return;
+    const length = count * HIGHLIGHT_STRIDE;
+    // Copied: the caller's list is its own to refill.
+    if (this.#highlights.length < length) this.#highlights = new Int32Array(length);
+    if (highlights) this.#highlights.set(highlights.data.subarray(0, length));
+    this.#highlightCount = count;
+    this.#highlightsStale = true;
+  }
+
   gridSize(): { cols: number; rows: number } {
     return gridSize(this.#surface, this.#ensureMetrics());
   }
@@ -147,6 +169,8 @@ export class GridRenderer implements CellRenderer {
     }
     const planes = this.#ensurePlanes(frame);
     if (atlas.generation !== this.#generation) this.#force = true;
+    if (this.#highlightsStale) this.#markHighlights(frame.cols, frame.rows);
+    const marks = this.#marks;
 
     const { rows } = frame;
     let count = collectDirtyRows(
@@ -155,10 +179,13 @@ export class GridRenderer implements CellRenderer {
       this.#selectionStart,
       this.#selectionEnd,
       this.#dirty,
+      this.#markRows,
     );
     const generation = atlas.generation;
     for (let row = 0; row < rows; row++) {
-      if (this.#dirty[row] === 1) buildRow(frame, row, planes, atlas, metrics, this.#theme);
+      if (this.#dirty[row] === 1) {
+        buildRow(frame, row, planes, atlas, metrics, this.#theme, marks);
+      }
     }
     const buildOverlays = () =>
       buildOverlay(
@@ -182,7 +209,7 @@ export class GridRenderer implements CellRenderer {
       count = rows;
       rebuiltAll = true;
       for (let row = 0; row < rows; row++) {
-        buildRow(frame, row, planes, atlas, metrics, this.#theme);
+        buildRow(frame, row, planes, atlas, metrics, this.#theme, marks);
       }
       overlay = buildOverlays();
     }
@@ -279,9 +306,49 @@ export class GridRenderer implements CellRenderer {
     this.#repaint = new Uint8Array(frame.rows);
     this.#selectionStart = new Int32Array(frame.rows).fill(NO_SELECTION);
     this.#selectionEnd = new Int32Array(frame.rows);
+    this.#marks = new Uint8Array(frame.cols * frame.rows);
+    this.#nextMarks = new Uint8Array(frame.cols * frame.rows);
+    this.#markRows = new Uint8Array(frame.rows);
+    // The runs were laid out for a grid of another size.
+    this.#highlightsStale = this.#highlightCount > 0;
     this.#backend.setPlanes(planes);
     this.#force = true;
     return planes;
+  }
+
+  /**
+   * Bring `#marks` up to date with the highlighted runs, and flag the rows where a cell
+   * gained, lost or changed its highlight: a highlight changes a cell's colours without
+   * the cell itself changing.
+   */
+  #markHighlights(cols: number, rows: number): void {
+    this.#highlightsStale = false;
+    const next = this.#nextMarks;
+    next.fill(0);
+    const runs = this.#highlights;
+    for (let at = 0; at < this.#highlightCount * HIGHLIGHT_STRIDE; at += HIGHLIGHT_STRIDE) {
+      const row = runs[at]!;
+      if (row < 0 || row >= rows) continue;
+      const first = Math.max(0, runs[at + 1]!);
+      const last = Math.min(cols - 1, runs[at + 2]!);
+      const kind = runs[at + 3]!;
+      // Where two runs meet on a cell the greater kind is kept: the match a search is
+      // at shows over the others.
+      for (let cell = row * cols + first; cell <= row * cols + last; cell++) {
+        if (kind > next[cell]!) next[cell] = kind;
+      }
+    }
+    const before = this.#marks;
+    for (let row = 0; row < rows; row++) {
+      for (let cell = row * cols; cell < (row + 1) * cols; cell++) {
+        if (next[cell] !== before[cell]) {
+          this.#markRows[row] = 1;
+          break;
+        }
+      }
+    }
+    this.#marks = next;
+    this.#nextMarks = before;
   }
 
   /** Send the rows that were rebuilt to the tier. */

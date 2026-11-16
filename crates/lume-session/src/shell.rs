@@ -1,4 +1,7 @@
-//! Which shell to start when nothing says otherwise.
+//! Which shell to start when nothing says otherwise, and which shells there are to
+//! choose from.
+
+use std::path::PathBuf;
 
 use lume_proto::Launcher;
 
@@ -11,11 +14,64 @@ pub fn default_shell() -> Launcher {
     platform::default_shell()
 }
 
+/// A shell that is installed on this machine.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KnownShell {
+    /// What a person calls it.
+    pub name: &'static str,
+    /// The file to run, as an absolute path.
+    pub program: String,
+}
+
+/// The well-known shells installed on this machine, in a fixed order.
+///
+/// A shell is installed if its program is in one of the folders of `PATH`. The list of
+/// shells looked for is short and fixed: this is what a user chooses a default from,
+/// not everything that could be run.
+pub fn known_shells() -> Vec<KnownShell> {
+    let dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    shells_in(platform::SHELLS, &dirs)
+}
+
+/// The shells of `candidates` (a name and a file name each) found in `dirs`, each at
+/// the first folder that has it. Only absolute folders are looked in, so a file planted
+/// in the working directory is never offered.
+fn shells_in(candidates: &[(&'static str, &str)], dirs: &[PathBuf]) -> Vec<KnownShell> {
+    candidates
+        .iter()
+        .filter_map(|(name, file)| {
+            dirs.iter()
+                .filter(|dir| dir.is_absolute())
+                .map(|dir| dir.join(file))
+                .find(|candidate| platform::runnable(candidate))
+                .map(|program| KnownShell {
+                    name,
+                    program: program.to_string_lossy().into_owned(),
+                })
+        })
+        .collect()
+}
+
 #[cfg(windows)]
 mod platform {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use lume_proto::Launcher;
+
+    /// The shells looked for: what each is called, and its program's file name.
+    pub(super) const SHELLS: &[(&str, &str)] = &[
+        ("PowerShell", "pwsh.exe"),
+        ("Windows PowerShell", "powershell.exe"),
+        ("Command Prompt", "cmd.exe"),
+        ("Bash", "bash.exe"),
+        ("Nushell", "nu.exe"),
+    ];
+
+    pub(super) fn runnable(path: &Path) -> bool {
+        path.is_file()
+    }
 
     fn shell(program: PathBuf) -> Launcher {
         Launcher::Shell {
@@ -62,6 +118,20 @@ mod platform {
     use lume_proto::Launcher;
 
     const FALLBACK: &str = "/bin/sh";
+
+    /// The shells looked for: what each is called, and its program's file name.
+    pub(super) const SHELLS: &[(&str, &str)] = &[
+        ("zsh", "zsh"),
+        ("bash", "bash"),
+        ("fish", "fish"),
+        ("Nushell", "nu"),
+        ("PowerShell", "pwsh"),
+        ("sh", "sh"),
+    ];
+
+    pub(super) fn runnable(path: &Path) -> bool {
+        is_executable(path)
+    }
 
     pub(super) fn default_shell() -> Launcher {
         let from_environment = || std::env::var_os("SHELL").map(PathBuf::from);
@@ -137,5 +207,81 @@ mod tests {
         assert!(path.is_file(), "{program} does not exist");
         assert!(args.is_empty());
         assert_eq!(login, cfg!(target_os = "macos"));
+    }
+
+    /// A folder of its own for a test, removed when the test is over.
+    struct Folder(PathBuf);
+
+    impl Folder {
+        fn new(name: &str) -> Self {
+            let folder =
+                std::env::temp_dir().join(format!("lume-shells-{}-{name}", std::process::id()));
+            std::fs::create_dir_all(&folder).unwrap();
+            Self(folder)
+        }
+
+        /// Puts a program that can be run into the folder.
+        fn program(&self, file: &str) -> PathBuf {
+            let path = self.0.join(file);
+            std::fs::write(&path, b"").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            path
+        }
+    }
+
+    impl Drop for Folder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn the_shells_found_are_listed_in_the_order_of_the_list_each_where_it_is_first() {
+        let first = Folder::new("first");
+        let second = Folder::new("second");
+        let two = first.program("two");
+        second.program("two");
+        let one = second.program("one");
+        let dirs = [first.0.clone(), second.0.clone()];
+
+        let found = shells_in(
+            &[("One", "one"), ("Absent", "absent"), ("Two", "two")],
+            &dirs,
+        );
+        assert_eq!(
+            found,
+            [
+                KnownShell {
+                    name: "One",
+                    program: one.to_string_lossy().into_owned(),
+                },
+                KnownShell {
+                    name: "Two",
+                    program: two.to_string_lossy().into_owned(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_folder_that_is_not_absolute_is_not_looked_in() {
+        // Tests run in the crate's own folder, which holds this file.
+        assert!(Path::new("Cargo.toml").is_file());
+        let here = [PathBuf::from("."), PathBuf::new()];
+        assert_eq!(shells_in(&[("Manifest", "Cargo.toml")], &here), []);
+        assert_eq!(shells_in(&[("Manifest", "Cargo.toml")], &[]), []);
+    }
+
+    #[test]
+    fn every_shell_offered_on_this_machine_is_a_program_that_exists() {
+        for shell in known_shells() {
+            let path = Path::new(&shell.program);
+            assert!(path.is_absolute(), "{}", shell.program);
+            assert!(path.is_file(), "{}", shell.program);
+        }
     }
 }

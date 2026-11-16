@@ -27,6 +27,9 @@ export const TEST_THEME: TerminalTheme = {
   font: { family: `"${FONT_FAMILY}", monospace`, sizePx: 14 },
   cursor: rgba(0xf0, 0xf0, 0xf0),
   selectionBackground: rgba(0x2f, 0x4f, 0x8f),
+  searchMatch: rgba(0xf0, 0xb3, 0x5a, 0x66),
+  searchActive: rgba(0xf0, 0xb3, 0x5a),
+  searchActiveText: rgba(0x16, 0x18, 0x1c),
   padding: 4,
 };
 

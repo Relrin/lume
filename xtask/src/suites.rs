@@ -178,8 +178,25 @@ fn snapshots(profile: Profile) -> Result<()> {
     Ok(())
 }
 
+/// Runs the suite of the window's own page: what it must hold to, and its scenes
+/// compared with what they were made of when they were last found right.
+pub fn run_chrome(profile: Profile) -> Result<Report> {
+    let out = out_dir().join("chrome");
+    let out = out.to_string_lossy();
+    run_in_webview(
+        profile,
+        "chrome",
+        &["--references", "tests/snapshots", "--out", &out],
+    )
+}
+
+/// Runs the suite that times the window's own page under load.
+pub fn run_measure(profile: Profile) -> Result<Report> {
+    run_in_webview(profile, "measure", &[])
+}
+
 fn chrome(profile: Profile) -> Result<()> {
-    let report = run_in_webview(profile, "chrome", &[])?;
+    let report = run_chrome(profile)?;
     if !report.passed {
         bail!(
             "the window's page does not hold to what it must:
@@ -198,6 +215,8 @@ fn chrome(profile: Profile) -> Result<()> {
         report.json["renderers"]["otherTab"],
         report.json["renderers"]["firstTab"],
     );
+    let scenes = report.json["scenes"].as_array().map_or(0, Vec::len);
+    println!("chrome: {scenes} scenes are made of what they were, in both looks");
     Ok(())
 }
 

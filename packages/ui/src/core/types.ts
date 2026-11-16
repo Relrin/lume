@@ -124,6 +124,25 @@ export interface WorkspaceList {
   }[];
 }
 
+/** A theme there is to choose, as `themes_list` describes it. */
+export interface ThemeEntry {
+  /** What the configuration calls the theme. */
+  readonly id: string;
+  /** What a person calls it. */
+  readonly name: string;
+  readonly scheme: Scheme;
+  /** Whether the theme comes with the application, not from the user's folder. */
+  readonly builtin: boolean;
+}
+
+/** A shell found on this machine, as `shells_list` describes it. */
+export interface ShellEntry {
+  /** What a person calls the shell. */
+  readonly name: string;
+  /** What the configuration names to start it. */
+  readonly program: string;
+}
+
 /** The layout as `layout_view` returns it. */
 export interface LayoutView {
   /** The window this page is. */
@@ -196,6 +215,13 @@ export type Notice =
     }
   | { readonly type: "config_error"; readonly problems: readonly ConfigProblem[] }
   | ({ readonly type: "window_state" } & WindowState)
+  /**
+   * The window was asked to close while it must ask first. The page asks, and closes
+   * the window itself if the answer is yes.
+   */
+  | { readonly type: "close_requested" }
+  /** The settings window was asked for again: the page to show, if one was named. */
+  | { readonly type: "settings_show"; readonly section: string | null }
   | {
       readonly type: "notice";
       readonly level: "info" | "warning" | "error";

@@ -8,11 +8,13 @@
  */
 
 import type { GlyphAtlas } from "./atlas/atlas.ts";
+import { blendOver } from "./color.ts";
 import { CURSOR_BAR_WIDTH_RATIO, LINE_RECTS_PER_CELL } from "./constants.ts";
 import {
   CellFlag,
   CursorShape,
   GLYPH_CLUSTER_TAG,
+  HighlightKind,
   NO_SELECTION,
   UNDERLINE_MASK,
   UNDERLINE_SHIFT,
@@ -36,7 +38,12 @@ function glyphSlot(frame: RenderFrame, index: number, atlas: GlyphAtlas): number
   return atlas.glyph(glyph, bold, italic, span);
 }
 
-/** Rebuild the records of one row of the grid. */
+/**
+ * Rebuild the records of one row of the grid.
+ *
+ * `marks` holds a `HighlightKind` for every cell of the grid that is highlighted, and
+ * zero for the others.
+ */
 export function buildRow(
   frame: RenderFrame,
   row: number,
@@ -44,6 +51,7 @@ export function buildRow(
   atlas: GlyphAtlas,
   metrics: CellMetrics,
   theme: TerminalTheme,
+  marks?: Uint8Array,
 ): void {
   const { cols, glyph, fg, bg, underlineColor, flags } = frame;
   const { cellWidth, cellHeight, lineThickness, padding } = metrics;
@@ -65,14 +73,36 @@ export function buildRow(
     const selected =
       col >= selectionStart && col <= selectionEnd && selectionStart !== NO_SELECTION;
 
+    // The second cell of a wide character is highlighted with the first, wherever the
+    // highlight was said to end.
+    let mark = marks === undefined ? 0 : marks[index]!;
+    if (mark === 0 && marks !== undefined && col > 0 && (cellFlags & CellFlag.Spacer) !== 0) {
+      mark = marks[index - 1]!;
+    }
+
     // The selection replaces the cell's colours, so selected text can have a colour of
-    // its own instead of whatever it had before.
-    const background = selected ? theme.selectionBackground : bg[index]!;
+    // its own instead of whatever it had before. It is drawn over a highlight.
+    let background = bg[index]!;
     let foreground = fg[index]!;
     let underline = underlineColor[index]!;
-    if (selected && theme.selectionForeground !== undefined) {
-      foreground = theme.selectionForeground;
-      underline = theme.selectionForeground;
+    if (selected) {
+      background = theme.selectionBackground;
+      if (theme.selectionForeground !== undefined) {
+        foreground = theme.selectionForeground;
+        underline = theme.selectionForeground;
+      }
+    } else if (mark === HighlightKind.Active) {
+      background = theme.searchActive;
+      if (theme.searchActiveText !== undefined) {
+        foreground = theme.searchActiveText;
+        underline = theme.searchActiveText;
+      }
+    } else if (mark === HighlightKind.Match) {
+      // Laid over the cell's own colour, which for most cells is the default one.
+      background = blendOver(
+        theme.searchMatch,
+        background >>> 24 === 0 ? frame.background : background,
+      );
     }
 
     // A fully transparent background is the default one, which is already there.

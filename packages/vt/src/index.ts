@@ -33,15 +33,19 @@ export {
   CursorShape,
   DirtyState,
   GLYPH_CLUSTER_TAG,
+  HIGHLIGHT_STRIDE,
+  HighlightKind,
   NO_SELECTION,
   rgba,
   UNDERLINE_MASK,
   UNDERLINE_SHIFT,
   UnderlineStyle,
   type FrameCursor,
+  type Highlights,
   type RenderFrame,
 } from "./frame.ts";
 export { RenderState } from "./render.ts";
+export { newHighlights, Search, type SearchStatus } from "./search.ts";
 export { KeyEncoder, Mod, type KeyAction, type KeyInput } from "./keys.ts";
 export {
   MouseEncoder,

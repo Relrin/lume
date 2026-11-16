@@ -10,7 +10,8 @@ import { DirtyState, NO_SELECTION, type RenderFrame } from "./frame.ts";
  * That is the rows the frame flags, and also any row whose selected range differs from
  * the one it was last built with, because the selection changes a cell's colours without
  * the cell itself changing. `selectionStart` and `selectionEnd` hold the ranges of the
- * last build and are brought up to date.
+ * last build and are brought up to date. `also` flags rows that must be rebuilt for a
+ * reason the frame does not know of, and is cleared.
  *
  * Returns how many rows are marked in `out`.
  */
@@ -20,6 +21,7 @@ export function collectDirtyRows(
   selectionStart: Int32Array,
   selectionEnd: Int32Array,
   out: Uint8Array,
+  also?: Uint8Array,
 ): number {
   const full = force || frame.dirty === DirtyState.Full;
   let count = 0;
@@ -30,7 +32,9 @@ export function collectDirtyRows(
     selectionStart[row] = start;
     selectionEnd[row] = end;
 
-    const dirty = full || selectionChanged || frame.dirtyRows[row] === 1;
+    const asked = also !== undefined && also[row] === 1;
+    if (asked) also[row] = 0;
+    const dirty = full || selectionChanged || asked || frame.dirtyRows[row] === 1;
     out[row] = dirty ? 1 : 0;
     if (dirty) count++;
   }

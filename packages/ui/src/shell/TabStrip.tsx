@@ -19,6 +19,7 @@ import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
 import { useKeyHint } from "./hints.ts";
 import { CloseIcon, PlusIcon, TerminalIcon } from "./icons.tsx";
+import { roveWithin } from "./roving.ts";
 
 /** Keeps an element's text the title of a tab, without rendering. */
 function useTabLabel(app: ShellApp, tab: TabId) {
@@ -79,7 +80,8 @@ function RenameField({ tab, done }: { tab: TabId; done: () => void }) {
 /**
  * One tab among its window's tabs: pressed to show it, dragged to another place among
  * them, renamed in place. `vertical` says the tabs are listed one under another, so a
- * tab is dragged up and down, not sideways.
+ * tab is dragged up and down, not sideways, and the up and down arrows move the
+ * keyboard from one tab to the next.
  */
 export function TabItem({
   tab,
@@ -172,7 +174,20 @@ export function TabItem({
           tabIndex={active ? 0 : -1}
           className="tab-label"
           onKeyDown={(event) => {
-            if (event.key === "F2") setRenaming(true);
+            if (event.key === "F2") {
+              setRenaming(true);
+              return;
+            }
+            // The arrows move the keyboard among the tabs without showing them: a
+            // tab is shown when it is pressed, with Enter or the space bar.
+            const tabs = event.currentTarget.closest("[role=tablist]");
+            const way = vertical ? "vertical" : "horizontal";
+            if (tabs && roveWithin(event, tabs, "[role=tab]", way)) event.preventDefault();
+          }}
+          onClick={(event) => {
+            // A press with the pointer is the tab's own business, above; this is the
+            // press a key makes.
+            if (event.detail === 0) show();
           }}
         >
           <span className="tab-icon">

@@ -12,8 +12,8 @@ pub const USAGE: &str = "\
 usage: lume-gui [--endpoint <name>] [--workspace <name>] [--cwd <dir>]
                 [-e <program> [arguments...]]
        lume-gui --probe
-       lume-gui --harness <corpus|snapshots|bench> [--report <file>] [--out <dir>]
-                [--references <dir>] [--update]
+       lume-gui --harness <corpus|snapshots|bench|chrome|measure> [--report <file>]
+                [--out <dir>] [--references <dir>] [--update]
 
   --endpoint <name>  serve the control endpoint under this name instead of the default
   --workspace <name> show this workspace, beginning it if there is none of that name
@@ -24,8 +24,8 @@ usage: lume-gui [--endpoint <name>] [--workspace <name>] [--cwd <dir>]
   --harness <suite>  run a test suite in the webview, then exit
   --report <file>    also write the suite's report to this file
   --out <dir>        where a suite may write the files it produces
-  --references <dir> where the snapshot suite keeps its reference images
-  --update           let the snapshot suite replace its reference images
+  --references <dir> where a suite keeps what it compares against
+  --update           let a suite replace what it compares against
 
 An option's value may follow it, or be joined to it with `=`, as in --endpoint=name.";
 
@@ -40,11 +40,24 @@ pub enum Suite {
     Bench,
     /// Runs the window's own page against a stand-in for the core, and checks what a
     /// page must hold to: nothing renders for a terminal's output, and a pane that is
-    /// not on show draws nothing.
+    /// not on show draws nothing. Then compares a number of arrangements of the
+    /// window with what each was made of when it was last found right.
     Chrome,
+    /// Times the window's own page under load: many panes printing at once, a divider
+    /// dragged between two that print, and a tab being drawn again.
+    Measure,
 }
 
 impl Suite {
+    /// Every suite there is.
+    pub const ALL: [Suite; 5] = [
+        Suite::Corpus,
+        Suite::Snapshots,
+        Suite::Bench,
+        Suite::Chrome,
+        Suite::Measure,
+    ];
+
     /// The name the suite goes by on the command line and in the page.
     pub fn name(self) -> &'static str {
         match self {
@@ -52,13 +65,12 @@ impl Suite {
             Suite::Snapshots => "snapshots",
             Suite::Bench => "bench",
             Suite::Chrome => "chrome",
+            Suite::Measure => "measure",
         }
     }
 
     fn named(name: &str) -> Option<Self> {
-        [Suite::Corpus, Suite::Snapshots, Suite::Bench, Suite::Chrome]
-            .into_iter()
-            .find(|suite| suite.name() == name)
+        Suite::ALL.into_iter().find(|suite| suite.name() == name)
     }
 }
 
@@ -273,9 +285,11 @@ mod tests {
 
     #[test]
     fn every_suite_is_found_by_its_name() {
-        for suite in [Suite::Corpus, Suite::Snapshots, Suite::Bench, Suite::Chrome] {
+        for suite in Suite::ALL {
             let args = parsed(&["--harness", suite.name()]).unwrap();
             assert_eq!(args.mode, Mode::Harness(suite));
+            // What is shown when the arguments are not understood names it too.
+            assert!(USAGE.contains(suite.name()), "{}", suite.name());
         }
     }
 

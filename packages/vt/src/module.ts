@@ -46,6 +46,17 @@ export interface Exports {
   ghostty_terminal_get(terminal: number, key: number, out: number): number;
   ghostty_terminal_scroll_viewport(terminal: number, behavior: number): number;
   ghostty_terminal_grid_ref(terminal: number, point: number, out: number): number;
+  ghostty_terminal_point_from_grid_ref(
+    terminal: number,
+    ref: number,
+    tag: number,
+    out: number,
+  ): number;
+  ghostty_terminal_grid_ref_track(terminal: number, point: number, out: number): number;
+  ghostty_tracked_grid_ref_free(ref: number): void;
+  ghostty_tracked_grid_ref_point(ref: number, tag: number, out: number): number;
+  ghostty_tracked_grid_ref_set(ref: number, terminal: number, point: number): number;
+  ghostty_tracked_grid_ref_snapshot(ref: number, out: number): number;
   ghostty_terminal_select_all(terminal: number, out: number): number;
   ghostty_terminal_select_word(terminal: number, options: number, out: number): number;
   ghostty_terminal_select_line(terminal: number, options: number, out: number): number;
@@ -161,6 +172,13 @@ export interface Exports {
     outPtr: number,
     outLen: number,
   ): number;
+
+  ghostty_search_new(allocator: number, out: number, terminal: number): number;
+  ghostty_search_free(search: number): void;
+  ghostty_search_tick(search: number, outStatus: number): number;
+  ghostty_search_feed(search: number): number;
+  ghostty_search_set(search: number, option: number, value: number): number;
+  ghostty_search_get(search: number, data: number, value: number): number;
 }
 
 // Written as a record so that the compiler rejects a name missing from either side.
@@ -186,6 +204,12 @@ const REQUIRED_EXPORTS: Readonly<Record<keyof Exports, true>> = {
   ghostty_terminal_get: true,
   ghostty_terminal_scroll_viewport: true,
   ghostty_terminal_grid_ref: true,
+  ghostty_terminal_point_from_grid_ref: true,
+  ghostty_terminal_grid_ref_track: true,
+  ghostty_tracked_grid_ref_free: true,
+  ghostty_tracked_grid_ref_point: true,
+  ghostty_tracked_grid_ref_set: true,
+  ghostty_tracked_grid_ref_snapshot: true,
   ghostty_terminal_select_all: true,
   ghostty_terminal_select_word: true,
   ghostty_terminal_select_line: true,
@@ -250,6 +274,12 @@ const REQUIRED_EXPORTS: Readonly<Record<keyof Exports, true>> = {
   ghostty_formatter_free: true,
   ghostty_formatter_set: true,
   ghostty_formatter_format_alloc: true,
+  ghostty_search_new: true,
+  ghostty_search_free: true,
+  ghostty_search_tick: true,
+  ghostty_search_feed: true,
+  ghostty_search_set: true,
+  ghostty_search_get: true,
 };
 
 /** The most bytes one `crypto.getRandomValues` call will fill. */
@@ -484,6 +514,14 @@ export class Vt {
   /** The library version the module reports, for example `"1.0.1"`. */
   get version(): string {
     return this.core.version;
+  }
+
+  /**
+   * How much memory the module holds, in bytes. Every terminal of the module lives in
+   * it, and it grows as they need more but is never given back.
+   */
+  get memoryBytes(): number {
+    return this.core.x.memory.buffer.byteLength;
   }
 
   /** Instantiate the module from its bytes or from a fetch response. */

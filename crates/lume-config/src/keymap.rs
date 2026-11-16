@@ -63,6 +63,10 @@ const SCROLLBACK: &str = "terminal && !alt-screen";
 
 const TERMINAL: &str = "terminal";
 
+/// Where the keyboard is in the bar that searches a terminal. The key that opens the
+/// bar holds there too, and goes back to what was typed.
+const SEARCH: &str = "search";
+
 /// The defaults on Windows and Linux.
 const DEFAULTS: &[Row] = &[
     ("ctrl+shift+c", "lume.terminal.copy", TERMINAL),
@@ -97,6 +101,7 @@ const DEFAULTS: &[Row] = &[
     ("ctrl+shift+space", "lume.pane.scratch", ""),
     ("ctrl+shift+p", "lume.palette.open", ""),
     ("ctrl+shift+f", "lume.search.open", TERMINAL),
+    ("ctrl+shift+f", "lume.search.open", SEARCH),
     ("ctrl+shift+,", "lume.settings.open", ""),
     ("ctrl+shift+n", "lume.window.new", ""),
     ("ctrl+shift+b", "lume.panel.toggle", ""),
@@ -141,6 +146,7 @@ const MAC_DEFAULTS: &[Row] = &[
     ("cmd+shift+space", "lume.pane.scratch", ""),
     ("cmd+shift+p", "lume.palette.open", ""),
     ("cmd+f", "lume.search.open", TERMINAL),
+    ("cmd+f", "lume.search.open", SEARCH),
     ("cmd+,", "lume.settings.open", ""),
     ("cmd+n", "lume.window.new", ""),
     ("cmd+shift+b", "lume.panel.toggle", ""),
@@ -598,17 +604,17 @@ mod tests {
     fn a_key_can_do_different_things_in_different_places() {
         let text = "\
 [keybindings]\n\
-\"ctrl+shift+f\" = [\n  { command = \"lume.search.open\", when = \"terminal\" },\n  \
+\"ctrl+shift+k\" = [\n  { command = \"lume.terminal.clear\", when = \"terminal\" },\n  \
 { command = \"lume.palette.open\", when = \"settings\" },\n]\n\
 \"ctrl+shift+p\" = { command = \"lume.tab.activate\", args = { index = 2 }, when = \"floating\" }\n";
         let keymap = keymap(text, Platform::Windows);
         assert_eq!(keymap.problems, vec![]);
-        let search = bound(&keymap, "ctrl+shift+f");
-        assert_eq!(search.len(), 2);
-        assert_eq!(search[0].command, "lume.search.open");
-        assert_eq!(write_when(&search[1].when), "settings");
+        let clear = bound(&keymap, "ctrl+shift+k");
+        assert_eq!(clear.len(), 2);
+        assert_eq!(clear[0].command, "lume.terminal.clear");
+        assert_eq!(write_when(&clear[1].when), "settings");
         // The default in the terminal was replaced by the same binding of the user's.
-        assert!(matches!(search[0].source, Source::User { .. }));
+        assert!(matches!(clear[0].source, Source::User { .. }));
 
         // In another context the default stays beside the user's.
         let palette = bound(&keymap, "ctrl+shift+p");

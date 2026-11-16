@@ -496,7 +496,7 @@ impl AppState {
             .panes()
             .and_then(|panes| panes.focused_window())
             .and_then(|window| self.page_of(&window::label_of(window)));
-        focused.or_else(|| lock(&self.links).values().next().cloned())
+        focused.or_else(|| self.links().into_iter().next().map(|(_, link)| link))
     }
 
     /// The carrier of the page of the webview called `label`, if its page has connected.
@@ -504,19 +504,28 @@ impl AppState {
         lock(&self.links).get(label).cloned()
     }
 
-    /// Every connected page's carrier, with its webview's label.
+    /// The carrier of every connected page that shows terminals or runs a test suite,
+    /// with its webview's label. The page of the settings window is not one of them:
+    /// it is told of the configuration and of nothing else.
     pub fn links(&self) -> Vec<(String, Arc<Link>)> {
         lock(&self.links)
             .iter()
+            .filter(|(label, _)| label.as_str() != window::SETTINGS_LABEL)
             .map(|(label, link)| (label.clone(), Arc::clone(link)))
             .collect()
     }
 
-    /// Tells every connected page something.
+    /// Tells every connected page something, the settings window's page as well.
     pub fn broadcast(&self, notice: &serde_json::Value) {
-        for (_, link) in self.links() {
+        let links: Vec<Arc<Link>> = lock(&self.links).values().cloned().collect();
+        for link in links {
             link.notify(notice);
         }
+    }
+
+    /// Whether a session's program is known to have ended.
+    pub fn ended(&self, key: &SessionKey) -> bool {
+        lock(&self.exits).of(key).is_some()
     }
 
     /// Wakes whoever waits in [`soon`](Self::soon): something they may be waiting for
@@ -938,6 +947,42 @@ mod tests {
         let next = state.open(WINDOW, RecordingCarrier::new()).await;
         sleep(Duration::from_millis(800)).await;
         assert_eq!(state.list(WINDOW, next).await.unwrap().len(), 2);
+
+        state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_settings_page_is_told_of_the_configuration_and_is_no_page_of_terminals() {
+        let state = local_state(PATIENT).await;
+        let settings = RecordingCarrier::new();
+        state.open(window::SETTINGS_LABEL, settings.clone()).await;
+
+        // It is connected, and it is not a page a terminal's request could be put to.
+        assert!(state.page_of(window::SETTINGS_LABEL).is_some());
+        assert!(state.links().is_empty());
+        assert!(state.page().is_none());
+
+        let terminals = RecordingCarrier::new();
+        state.open(WINDOW, terminals.clone()).await;
+        assert_eq!(state.links().len(), 1);
+        assert!(state.page().is_some());
+
+        state.broadcast(&serde_json::json!({ "type": "config_changed", "revision": 2 }));
+        let told = |carrier: &Arc<RecordingCarrier>| {
+            let carrier = Arc::clone(carrier);
+            async move {
+                timeout(STEP, async {
+                    while carrier.requests().is_empty() {
+                        sleep(Duration::from_millis(5)).await;
+                    }
+                })
+                .await
+                .expect("the page to be told");
+                carrier.requests()[0]["notify"]["type"].clone()
+            }
+        };
+        assert_eq!(told(&settings).await, "config_changed");
+        assert_eq!(told(&terminals).await, "config_changed");
 
         state.shutdown().await;
     }

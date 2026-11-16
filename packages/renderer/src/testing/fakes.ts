@@ -26,6 +26,9 @@ export const TEST_THEME: TerminalTheme = {
   font: { family: "Test Mono", sizePx: 14 },
   cursor: rgba(0xff, 0xff, 0xff),
   selectionBackground: rgba(0x33, 0x55, 0x99),
+  searchMatch: rgba(0xf0, 0xb3, 0x5a, 0x66),
+  searchActive: rgba(0xf0, 0xb3, 0x5a),
+  searchActiveText: rgba(0x16, 0x18, 0x1c),
   padding: 0,
 };
 

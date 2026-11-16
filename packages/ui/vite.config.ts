@@ -13,6 +13,9 @@ const forTesting = process.env["LUME_HARNESS"] === "1";
 
 const page = (name: string) => fileURLToPath(new URL(name, import.meta.url));
 
+/** The pages every build contains: the terminal window's and the settings window's. */
+const pages = { index: page("index.html"), settings: page("settings.html") };
+
 // Tauri loads this dev server at a fixed address (tauri.conf.json, build.devUrl).
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -26,9 +29,7 @@ export default defineConfig({
     target: "es2023",
     sourcemap: forTesting,
     rolldownOptions: {
-      input: forTesting
-        ? { index: page("index.html"), harness: page("harness.html") }
-        : { index: page("index.html") },
+      input: forTesting ? { ...pages, harness: page("harness.html") } : pages,
     },
   },
 });

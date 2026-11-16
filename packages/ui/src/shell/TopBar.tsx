@@ -9,6 +9,9 @@
  * A window without a title bar of the system's is moved by this bar: a press on any
  * part of it that is not a control drags the window, and a double press makes the
  * window fill the screen or puts it back.
+ *
+ * With the keyboard in the bar, Tab goes from one of its parts to the next and Escape
+ * goes back to the terminal.
  */
 
 import { useLayoutEffect, useRef } from "react";
@@ -26,6 +29,9 @@ import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 
 /** The parts of the bar a press is meant for, and so does not move the window. */
 const CONTROLS = "button, input, textarea, select, a, [role=menu], .tab";
+
+/** The parts of the bar that put Escape to a use of their own. */
+const KEEPS_ESCAPE = "[role=menu], input, textarea";
 
 /** The top bar. */
 export function TopBar() {
@@ -50,6 +56,14 @@ export function TopBar() {
       ref={bar}
       className="top-bar"
       data-title-bar={custom ? "custom" : "system"}
+      onKeyDown={(event) => {
+        // Escape gives the keyboard back to the terminal, unless something in the
+        // bar has a use of its own for it: a menu that is open, a name being typed.
+        if (event.key !== "Escape" || event.defaultPrevented) return;
+        if ((event.target as Element).closest(KEEPS_ESCAPE)) return;
+        event.preventDefault();
+        app.views.focus();
+      }}
       onMouseDown={(event) => {
         if (event.button !== 0 || (event.target as Element).closest(CONTROLS)) return;
         // The keyboard stays with the terminal when the bar is pressed.
