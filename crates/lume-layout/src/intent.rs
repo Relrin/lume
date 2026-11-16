@@ -61,6 +61,11 @@ pub enum Intent {
     },
     /// Moves or resizes a floating pane.
     FloatMove { pane: PaneId, rect: UnitRect },
+    /// Puts a pane away for now, or brings it back. A pane that is put away floats
+    /// out of sight: one that was in a tab is taken out of it first. Brought back, it
+    /// has the keyboard, and is where it came from: floating where it floated, or
+    /// among the tabs again, beside the pane that last had the keyboard.
+    Minimise { pane: PaneId, on: bool },
     /// Puts a floating pane back among the tabs: where it is told, or beside the pane
     /// that last had the keyboard.
     Dock {
@@ -159,6 +164,9 @@ pub enum Intent {
     WindowBounds { window: WindowId, bounds: Bounds },
     /// Records which window the user is working in.
     WindowFocus { window: WindowId },
+    /// Gives the workspace another name. The file it is kept in is the application's
+    /// to rename.
+    WorkspaceRename { name: String },
 }
 
 fn yes() -> bool {
@@ -174,6 +182,7 @@ impl Intent {
                 | Intent::PanelSet { .. }
                 | Intent::WindowBounds { .. }
                 | Intent::WindowFocus { .. }
+                | Intent::WorkspaceRename { .. }
         )
     }
 }

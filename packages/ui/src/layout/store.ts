@@ -21,6 +21,7 @@ import type {
   DockAreas,
   Floating,
   LayoutChange,
+  Minimised,
   Node,
   Pane,
   PaneId,
@@ -55,6 +56,8 @@ export interface WindowEntry {
   readonly active: TabId | null;
   /** The floating panes, from the one at the back to the one in front. */
   readonly floating: readonly PaneId[];
+  /** Those of the floating panes that are put away at the window's corner, in the same order. */
+  readonly minimised: readonly PaneId[];
   /** The pane that has the keyboard. */
   readonly focus: PaneId | null;
 }
@@ -83,7 +86,18 @@ export interface SplitEntry {
 export interface FloatEntry {
   readonly window: WindowId;
   readonly rect: UnitRect;
+  /** Set while the pane is put away; says where it goes when it is brought back. */
+  readonly minimised: Minimised | null;
 }
+
+/** A window's floating panes by id: all of them, and those that are put away. */
+interface FloatingIds {
+  readonly floating: readonly PaneId[];
+  readonly minimised: readonly PaneId[];
+}
+
+/** No ids: one list for every window that has none, so an entry's list stays the same. */
+const NO_IDS: readonly PaneId[] = [];
 
 /** What following a set of changes came to. */
 export type Followed =
@@ -312,7 +326,7 @@ function dropTab(draft: Draft, tab: TabId): void {
 }
 
 /** Puts a window's floating panes in place of those it had. */
-function setFloating(draft: Draft, window: WindowId, floating: readonly Floating[]): PaneId[] {
+function setFloating(draft: Draft, window: WindowId, floating: readonly Floating[]): FloatingIds {
   const now = new Set(floating.map((entry) => entry.pane.id));
   const before = draft.data.windows[window]?.floating ?? [];
   for (const pane of before) {
@@ -321,21 +335,30 @@ function setFloating(draft: Draft, window: WindowId, floating: readonly Floating
     draft.remove("floats", pane);
     if (!(pane in draft.data.paneTabs)) draft.remove("panes", pane);
   }
-  for (const { pane, rect } of floating) {
+  for (const { pane, rect, minimised } of floating) {
     const held = draft.data.panes[pane.id];
     draft.set("panes", pane.id, held && alike(held, pane) ? held : pane);
     draft.remove("paneTabs", pane.id);
     const float = draft.data.floats[pane.id];
-    const same = float !== undefined && float.window === window && alike(float.rect, rect);
-    if (!same) draft.set("floats", pane.id, { window, rect });
+    const same =
+      float !== undefined &&
+      float.window === window &&
+      float.minimised === (minimised ?? null) &&
+      alike(float.rect, rect);
+    if (!same) draft.set("floats", pane.id, { window, rect, minimised: minimised ?? null });
   }
-  return floating.map((entry) => entry.pane.id);
+  const away = floating.filter((entry) => (entry.minimised ?? null) !== null);
+  return {
+    floating: floating.map((entry) => entry.pane.id),
+    // The same empty list each time, so a window with nothing put away renders nothing again.
+    minimised: away.length === 0 ? NO_IDS : away.map((entry) => entry.pane.id),
+  };
 }
 
 function takeWindow(draft: Draft, window: Window): void {
   dropWindow(draft, window.id);
   for (const tab of window.centre.tabs) takeTab(draft, window.id, tab);
-  const floating = setFloating(draft, window.id, window.floating);
+  const { floating, minimised } = setFloating(draft, window.id, window.floating);
   draft.set("windows", window.id, {
     id: window.id,
     bounds: window.bounds,
@@ -343,6 +366,7 @@ function takeWindow(draft: Draft, window: Window): void {
     tabs: window.centre.tabs.map((tab) => tab.id),
     active: window.centre.active,
     floating,
+    minimised,
     focus: window.focus,
   });
   draft.put("windowOrder", [...draft.data.windowOrder, window.id]);
@@ -454,8 +478,8 @@ function follow(draft: Draft, change: LayoutChange): void {
     }
     case "floating": {
       if (!draft.data.windows[change.window]) return;
-      const floating = setFloating(draft, change.window, change.floating);
-      editWindow(draft, change.window, (entry) => ({ ...entry, floating }));
+      const { floating, minimised } = setFloating(draft, change.window, change.floating);
+      editWindow(draft, change.window, (entry) => ({ ...entry, floating, minimised }));
       return;
     }
     case "float_rect": {
@@ -489,6 +513,9 @@ function follow(draft: Draft, change: LayoutChange): void {
       return;
     case "window_focused":
       draft.put("focusedWindow", change.window);
+      return;
+    case "workspace_name":
+      draft.put("name", change.name);
       return;
     case "pane_closed":
       // The changes before it have already taken the pane out.
@@ -573,7 +600,7 @@ export function toWorkspace(state: LayoutState): Workspace {
     const floating = window.floating.flatMap((paneId): Floating[] => {
       const pane = state.panes[paneId];
       const float = state.floats[paneId];
-      return pane && float ? [{ pane, rect: float.rect }] : [];
+      return pane && float ? [{ pane, rect: float.rect, minimised: float.minimised }] : [];
     });
     return [
       {

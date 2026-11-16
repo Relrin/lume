@@ -36,6 +36,13 @@ export class PaneTitles {
     if (this.#titles.delete(pane)) this.#changed(pane);
   }
 
+  /** Forgets every pane: the window shows another workspace's panes now. */
+  clear(): void {
+    const panes = [...this.#titles.keys()];
+    this.#titles.clear();
+    for (const pane of panes) this.#changed(pane);
+  }
+
   /** Calls `listener` with the pane whose title changed. Returns how to stop. */
   subscribe(listener: (pane: PaneId) => void): () => void {
     this.#listeners.add(listener);

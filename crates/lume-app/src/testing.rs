@@ -203,6 +203,8 @@ pub struct FakeShell {
     activated: std::sync::atomic::AtomicUsize,
     quit: std::sync::atomic::AtomicUsize,
     closed: Mutex<Vec<String>>,
+    /// The labels of the windows that are open.
+    open: Mutex<Vec<String>>,
 }
 
 impl FakeShell {
@@ -217,6 +219,14 @@ impl FakeShell {
     /// The labels of the windows that were closed, in order.
     pub fn closed(&self) -> Vec<String> {
         self.closed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The labels of the windows that are open, in the order they were opened.
+    pub fn open(&self) -> Vec<String> {
+        self.open
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
@@ -241,5 +251,23 @@ impl crate::control::Shell for FakeShell {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(label.to_owned());
+        self.open
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|open| open != label);
     }
+
+    fn open_window(&self, window: lume_layout::WindowId, _bounds: Option<lume_layout::Bounds>) {
+        let label = crate::window::label_of(window);
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        if !open.contains(&label) {
+            open.push(label);
+        }
+    }
+
+    fn layout_windows(&self) -> Vec<String> {
+        self.open()
+    }
+
+    fn set_title_bar(&self, _custom: bool) {}
 }

@@ -57,12 +57,16 @@ pub struct Window {
     pub history: Vec<PaneId>,
 }
 
-/// A window's place and size on the desktop, in logical pixels.
+/// A window's place and size on the desktop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bounds {
+    /// Where the window's top left corner is, in the desktop's own pixels. On a
+    /// desktop whose screens have different scales only those name one place.
     pub x: i32,
     pub y: i32,
+    /// The size of what the window shows, in logical pixels: the window looks as large
+    /// on a screen of another scale.
     pub width: u32,
     pub height: u32,
     /// The position and size above are the ones the window returns to when it is no
@@ -307,6 +311,21 @@ pub struct TerminalPane {
 pub struct Floating {
     pub pane: Pane,
     pub rect: UnitRect,
+    /// Set while the pane is put away. It keeps its place, and its program keeps
+    /// running; a page shows it as a small marker to bring it back by. A pane that is
+    /// put away cannot have the keyboard.
+    #[serde(default)]
+    pub minimised: Option<Minimised>,
+}
+
+/// Where a pane that is put away goes when it is brought back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Minimised {
+    /// It floated, and floats again where it was.
+    Floating,
+    /// It was in a tab, and goes back among the tabs.
+    Tab,
 }
 
 /// A rectangle within a whole that is [`UNITS`] wide and [`UNITS`] high.
@@ -547,15 +566,24 @@ impl Window {
     }
 
     /// The panes the keyboard may be given to: those of the tab on show, in the order
-    /// they are laid out, then the floating ones from back to front.
+    /// they are laid out, then the floating ones that are not put away, from back to
+    /// front.
     pub fn focusable(&self) -> Vec<PaneId> {
         let mut panes = self
             .centre
             .active_tab()
             .map(Tab::pane_ids)
             .unwrap_or_default();
-        panes.extend(self.floating.iter().map(|floating| floating.pane.id));
+        panes.extend(self.shown_floating().map(|floating| floating.pane.id));
         panes
+    }
+
+    /// The floating panes that are on show, from back to front: those that are not
+    /// put away.
+    pub fn shown_floating(&self) -> impl Iterator<Item = &Floating> {
+        self.floating
+            .iter()
+            .filter(|floating| floating.minimised.is_none())
     }
 }
 

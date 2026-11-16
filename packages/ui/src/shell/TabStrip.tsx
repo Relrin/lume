@@ -1,5 +1,6 @@
 /**
- * The window's tabs, in a row.
+ * The window's tabs, in a row along the top bar, and one tab as it is shown wherever
+ * the tabs are listed.
  *
  * Which tabs there are and which is on show come from the layout and render here. What
  * a tab is called does not: a tab without a name of its own is called after the program
@@ -10,6 +11,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 
+import { NEW_TAB_DROP } from "../drag/controller.ts";
 import { selectActiveTab, selectTabOrder, tabTitle } from "../layout/selectors.ts";
 import type { TabId } from "../layout/types.ts";
 import { DRAG_START_PX } from "../tuning.ts";
@@ -74,12 +76,30 @@ function RenameField({ tab, done }: { tab: TabId; done: () => void }) {
   );
 }
 
-function TabItem({ tab, active, index }: { tab: TabId; active: boolean; index: number }) {
+/**
+ * One tab among its window's tabs: pressed to show it, dragged to another place among
+ * them, renamed in place. `vertical` says the tabs are listed one under another, so a
+ * tab is dragged up and down, not sideways.
+ */
+export function TabItem({
+  tab,
+  active,
+  index,
+  vertical = false,
+}: {
+  tab: TabId;
+  active: boolean;
+  index: number;
+  vertical?: boolean;
+}) {
   const app = useShell();
   const label = useTabLabel(app, tab);
   const [renaming, setRenaming] = useState(false);
   const closeHint = useKeyHint("lume.tab.close");
-  const drag = useRef<{ pointerId: number; x: number; moved: boolean } | null>(null);
+  const drag = useRef<{ pointerId: number; at: number; moved: boolean } | null>(null);
+  /** Where the pointer is along the direction the tabs are listed in. */
+  const along = (event: { clientX: number; clientY: number }) =>
+    vertical ? event.clientY : event.clientX;
 
   const show = () => {
     app.client
@@ -87,13 +107,14 @@ function TabItem({ tab, active, index }: { tab: TabId; active: boolean; index: n
       .catch(() => undefined);
   };
   /** The place among the tabs the pointer is over, by the middles of the tabs. */
-  const placeAt = (x: number, strip: Element): number => {
+  const placeAt = (at: number, strip: Element): number => {
     const tabs = [...strip.querySelectorAll<HTMLElement>("[data-tab]")];
     let place = 0;
     for (const element of tabs) {
       if (element.dataset["tab"] === tab) continue;
       const box = element.getBoundingClientRect();
-      if (x > box.left + box.width / 2) place += 1;
+      const middle = vertical ? box.top + box.height / 2 : box.left + box.width / 2;
+      if (at > middle) place += 1;
     }
     return place;
   };
@@ -106,13 +127,13 @@ function TabItem({ tab, active, index }: { tab: TabId; active: boolean; index: n
       onPointerDown={(event) => {
         if (event.button !== 0 || renaming) return;
         if ((event.target as Element).closest(".tab-close")) return;
-        drag.current = { pointerId: event.pointerId, x: event.clientX, moved: false };
+        drag.current = { pointerId: event.pointerId, at: along(event), moved: false };
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
         const held = drag.current;
         if (!held || held.pointerId !== event.pointerId) return;
-        if (Math.abs(event.clientX - held.x) >= DRAG_START_PX) held.moved = true;
+        if (Math.abs(along(event) - held.at) >= DRAG_START_PX) held.moved = true;
         event.currentTarget.dataset["dragging"] = String(held.moved);
       }}
       onPointerUp={(event) => {
@@ -126,7 +147,7 @@ function TabItem({ tab, active, index }: { tab: TabId; active: boolean; index: n
           app.views.focus();
           return;
         }
-        const place = placeAt(event.clientX, strip);
+        const place = placeAt(along(event), strip);
         if (place !== index) {
           app.client.layoutApply({ type: "tab_move", tab, index: place }).catch(() => undefined);
         }
@@ -181,7 +202,7 @@ export function TabStrip() {
   const active = useStore(app.layout, (state) => (state.ready ? selectActiveTab(state) : null));
   const newHint = useKeyHint("lume.tab.new");
   return (
-    <div className="tab-strip">
+    <div className="tab-strip" data-drop={NEW_TAB_DROP}>
       <div className="tab-list" role="tablist" aria-label="Tabs">
         {tabs.map((tab, index) => (
           <TabItem key={tab} tab={tab} active={tab === active} index={index} />

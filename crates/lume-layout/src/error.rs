@@ -39,6 +39,8 @@ pub enum IntentError {
     BadRect,
     #[error("there is no place {index} among {len}")]
     BadIndex { index: u32, len: usize },
+    #[error("`{0}` cannot be a workspace's name")]
+    BadName(String),
     #[error("only the application may apply this intent")]
     CoreOnly,
     #[error("a session was started for an intent that makes no terminal pane")]
@@ -66,6 +68,7 @@ impl IntentError {
             | IntentError::Fixed
             | IntentError::ContentRequired
             | IntentError::BadRect
+            | IntentError::BadName(_)
             | IntentError::BadIndex { .. }
             | IntentError::SessionUnused => "invalid_intent",
         }

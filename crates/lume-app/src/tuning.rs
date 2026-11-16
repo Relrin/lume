@@ -86,3 +86,24 @@ pub const WORKSPACE_NAME: &str = "default";
 /// How many notices wait for a page that has not connected yet. More than a start can
 /// have reason to say.
 pub const PENDING_NOTICES_MAX: usize = 16;
+
+/// How long a window that is being moved or resized is left alone before where it is
+/// now is kept with the layout.
+pub const BOUNDS_DEBOUNCE: Duration = Duration::from_millis(500);
+
+/// How much of a window must be on a screen, along each side, for the window to be
+/// left where it was kept: enough to see it and take hold of it. In the pixels a
+/// window's size is counted in.
+pub const BOUNDS_MIN_VISIBLE: u32 = 64;
+
+/// The smallest a window may be. The same as the window's description says, which
+/// holds while the window is open; this holds for a size read from a file.
+pub const WINDOW_MIN_WIDTH: u32 = 480;
+pub const WINDOW_MIN_HEIGHT: u32 = 320;
+
+/// The file, in the folder of the application's state, that says which workspace was
+/// last on show.
+pub const APP_FILE: &str = "app.json";
+
+/// The id of the panel that lists a window's tabs.
+pub const TAB_LIST_PANEL: &str = "lume.tabs";

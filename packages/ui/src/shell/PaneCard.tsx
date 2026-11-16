@@ -5,23 +5,37 @@
  * the controller that places the cards, and the terminal's elements to the pane's view,
  * which works on them directly from then on. Nothing a terminal does makes the card
  * render again, and neither does moving or resizing it.
+ *
+ * A card is moved by its header. A card in a tab is dragged to another place among the
+ * tab's cards; a card that floats over the tabs is dragged wherever it is wanted, and
+ * resized by its edges.
  */
 
 import { useLayoutEffect, useRef } from "react";
 import { useStore } from "zustand";
 
+import { FLOAT_EDGES } from "../layout/floats.ts";
 import { selectFocus } from "../layout/selectors.ts";
 import type { PaneId } from "../layout/types.ts";
+import { StatusSlotItems } from "../status/StatusItem.tsx";
 import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
 import { useKeyHint } from "./hints.ts";
-import { CloseIcon, SplitDownIcon, SplitRightIcon, TerminalIcon, ZoomIcon } from "./icons.tsx";
+import {
+  CloseIcon,
+  FloatIcon,
+  PutAwayIcon,
+  SplitDownIcon,
+  SplitRightIcon,
+  TerminalIcon,
+  ZoomIcon,
+} from "./icons.tsx";
 
 /** What a pane is called when neither the user nor its program has named it. */
 const UNTITLED_PANE = "Terminal";
 
 /** Keeps an element's text the title of a pane's program, without rendering. */
-function usePaneTitle(app: ShellApp, pane: PaneId) {
+export function usePaneTitle(app: ShellApp, pane: PaneId) {
   const title = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
     const element = title.current;
@@ -49,6 +63,7 @@ function HeaderButton({
   hint,
   pressed,
   spare = false,
+  lit = false,
   onPress,
   children,
 }: {
@@ -57,13 +72,18 @@ function HeaderButton({
   pressed?: boolean;
   /** Whether a header too narrow for every button does without this one. */
   spare?: boolean;
+  /** Whether the button, while pressed, is lit in the colour of a floating card's edge. */
+  lit?: boolean;
   onPress: () => void;
   children: React.ReactNode;
 }) {
+  const classes = ["control", "pane-button"];
+  if (spare) classes.push("pane-button-spare");
+  if (lit) classes.push("pane-button-lit");
   return (
     <button
       type="button"
-      className={spare ? "control pane-button pane-button-spare" : "control pane-button"}
+      className={classes.join(" ")}
       aria-label={label}
       aria-pressed={pressed}
       title={`${label}${hint}`}
@@ -77,7 +97,15 @@ function HeaderButton({
   );
 }
 
-function PaneHeader({ pane, focused }: { pane: PaneId; focused: boolean }) {
+function PaneHeader({
+  pane,
+  focused,
+  floating,
+}: {
+  pane: PaneId;
+  focused: boolean;
+  floating: boolean;
+}) {
   const app = useShell();
   const title = usePaneTitle(app, pane);
   const cwd = useStore(app.layout, (state) => {
@@ -91,12 +119,23 @@ function PaneHeader({ pane, focused }: { pane: PaneId; focused: boolean }) {
   const hints = {
     right: useKeyHint("lume.pane.split-right"),
     down: useKeyHint("lume.pane.split-down"),
+    float: useKeyHint("lume.pane.float"),
+    minimise: useKeyHint("lume.pane.minimise"),
     zoom: useKeyHint("lume.pane.zoom"),
     close: useKeyHint("lume.pane.close"),
   };
   const run = (command: string) => () => app.commands.run(command, { pane });
   return (
-    <header className="pane-header">
+    <header
+      className="pane-header"
+      onPointerDown={(event) => {
+        if (event.button !== 0 || (event.target as Element).closest("button")) return;
+        // The keyboard stays with the terminal while its card is moved.
+        event.preventDefault();
+        if (floating) app.area.startFloatDrag(pane, "move", event.nativeEvent, event.currentTarget);
+        else app.cardDrag.start(pane, event.nativeEvent, event.currentTarget);
+      }}
+    >
       <span className="pane-icon">
         <TerminalIcon size={10} />
       </span>
@@ -107,8 +146,9 @@ function PaneHeader({ pane, focused }: { pane: PaneId; focused: boolean }) {
         </span>
       )}
       <span className="pane-spacer" />
+      <StatusSlotItems store={app.status} slot="pane.header" pane={pane} />
       <span className="pane-buttons">
-        {focused && !zoomed && (
+        {focused && !zoomed && !floating && (
           <>
             <HeaderButton
               label="Split right"
@@ -129,12 +169,32 @@ function PaneHeader({ pane, focused }: { pane: PaneId; focused: boolean }) {
           </>
         )}
         <HeaderButton
-          label={zoomed ? "Restore layout" : "Zoom pane"}
-          hint={hints.zoom}
-          pressed={zoomed}
-          onPress={run("lume.pane.zoom")}
+          label={floating ? "Dock back into the layout" : "Float above other panes"}
+          hint={hints.float}
+          pressed={floating}
+          spare={!floating}
+          lit
+          onPress={run("lume.pane.float")}
         >
-          <ZoomIcon />
+          <FloatIcon />
+        </HeaderButton>
+        {!floating && (
+          <HeaderButton
+            label={zoomed ? "Restore layout" : "Zoom pane"}
+            hint={hints.zoom}
+            pressed={zoomed}
+            onPress={run("lume.pane.zoom")}
+          >
+            <ZoomIcon />
+          </HeaderButton>
+        )}
+        <HeaderButton
+          label="Minimise to the corner"
+          hint={hints.minimise}
+          spare={!floating}
+          onPress={run("lume.pane.minimise")}
+        >
+          <PutAwayIcon />
         </HeaderButton>
         <HeaderButton label="Close pane" hint={hints.close} onPress={run("lume.pane.close")}>
           <CloseIcon />
@@ -144,8 +204,20 @@ function PaneHeader({ pane, focused }: { pane: PaneId; focused: boolean }) {
   );
 }
 
-/** A pane's card. `header` says whether the card has one. */
-export function PaneCard({ pane, header }: { pane: PaneId; header: boolean }) {
+/**
+ * A pane's card. `header` says whether the card has one; `floating`, whether the card
+ * floats over the window's tabs, which gives it a header whatever else is said, and
+ * edges to resize it by.
+ */
+export function PaneCard({
+  pane,
+  header,
+  floating = false,
+}: {
+  pane: PaneId;
+  header: boolean;
+  floating?: boolean;
+}) {
   const app = useShell();
   const card = useRef<HTMLElement>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -185,13 +257,15 @@ export function PaneCard({ pane, header }: { pane: PaneId; header: boolean }) {
       className="pane-card"
       data-pane={pane}
       data-focused={focused}
+      data-floating={floating}
       aria-label={`Pane ${pane}`}
       onPointerDown={() => {
         // A press anywhere on a card gives its terminal the keyboard.
-        if (!focused) app.views.get(pane)?.focus();
+        const view = app.views.get(pane);
+        if (view && (!focused || !view.hasFocus)) view.focus();
       }}
     >
-      {header && <PaneHeader pane={pane} focused={focused} />}
+      {(header || floating) && <PaneHeader pane={pane} focused={focused} floating={floating} />}
       <div className="terminal" ref={root}>
         <div className="terminal-surface" ref={surface} />
         <textarea
@@ -209,6 +283,19 @@ export function PaneCard({ pane, header }: { pane: PaneId; header: boolean }) {
         <div className="terminal-preedit" ref={preedit} hidden />
         <div className="terminal-status" ref={status} hidden />
       </div>
+      {floating &&
+        FLOAT_EDGES.map((edge) => (
+          <div
+            key={edge}
+            className="float-edge"
+            data-edge={edge}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              app.area.startFloatDrag(pane, edge, event.nativeEvent, event.currentTarget);
+            }}
+          />
+        ))}
     </section>
   );
 }

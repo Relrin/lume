@@ -232,6 +232,9 @@ export class PlainFollower {
       case "window_focused":
         workspace.focused_window = change.window;
         return;
+      case "workspace_name":
+        workspace.name = change.name;
+        return;
       case "pane_closed":
         return;
     }

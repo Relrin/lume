@@ -7,8 +7,8 @@ mod common;
 use common::*;
 use lume_layout::tuning::{DOCK_SIZE_MAX, DOCK_SIZE_MIN, FLOATING_MAX, SHARE_MIN};
 use lume_layout::{
-    Area, Axis, Bounds, Dir, FocusTarget, Intent, IntentError, LayoutChange, NewContent, Node,
-    PaneContent, PaneId, PanelContent, PanelId, Place, Slot, SpawnRequest, SplitId, TabId,
+    Area, Axis, Bounds, Dir, FocusTarget, Intent, IntentError, LayoutChange, Minimised, NewContent,
+    Node, PaneContent, PaneId, PanelContent, PanelId, Place, Slot, SpawnRequest, SplitId, TabId,
     TabTarget, UNITS, UnitRect, WindowId, Workspace, apply, needs,
 };
 use lume_proto::{BackendId, SessionId};
@@ -1206,6 +1206,153 @@ fn an_intent_says_whether_a_session_must_be_started_for_it() {
     must(&mut workspace, show.clone());
     // The scratch terminal is there: showing it again starts nothing.
     assert!(needs(&workspace, &show).is_none());
+}
+
+#[test]
+fn a_floating_pane_is_put_away_and_brought_back_where_it_was() {
+    let (mut workspace, window, _, a) = one_pane();
+    let b = split(&mut workspace, a, Dir::Right);
+    let rect = UnitRect {
+        x: 100_000,
+        y: 200_000,
+        w: 400_000,
+        h: 300_000,
+    };
+    must(
+        &mut workspace,
+        Intent::Float {
+            pane: b,
+            rect: Some(rect),
+        },
+    );
+    assert_eq!(focus(&workspace, window), Some(b));
+
+    // Put away, it floats still, and the keyboard goes to a pane that is on show.
+    let (changes, _) = must(&mut workspace, Intent::Minimise { pane: b, on: true });
+    let floating = &workspace.window(window).unwrap().floating;
+    assert_eq!(floating[0].minimised, Some(Minimised::Floating));
+    assert_eq!(floating[0].rect, rect);
+    assert_eq!(focus(&workspace, window), Some(a));
+    assert!(
+        changes
+            .iter()
+            .any(|change| matches!(change, LayoutChange::Floating { .. }))
+    );
+    assert!(!workspace.window(window).unwrap().focusable().contains(&b));
+
+    // Going through the panes, or back to the one before, passes it over.
+    for target in [
+        FocusTarget::Next { window },
+        FocusTarget::Previous { window },
+        FocusTarget::Back { window },
+    ] {
+        must(&mut workspace, Intent::Focus { target });
+        assert_eq!(focus(&workspace, window), Some(a));
+    }
+    // Putting it away again changes nothing.
+    let (changes, _) = must(&mut workspace, Intent::Minimise { pane: b, on: true });
+    assert_eq!(changes, vec![]);
+
+    // Brought back, it is where it was, in front, with the keyboard.
+    must(&mut workspace, Intent::Minimise { pane: b, on: false });
+    let floating = &workspace.window(window).unwrap().floating;
+    assert_eq!(floating[0].minimised, None);
+    assert_eq!(floating[0].rect, rect);
+    assert_eq!(focus(&workspace, window), Some(b));
+
+    // Asking for a pane that is put away brings it back too.
+    must(&mut workspace, Intent::Minimise { pane: b, on: true });
+    focus_pane(&mut workspace, b);
+    assert_eq!(
+        workspace.window(window).unwrap().floating[0].minimised,
+        None
+    );
+    assert_eq!(focus(&workspace, window), Some(b));
+}
+
+#[test]
+fn a_pane_in_a_tab_is_put_away_by_taking_it_out_of_the_tab() {
+    let (mut workspace, window, tab, a) = one_pane();
+    let b = split(&mut workspace, a, Dir::Down);
+
+    must(&mut workspace, Intent::Minimise { pane: b, on: true });
+    assert_eq!(panes_of(&workspace, tab), vec![a]);
+    let floating = &workspace.window(window).unwrap().floating;
+    assert_eq!(floating.len(), 1);
+    assert_eq!(floating[0].pane.id, b);
+    assert_eq!(floating[0].minimised, Some(Minimised::Tab));
+    assert_eq!(focus(&workspace, window), Some(a));
+
+    // A pane in a tab is on show: there is nothing to bring back.
+    let (changes, _) = must(&mut workspace, Intent::Minimise { pane: a, on: false });
+    assert_eq!(changes, vec![]);
+
+    // The last pane on show may be put away as well, and the window is left with
+    // nothing that has the keyboard until one is brought back.
+    must(&mut workspace, Intent::Minimise { pane: a, on: true });
+    let shown = workspace.window(window).unwrap();
+    assert!(shown.centre.tabs.is_empty());
+    assert_eq!(shown.focus, None);
+    assert_eq!(shown.floating.len(), 2);
+
+    // Brought back, a pane that was taken out of a tab is among the tabs again: in
+    // a tab of its own when the window has none left.
+    let (_, created) = must(&mut workspace, Intent::Minimise { pane: a, on: false });
+    let shown = workspace.window(window).unwrap();
+    assert_eq!(shown.centre.tabs.len(), 1);
+    assert_eq!(created.tab, shown.centre.active);
+    assert_eq!(shown.floating.len(), 1);
+    assert_eq!(focus(&workspace, window), Some(a));
+
+    // The other goes beside the pane that has the keyboard.
+    must(&mut workspace, Intent::Minimise { pane: b, on: false });
+    let shown = workspace.window(window).unwrap();
+    assert!(shown.floating.is_empty());
+    assert_eq!(shown.centre.active_tab().unwrap().pane_ids(), vec![a, b]);
+    assert_eq!(focus(&workspace, window), Some(b));
+    assert_eq!(
+        refused(
+            &mut workspace,
+            Intent::Minimise {
+                pane: NOWHERE,
+                on: true
+            }
+        ),
+        IntentError::NoSuchPane(NOWHERE)
+    );
+}
+
+#[test]
+fn a_workspace_is_given_another_name_if_the_name_can_be_a_files() {
+    let (mut workspace, _, _, _) = one_pane();
+    let (changes, _) = must(
+        &mut workspace,
+        Intent::WorkspaceRename {
+            name: "site v2".to_owned(),
+        },
+    );
+    assert_eq!(workspace.name, "site v2");
+    assert_eq!(
+        changes,
+        vec![LayoutChange::WorkspaceName {
+            name: "site v2".to_owned()
+        }]
+    );
+
+    let refused = refused(
+        &mut workspace,
+        Intent::WorkspaceRename {
+            name: "../elsewhere".to_owned(),
+        },
+    );
+    assert_eq!(refused, IntentError::BadName("../elsewhere".to_owned()));
+    assert_eq!(workspace.name, "site v2");
+    assert!(
+        Intent::WorkspaceRename {
+            name: String::new()
+        }
+        .is_core_only()
+    );
 }
 
 #[test]

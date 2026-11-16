@@ -347,6 +347,7 @@
         {
           "floating": [
             {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",
@@ -417,6 +418,7 @@
         {
           "floating": [
             {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",
@@ -438,6 +440,7 @@
               }
             },
             {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",
@@ -499,6 +502,7 @@
         {
           "floating": [
             {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",
@@ -520,6 +524,7 @@
               }
             },
             {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",
@@ -568,6 +573,7 @@
         {
           "floating": [
             {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",
@@ -596,6 +602,7 @@
           "scratch": {
             "pane": "p6",
             "parked": {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",
@@ -645,6 +652,7 @@
         {
           "floating": [
             {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",
@@ -666,6 +674,7 @@
               }
             },
             {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",
@@ -803,6 +812,7 @@
         {
           "floating": [
             {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",
@@ -927,6 +937,7 @@
         {
           "floating": [
             {
+              "minimised": null,
               "pane": {
                 "content": {
                   "backend": "local",

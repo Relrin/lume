@@ -27,7 +27,7 @@ use crate::frame::{Kind, encode_control_json};
 use crate::types::{BackendId, ExitStatus, Launcher, SessionId, SessionInfo, TermSize};
 
 /// The version of the control endpoint's messages this crate speaks.
-pub const APP_PROTO_VERSION: u32 = 2;
+pub const APP_PROTO_VERSION: u32 = 3;
 
 /// The name the control endpoint is served under, and looked for, when none is given.
 ///
@@ -173,9 +173,21 @@ pub enum AppRequestBody {
         proto_min: u32,
         client_kind: ClientKind,
     },
-    /// Brings the application's window to the front. A second copy of the application
-    /// sends this and exits, so that there is one application however often it is started.
-    Activate {},
+    /// Does what starting the application again asks for: its window is brought to the
+    /// front, the workspace named is switched to, and the program named is run in a new
+    /// tab. A second copy of the application sends this and exits, so that there is one
+    /// application however often it is started.
+    Launch {
+        /// The workspace to show. Left out, the one on show stays.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+        /// A program to run in a new tab, and its arguments. Empty, nothing is run.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        exec: Vec<String>,
+        /// The directory the program is started in: where the command was typed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+    },
     /// Closes the application as closing its window would: its sessions are ended first.
     Quit {},
     /// Asks what the application is and how far its start has come.
@@ -236,6 +248,8 @@ pub enum AppRequestBody {
     LayoutApply {
         intent: serde_json::Value,
     },
+    /// Lists the workspaces there are, and says which is on show.
+    Workspaces {},
     /// Lists the commands there are.
     Commands {},
     /// Runs a command, in the window named or the one the user is working in.
@@ -349,6 +363,15 @@ pub struct AppSession {
     pub info: SessionInfo,
 }
 
+/// One workspace there is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceEntry {
+    pub name: String,
+    /// The folder the workspace's new terminals start in, if it has one.
+    pub root: Option<String>,
+}
+
 /// The pane that has the keyboard in the window the user is working in.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -377,7 +400,13 @@ pub enum AppReplyBody {
         app_version: String,
         pid: u32,
     },
-    Activated {},
+    /// The window is at the front, and what else was asked has been done.
+    Launched {
+        /// The workspace on show afterwards.
+        workspace: String,
+        /// The pane the program named runs in, if one was named.
+        pane: Option<String>,
+    },
     Quitting {},
     Status {
         app_version: String,
@@ -448,6 +477,11 @@ pub enum AppReplyBody {
         revision: u64,
         /// The ids of what the intent made: `pane`, `tab`, `window`.
         created: serde_json::Value,
+    },
+    Workspaces {
+        /// The workspace on show.
+        active: String,
+        workspaces: Vec<WorkspaceEntry>,
     },
     Commands {
         commands: serde_json::Value,
@@ -576,7 +610,23 @@ mod tests {
                 },
                 r#"{"type":"hello","proto":1,"proto_min":1,"client_kind":"ctl"}"#,
             ),
-            (AppRequestBody::Activate {}, r#"{"type":"activate"}"#),
+            (
+                AppRequestBody::Launch {
+                    workspace: None,
+                    exec: Vec::new(),
+                    cwd: None,
+                },
+                r#"{"type":"launch"}"#,
+            ),
+            (
+                AppRequestBody::Launch {
+                    workspace: Some("site".to_owned()),
+                    exec: vec!["htop".to_owned(), "-d".to_owned()],
+                    cwd: Some("/work".to_owned()),
+                },
+                r#"{"type":"launch","workspace":"site","exec":["htop","-d"],"cwd":"/work"}"#,
+            ),
+            (AppRequestBody::Workspaces {}, r#"{"type":"workspaces"}"#),
             (AppRequestBody::Quit {}, r#"{"type":"quit"}"#),
             (AppRequestBody::Status {}, r#"{"type":"status"}"#),
             (

@@ -7,8 +7,9 @@
 //! and attaches to the sessions it finds in it.
 //!
 //! One task follows the layout's changes. It tells every page, ends the sessions of
-//! panes that have closed, closes a window whose last tab has gone, and writes the
-//! workspace to its file a moment after it last changed.
+//! panes that have closed, opens and closes the windows the layout gains and loses,
+//! closes a window whose last tab has gone, and writes the workspace to its file a
+//! moment after it last changed.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,11 +17,11 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use lume_config::schema::{CloseOnExit, NewPaneCwd};
+use lume_config::schema::{CloseOnExit, NewPaneCwd, TabPlacement};
 use lume_layout::{
-    Applied, ChangeStream, Intent, LayoutAuthority, LayoutChange, LayoutEvent, LayoutSnapshot,
-    Loaded, LocalLayout, NewContent, Pane, PaneContent, PaneId, SpawnFailure, SpawnRequest,
-    Spawner, Started, Store, UNITS, WindowId, Workspace, WorkspaceId, needs,
+    Applied, Area, ChangeStream, Intent, LayoutAuthority, LayoutChange, LayoutEvent,
+    LayoutSnapshot, LocalLayout, NewContent, Pane, PaneContent, PaneId, PanelContent, PanelId,
+    SpawnFailure, SpawnRequest, Spawner, Started, Store, UNITS, WindowId, Workspace, needs,
 };
 use lume_proto::app::{AppReplyBody, PageRequestBody};
 use lume_session::{
@@ -37,9 +38,10 @@ use crate::error::CommandError;
 use crate::state::AppState;
 use crate::tuning::{
     DEFAULT_SPAWN_COLS, DEFAULT_SPAWN_ROWS, ESTIMATE_TIMEOUT, PENDING_NOTICES_MAX, SAVE_DEBOUNCE,
-    SAVE_MAX_DELAY,
+    SAVE_MAX_DELAY, TAB_LIST_PANEL,
 };
-use crate::window::label_of;
+use crate::window::{label_of, window_of};
+use crate::workspaces::open_workspace;
 
 /// A pane a page asks to have a session started for, and the grid the pane has.
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -77,24 +79,12 @@ fn default_size() -> TermSize {
     TermSize::new(DEFAULT_SPAWN_COLS, DEFAULT_SPAWN_ROWS).expect("the default grid is a valid size")
 }
 
-fn now_unix_ms() -> u64 {
+pub(crate) fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| {
             u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
         })
-}
-
-/// An id for a workspace that has none yet: sixteen hexadecimal digits nobody chose.
-fn fresh_workspace_id() -> WorkspaceId {
-    use std::hash::{BuildHasher, Hasher};
-
-    // The standard library's hasher is keyed afresh in every process, which is all the
-    // chance this needs: the id tells workspaces apart, it guards nothing.
-    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-    hasher.write_u64(now_unix_ms());
-    hasher.write_u32(std::process::id());
-    WorkspaceId::new(hasher.finish() | 1).expect("an odd number is not nought")
 }
 
 /// The directory a session starts in. `asked` is where its pane was last started; a
@@ -243,11 +233,11 @@ pub fn equal_ratios(count: usize) -> Vec<u32> {
 
 /// The panes of the application's windows and the sessions in them.
 pub struct Panes {
-    state: Weak<AppState>,
-    layout: Arc<LocalLayout>,
+    pub(crate) state: Weak<AppState>,
+    pub(crate) layout: Arc<LocalLayout>,
     spawner: Arc<PaneSpawner>,
-    config: Arc<ConfigService>,
-    store: Arc<Store>,
+    pub(crate) config: Arc<ConfigService>,
+    pub(crate) store: Arc<Store>,
     /// The layout's changes from before any page could connect. The task that follows
     /// them takes this.
     changes: Mutex<Option<ChangeStream>>,
@@ -260,6 +250,12 @@ pub struct Panes {
     /// Set when the application is closing. Sessions that end from then on were ended
     /// by that, and their panes stay in the workspace's file.
     closing: AtomicBool,
+    /// Held while another workspace is put on show, or the one on show is renamed or
+    /// one is deleted: these go one at a time.
+    pub(crate) switching: tokio::sync::Mutex<()>,
+    /// Held while the workspace is written to its file, and while its file is being
+    /// renamed, so that it is not written under the name it is just losing.
+    saving: tokio::sync::Mutex<()>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -268,42 +264,27 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 impl Panes {
     /// Reads the workspace called `name` from `store`, or begins one, and takes charge
-    /// of its panes. The workspace has at least one window afterwards.
+    /// of its panes. The workspace has at least one window afterwards. The first pane
+    /// of a workspace that is begun here shows `first`, or a shell; whether it was
+    /// begun here is returned.
     pub async fn open(
         state: &Arc<AppState>,
         config: Arc<ConfigService>,
         store: Store,
         name: &str,
-    ) -> Arc<Self> {
-        let mut pending = Vec::new();
-        let workspace = match store.load(name, now_unix_ms()) {
-            Ok(Loaded::Workspace(workspace)) => *workspace,
-            Ok(Loaded::Missing) => Workspace::new(fresh_workspace_id(), name),
-            Ok(Loaded::SetAside { to, reason }) => {
-                tracing::warn!(file = %to.display(), reason, "the workspace's file was set aside");
-                pending.push(json!({
-                    "type": "notice",
-                    "level": "warning",
-                    "message": format!(
-                        "The saved workspace could not be read ({reason}) and a new one was \
-                         begun. The file is kept as {}.",
-                        to.display()
-                    ),
-                }));
-                Workspace::new(fresh_workspace_id(), name)
-            }
-            Err(error) => {
-                // Nothing was moved or lost; the workspace is simply not saved from here
-                // if the same fault stops the writing too.
-                tracing::error!(%error, "the workspace's file could not be read");
-                Workspace::new(fresh_workspace_id(), name)
-            }
-        };
+        first: Option<SpawnRequest>,
+    ) -> (Arc<Self>, bool) {
+        let opened = open_workspace(&store, name, first);
+        let pending = opened
+            .warning
+            .iter()
+            .map(|warning| json!({ "type": "notice", "level": "warning", "message": warning }))
+            .collect();
         let spawner = Arc::new(PaneSpawner {
             state: Arc::downgrade(state),
             config: Arc::clone(&config),
         });
-        let layout = LocalLayout::new(workspace, 1, spawner.clone());
+        let layout = LocalLayout::new(opened.workspace, 1, spawner.clone());
         // Taken before anything can change the layout, so the task that follows it
         // misses nothing.
         let changes = layout.changes();
@@ -317,20 +298,11 @@ impl Panes {
             starting: tokio::sync::Mutex::new(()),
             pending: Mutex::new(pending),
             closing: AtomicBool::new(false),
+            switching: tokio::sync::Mutex::new(()),
+            saving: tokio::sync::Mutex::new(()),
         });
-        if panes.layout.workspace().windows.is_empty() {
-            let opened = panes
-                .layout
-                .apply_core(Intent::WindowNew {
-                    content: NewContent::Terminal(SpawnRequest::default()),
-                    bounds: None,
-                })
-                .await;
-            if let Err(error) = opened {
-                tracing::error!(%error, "the workspace's first window could not be made");
-            }
-        }
-        panes
+        panes.sync_tab_panel().await;
+        (panes, opened.fresh)
     }
 
     /// The layout as it is now.
@@ -402,7 +374,7 @@ impl Panes {
         })
     }
 
-    fn backend_of(&self, terminal: &lume_layout::TerminalPane) -> BackendId {
+    pub(crate) fn backend_of(&self, terminal: &lume_layout::TerminalPane) -> BackendId {
         terminal
             .backend
             .clone()
@@ -431,14 +403,6 @@ impl Panes {
     /// An intent that makes a terminal pane and does not say how large the pane will
     /// be has the window's page asked, since only the page knows the window's pixels.
     pub async fn apply(&self, intent: Intent) -> Result<Applied, CommandError> {
-        if matches!(
-            intent,
-            Intent::WindowNew { .. } | Intent::WindowClose { .. }
-        ) {
-            return Err(CommandError::unsupported(
-                "the application has one window; more cannot be opened yet",
-            ));
-        }
         let intent = self.sized(intent).await;
         Ok(self.layout.apply(intent).await?)
     }
@@ -668,10 +632,31 @@ impl Panes {
                     }
                 }
                 LayoutEvent::Reset(snapshot) => {
+                    // Another workspace is on show. The windows it has are opened
+                    // before the ones it has not are closed, so the application is
+                    // never without a window.
+                    let open = shell.layout_windows();
+                    let wanted: Vec<String> = snapshot
+                        .workspace
+                        .windows
+                        .iter()
+                        .map(|window| label_of(window.id))
+                        .collect();
+                    for window in &snapshot.workspace.windows {
+                        if !open.contains(&label_of(window.id)) {
+                            shell.open_window(window.id, window.bounds);
+                        }
+                    }
+                    for label in open.iter().filter(|label| !wanted.contains(label)) {
+                        shell.close_window(label);
+                    }
                     for (label, link) in state.links() {
-                        let Some(window) = crate::window::window_of(&label) else {
+                        let Some(window) = window_of(&label) else {
                             continue;
                         };
+                        if !wanted.contains(&label) {
+                            continue;
+                        }
                         link.notify(&json!({
                             "type": "layout_reset",
                             "window": window,
@@ -714,18 +699,15 @@ impl Panes {
                 });
             }
             LayoutChange::Tabs { window, order, .. } if order.is_empty() => {
-                if self.closing.load(Ordering::Relaxed)
-                    || !self.config.current().config.window.close_with_last_tab
-                {
-                    return;
-                }
-                let closed = self
-                    .layout
-                    .apply_core(Intent::WindowClose { window: *window })
-                    .await;
-                if let Err(error) = closed {
-                    tracing::debug!(%window, %error, "a window without tabs could not be closed");
-                }
+                self.close_if_empty(*window).await;
+            }
+            LayoutChange::Floating { window, floating } if floating.is_empty() => {
+                self.close_if_empty(*window).await;
+            }
+            LayoutChange::WindowOpened { window } => {
+                shell.open_window(window.id, window.bounds);
+                // A new window has the panels the configuration gives every window.
+                self.sync_tab_panel().await;
             }
             LayoutChange::WindowClosed { window } => {
                 shell.close_window(&label_of(*window));
@@ -737,8 +719,30 @@ impl Panes {
         }
     }
 
+    /// Closes a window that has nothing left in it: no tab, and no pane that floats
+    /// over where the tabs were or is put away at its corner.
+    async fn close_if_empty(&self, window: WindowId) {
+        if self.closing.load(Ordering::Relaxed)
+            || !self.config.current().config.window.close_with_last_tab
+        {
+            return;
+        }
+        let empty = self
+            .workspace()
+            .window(window)
+            .is_some_and(|found| found.centre.tabs.is_empty() && found.floating.is_empty());
+        if !empty {
+            return;
+        }
+        let closed = self.layout.apply_core(Intent::WindowClose { window }).await;
+        if let Err(error) = closed {
+            tracing::debug!(%window, %error, "a window with nothing in it could not be closed");
+        }
+    }
+
     /// Writes the workspace to its file.
-    async fn save(&self) {
+    pub(crate) async fn save(&self) {
+        let _one_at_a_time = self.saving.lock().await;
         let workspace = self.workspace();
         let store = Arc::clone(&self.store);
         let written = tokio::task::spawn_blocking(move || {
@@ -769,6 +773,106 @@ impl Panes {
         if let Err(error) = saved {
             tracing::error!(%error, "the workspace could not be saved");
         }
+    }
+
+    /// Holds off writing the workspace to its file for as long as the guard lives.
+    pub(crate) async fn hold_saving(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.saving.lock().await
+    }
+
+    /// Puts the list of tabs where the configuration says it goes, in every window: in
+    /// a panel at the left or the right, or in no panel when the tabs are in the bar at
+    /// the top.
+    pub async fn sync_tab_panel(&self) {
+        let want = match self.config.current().config.layout.tab_placement {
+            TabPlacement::Top => None,
+            TabPlacement::Left => Some(Area::Left),
+            TabPlacement::Right => Some(Area::Right),
+        };
+        let Ok(panel) = PanelId::new(TAB_LIST_PANEL) else {
+            return;
+        };
+        for window in self.workspace().windows {
+            let have = [Area::Left, Area::Right, Area::Bottom]
+                .into_iter()
+                .find(|area| {
+                    let panels = &window.dock.area(*area).panels;
+                    panels.iter().any(|found| found.id == panel)
+                });
+            if have == want {
+                continue;
+            }
+            let placed = self
+                .layout
+                .apply_core(Intent::PanelSet {
+                    window: window.id,
+                    panel: panel.clone(),
+                    content: PanelContent::TabList {},
+                    area: want,
+                    index: 0,
+                })
+                .await;
+            if let Err(error) = placed {
+                tracing::debug!(window = %window.id, %error, "the list of tabs could not be placed");
+                continue;
+            }
+            // A list that was just asked for is not left folded away.
+            if let Some(area) = want.filter(|area| window.dock.area(*area).collapsed) {
+                let _ = self
+                    .layout
+                    .apply_core(Intent::PanelToggle {
+                        window: window.id,
+                        area,
+                        on: Some(true),
+                    })
+                    .await;
+            }
+        }
+    }
+
+    /// Whether a pane floats over a window.
+    pub fn is_floating(&self, pane: PaneId) -> bool {
+        self.workspace()
+            .windows
+            .iter()
+            .any(|window| window.floating_index(pane).is_some())
+    }
+
+    /// Whether a pane is put away at the corner of its window.
+    pub fn is_minimised(&self, pane: PaneId) -> bool {
+        self.workspace().windows.iter().any(|window| {
+            let floating = &window.floating;
+            floating
+                .iter()
+                .any(|floating| floating.pane.id == pane && floating.minimised.is_some())
+        })
+    }
+
+    /// Whether the workspace's scratch terminal is on show over `window`.
+    pub fn scratch_shown_in(&self, window: WindowId) -> bool {
+        let workspace = self.workspace();
+        workspace.scratch.as_ref().is_some_and(|scratch| {
+            scratch.parked.is_none() && workspace.window_of(scratch.pane) == Some(window)
+        })
+    }
+
+    /// The dock area a command that names none means: the one that holds the list of
+    /// tabs, or the first that holds any panel.
+    pub fn dock_to_toggle(&self, window: WindowId) -> Option<Area> {
+        let workspace = self.workspace();
+        let dock = &workspace.window(window)?.dock;
+        let sides = [Area::Left, Area::Right, Area::Bottom];
+        let holds_tabs = |area: &Area| {
+            let panels = &dock.area(*area).panels;
+            panels
+                .iter()
+                .any(|panel| panel.id.as_str() == TAB_LIST_PANEL)
+        };
+        sides.into_iter().find(holds_tabs).or_else(|| {
+            sides
+                .into_iter()
+                .find(|area| !dock.area(*area).panels.is_empty())
+        })
     }
 
     /// The splits of the tab on show in a window, each with how many children it has.
@@ -803,7 +907,6 @@ mod tests {
     use std::time::Duration;
 
     use lume_layout::{Dir, FocusTarget};
-    use lume_proto::app::codes;
     use lume_proto::{Body, Message};
     use lume_session::{HostConfig, LocalBackend, Router};
     use tokio::runtime::Handle;
@@ -815,6 +918,7 @@ mod tests {
         CREDIT, FakeShell, RecordingCarrier, STEP, TempDir, client_frames, facts, size,
     };
     use crate::tuning::WORKSPACE_NAME;
+    use crate::workspaces::Find;
 
     struct Running {
         state: Arc<AppState>,
@@ -853,7 +957,7 @@ mod tests {
         );
         let config = ConfigService::load(dir.dirs(), Some(WORKSPACE_NAME));
         let store = Store::new(dir.dirs().state_workspaces_dir());
-        let panes = Panes::open(&state, config, store, WORKSPACE_NAME).await;
+        let (panes, _) = Panes::open(&state, config, store, WORKSPACE_NAME, None).await;
         state.set_panes(Arc::clone(&panes));
         let shell = Arc::new(FakeShell::default());
         panes.run(shell.clone());
@@ -1092,6 +1196,31 @@ mod tests {
         until("the application to be told to close", || shell.quits() == 1).await;
         assert_eq!(app.shell.closed(), vec![label_of(app.window)]);
         assert!(app.panes.workspace().windows.is_empty());
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_window_stays_while_a_pane_floats_over_it_or_is_put_away() {
+        let app = running("floats", "").await;
+        let pane = only_pane(&app);
+        // The only pane floats: the window has no tab, and is not empty.
+        app.panes
+            .apply(Intent::Float { pane, rect: None })
+            .await
+            .unwrap();
+        app.panes
+            .apply(Intent::Minimise { pane, on: true })
+            .await
+            .unwrap();
+        assert!(app.panes.is_minimised(pane));
+        sleep(Duration::from_millis(300)).await;
+        assert_eq!(app.shell.quits(), 0);
+        assert_eq!(app.panes.workspace().windows.len(), 1);
+
+        // Once that pane is closed there is nothing left, and the window goes.
+        app.panes.apply(Intent::Close { pane }).await.unwrap();
+        let shell = app.shell.clone();
+        until("the application to be told to close", || shell.quits() == 1).await;
         app.state.shutdown().await;
     }
 
@@ -1345,17 +1474,234 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn more_windows_cannot_be_opened_yet() {
+    async fn a_window_the_layout_gains_is_opened_and_one_it_loses_is_closed() {
         let app = running("windows", "").await;
-        let refused = app
+        let opened = app
             .panes
             .apply(Intent::WindowNew {
                 content: NewContent::Terminal(SpawnRequest::default()),
                 bounds: None,
             })
             .await
-            .unwrap_err();
-        assert_eq!(refused.code, codes::UNSUPPORTED);
+            .unwrap();
+        let second = opened.created.window.unwrap();
+        let shell = app.shell.clone();
+        until("the window to be opened", || {
+            shell.open() == vec![label_of(second)]
+        })
+        .await;
+        // Its pane waits for its page before it has a session.
+        assert_eq!(app.panes.session_of(opened.created.pane.unwrap()), None);
+
+        app.panes
+            .apply(Intent::WindowClose { window: second })
+            .await
+            .unwrap();
+        let shell = app.shell.clone();
+        until("the window to be closed", || {
+            shell.closed() == vec![label_of(second)]
+        })
+        .await;
+        assert_eq!(app.shell.quits(), 0);
+        assert_eq!(app.panes.workspace().windows.len(), 1);
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn another_workspace_is_put_on_show_and_the_first_ones_sessions_end() {
+        let dir = TempDir::new("switch");
+        plain_shell(&dir, "");
+        let dirs = dir.dirs();
+        let app = running_in(dir).await;
+        let (carrier, _id) = page(&app).await;
+        let first = only_pane(&app);
+        start(&app, first).await;
+        app.panes.apply(split(first)).await.unwrap();
+        assert_eq!(listed(&app).await, 2);
+
+        app.panes.switch("play", Find::New).await.unwrap();
+        let play = app.panes.workspace();
+        assert_eq!(play.name, "play");
+        assert_eq!(play.panes().len(), 1);
+        assert_eq!(app.panes.snapshot().epoch, 2);
+        assert_eq!(app.panes.config.workspace().as_deref(), Some("play"));
+        assert_eq!(
+            crate::workspaces::last_workspace(&dirs),
+            Some("play".to_owned())
+        );
+        // The page is given the new layout whole, and the old sessions are ended.
+        until("the page to be given the layout", || {
+            notices(&carrier, "layout_reset")
+                .iter()
+                .any(|notice| notice["epoch"] == 2 && notice["workspace"]["name"] == "play")
+        })
+        .await;
+        let state = Arc::clone(&app.state);
+        let waiting = async {
+            while !state.list_all().await.unwrap().is_empty() {
+                sleep(Duration::from_millis(20)).await;
+            }
+        };
+        timeout(STEP, waiting)
+            .await
+            .expect("the sessions of the workspace that was put away never ended");
+
+        // There is no such workspace to begin again, and none called `nowhere` to show.
+        assert_eq!(
+            app.panes.switch("PLAY", Find::New).await.unwrap_err().code,
+            "exists"
+        );
+        assert_eq!(
+            app.panes
+                .switch("nowhere", Find::Existing)
+                .await
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
+        assert_eq!(
+            app.panes
+                .switch("../x", Find::Either)
+                .await
+                .unwrap_err()
+                .code,
+            "bad_request"
+        );
+
+        // The first workspace comes back as it was left, without its sessions.
+        app.panes
+            .switch(WORKSPACE_NAME, Find::Existing)
+            .await
+            .unwrap();
+        let back = app.panes.workspace();
+        assert_eq!(back.name, WORKSPACE_NAME);
+        assert_eq!(back.panes().len(), 2);
+        assert!(back.sessions().is_empty());
+        assert_eq!(app.panes.snapshot().epoch, 3);
+
+        let (active, workspaces) = app.panes.workspaces().unwrap();
+        assert_eq!(active, WORKSPACE_NAME);
+        let names: Vec<&str> = workspaces.iter().map(|entry| entry.name.as_str()).collect();
+        assert_eq!(names, vec![WORKSPACE_NAME, "play"]);
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_workspace_is_renamed_given_a_folder_and_deleted_with_both_its_files() {
+        let dir = TempDir::new("rename");
+        plain_shell(&dir, "");
+        let dirs = dir.dirs();
+        let app = running_in(dir).await;
+        let (carrier, _id) = page(&app).await;
+        let here = std::env::temp_dir().to_string_lossy().into_owned();
+
+        app.panes.set_root(Some(&here)).await.unwrap();
+        assert_eq!(
+            app.panes.config.current().workspace.root.as_deref(),
+            Some(here.as_str())
+        );
+        assert_eq!(
+            app.panes
+                .set_root(Some("/lume-no-such-directory-k7q"))
+                .await
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
+
+        app.panes.rename("site").await.unwrap();
+        assert_eq!(app.panes.workspace().name, "site");
+        // The same layout under another name: no new epoch, and the pages are told.
+        assert_eq!(app.panes.snapshot().epoch, 1);
+        until("the page to be told the name", || {
+            notices(&carrier, "layout_changed").iter().any(|notice| {
+                notice["changes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|change| change["type"] == "workspace_name" && change["name"] == "site")
+            })
+        })
+        .await;
+        assert!(dirs.state_workspace_file("site").is_file());
+        assert!(!dirs.state_workspace_file(WORKSPACE_NAME).exists());
+        // What the user wrote about the workspace went with it.
+        assert!(dirs.workspace_file("site").is_file());
+        assert!(!dirs.workspace_file(WORKSPACE_NAME).exists());
+        assert_eq!(
+            app.panes.config.current().workspace.root.as_deref(),
+            Some(here.as_str())
+        );
+
+        // The workspace on show is not deleted from under the windows.
+        assert_eq!(
+            app.panes.delete("site").await.unwrap_err().code,
+            "bad_request"
+        );
+        app.panes.switch("play", Find::New).await.unwrap();
+        // A name another workspace has is not taken.
+        assert_eq!(app.panes.rename("Site").await.unwrap_err().code, "exists");
+        assert_eq!(app.panes.workspace().name, "play");
+
+        app.panes.delete("site").await.unwrap();
+        assert!(!dirs.state_workspace_file("site").exists());
+        assert!(!dirs.workspace_file("site").exists());
+        assert_eq!(
+            app.panes.delete("site").await.unwrap_err().code,
+            "not_found"
+        );
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_list_of_tabs_is_a_panel_at_the_side_the_configuration_names() {
+        let app = running("tabpanel", "[layout]\ntab-placement = \"left\"\n").await;
+        let tabs_at = |window: &lume_layout::Window| -> Vec<Area> {
+            [Area::Left, Area::Right, Area::Bottom]
+                .into_iter()
+                .filter(|area| {
+                    let panels = &window.dock.area(*area).panels;
+                    panels
+                        .iter()
+                        .any(|panel| panel.id.as_str() == TAB_LIST_PANEL)
+                })
+                .collect()
+        };
+        assert_eq!(tabs_at(&app.panes.workspace().windows[0]), vec![Area::Left]);
+        assert_eq!(app.panes.dock_to_toggle(app.window), Some(Area::Left));
+
+        // A window that is opened later has the panel too.
+        app.panes
+            .apply(Intent::WindowNew {
+                content: NewContent::Terminal(SpawnRequest::default()),
+                bounds: None,
+            })
+            .await
+            .unwrap();
+        let panes = Arc::clone(&app.panes);
+        until("the new window to have the list of tabs", || {
+            tabs_at(&panes.workspace().windows[1]) == vec![Area::Left]
+        })
+        .await;
+
+        // The setting moves it, and takes it away.
+        app.panes
+            .config
+            .set("layout.tab-placement", &json!("right"))
+            .unwrap();
+        app.panes.sync_tab_panel().await;
+        for window in &app.panes.workspace().windows {
+            assert_eq!(tabs_at(window), vec![Area::Right]);
+        }
+        app.panes
+            .config
+            .set("layout.tab-placement", &json!("top"))
+            .unwrap();
+        app.panes.sync_tab_panel().await;
+        for window in &app.panes.workspace().windows {
+            assert_eq!(tabs_at(window), vec![]);
+        }
+        assert_eq!(app.panes.dock_to_toggle(app.window), None);
         app.state.shutdown().await;
     }
 

@@ -3,6 +3,9 @@
 //! The application is the program beside this one. It is started so that it outlives
 //! the console `lume` was typed in, and `lume` returns once the application answers on
 //! its control endpoint, so a command that follows finds it running.
+//!
+//! A workspace to show and a program to run in a tab go to the application either
+//! way: as a request if it is running, on its command line if it is started here.
 
 use std::io;
 use std::path::PathBuf;
@@ -40,12 +43,49 @@ fn application() -> io::Result<PathBuf> {
     }
 }
 
-/// Starts the application so that nothing ties it to this process or its console.
-fn spawn_detached(name: Option<&str>) -> io::Result<()> {
-    let mut command = Command::new(application()?);
-    if let Some(name) = name {
-        command.args(["--endpoint", name]);
+/// What the application is started for.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Start {
+    /// The name its control endpoint is served under, when it is not the default.
+    pub endpoint: Option<String>,
+    /// The workspace to show.
+    pub workspace: Option<String>,
+    /// A program to run in a new tab, and its arguments. Empty for none.
+    pub exec: Vec<String>,
+}
+
+/// The directory a program given to run is started in: the one this was typed in.
+fn here() -> Option<String> {
+    std::env::current_dir()
+        .ok()
+        .map(|dir| dir.to_string_lossy().into_owned())
+}
+
+/// What the application is given on its command line for a start.
+fn arguments(start: &Start, cwd: Option<&str>) -> Vec<String> {
+    let mut arguments = Vec::new();
+    // Joined with `=`, so that a value that begins with a dash is still a value.
+    if let Some(name) = &start.endpoint {
+        arguments.push(format!("--endpoint={name}"));
     }
+    if let Some(workspace) = &start.workspace {
+        arguments.push(format!("--workspace={workspace}"));
+    }
+    if !start.exec.is_empty() {
+        if let Some(cwd) = cwd {
+            arguments.push(format!("--cwd={cwd}"));
+        }
+        // Last: everything after it is the program's.
+        arguments.push("-e".to_owned());
+        arguments.extend(start.exec.iter().cloned());
+    }
+    arguments
+}
+
+/// Starts the application so that nothing ties it to this process or its console.
+fn spawn_detached(start: &Start, cwd: Option<&str>) -> io::Result<()> {
+    let mut command = Command::new(application()?);
+    command.args(arguments(start, cwd));
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -68,17 +108,21 @@ fn spawn_detached(name: Option<&str>) -> io::Result<()> {
     command.spawn().map(drop)
 }
 
-/// Brings the running application to the front, or starts it and waits until it answers.
-pub async fn start(name: Option<&str>) -> Result<(), String> {
-    let endpoint = endpoint(name).map_err(|error| error.to_string())?;
-    let activate = || async {
+/// Brings the running application to the front, or starts it and waits until it
+/// answers. Either way it shows the workspace named and runs the program named.
+pub async fn start(start: Start) -> Result<(), String> {
+    let endpoint = endpoint(start.endpoint.as_deref()).map_err(|error| error.to_string())?;
+    let cwd = if start.exec.is_empty() { None } else { here() };
+    let launch = || async {
         let mut client = Client::connect(&endpoint).await?;
-        client
-            .ask(AppRequestBody::Activate {}, ANSWER_TIMEOUT)
-            .await
-            .map(drop)
+        let request = AppRequestBody::Launch {
+            workspace: start.workspace.clone(),
+            exec: start.exec.clone(),
+            cwd: cwd.clone(),
+        };
+        client.ask(request, ANSWER_TIMEOUT).await.map(drop)
     };
-    match activate().await {
+    match launch().await {
         Ok(()) => return Ok(()),
         Err(Failure::NotRunning(_)) => {}
         Err(Failure::Broken(error)) => {
@@ -87,7 +131,7 @@ pub async fn start(name: Option<&str>) -> Result<(), String> {
         Err(Failure::Refused(error)) => return Err(error.to_string()),
     }
 
-    spawn_detached(name)
+    spawn_detached(&start, cwd.as_deref())
         .map_err(|error| format!("the application could not be started: {error}"))?;
     let deadline = Instant::now() + START_TIMEOUT;
     loop {
@@ -102,5 +146,44 @@ pub async fn start(name: Option<&str>) -> Result<(), String> {
             Err(Failure::Broken(error)) => return Err(error.to_string()),
             Err(Failure::Refused(error)) => return Err(error.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_application_is_given_what_it_was_started_for() {
+        assert_eq!(
+            arguments(&Start::default(), Some("/work")),
+            Vec::<String>::new()
+        );
+        let start = Start {
+            endpoint: Some("trial".to_owned()),
+            workspace: Some("site v2".to_owned()),
+            exec: vec!["htop".to_owned(), "--delay".to_owned(), "5".to_owned()],
+        };
+        assert_eq!(
+            arguments(&start, Some("/work")),
+            [
+                "--endpoint=trial",
+                "--workspace=site v2",
+                "--cwd=/work",
+                "-e",
+                "htop",
+                "--delay",
+                "5"
+            ]
+        );
+        // Without a program there is no directory to start it in.
+        let start = Start {
+            exec: Vec::new(),
+            ..start
+        };
+        assert_eq!(
+            arguments(&start, Some("/work")),
+            ["--endpoint=trial", "--workspace=site v2"]
+        );
     }
 }

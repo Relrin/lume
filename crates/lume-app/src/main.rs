@@ -1,10 +1,10 @@
 //! `lume-gui`: the Lume application.
 //!
-//! It opens a window whose webview shows terminals in tabs and panes. The sessions
-//! behind them run on a session host inside this process, reached through the session
-//! protocol like any other host would be. Which panes there are is the layout's to say,
-//! the application starts and ends their sessions, and the webview follows both through
-//! commands and a byte carrier.
+//! It opens the windows of a workspace, whose webviews show terminals in tabs and
+//! panes. The sessions behind them run on a session host inside this process, reached
+//! through the session protocol like any other host would be. Which windows and panes
+//! there are is the layout's to say, the application opens the windows and starts and
+//! ends the sessions, and each webview follows through commands and a byte carrier.
 //!
 //! `lume-gui --probe` starts no session. The page reports which webview engine it runs
 //! on and what GPU paths the engine offers, the findings are printed to standard output
@@ -16,19 +16,22 @@
 //! process exits with the suite's verdict.
 //!
 //! There is one application for each user. It serves a control endpoint, and a copy
-//! that finds the endpoint already served asks the first to bring its window to the
-//! front, and exits.
+//! that finds the endpoint already served hands what it was started for to the first:
+//! its window comes to the front, the workspace named is shown and the program named
+//! is run in a tab. Then the copy exits.
 
 // A release build on Windows is a GUI-subsystem program and opens no console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
+mod bounds;
 mod builtins;
 mod carrier;
 mod clipboard;
 mod commands;
 mod commands_config;
 mod commands_layout;
+mod commands_window;
 mod configsvc;
 mod control;
 mod error;
@@ -46,9 +49,11 @@ mod synthetic;
 mod testing;
 mod tuning;
 mod window;
+mod workspaces;
 
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use lume_config::{ColorScheme, Dirs};
 use lume_ipc::Listener;
@@ -112,25 +117,79 @@ fn bench_sessions(router: &Router) -> Option<Arc<LocalBackend>> {
 struct Terminals {
     panes: Arc<Panes>,
     config: Arc<ConfigService>,
+    /// What the command line asked to have run, if the workspace was there already:
+    /// the program and the directory to start it in. In a workspace that is begun by
+    /// this start the program has the first pane instead.
+    exec: Option<(Vec<String>, Option<String>)>,
 }
 
-/// Reads the configuration and the workspace, and puts the workspace's panes in the
-/// application's charge.
-fn terminals(state: &Arc<AppState>) -> Result<Terminals, String> {
+/// What a start asks for besides the window: a workspace to show and a program to run.
+#[derive(Clone, Debug, Default)]
+struct Launch {
+    workspace: Option<String>,
+    exec: Vec<String>,
+    cwd: Option<String>,
+}
+
+impl Launch {
+    fn of(args: &Args) -> Self {
+        // A program is started where the command was typed, unless it says otherwise.
+        let here = || {
+            std::env::current_dir()
+                .ok()
+                .map(|dir| dir.to_string_lossy().into_owned())
+        };
+        Self {
+            workspace: args.workspace.clone(),
+            exec: args.exec.clone(),
+            cwd: if args.exec.is_empty() {
+                None
+            } else {
+                args.cwd.clone().or_else(here)
+            },
+        }
+    }
+}
+
+/// Reads the configuration and the workspace to show, and puts the workspace's panes in
+/// the application's charge.
+fn terminals(state: &Arc<AppState>, launch: &Launch) -> Result<Terminals, String> {
     let dirs = Dirs::resolve().ok_or_else(|| {
         "the folders for the configuration and the saved workspaces could not be found".to_owned()
     })?;
-    let config = ConfigService::load(dirs.clone(), Some(tuning::WORKSPACE_NAME));
+    if let Some(name) = &launch.workspace
+        && !lume_layout::valid_name(name)
+    {
+        return Err(format!("`{name}` cannot be a workspace's name"));
+    }
+    // Which workspace to show is the user's own setting, so it is read before any
+    // workspace's settings are laid over the user's.
+    let config = ConfigService::load(dirs.clone(), None);
     config.ensure_default_file();
+    let name = workspaces::start_workspace(
+        launch.workspace.as_deref(),
+        &config.current().config.app.start_workspace,
+        workspaces::last_workspace(&dirs),
+    );
+    config.set_workspace(Some(&name));
     let store = Store::new(dirs.state_workspaces_dir());
-    let panes = tauri::async_runtime::block_on(Panes::open(
+    let first = services::exec_request(&launch.exec, launch.cwd.clone());
+    let (panes, fresh) = tauri::async_runtime::block_on(Panes::open(
         state,
         Arc::clone(&config),
         store,
-        tuning::WORKSPACE_NAME,
+        &name,
+        first,
     ));
+    workspaces::remember_workspace(&dirs, &panes.workspace().name);
     state.set_panes(Arc::clone(&panes));
-    Ok(Terminals { panes, config })
+    let exec =
+        (!fresh && !launch.exec.is_empty()).then(|| (launch.exec.clone(), launch.cwd.clone()));
+    Ok(Terminals {
+        panes,
+        config,
+        exec,
+    })
 }
 
 /// The colour scheme a window's theme is.
@@ -153,7 +212,7 @@ enum Instance {
 }
 
 /// Claims the control endpoint, or hands over to the copy that holds it.
-fn claim_instance(args: &Args) -> Result<Instance, String> {
+fn claim_instance(args: &Args, launch: &Launch) -> Result<Instance, String> {
     // The endpoint belongs to the terminal. A check of the webview starts no sessions
     // and must not stand in for the application, or be turned away by it.
     if args.mode != Mode::Terminal {
@@ -164,12 +223,17 @@ fn claim_instance(args: &Args) -> Result<Instance, String> {
     tauri::async_runtime::block_on(async {
         match control::bind(&endpoint) {
             Ok(Some(listener)) => Ok(Instance::First(Some(listener))),
-            Ok(None) => control::activate_running(&endpoint)
-                .await
-                .map(|()| Instance::Second)
-                .map_err(|error| {
-                    format!("{endpoint} is in use, and what serves it did not answer: {error}")
-                }),
+            Ok(None) => control::launch_running(
+                &endpoint,
+                launch.workspace.clone(),
+                launch.exec.clone(),
+                launch.cwd.clone(),
+            )
+            .await
+            .map(|()| Instance::Second)
+            .map_err(|error| {
+                format!("{endpoint} is in use, and what serves it did not answer: {error}")
+            }),
             Err(error) => {
                 // Without the endpoint the terminal still works; only the command-line
                 // tool cannot reach it.
@@ -196,7 +260,8 @@ fn main() -> ExitCode {
         }
     };
     let mode = args.mode;
-    let listener = match claim_instance(&args) {
+    let launch = Launch::of(&args);
+    let listener = match claim_instance(&args, &launch) {
         Ok(Instance::First(listener)) => listener,
         Ok(Instance::Second) => return ExitCode::SUCCESS,
         Err(problem) => {
@@ -226,7 +291,7 @@ fn main() -> ExitCode {
     );
 
     let terminals = match mode {
-        Mode::Terminal => match terminals(&state) {
+        Mode::Terminal => match terminals(&state, &launch) {
             Ok(terminals) => Some(terminals),
             Err(problem) => {
                 eprintln!("lume-gui: {problem}");
@@ -250,15 +315,28 @@ fn main() -> ExitCode {
             if matches!(mode, Mode::Harness(_)) {
                 harness::start(app)?;
             }
-            let shown = terminals
-                .as_ref()
-                .and_then(|terminals| terminals.panes.focused_window());
-            let window = window::open(app, mode, shown)?;
-            marks.window();
-            let Some(Terminals { panes, config }) = terminals else {
+            let Some(Terminals {
+                panes,
+                config,
+                exec,
+            }) = terminals
+            else {
+                window::open(app, mode)?;
+                marks.window();
                 return Ok(());
             };
-            let shell: Arc<dyn Shell> = Arc::new(WindowShell::new(app.handle().clone()));
+            let windows = WindowShell::new(
+                app.handle().clone(),
+                Arc::clone(&serving),
+                Arc::clone(&config),
+            );
+            app.manage(Arc::clone(&windows));
+            let shell: Arc<dyn Shell> = windows;
+            // The layout says which windows there are and where each was.
+            for window in &panes.workspace().windows {
+                shell.open_window(window.id, window.bounds);
+            }
+            marks.window();
             let services = Arc::new(Services {
                 state: Arc::clone(&serving),
                 panes,
@@ -268,14 +346,51 @@ fn main() -> ExitCode {
             });
             app.manage(Arc::clone(&services));
             // The theme follows the system's scheme, which only a window can tell.
-            if let Ok(theme) = window.theme() {
+            let scheme = app
+                .webview_windows()
+                .values()
+                .find_map(|window| window.theme().ok());
+            if let Some(theme) = scheme {
                 services.config.set_scheme(scheme_of(theme));
             }
+
+            // A change of the configuration reaches the pages, and what the application
+            // itself draws from it follows: the windows' title bars, and where the
+            // list of tabs is.
             let telling = Arc::clone(&serving);
-            services
-                .config
-                .watch(move |notice| telling.broadcast(&notice));
+            let following = Arc::downgrade(&services);
+            let custom = AtomicBool::new(services.config.title_bar_custom());
+            services.config.watch(move |notice| {
+                let changed = notice["type"] == "config_changed";
+                telling.broadcast(&notice);
+                let Some(services) = following.upgrade().filter(|_| changed) else {
+                    return;
+                };
+                let now = services.config.title_bar_custom();
+                if custom.swap(now, Ordering::Relaxed) != now {
+                    services.shell.set_title_bar(now);
+                }
+                let panes = Arc::clone(&services.panes);
+                telling
+                    .runtime()
+                    .spawn(async move { panes.sync_tab_panel().await });
+            });
             services.panes.run(shell);
+            if let Some((exec, cwd)) = exec {
+                let launching = Arc::clone(&services);
+                tauri::async_runtime::spawn(async move {
+                    let launched = launching
+                        .launch(None, &exec, cwd, tuning::PAGE_START_TIMEOUT)
+                        .await;
+                    if let Err(error) = launched {
+                        tracing::error!(%error, "the program the application was started with could not be run");
+                        launching.panes.notice(
+                            "error",
+                            format!("{} could not be started: {}", exec[0], error.message),
+                        );
+                    }
+                });
+            }
             if let Some(listener) = listener {
                 let control = Control::new(services, tuning::PAGE_START_TIMEOUT);
                 tauri::async_runtime::spawn(control::serve(listener, control));
@@ -312,6 +427,10 @@ fn main() -> ExitCode {
             commands_config::config_set,
             commands_config::config_unset,
             commands_config::config_open,
+            commands_window::window_drag,
+            commands_window::window_control,
+            commands_window::window_state,
+            commands_window::workspaces_list,
             harness::harness_done,
             harness::harness_save,
             harness::harness_read,
@@ -319,32 +438,79 @@ fn main() -> ExitCode {
         .build(tauri::generate_context!())
         .expect("error while starting Lume");
 
-    app.run(move |_app, event| match event {
-        RunEvent::WindowEvent {
-            label,
-            event: WindowEvent::Destroyed,
-            ..
-        } => state.retire(&label),
-        RunEvent::WindowEvent {
-            event: WindowEvent::ThemeChanged(theme),
-            ..
-        } => {
-            if let Some(config) = &config {
-                config.set_scheme(scheme_of(theme));
+    app.run(move |app, event| match event {
+        RunEvent::WindowEvent { label, event, .. } => {
+            let windows = app.try_state::<Arc<WindowShell>>();
+            let windows = windows.as_ref().map(|windows| windows.inner());
+            match event {
+                WindowEvent::Destroyed => {
+                    state.retire(&label);
+                    if let Some(windows) = windows {
+                        windows.forget(&label);
+                    }
+                }
+                WindowEvent::ThemeChanged(theme) => {
+                    if let Some(config) = &config {
+                        config.set_scheme(scheme_of(theme));
+                    }
+                }
+                WindowEvent::Focused(focused) => {
+                    // The layout remembers which window the user is working in: a
+                    // request that names no window means that one.
+                    if focused
+                        && let (Some(panes), Some(window)) =
+                            (state.panes(), window::window_of(&label))
+                    {
+                        let panes = Arc::clone(panes);
+                        tauri::async_runtime::spawn(async move {
+                            let _ = panes.apply_core(Intent::WindowFocus { window }).await;
+                        });
+                    }
+                    if let Some(windows) = windows {
+                        windows.tell_state(&label);
+                    }
+                }
+                WindowEvent::Resized(_) => {
+                    if let Some(windows) = windows {
+                        windows.tell_state(&label);
+                        windows.moved(&label);
+                    }
+                }
+                WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                    if let Some(windows) = windows {
+                        windows.moved(&label);
+                    }
+                }
+                WindowEvent::CloseRequested { api, .. } => {
+                    let (Some(panes), Some(window)) = (state.panes(), window::window_of(&label))
+                    else {
+                        return;
+                    };
+                    if let Some(windows) = windows {
+                        windows.keep_place(&label);
+                    }
+                    // The only window closes the application, and the layout stays as
+                    // it is for the next start. Any other window is closed in the
+                    // layout, which ends what ran in it and then closes it here.
+                    if panes.workspace().windows.len() > 1 {
+                        api.prevent_close();
+                        let panes = Arc::clone(panes);
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(error) = panes.apply(Intent::WindowClose { window }).await {
+                                tracing::debug!(%window, %error, "a window could not be closed");
+                            }
+                        });
+                    }
+                }
+                _ => {}
             }
         }
-        // The layout remembers which window the user is working in: a request that
-        // names no window means that one.
-        RunEvent::WindowEvent {
-            label,
-            event: WindowEvent::Focused(true),
-            ..
-        } => {
-            if let (Some(panes), Some(window)) = (state.panes(), window::window_of(&label)) {
-                let panes = Arc::clone(panes);
-                tauri::async_runtime::spawn(async move {
-                    let _ = panes.apply_core(Intent::WindowFocus { window }).await;
-                });
+        RunEvent::ExitRequested { .. } => {
+            // Where each window is goes into the workspace's file with the rest.
+            if let Some(windows) = app.try_state::<Arc<WindowShell>>() {
+                for label in windows.layout_windows() {
+                    windows.keep_place(&label);
+                }
             }
         }
         RunEvent::Exit => {

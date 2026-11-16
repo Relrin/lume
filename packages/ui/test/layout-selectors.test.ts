@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  hasTabListPanel,
   isFloating,
   isFocused,
   isPaneVisible,
   selectActivePanes,
   selectActiveTab,
+  selectDock,
   selectFloatRect,
   selectFloating,
   selectFocus,
   selectPane,
+  selectPanelArea,
+  selectPanels,
   selectRatios,
   selectSplit,
   selectTab,
@@ -21,6 +25,7 @@ import {
   selectWindowOf,
   selectWindowPanes,
   selectZoomed,
+  TAB_LIST_PANEL,
   tabTitle,
   UNTITLED_TAB,
 } from "../src/layout/selectors.ts";
@@ -54,7 +59,9 @@ function workspace(): Workspace {
           { id: "t2", title: null, root: pane("p4"), zoomed: null, last_focus: "p4" },
         ],
       },
-      floating: [{ pane: { id: "p5", title: null, content: floating.content }, rect: RECT }],
+      floating: [
+        { pane: { id: "p5", title: null, content: floating.content }, rect: RECT, minimised: null },
+      ],
     })),
   };
 }
@@ -192,5 +199,77 @@ describe("what a tab is called", () => {
     expect(tabTitle(state, "t2", new Map())).toBe(UNTITLED_TAB);
     expect(tabTitle(state, "t9", titles)).toBe(UNTITLED_TAB);
     expect(UNTITLED_TAB).toBe("Terminal");
+  });
+});
+
+describe("the panels at a window's sides", () => {
+  /** One tab, with the list of tabs docked at `side` and a plugin's view at the bottom. */
+  function docked(side: "left" | "right" | null): LayoutStore {
+    const base = oneTab(pane("p1"), "p1");
+    const window = base.windows[0]!;
+    const empty = { panels: [], size: 240, collapsed: false };
+    const tabs = { id: "lume.tabs", content: { type: "tab_list" as const } };
+    const view = {
+      id: "acme.files",
+      content: { type: "plugin_view" as const, plugin: "acme", view: "files" },
+    };
+    const store = createLayoutStore();
+    store.getState().reset(
+      viewOf({
+        ...base,
+        windows: [
+          {
+            ...window,
+            dock: {
+              top: empty,
+              left: side === "left" ? { ...empty, panels: [tabs], size: 300 } : empty,
+              right: side === "right" ? { ...empty, panels: [tabs] } : empty,
+              bottom: { ...empty, panels: [view] },
+            },
+          },
+        ],
+      }),
+    );
+    return store;
+  }
+
+  it("finds the side a panel is docked at", () => {
+    expect(selectPanelArea(docked("left").getState(), TAB_LIST_PANEL)).toBe("left");
+    expect(selectPanelArea(docked("right").getState(), TAB_LIST_PANEL)).toBe("right");
+    expect(selectPanelArea(docked(null).getState(), TAB_LIST_PANEL)).toBeNull();
+    expect(selectPanelArea(docked(null).getState(), "acme.files")).toBe("bottom");
+    expect(selectPanelArea(docked("left").getState(), "acme.files", "w9")).toBeNull();
+  });
+
+  it("says whether the tabs are listed at a side, which takes them out of the top bar", () => {
+    expect(hasTabListPanel(docked("left").getState())).toBe(true);
+    expect(hasTabListPanel(docked(null).getState())).toBe(false);
+    expect(hasTabListPanel(createLayoutStore().getState())).toBe(false);
+
+    // A side that is folded away shows no list, so the top bar lists the tabs again.
+    const store = docked("left");
+    const left = selectDock(store.getState(), "left")!;
+    store
+      .getState()
+      .apply(1, 1, [
+        { type: "dock", window: "w1", area: "left", dock: { ...left, collapsed: true } },
+      ]);
+    expect(selectPanelArea(store.getState(), TAB_LIST_PANEL)).toBe("left");
+    expect(hasTabListPanel(store.getState())).toBe(false);
+  });
+
+  it("gives a side's area and its panels, the same until that side changes", () => {
+    const store = docked("left");
+    const before = store.getState();
+    expect(selectDock(before, "left")?.size).toBe(300);
+    expect(selectPanels(before, "left").map((panel) => panel.id)).toEqual(["lume.tabs"]);
+    expect(selectPanels(before, "right")).toEqual([]);
+    expect(selectPanels(createLayoutStore().getState(), "left")).toEqual([]);
+
+    store.getState().apply(1, 1, [{ type: "dock_size", window: "w1", area: "bottom", size: 180 }]);
+    const after = store.getState();
+    expect(selectDock(after, "bottom")?.size).toBe(180);
+    expect(selectDock(after, "left")).toBe(selectDock(before, "left"));
+    expect(selectPanels(after, "left")).toBe(selectPanels(before, "left"));
   });
 });

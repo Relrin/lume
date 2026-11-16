@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  isMinimised,
+  isPaneVisible,
+  selectMinimised,
+  selectVisiblePanes,
+} from "../src/layout/selectors.ts";
 import { createLayoutStore, toWorkspace } from "../src/layout/store.ts";
 import type { LayoutChange } from "../src/layout/types.ts";
 import {
@@ -243,7 +249,7 @@ describe("a pane that moves between a tab and the floating layer", () => {
   const floating: LayoutChange = {
     type: "floating",
     window: "w1",
-    floating: [{ pane: paneOf("p3"), rect }],
+    floating: [{ pane: paneOf("p3"), rect, minimised: null }],
   };
 
   it("is kept whichever of the two changes arrives first", () => {
@@ -255,10 +261,42 @@ describe("a pane that moves between a tab and the floating layer", () => {
       store.getState().apply(3, 11, changes);
       const state = store.getState();
       expect(state.panes["p3"]).toBeDefined();
-      expect(state.floats["p3"]).toEqual({ window: "w1", rect });
+      expect(state.floats["p3"]).toEqual({ window: "w1", rect, minimised: null });
       expect(state.paneTabs["p3"]).toBeUndefined();
       expect(state.windows["w1"]?.floating).toEqual(["p3"]);
     }
+  });
+
+  it("is put away and brought back without losing its place", () => {
+    const store = started();
+    store.getState().apply(3, 11, [tree, floating]);
+    const shown = store.getState();
+    expect(shown.windows["w1"]?.minimised).toEqual([]);
+    expect(isPaneVisible(shown, "p3")).toBe(true);
+
+    const away: LayoutChange = {
+      type: "floating",
+      window: "w1",
+      floating: [{ pane: paneOf("p3"), rect, minimised: "tab" }],
+    };
+    store.getState().apply(3, 12, [away]);
+    const hidden = store.getState();
+    expect(hidden.floats["p3"]).toEqual({ window: "w1", rect, minimised: "tab" });
+    expect(hidden.windows["w1"]?.floating).toEqual(["p3"]);
+    expect(selectMinimised(hidden)).toEqual(["p3"]);
+    expect(isMinimised(hidden, "p3")).toBe(true);
+    expect(isPaneVisible(hidden, "p3")).toBe(false);
+    expect(selectVisiblePanes(hidden)).not.toContain("p3");
+    // The pane itself is kept: its terminal carries on while it is put away.
+    expect(hidden.panes["p3"]).toBe(shown.panes["p3"]);
+    expect(toWorkspace(hidden).windows[0]?.floating[0]?.minimised).toBe("tab");
+
+    store.getState().apply(3, 13, [floating]);
+    const back = store.getState();
+    expect(selectMinimised(back)).toEqual([]);
+    // A window with nothing put away has the same list each time.
+    expect(selectMinimised(back)).toBe(selectMinimised(shown));
+    expect(isPaneVisible(back, "p3")).toBe(true);
   });
 
   it("comes back into the tab whichever change arrives first", () => {
@@ -290,3 +328,21 @@ function paneOf(id: string) {
   if (node.type !== "pane") throw new Error("not a pane");
   return { id: node.id, title: node.title, content: node.content };
 }
+
+describe("the workspace's name", () => {
+  it("follows the workspace when it is renamed, and nothing else changes", () => {
+    const store = started();
+    const before = store.getState();
+    expect(before.name).toBe("test");
+    expect(store.getState().apply(3, 11, [{ type: "workspace_name", name: "notes" }])).toBe(
+      "applied",
+    );
+    const after = store.getState();
+    expect(after.name).toBe("notes");
+    expect(after.workspaceId).toBe(before.workspaceId);
+    expect(after.panes).toBe(before.panes);
+    expect(after.tabs).toBe(before.tabs);
+    expect(after.windows).toBe(before.windows);
+    expect(toWorkspace(after).name).toBe("notes");
+  });
+});

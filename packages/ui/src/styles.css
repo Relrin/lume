@@ -70,6 +70,8 @@
     inset: 0;
     display: flex;
     flex-direction: column;
+    /* What reaches past the window's edge, such as a card's shadow, is cut off there. */
+    overflow: hidden;
     /* A faint glow of the accent behind the top left corner, over the surface. */
     background:
       radial-gradient(
@@ -81,19 +83,414 @@
     user-select: none;
   }
 
+  /*
+   * The bar along the top. Its menus drop over the panes, so it lies above the rest of
+   * the window. When the window is narrow the tabs give way first: they shrink and
+   * then scroll, and the parts at either end stay whole.
+   */
   .top-bar {
+    position: relative;
+    z-index: 2;
     display: flex;
     align-items: center;
     flex-shrink: 0;
     gap: 10px;
     height: var(--lume-size-topbar);
-    padding: 0 var(--lume-space-gap) 0 12px;
+    padding: 0 var(--lume-space-gap) 0 8px;
   }
 
-  .top-mark {
+  /* The window's own buttons reach the window's edge. */
+  .top-bar[data-title-bar="custom"] {
+    padding-right: 0;
+  }
+
+  .top-left,
+  .top-right {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    min-width: 0;
+    gap: 10px;
+    height: 100%;
+  }
+
+  .top-centre {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    gap: 10px;
+    height: 100%;
+  }
+
+  .top-divider {
+    flex-shrink: 0;
+    width: var(--lume-size-border);
+    height: 18px;
+    background: var(--lume-color-border);
+  }
+
+  /*
+   * The application's menu: a button, the names of its other menus, which unfold
+   * beside the button while a menu is on show, and the menu on show under them.
+   */
+
+  .app-menu {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    /* The names stand close to the button; the bar's own gap follows them. */
+    margin-right: -2px;
+  }
+
+  /* Over what puts a menu away when pressed, so another menu can be asked for. */
+  .app-menu-button,
+  .app-menu-fold {
+    position: relative;
+    z-index: 42;
+  }
+
+  .app-menu-button {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--lume-radius-control);
+  }
+
+  .app-menu-button[data-open="true"] {
+    @apply bg-control-hover text-ink;
+  }
+
+  .app-menu-fold {
+    display: grid;
+    grid-template-columns: 0fr;
+    transition: grid-template-columns 220ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .app-menu-fold[data-open="true"] {
+    grid-template-columns: 1fr;
+  }
+
+  .app-menu-bar {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+    gap: 2px;
+    height: 30px;
+    opacity: 0;
+    white-space: nowrap;
+    transition: opacity 140ms ease-out;
+  }
+
+  .app-menu-fold[data-open="true"] > .app-menu-bar {
+    padding: 0 2px 0 6px;
+    opacity: 1;
+    transition-delay: 40ms;
+  }
+
+  .app-menu-name {
+    /* Quieter than the menu on show, and plainer to read than a control at rest. */
+    color: color-mix(in srgb, var(--lume-color-text) 80%, var(--lume-color-text-muted));
+    height: 24px;
+    padding: 0 9px;
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    font-size: 12.5px;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .app-menu-name:hover,
+  .app-menu-name[aria-expanded="true"] {
+    @apply bg-control-hover text-ink;
+  }
+
+  /* Where the menu on show hangs: under the button, or under its own name. */
+  .app-menu-drop {
+    position: absolute;
+    top: 100%;
+    left: 0;
+  }
+
+  .app-menu-drop[data-menu="view"] {
+    left: 30px;
+  }
+
+  .app-menu-drop[data-menu="help"] {
+    left: 78px;
+  }
+
+  /* The application's menus are set closer than other menus: many short rows. */
+  .app-menu-drop > .menu {
+    min-width: 260px;
+    padding: 5px;
+    border-radius: var(--lume-radius-card);
+    transform-origin: 16px 0;
+    animation: menu-in 200ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .app-menu-drop .menu-item {
+    justify-content: space-between;
+    gap: 24px;
+    height: 28px;
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    font-size: 12.5px;
+  }
+
+  .app-menu-drop .menu-separator {
+    margin: 4px 6px;
+  }
+
+  @keyframes menu-in {
+    from {
+      opacity: 0;
+      translate: 0 -4px;
+      scale: 0.97;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-menu-fold,
+    .app-menu-bar {
+      transition: none;
+    }
+
+    .app-menu-drop > .menu {
+      animation: none;
+    }
+  }
+
+  /* The workspace's name, and the menu under it. */
+
+  .switcher {
+    position: relative;
+    flex-shrink: 0;
+    min-width: 0;
+  }
+
+  .switcher-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 220px;
+    height: 30px;
+    padding: 0 10px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    cursor: pointer;
+    transition: background-color 120ms ease;
+  }
+
+  .switcher-button:hover,
+  .switcher-button[aria-expanded="true"] {
+    @apply bg-control-hover;
+  }
+
+  .switcher-dot {
+    @apply bg-accent;
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+
+  .switcher-name {
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .switcher-chevron {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 640px) {
+    .switcher-button {
+      max-width: 132px;
+    }
+  }
+
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+
+  .menu {
+    @apply bg-popover;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 41;
+    min-width: 240px;
+    max-width: min(360px, calc(100vw - 16px));
+    max-height: calc(100vh - var(--lume-size-topbar) - 16px);
+    padding: 6px;
+    overflow-y: auto;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + 2px);
+    outline: none;
+    box-shadow: var(--lume-shadow-popover);
+    scrollbar-width: thin;
+  }
+
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .menu-item:hover,
+  .menu-item:focus {
+    @apply bg-control-hover;
+    outline: none;
+  }
+
+  .menu-item:disabled {
+    background: transparent;
+    opacity: var(--lume-opacity-disabled);
+    cursor: default;
+  }
+
+  .menu-check {
     @apply text-accent;
     display: flex;
     flex-shrink: 0;
+    width: 14px;
+  }
+
+  .menu-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .menu-hint {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .menu-separator {
+    height: var(--lume-size-border);
+    margin: 5px 4px;
+    background: var(--lume-color-border);
+  }
+
+  /* The window's own buttons, as high as the bar. */
+
+  .window-controls {
+    display: flex;
+    align-self: stretch;
+    flex-shrink: 0;
+    margin-left: 4px;
+  }
+
+  .window-control {
+    width: 44px;
+    height: 100%;
+    border-radius: 0;
+  }
+
+  /*
+   * Status items. An item's tone colours what it draws, not what it is called: the
+   * name of a meter stays quiet whatever colour its bar is.
+   */
+
+  .status-slot {
+    display: flex;
+    align-items: center;
+    flex-shrink: 1;
+    min-width: 0;
+    gap: 14px;
+    overflow: hidden;
+  }
+
+  .status-item {
+    @apply text-ink-muted;
+    --status-tone: var(--lume-color-text-muted);
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .status-item[data-tone="info"] {
+    --status-tone: var(--lume-color-status-info);
+  }
+
+  .status-item[data-tone="success"] {
+    --status-tone: var(--lume-color-status-success);
+  }
+
+  .status-item[data-tone="warning"] {
+    --status-tone: var(--lume-color-status-warning);
+  }
+
+  .status-item[data-tone="danger"] {
+    --status-tone: var(--lume-color-status-danger);
+  }
+
+  .status-icon {
+    display: flex;
+    color: var(--status-tone);
+  }
+
+  .status-item:not([data-tone="neutral"]) .status-text {
+    color: var(--status-tone);
+  }
+
+  .status-value {
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .status-meter-track {
+    fill: var(--lume-color-border);
+  }
+
+  .status-meter-fill {
+    fill: var(--status-tone);
+  }
+
+  .status-sparkline {
+    color: var(--status-tone);
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border: var(--lume-size-border) solid color-mix(in srgb, var(--status-tone) 40%, transparent);
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--status-tone) 12%, transparent);
+    color: var(--status-tone);
+    font-family: var(--font-mono);
+    font-size: 11px;
   }
 
   /* Anything small that is pressed: it lights up under the pointer. */
@@ -117,6 +514,7 @@
 
   .control:focus-visible,
   .tab-label:focus-visible,
+  .switcher-button:focus-visible,
   .empty-action:focus-visible {
     outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
     outline-offset: 1px;
@@ -225,13 +623,263 @@
     border-radius: var(--lume-radius-control);
   }
 
+  /* Where a card that is being dragged can be let go to get a tab of its own. */
+  [data-drop-active="true"] {
+    border-radius: var(--lume-radius-control);
+    background: var(--lume-color-drop-preview);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lume-color-accent) 75%, transparent);
+  }
+
+  /*
+   * The body of the window: the panes in the middle, and the panels docked at the left,
+   * the right and the bottom. The panels lie flush on the window, not in cards.
+   */
+
+  .shell-body {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .shell-centre {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .dock-area {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    min-width: 0;
+    min-height: 0;
+    gap: 6px;
+  }
+
+  /* A side never takes so much that nothing is left for the panes. */
+  .dock-area[data-area="left"] {
+    max-width: 60%;
+    padding: 0 0 var(--lume-space-gap) var(--lume-space-gap);
+  }
+
+  .dock-area[data-area="right"] {
+    max-width: 60%;
+    padding: 0 var(--lume-space-gap) var(--lume-space-gap) 0;
+  }
+
+  .dock-area[data-area="bottom"] {
+    flex-direction: row;
+    max-height: 60%;
+    padding: 0 var(--lume-space-gap) var(--lume-space-gap);
+  }
+
+  /* The inner edge of a side, in the gap between it and the panes. */
+  .dock-resize {
+    position: absolute;
+    z-index: 3;
+    touch-action: none;
+  }
+
+  .dock-area[data-area="left"] > .dock-resize,
+  .dock-area[data-area="right"] > .dock-resize {
+    top: 0;
+    bottom: var(--lume-space-gap);
+    width: max(var(--lume-space-gap), 6px);
+    cursor: col-resize;
+  }
+
+  .dock-area[data-area="left"] > .dock-resize {
+    left: 100%;
+  }
+
+  .dock-area[data-area="right"] > .dock-resize {
+    right: 100%;
+  }
+
+  .dock-area[data-area="bottom"] > .dock-resize {
+    right: var(--lume-space-gap);
+    bottom: 100%;
+    left: var(--lume-space-gap);
+    height: max(var(--lume-space-gap), 6px);
+    cursor: row-resize;
+  }
+
+  .dock-resize::after {
+    content: "";
+    position: absolute;
+    border-radius: 2px;
+    background: transparent;
+    transition: background-color 120ms ease;
+  }
+
+  .dock-area[data-area="left"] > .dock-resize::after,
+  .dock-area[data-area="right"] > .dock-resize::after {
+    top: 10px;
+    bottom: 10px;
+    left: calc(50% - 1px);
+    width: 2px;
+  }
+
+  .dock-area[data-area="bottom"] > .dock-resize::after {
+    top: calc(50% - 1px);
+    right: 10px;
+    left: 10px;
+    height: 2px;
+  }
+
+  .dock-resize:hover::after {
+    background: color-mix(in srgb, var(--lume-color-accent) 55%, transparent);
+  }
+
+  .dock-resize[data-dragging="true"]::after {
+    background: var(--lume-color-accent);
+  }
+
+  /* The side a panel that is being dragged would be docked at. */
+  .dock-drop {
+    position: absolute;
+    z-index: 5;
+    border-radius: var(--lume-radius-card);
+    background: var(--lume-color-drop-preview);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lume-color-accent) 75%, transparent);
+    pointer-events: none;
+  }
+
+  .dock-drop[data-area="left"],
+  .dock-drop[data-area="right"] {
+    top: 0;
+    bottom: var(--lume-space-gap);
+    width: min(240px, 33%);
+  }
+
+  .dock-drop[data-area="left"] {
+    left: var(--lume-space-gap);
+  }
+
+  .dock-drop[data-area="right"] {
+    right: var(--lume-space-gap);
+  }
+
+  .dock-drop[data-area="bottom"] {
+    right: var(--lume-space-gap);
+    bottom: var(--lume-space-gap);
+    left: var(--lume-space-gap);
+    height: min(240px, 33%);
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
+    height: 30px;
+    padding: 0 2px 0 8px;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .panel-header[data-dragging="true"] {
+    opacity: var(--lume-opacity-disabled);
+    cursor: grabbing;
+  }
+
+  .panel-title {
+    @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .panel-button {
+    width: 24px;
+    height: 24px;
+  }
+
+  .panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .panel-placeholder {
+    @apply text-ink-muted;
+    padding: 10px 8px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .panel-placeholder-name {
+    @apply text-ink;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .panel-placeholder-plugin {
+    font-family: var(--font-mono);
+  }
+
+  /* The tabs as a list down a side of the window. */
+
+  .tab-column {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 100%;
+  }
+
+  .tab-column .tab-list {
+    flex-direction: column;
+    align-items: stretch;
+    overflow: visible;
+  }
+
+  .tab-column .tab {
+    flex: none;
+    max-width: none;
+    height: 34px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+    touch-action: pan-x;
+  }
+
+  .tab-column-new {
+    justify-content: flex-start;
+    gap: 7px;
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+  }
+
   /* The panes. Each card and divider is placed by a transform and a size set on it. */
 
+  /*
+   * The cards stack among themselves: a floating card is above the others, not above
+   * the window. Nothing is cut off at the area's edges: a card's shadow falls on
+   * whatever lies beside the area, a panel at the window's side included, so the side
+   * reads as the same ground the cards stand on and no edge shows between the two.
+   */
   .tab-area {
     position: relative;
     flex: 1;
     min-height: 0;
-    overflow: hidden;
+    isolation: isolate;
   }
 
   .pane-card {
@@ -275,6 +923,8 @@
   .pane-header {
     @apply bg-card-header;
     container-type: inline-size;
+    cursor: grab;
+    touch-action: none;
     display: flex;
     align-items: center;
     flex-shrink: 0;
@@ -352,6 +1002,245 @@
     .pane-icon {
       display: none;
     }
+  }
+
+  /* A card in hand stays where it is, dimmed, until it is let go. */
+  .pane-card[data-dragging="true"] {
+    opacity: var(--lume-opacity-disabled);
+    outline: var(--lume-size-border) dashed
+      color-mix(in srgb, var(--lume-color-accent) 60%, transparent);
+    outline-offset: -1px;
+  }
+
+  .pane-card[data-dragging="true"] .pane-header,
+  .pane-card[data-moving="true"] .pane-header {
+    cursor: grabbing;
+  }
+
+  /*
+   * A card that floats over the tabs is told apart by the colour of its edge, and has
+   * edges the pointer can take hold of to resize it.
+   */
+  .pane-card[data-floating="true"] {
+    border-color: color-mix(
+      in srgb,
+      var(--lume-color-status-warning) 35%,
+      var(--lume-color-border)
+    );
+    box-shadow: var(--lume-shadow-floating);
+  }
+
+  .pane-card[data-floating="true"][data-focused="true"] {
+    border-color: color-mix(in srgb, var(--lume-color-status-warning) 60%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--lume-color-status-warning) 18%, transparent),
+      var(--lume-shadow-floating);
+  }
+
+  .pane-card[data-floating="true"] .pane-header {
+    background: color-mix(
+      in srgb,
+      var(--lume-color-status-warning) 5%,
+      var(--lume-color-card-header)
+    );
+  }
+
+  /* The button that lifts a pane off the others is lit while the pane floats. */
+  .pane-button-lit[aria-pressed="true"],
+  .pane-button-lit[aria-pressed="true"]:hover {
+    color: var(--lume-color-status-warning);
+    background: color-mix(in srgb, var(--lume-color-status-warning) 16%, transparent);
+  }
+
+  /* A card that begins to float, or comes back from the corner, grows into its place. */
+  .pane-card[data-floating="true"] {
+    animation: float-in 220ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  @keyframes float-in {
+    from {
+      opacity: 0;
+      scale: 0.96;
+    }
+  }
+
+  /*
+   * The panes that are put away: a row of markers at the bottom right of the panes,
+   * over everything else there. Only the markers take the pointer.
+   */
+  .pane-tray {
+    position: absolute;
+    right: calc(var(--lume-space-gap) + 12px);
+    bottom: calc(var(--lume-space-gap) + 12px);
+    z-index: 100;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    max-width: calc(100% - 2 * var(--lume-space-gap) - 24px);
+    pointer-events: none;
+  }
+
+  .pane-pill {
+    @apply bg-popover text-ink;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 220px;
+    gap: 8px;
+    height: 32px;
+    padding: 0 12px 0 8px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-card);
+    box-shadow: var(--lume-shadow-floating);
+    font-size: 12.5px;
+    cursor: pointer;
+    pointer-events: auto;
+    transform-origin: 100% 100%;
+    animation: pill-in 200ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition:
+      border-color 120ms ease,
+      scale 140ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .pane-pill:hover {
+    border-color: var(--lume-color-border-focus);
+  }
+
+  .pane-pill:active {
+    scale: 0.97;
+  }
+
+  .pane-pill:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
+
+  .pane-pill-icon {
+    @apply text-accent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--lume-color-accent) 16%, transparent);
+  }
+
+  .pane-pill-name {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  @keyframes pill-in {
+    from {
+      opacity: 0;
+      scale: 0.9;
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pane-card[data-floating="true"],
+    .pane-pill {
+      animation: fade-in 150ms ease-out;
+    }
+  }
+
+  .float-edge {
+    position: absolute;
+    z-index: 3;
+    touch-action: none;
+  }
+
+  .float-edge[data-edge="w"],
+  .float-edge[data-edge="e"] {
+    top: var(--lume-size-header);
+    bottom: 16px;
+    width: 6px;
+    cursor: ew-resize;
+  }
+
+  .float-edge[data-edge="w"] {
+    left: 0;
+  }
+
+  .float-edge[data-edge="e"] {
+    right: 0;
+  }
+
+  .float-edge[data-edge="s"] {
+    right: 16px;
+    bottom: 0;
+    left: 16px;
+    height: 6px;
+    cursor: ns-resize;
+  }
+
+  .float-edge[data-edge="sw"],
+  .float-edge[data-edge="se"] {
+    bottom: 0;
+    width: 16px;
+    height: 16px;
+  }
+
+  .float-edge[data-edge="sw"] {
+    left: 0;
+    cursor: nesw-resize;
+  }
+
+  .float-edge[data-edge="se"] {
+    right: 0;
+    cursor: nwse-resize;
+  }
+
+  /* A small mark in the lower right corner, which says the card can be resized. */
+  .float-edge[data-edge="se"]::after {
+    content: "";
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 6px;
+    height: 6px;
+    border-right: 1.5px solid var(--lume-color-text-muted);
+    border-bottom: 1.5px solid var(--lume-color-text-muted);
+    border-bottom-right-radius: 3px;
+    opacity: 0.6;
+  }
+
+  /* Where a card in hand would go. It is above the cards of the tab and below the floating ones. */
+  .drop-preview {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 10;
+    display: grid;
+    place-items: center;
+    border-radius: var(--lume-radius-card);
+    background: var(--lume-color-drop-preview);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lume-color-accent) 75%, transparent);
+    pointer-events: none;
+  }
+
+  .drop-preview-label {
+    @apply bg-popover;
+    padding: 6px 12px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    font-size: 12px;
+    box-shadow: var(--lume-shadow-popover);
+  }
+
+  .drop-preview-label:empty {
+    display: none;
   }
 
   .divider {
@@ -517,7 +1406,196 @@
     pointer-events: none;
   }
 
-  /* A question or a notice, over everything. */
+  /* The command palette: a field and a list, near the top of the window. */
+
+  .palette-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: calc(var(--lume-size-topbar) + 10px) 16px 16px;
+    background: color-mix(in srgb, var(--lume-color-overlay) 30%, transparent);
+    cursor: default;
+  }
+
+  .palette {
+    @apply bg-popover;
+    display: flex;
+    flex-direction: column;
+    width: min(560px, 100%);
+    max-height: min(420px, 100%);
+    overflow: hidden;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + 2px);
+    box-shadow: var(--lume-shadow-popover);
+  }
+
+  .palette-field {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 10px;
+    height: 44px;
+    padding: 0 14px;
+    border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+  }
+
+  .palette-field-icon {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .palette-crumb {
+    @apply bg-control-active;
+    flex-shrink: 0;
+    max-width: 45%;
+    padding: 2px 8px;
+    overflow: hidden;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .palette-input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    background: transparent;
+    outline: none;
+    user-select: text;
+  }
+
+  .palette-input::placeholder {
+    color: var(--lume-color-text-muted);
+  }
+
+  .palette-problem {
+    @apply text-danger;
+    flex-shrink: 0;
+    padding: 8px 14px 0;
+    font-size: 12px;
+  }
+
+  .palette-list {
+    flex: 1;
+    min-height: 0;
+    padding: 6px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .palette-list:empty {
+    display: none;
+  }
+
+  .palette-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+    cursor: pointer;
+  }
+
+  .palette-row[aria-selected="true"] {
+    @apply bg-control-hover;
+  }
+
+  .palette-row-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .palette-row-prefix {
+    @apply text-ink-muted;
+  }
+
+  .palette-mark {
+    @apply text-accent;
+    background: transparent;
+    font-weight: 600;
+  }
+
+  .palette-row-keys {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .palette-empty {
+    @apply text-ink-muted;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  /* Notices, in the lower right corner, beside the work and not over it. */
+
+  .notices {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    z-index: 44;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: min(380px, calc(100% - 24px));
+    pointer-events: none;
+  }
+
+  /* Over the markers of the panes that are put away, when there are any, not on them. */
+  .shell:has(.pane-tray) .notices {
+    bottom: calc(var(--lume-space-gap) + 12px + 32px + 8px);
+  }
+
+  .notice {
+    @apply bg-popover;
+    --notice-tone: var(--lume-color-status-info);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 9px 8px 9px 12px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-left: 3px solid var(--notice-tone);
+    border-radius: var(--lume-radius-control);
+    box-shadow: var(--lume-shadow-popover);
+    cursor: pointer;
+    pointer-events: auto;
+  }
+
+  .notice[data-level="warning"] {
+    --notice-tone: var(--lume-color-status-warning);
+  }
+
+  .notice[data-level="error"] {
+    --notice-tone: var(--lume-color-status-danger);
+  }
+
+  .notice-message {
+    flex: 1;
+    min-width: 0;
+    max-height: 9em;
+    overflow: auto;
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+    user-select: text;
+    scrollbar-width: thin;
+  }
+
+  .notice-close {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* A question that must be answered, over everything. */
 
   .prompt-backdrop {
     @apply bg-overlay;

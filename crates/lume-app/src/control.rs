@@ -2,7 +2,7 @@
 //!
 //! The application serves a local endpoint that only its user can reach. The command-line
 //! tool drives the application through it, and a second copy of the application uses it
-//! to bring the first one's window to the front instead of opening another.
+//! to hand what it was started for to the first one instead of opening another.
 //!
 //! A connection carries requests one after another, each answered before the next is
 //! read. Every answer says what the request changed. What needs a terminal's screen is
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lume_ipc::{Endpoint, Listener};
-use lume_layout::{Dir, Intent, NewContent, PaneId, SpawnRequest, UNITS, WindowId};
+use lume_layout::{Bounds, Dir, Intent, NewContent, PaneId, SpawnRequest, UNITS, WindowId};
 use lume_proto::app::{
     APP_PROTO_VERSION, AppError, AppMessage, AppReply, AppReplyBody, AppRequest, AppRequestBody,
     AppResponse, AppSession, Direction, Focused, PageRequestBody, SpawnPlace, codes,
@@ -43,6 +43,13 @@ pub trait Shell: Send + Sync + 'static {
     fn bundled_ui(&self) -> bool;
     /// Closes the window with this label.
     fn close_window(&self, label: &str);
+    /// Opens the window that shows a window of the layout, where it was kept if a
+    /// place is given. A window that is open already is left as it is.
+    fn open_window(&self, window: WindowId, bounds: Option<Bounds>);
+    /// The labels of the open windows that show windows of the layout.
+    fn layout_windows(&self) -> Vec<String>;
+    /// Draws every window with the page's own title bar, or with the system's.
+    fn set_title_bar(&self, custom: bool);
 }
 
 /// What a request needs to be carried out.
@@ -264,11 +271,29 @@ impl Control {
                 codes::BAD_REQUEST,
                 "hello has been said on this connection",
             )),
-            AppRequestBody::Activate {} => {
-                shell.activate();
+            AppRequestBody::Launch {
+                workspace,
+                exec,
+                cwd,
+            } => {
+                let pane = self
+                    .services
+                    .launch(workspace.as_deref(), &exec, cwd, self.page_wait)
+                    .await?;
+                let on_show = panes.workspace().name;
+                let mut effect = "brought the window to the front".to_owned();
+                if workspace.is_some() {
+                    effect.push_str(&format!(", showing the workspace {on_show}"));
+                }
+                if let Some(pane) = pane {
+                    effect.push_str(&format!(", and started the program in pane {pane}"));
+                }
                 reply(
-                    "brought the window to the front",
-                    AppReplyBody::Activated {},
+                    effect,
+                    AppReplyBody::Launched {
+                        workspace: on_show,
+                        pane: pane.map(|pane| pane.to_string()),
+                    },
                 )
             }
             AppRequestBody::Quit {} => reply("closing the application", AppReplyBody::Quitting {}),
@@ -318,28 +343,39 @@ impl Control {
                         ratio: UNITS / 2,
                         content,
                     },
-                    SpawnPlace::Window {} => {
-                        return Err(AppError::new(
-                            codes::UNSUPPORTED,
-                            "the application has one window; more cannot be opened yet",
-                        ));
-                    }
+                    SpawnPlace::Window {} => Intent::WindowNew {
+                        content,
+                        bounds: None,
+                    },
                 };
                 let applied = panes.apply(intent).await?;
-                let made = applied
-                    .created
-                    .pane
-                    .and_then(|pane| Some((pane, panes.session_of(pane)?)));
-                let Some((pane, key)) = made else {
+                let Some(pane) = applied.created.pane else {
                     return Err(AppError::new(
                         codes::INTERNAL,
-                        "the pane that was made has no session",
+                        "the intent was applied and made no pane",
+                    ));
+                };
+                // The pane of a new window gets its session once the window's page has
+                // loaded and said how large the pane is.
+                let shown_in = applied.created.window.unwrap_or(window);
+                let Some(key) = state
+                    .soon(PAGE_OPEN_TIMEOUT, |_| panes.session_of(pane))
+                    .await
+                else {
+                    return Err(AppError::new(
+                        codes::TIMEOUT,
+                        format!("pane {pane} was made, but no session was started in it in time"),
                     ));
                 };
                 // Typing into the session, or reading its screen, needs the page to
                 // have attached to it. The answer waits for that, so a script's next
                 // request finds the terminal ready.
-                let label = label_of(window);
+                let label = label_of(shown_in);
+                let page = if shown_in == window {
+                    page
+                } else {
+                    self.page_of(shown_in).await?
+                };
                 let attached = state
                     .soon(PAGE_OPEN_TIMEOUT, |state| {
                         state.page_of(&label)?.input_of(&key)
@@ -365,12 +401,18 @@ impl Control {
                     page.ask(pinned, PAGE_ANSWER_TIMEOUT).await?;
                 }
                 let tab = applied.created.tab.map(|tab| tab.to_string());
-                let effect = match &tab {
-                    Some(tab) => format!(
+                let effect = match (applied.created.window, &tab) {
+                    (Some(opened), _) => format!(
+                        "started session {} in pane {pane} of the new window {opened}",
+                        key.session
+                    ),
+                    (None, Some(tab)) => format!(
                         "started session {} in pane {pane} of the new tab {tab}",
                         key.session
                     ),
-                    None => format!("started session {} in the new pane {pane}", key.session),
+                    (None, None) => {
+                        format!("started session {} in the new pane {pane}", key.session)
+                    }
                 };
                 reply(
                     effect,
@@ -574,6 +616,13 @@ impl Control {
                     },
                 )
             }
+            AppRequestBody::Workspaces {} => {
+                let (active, workspaces) = panes.workspaces()?;
+                reply(
+                    format!("listed {} workspaces", workspaces.len()),
+                    AppReplyBody::Workspaces { active, workspaces },
+                )
+            }
             AppRequestBody::Commands {} => {
                 let commands = registry.list();
                 let count = commands.len();
@@ -755,8 +804,15 @@ where
     }
 }
 
-/// Asks the application already serving `endpoint` to bring its window to the front.
-pub async fn activate_running(endpoint: &Endpoint) -> io::Result<()> {
+/// Hands what this copy of the application was started for to the copy already
+/// serving `endpoint`: it brings its window to the front, shows the workspace named and
+/// runs the program named.
+pub async fn launch_running(
+    endpoint: &Endpoint,
+    workspace: Option<String>,
+    exec: Vec<String>,
+    cwd: Option<String>,
+) -> io::Result<()> {
     let mut io = lume_ipc::connect(endpoint).await?;
     let requests = [
         AppRequestBody::Hello {
@@ -764,7 +820,11 @@ pub async fn activate_running(endpoint: &Endpoint) -> io::Result<()> {
             proto_min: APP_PROTO_VERSION,
             client_kind: ClientKind::App,
         },
-        AppRequestBody::Activate {},
+        AppRequestBody::Launch {
+            workspace,
+            exec,
+            cwd,
+        },
     ];
     let mut decoder = ControlDecoder::new();
     let mut chunk = vec![0; READ_CHUNK];
@@ -911,7 +971,8 @@ mod tests {
         );
         let config = ConfigService::load(dir.dirs(), Some(WORKSPACE_NAME));
         let store = Store::new(dir.dirs().state_workspaces_dir());
-        let panes = Panes::open(&state, Arc::clone(&config), store, WORKSPACE_NAME).await;
+        let (panes, _) =
+            Panes::open(&state, Arc::clone(&config), store, WORKSPACE_NAME, None).await;
         state.set_panes(Arc::clone(&panes));
         let shell = Arc::new(FakeShell::default());
         panes.run(shell.clone());
@@ -1061,8 +1122,22 @@ mod tests {
         let mut app = running("quit").await;
         app.client.hello().await;
 
-        let activated = app.client.ask(AppRequestBody::Activate {}).await.unwrap();
-        assert_eq!(activated.body, AppReplyBody::Activated {});
+        let launched = app
+            .client
+            .ask(AppRequestBody::Launch {
+                workspace: None,
+                exec: Vec::new(),
+                cwd: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            launched.body,
+            AppReplyBody::Launched {
+                workspace: WORKSPACE_NAME.to_owned(),
+                pane: None,
+            }
+        );
         assert_eq!(app.shell.activations(), 1);
         assert_eq!(app.shell.quits(), 0);
 
@@ -1318,15 +1393,103 @@ mod tests {
         assert_eq!(workspace.windows[0].centre.tabs.len(), 2);
         assert_eq!(workspace.panes().len(), 3);
 
-        let refused = app
+        stop(app).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_second_start_shows_a_workspace_and_runs_a_program_in_a_new_tab() {
+        let mut app = running("launch").await;
+        app.client.hello().await;
+        let (program, args) = if cfg!(windows) {
+            ("cmd.exe", "/d")
+        } else {
+            ("/bin/sh", "-i")
+        };
+
+        let launched = app
             .client
-            .ask(AppRequestBody::Spawn {
-                spec: OpenSpec::default(),
-                place: SpawnPlace::Window {},
+            .ask(AppRequestBody::Launch {
+                workspace: Some("play".to_owned()),
+                exec: vec![program.to_owned(), args.to_owned()],
+                cwd: None,
             })
             .await
-            .unwrap_err();
-        assert_eq!(refused.code, codes::UNSUPPORTED);
+            .unwrap();
+        let AppReplyBody::Launched { workspace, pane } = launched.body else {
+            panic!("not an answer to a launch");
+        };
+        assert_eq!(workspace, "play");
+        assert_eq!(app.shell.activations(), 1);
+
+        // The workspace was begun with a window of its own, and the program has a tab.
+        let on_show = app.services.panes.workspace();
+        assert_eq!(on_show.name, "play");
+        assert_eq!(on_show.windows[0].centre.tabs.len(), 2);
+        let pane: PaneId = pane.unwrap().parse().unwrap();
+        let lume_layout::PaneContent::Terminal(terminal) = &on_show.pane(pane).unwrap().content
+        else {
+            panic!("the program's pane is not a terminal");
+        };
+        assert!(terminal.session.is_some());
+        assert_eq!(
+            terminal.launcher,
+            Some(lume_session::Launcher::Shell {
+                program: program.to_owned(),
+                args: vec![args.to_owned()],
+                login: false,
+            })
+        );
+
+        let listed = app.client.ask(AppRequestBody::Workspaces {}).await.unwrap();
+        let AppReplyBody::Workspaces { active, workspaces } = listed.body else {
+            panic!("not a list of workspaces");
+        };
+        assert_eq!(active, "play");
+        let names: Vec<&str> = workspaces.iter().map(|entry| entry.name.as_str()).collect();
+        assert_eq!(names, vec![WORKSPACE_NAME, "play"]);
+        stop(app).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_command_opens_a_window_and_another_closes_it() {
+        let mut app = running("windows").await;
+        app.client.hello().await;
+        let run = |id: &str, window: Option<String>| AppRequestBody::Command {
+            id: id.to_owned(),
+            args: serde_json::Value::Null,
+            window,
+        };
+
+        app.client.ask(run("lume.window.new", None)).await.unwrap();
+        let workspace = app.services.panes.workspace();
+        assert_eq!(workspace.windows.len(), 2);
+        let second = workspace.windows[1].id;
+        let shell = app.shell.clone();
+        until("the new window to be opened", || {
+            shell.open() == vec![label_of(second)]
+        })
+        .await;
+
+        app.client
+            .ask(run("lume.window.close", Some(second.to_string())))
+            .await
+            .unwrap();
+        let shell = app.shell.clone();
+        until("the window to be closed", || {
+            shell.closed() == vec![label_of(second)]
+        })
+        .await;
+        assert_eq!(app.services.panes.workspace().windows.len(), 1);
+        assert_eq!(app.shell.quits(), 0);
+
+        // Closing the only window that is left closes the application, and the layout
+        // keeps the window for the next start.
+        app.client
+            .ask(run("lume.window.close", None))
+            .await
+            .unwrap();
+        assert_eq!(app.shell.quits(), 1);
+        assert_eq!(app.services.panes.workspace().windows.len(), 1);
         stop(app).await;
     }
 

@@ -209,7 +209,12 @@ fn mend_window(window: &mut Window) {
             let tab = window.centre.active_tab()?;
             Some(tab.last_focus.unwrap_or_else(|| tab.first_pane()))
         })
-        .or_else(|| window.floating.last().map(|floating| floating.pane.id));
+        .or_else(|| {
+            window
+                .shown_floating()
+                .last()
+                .map(|floating| floating.pane.id)
+        });
     window.focus = focus;
 
     if let Some(pane) = focus {

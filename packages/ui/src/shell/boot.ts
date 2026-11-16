@@ -24,14 +24,18 @@ import { createConfigStore, type ConfigStore } from "../config/store.ts";
 import { CoreClient } from "../core/client.ts";
 import type { ConfigView, Notice } from "../core/types.ts";
 import { checkFrameContract } from "../frame-contract.ts";
+import { CardDrag } from "../drag/controller.ts";
+import { createPanelDragStore, type PanelDragStore } from "../drag/panels.ts";
 import { Shortcuts } from "../keys/shortcuts.ts";
 import { TabAreaController } from "../layout/controller.ts";
 import { estimatePane, gridFor } from "../layout/estimate.ts";
 import { panesOf, selectActiveTab, selectFocus } from "../layout/selectors.ts";
 import { createLayoutStore, type LayoutStore } from "../layout/store.ts";
 import type { Intent, PaneId } from "../layout/types.ts";
+import { createPaletteStore, type PaletteStore } from "../palette/store.ts";
 import { PaneTitles } from "../panes/titles.ts";
 import { PaneViews } from "../panes/views.ts";
+import { createStatusStore, type StatusStore } from "../status/registry.ts";
 import { currentPlatform, KeyLayout } from "../terminal/keyboard.ts";
 import { PromptStore } from "../terminal/prompts.ts";
 import { answerRequest, type PaneRef, type RemoteTarget } from "../terminal/remote.ts";
@@ -40,9 +44,14 @@ import { DEFAULT_APPEARANCE, rendererTheme, type Appearance } from "../theme.ts"
 import { TauriCarrier, type Carrier } from "../transport/carrier.ts";
 import { CommandError } from "../transport/types.ts";
 import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX } from "../tuning.ts";
+import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
+import { NoticeStore, sentence } from "./notices.ts";
 
 /** The page's prompts. Created with the module so a component can show them at once. */
 export const prompts = new PromptStore();
+
+/** The page's notices. Created with the module, like the prompts. */
+export const notices = new NoticeStore();
 
 /** Everything the window's components and views work with. */
 export interface ShellApp {
@@ -55,6 +64,17 @@ export interface ShellApp {
   readonly titles: PaneTitles;
   readonly commands: Commands;
   readonly prompts: PromptStore;
+  readonly notices: NoticeStore;
+  /** Whether the command palette is on show, and what for. */
+  readonly palette: PaletteStore;
+  /** The status items the window's bars show. */
+  readonly status: StatusStore;
+  /** What the window is doing on the desktop. */
+  readonly windowState: WindowStateStore;
+  /** Moves cards about the window by their headers. */
+  readonly cardDrag: CardDrag;
+  /** The panel that is being dragged to another side of the window, if one is. */
+  readonly panelDrag: PanelDragStore;
   /** How many renderers of each kind are alive, and what their glyphs take. */
   stats(): RenderStats;
 }
@@ -84,6 +104,15 @@ function tiersFor(view: ConfigView): readonly Tier[] {
 /** No context holds besides the ones a key's place gives it. */
 const NO_CONTEXT: ReadonlySet<string> = new Set();
 
+/** The context of a key pressed while the command palette is on show. */
+const PALETTE_CONTEXT: ReadonlySet<string> = new Set(["palette"]);
+
+/**
+ * The parts of the window that keep the keys pressed in them: a terminal offers its
+ * own keys to the bindings, and a dialog or a menu takes what is typed in it.
+ */
+const KEEPS_KEYS = ".terminal, [role=alertdialog], [role=menu]";
+
 /** The title the window has when no program has given the focused pane one. */
 const DEFAULT_TITLE = "Lume";
 
@@ -101,6 +130,10 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   const config = createConfigStore();
   const commandStore = createCommandStore();
   const titles = new PaneTitles();
+  const palette = createPaletteStore();
+  const status = createStatusStore();
+  const windowState = createWindowStateStore();
+  const panelDrag = createPanelDragStore();
 
   // What the core sends before the page has its first copies is kept and followed
   // once it has them; a change the copies already hold is passed over there.
@@ -183,6 +216,12 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     config: () => config.getState().view,
     appearance: () => look,
     shortcut: (pane, event, alternateScreen) => {
+      // While the palette is on show every key is the palette's, wherever the
+      // keyboard happens to be: none reaches a program.
+      if (palette.getState().shown) {
+        shortcuts.handle(event, PALETTE_CONTEXT);
+        return true;
+      }
       const contexts = new Set(["terminal"]);
       if (alternateScreen) contexts.add("alt-screen");
       if (layout.getState().floats[pane]) contexts.add("floating");
@@ -193,7 +232,14 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     store: commandStore,
     client,
     views,
-    failed: (message) => prompts.notice(message),
+    palette,
+    failed: (message) => notices.push("error", sentence(message)),
+  });
+  const cardDrag = new CardDrag({
+    layout,
+    area,
+    apply: (intent) => client.layoutApply(intent),
+    failed: (message) => notices.push("error", sentence(message)),
   });
 
   // Following the core.
@@ -209,7 +255,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       },
       (error: unknown) => {
         refetching = false;
-        prompts.notice(`The layout could not be read again: ${reason(error)}`);
+        notices.push("error", `The layout could not be read again: ${reason(error)}`);
       },
     );
   };
@@ -241,14 +287,18 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         }
         break;
       case "config_error":
-        prompts.notice(
+        notices.push(
+          "error",
           `The configuration was not applied, and the one before it is still in use. ${notice.problems
             .map(describeProblem)
             .join(" ")}`,
         );
         break;
+      case "window_state":
+        windowState.getState().set(notice);
+        break;
       case "notice":
-        prompts.notice(notice.message);
+        notices.push(notice.level, notice.message);
         break;
     }
   };
@@ -279,7 +329,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       const state = layout.getState();
       const rect = estimatePane(state, intent, box, area.gapPx());
       if (!rect) throw new CommandError("bad_request", "the intent makes no pane");
-      // A pane made by dividing another shares its tab; a new tab's pane is alone.
+      // A pane made by dividing another shares its tab; a new tab's pane is alone,
+      // and the scratch terminal floats.
+      const floating = intent.type === "scratch_show";
       let beside = 1;
       if (intent.type === "split") {
         const tab = state.tabs[state.paneTabs[intent.pane] ?? ""];
@@ -291,7 +343,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       );
       const dpr = window.devicePixelRatio;
       const metrics = host.measureCells(rendererTheme(look, fontSizePx), dpr);
-      return gridFor(rect, area.chrome(beside), metrics, dpr);
+      return gridFor(rect, area.chrome(beside, floating), metrics, dpr);
     },
     command: (id, args) => {
       commands.runInPage(id, args);
@@ -318,6 +370,17 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
 
   // The keyboard and the window's title follow the layout's focus.
 
+  // While the palette is on show the keyboard is the palette's, and when the palette
+  // is put away the keyboard goes back to where the user was working.
+  const refocus = (): void => {
+    if (!palette.getState().shown) views.focus();
+  };
+  let paletteShown = false;
+  palette.subscribe((state) => {
+    if (state.shown === paletteShown) return;
+    paletteShown = state.shown;
+    if (!paletteShown) queueMicrotask(refocus);
+  });
   let focus: PaneId | null = null;
   let active: string | null = null;
   const retitle = (): void => {
@@ -332,7 +395,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     active = tab;
     retitle();
     // The card of a pane in a tab that has just been shown is rendered after this.
-    queueMicrotask(() => views.focus());
+    queueMicrotask(refocus);
   });
   titles.subscribe((pane) => {
     if (pane === focus) retitle();
@@ -341,7 +404,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     // The keyboard comes back to the terminal unless something else in the window
     // was using it: a dialog, or a field being typed in.
     const using = document.activeElement;
-    if (using === null || using === document.body) views.focus();
+    if (using === null || using === document.body) refocus();
   });
   // Keys pressed while the keyboard is with the window's own controls, not with a
   // terminal, are offered to the bindings that hold everywhere.
@@ -350,14 +413,20 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     (event) => {
       const where = event.target;
       if (!(where instanceof Element)) return;
-      // A terminal offers its own keys, and a dialog keeps what is typed in it.
-      if (where.closest(".terminal") || where.closest("[role=alertdialog]")) return;
-      if (shortcuts.handle(event, NO_CONTEXT)) {
+      if (where.closest(KEEPS_KEYS)) return;
+      const contexts = palette.getState().shown ? PALETTE_CONTEXT : NO_CONTEXT;
+      if (shortcuts.handle(event, contexts)) {
         event.preventDefault();
         event.stopPropagation();
       }
     },
     true,
+  );
+
+  // The window's own buttons show what the window is doing, which only the core knows.
+  client.windowState().then(
+    (state) => windowState.getState().set(state),
+    () => undefined,
   );
 
   layout.getState().reset(layoutView);
@@ -384,6 +453,12 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     titles,
     commands,
     prompts,
+    notices,
+    palette,
+    status,
+    windowState,
+    cardDrag,
+    panelDrag,
     stats: () => host.stats(),
   };
 }

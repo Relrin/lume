@@ -90,12 +90,21 @@ fn application() -> PathBuf {
 impl App {
     /// Starts an application that has never run before.
     fn start() -> Self {
+        Self::start_with("")
+    }
+
+    /// Starts an application that has never run before, with `settings` added to the
+    /// configuration the tests' applications run with.
+    fn start_with(settings: &str) -> Self {
         let number = NEXT.fetch_add(1, Ordering::Relaxed);
         let home = std::env::temp_dir().join(format!("lume-e2e-{}-{number}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(home.join("config")).expect("a folder for the configuration");
-        std::fs::write(home.join("config").join("config.toml"), configuration())
-            .expect("the configuration is written");
+        std::fs::write(
+            home.join("config").join("config.toml"),
+            configuration() + settings,
+        )
+        .expect("the configuration is written");
         Self::start_in(home, false)
     }
 
@@ -202,6 +211,45 @@ impl App {
     /// The layout: its windows, their tabs, and the panes in them.
     fn layout(&self) -> Value {
         self.ctl(&["layout", "view"]).ok("layout view")
+    }
+
+    /// The layout once it says where its first window is on the desktop. A window
+    /// tells where it is a moment after it was last moved, so this also waits for the
+    /// place to have stopped changing.
+    fn layout_with_bounds(&self) -> Value {
+        let deadline = Instant::now() + START;
+        let mut last = Value::Null;
+        loop {
+            let layout = self.layout();
+            let bounds = layout["workspace"]["windows"][0]["bounds"].clone();
+            if bounds.is_object() && bounds == last {
+                return layout;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the window never said where it is: {layout}"
+            );
+            last = bounds;
+            std::thread::sleep(Duration::from_millis(1500));
+        }
+    }
+
+    /// The workspaces there are, and which is on show.
+    fn workspaces(&self) -> Value {
+        self.ctl(&["workspaces"]).ok("workspaces")
+    }
+
+    /// Waits until there are `count` sessions.
+    fn until_sessions(&self, count: usize, what: &str) {
+        let deadline = Instant::now() + START;
+        loop {
+            let listed = self.ctl(&["list"]).ok("list");
+            if listed["sessions"].as_array().map_or(0, Vec::len) == count {
+                return;
+            }
+            assert!(Instant::now() < deadline, "{what}: {listed}");
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 
     /// The process behind the session a pane shows.
@@ -741,6 +789,234 @@ fn a_restart_brings_the_tabs_and_their_directories_back() {
     assert_ne!(app.pid_of(&tabbed), old_pid);
     app.type_line_in(&tabbed, print_directory);
     app.wait_text_in(&tabbed, &named);
+    app.quit();
+}
+
+/// The id of a pane an answer to `spawn` names.
+fn pane_of(spawned: &Value) -> String {
+    spawned["pane"].as_str().expect("a pane id").to_owned()
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn docks_floating_panes_and_where_the_window_was_come_back_after_a_restart() {
+    let shell = shells().into_iter().next().expect("a shell to test with");
+    // The list of tabs is a panel at the left, so there is something docked.
+    let app = App::start_with("[layout]\ntab-placement = \"left\"\n");
+    app.status_with_session();
+
+    // Three tabs, two of them divided, one pane taken out to float and one put away.
+    let beside = pane_of(&start_at(&app, &shell, MARK, &["--split", "right"]));
+    app.ctl(&[
+        "command",
+        "lume.pane.minimise",
+        &format!(r#"{{"pane":"{beside}"}}"#),
+    ])
+    .ok("putting a pane away");
+    start_at(&app, &shell, MARK, &["--tab"]);
+    let below = pane_of(&start_at(&app, &shell, MARK, &["--split", "down"]));
+    start_at(&app, &shell, MARK, &["--tab"]);
+    app.ctl(&[
+        "command",
+        "lume.pane.float",
+        &format!(r#"{{"pane":"{below}"}}"#),
+    ])
+    .ok("floating a pane");
+    let place = r#"{"x":100000,"y":150000,"w":400000,"h":500000}"#;
+    let moved = format!(r#"{{"type":"float_move","pane":"{below}","rect":{place}}}"#);
+    app.ctl(&["layout", "apply", &moved])
+        .ok("moving the floating pane");
+    let window = app.layout()["window"]
+        .as_str()
+        .expect("a window id")
+        .to_owned();
+    let wider =
+        format!(r#"{{"type":"panel_resize","window":"{window}","area":"left","size":300}}"#);
+    app.ctl(&["layout", "apply", &wider])
+        .ok("resizing the side panel");
+
+    let before = app.layout_with_bounds();
+    let shown = &before["workspace"]["windows"][0];
+    assert_eq!(tabs_of(&before).len(), 3, "{before}");
+    assert_eq!(shown["dock"]["left"]["panels"][0]["id"], "lume.tabs");
+    assert_eq!(shown["dock"]["left"]["size"], 300);
+    // The pane that was put away is first: it left its tab before the other floated.
+    assert_eq!(shown["floating"][0]["pane"]["id"], beside.as_str());
+    assert_eq!(shown["floating"][0]["minimised"], "tab");
+    assert_eq!(shown["floating"][1]["pane"]["id"], below.as_str());
+    assert_eq!(shown["floating"][1]["minimised"], Value::Null);
+    assert_eq!(
+        shown["floating"][1]["rect"],
+        serde_json::from_str::<Value>(place).unwrap()
+    );
+    let before = before.clone();
+
+    let home = app.home.clone();
+    let mut app = app;
+    app.keep_home = true;
+    app.quit();
+
+    let app = App::start_in(home, false);
+    app.status_with_session();
+    let after = app.layout_with_bounds();
+    let (was, is) = (
+        &before["workspace"]["windows"][0],
+        &after["workspace"]["windows"][0],
+    );
+    assert_eq!(tabs_of(&after), tabs_of(&before), "{after}");
+    assert_eq!(is["dock"], was["dock"], "{after}");
+    assert_eq!(is["floating"][0]["pane"]["id"], beside.as_str(), "{after}");
+    assert_eq!(is["floating"][0]["minimised"], "tab", "{after}");
+    assert_eq!(is["floating"][1]["pane"]["id"], below.as_str(), "{after}");
+    assert_eq!(is["floating"][1]["rect"], was["floating"][1]["rect"]);
+    assert_eq!(is["bounds"], was["bounds"], "{after}");
+    // Every pane has a shell again, the floating one and the one put away too.
+    app.until_sessions(5, "the panes' shells were not started again");
+
+    // Brought back, the pane that was put away is among the tabs again.
+    let back = format!(r#"{{"type":"minimise","pane":"{beside}","on":false}}"#);
+    app.ctl(&["layout", "apply", &back])
+        .ok("bringing a pane back");
+    let restored = app.layout();
+    assert!(
+        tabs_of(&restored).iter().any(|tab| tab.contains(&beside)),
+        "{restored}"
+    );
+    assert_eq!(
+        restored["workspace"]["windows"][0]["floating"]
+            .as_array()
+            .expect("the floating panes")
+            .len(),
+        1,
+        "{restored}"
+    );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_second_start_runs_a_program_in_a_tab_and_shows_a_workspace() {
+    let shell = shells().into_iter().next().expect("a shell to test with");
+    let app = App::start();
+    let pid = app.status_with_session()["pid"].clone();
+    let folder = app.home.join(format!("lume-there-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).expect("a folder to start a program in");
+
+    // The console command with a program to run, typed in that folder.
+    let ran = Command::new(lume())
+        .args(["--endpoint", &app.endpoint, "-e", shell.program])
+        .args(shell.args)
+        .current_dir(&folder)
+        .status()
+        .expect("lume runs");
+    assert!(ran.success(), "lume ended with {ran}");
+
+    // The first application has a second tab, whose program was started there.
+    let layout = app.layout();
+    let tabs = tabs_of(&layout);
+    assert_eq!(tabs.len(), 2, "{layout}");
+    let content = content_of(&layout, &tabs[1][0]);
+    assert_eq!(content["launcher"]["program"], shell.program);
+    let named = folder
+        .file_name()
+        .expect("the folder has a name")
+        .to_string_lossy()
+        .into_owned();
+    assert!(
+        content["cwd"]
+            .as_str()
+            .is_some_and(|cwd| cwd.ends_with(&named)),
+        "{content}"
+    );
+    app.until_sessions(2, "the program was not started");
+    assert_eq!(app.ctl(&["status"]).ok("status")["pid"], pid);
+
+    // Started again with a workspace's name, it shows that workspace, begun on the
+    // spot, and what ran in the first one is ended.
+    let shown = Command::new(lume())
+        .args(["--endpoint", &app.endpoint, "--workspace", "other place"])
+        .status()
+        .expect("lume runs");
+    assert!(shown.success(), "lume ended with {shown}");
+    let workspaces = app.workspaces();
+    assert_eq!(workspaces["active"], "other place");
+    assert_eq!(
+        workspaces["workspaces"]
+            .as_array()
+            .expect("a list of workspaces")
+            .len(),
+        2,
+        "{workspaces}"
+    );
+    assert_eq!(tabs_of(&app.layout()).len(), 1);
+    app.until_sessions(1, "the first workspace's sessions were not ended");
+
+    // The first workspace is as it was left.
+    app.ctl(&["command", "lume.workspace.switch", r#"{"name":"default"}"#])
+        .ok("showing the first workspace");
+    assert_eq!(app.workspaces()["active"], "default");
+    assert_eq!(tabs_of(&app.layout()), tabs);
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn two_windows_show_one_workspace_and_closing_one_ends_what_ran_in_it() {
+    let shell = shells().into_iter().next().expect("a shell to test with");
+    let app = App::start();
+    let first = app.status_with_session()["focused"]["pane"]
+        .as_str()
+        .expect("a pane has the keyboard")
+        .to_owned();
+
+    let far = pane_of(&start_at(&app, &shell, MARK, &["--window"]));
+    let layout = app.layout();
+    let windows = layout["workspace"]["windows"]
+        .as_array()
+        .expect("the windows");
+    assert_eq!(windows.len(), 2, "{layout}");
+    let second = windows[1]["id"].as_str().expect("a window id").to_owned();
+    assert_eq!(layout["workspace"]["focused_window"], second.as_str());
+    assert_eq!(windows[1]["focus"], far.as_str());
+
+    // Each window's page shows its own panes: what is typed in one is on its screen
+    // and not on the other's.
+    app.type_line_in(&far, &(shell.say)("far"));
+    app.wait_text_in(&far, &format!("lume-{MARK}-far"));
+    let near = app.ctl(&["capture", "--pane", &first]).ok("capture");
+    assert!(!near.to_string().contains("lume-k7q-far"), "{near}");
+
+    // A change made through one window's panes reaches the layout both follow.
+    let beside = pane_of(&start_at(&app, &shell, MARK, &["--split", "right"]));
+    let layout = app.layout();
+    assert_eq!(
+        panes_of(&layout["workspace"]["windows"][1]["centre"]["tabs"][0]["root"]),
+        [far.clone(), beside.clone()],
+        "{layout}"
+    );
+
+    // Closing the second window ends what ran in it, and the first carries on.
+    let (ending, staying) = (app.pid_of(&far), app.pid_of(&first));
+    let close = format!(r#"{{"type":"window_close","window":"{second}"}}"#);
+    app.ctl(&["layout", "apply", &close])
+        .ok("closing the second window");
+    until_gone(
+        ending,
+        Duration::from_secs(15),
+        "the shell of a closed window was not ended",
+    );
+    assert!(process_alive(staying));
+    let layout = app.layout();
+    assert_eq!(
+        layout["workspace"]["windows"]
+            .as_array()
+            .expect("the windows")
+            .len(),
+        1,
+        "{layout}"
+    );
+    app.type_line_in(&first, "echo still-here");
+    app.wait_text_in(&first, "still-here");
     app.quit();
 }
 

@@ -4,12 +4,13 @@
  *
  * A command that changes the layout, the configuration or the application is carried
  * out in the core, and the page only asks. A command that acts on what only the page
- * has is carried out here: a terminal's selection and scrollback, and the size of the
- * window's text.
+ * has is carried out here: a terminal's selection and scrollback, the size of the
+ * window's text, and the command palette.
  */
 
 import type { CoreClient } from "../core/client.ts";
 import type { PaneId } from "../layout/types.ts";
+import type { PaletteStore } from "../palette/store.ts";
 import type { PaneViews } from "../panes/views.ts";
 import type { TerminalAction } from "../terminal/keymap.ts";
 import type { TerminalView } from "../terminal/view.ts";
@@ -34,6 +35,7 @@ export interface CommandServices {
   readonly store: CommandStore;
   readonly client: CoreClient;
   readonly views: PaneViews;
+  readonly palette: PaletteStore;
   /** Tells the user that a command they ran could not be carried out. */
   failed(message: string): void;
 }
@@ -92,7 +94,7 @@ export class Commands {
    * cannot be: there is no such command here, or nothing for it to act on.
    */
   runInPage(id: string, args: unknown = null): void {
-    const { views } = this.#services;
+    const { views, palette } = this.#services;
     const action = TERMINAL_ACTIONS[id];
     if (action !== undefined) {
       this.#view(args).perform(action);
@@ -107,6 +109,9 @@ export class Commands {
         return;
       case "lume.view.zoom-reset":
         views.setZoom(0);
+        return;
+      case "lume.palette.open":
+        palette.getState().toggle();
         return;
       default:
         throw new CommandError("not_found", `the page has no command called ${id}`);

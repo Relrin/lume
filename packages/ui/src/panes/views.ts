@@ -7,6 +7,13 @@
  * the layout says its pane shows. A pane without a session has one started by the core,
  * at the grid the pane has.
  *
+ * The scratch terminal is the one pane that leaves a window without closing: put away,
+ * it is in no window. The window that showed it keeps its view meanwhile, so that what
+ * was on its screen is there when it is shown again.
+ *
+ * When the window is given another workspace, every view goes: the panes of two
+ * workspaces may be called the same, and are never the same panes.
+ *
  * Views are made and kept outside the component tree. A card that is rendered hands its
  * elements to its pane's view and takes them back when it goes; the view, its terminal
  * and its session carry on without them.
@@ -19,7 +26,7 @@ import { gridFor, shapeOf } from "../layout/estimate.ts";
 import { computeRects, unitRectToPx } from "../layout/geometry.ts";
 import { panesOf, selectFocus, selectWindowPanes } from "../layout/selectors.ts";
 import type { LayoutState, LayoutStore } from "../layout/store.ts";
-import type { PaneId } from "../layout/types.ts";
+import type { PaneContent, PaneId } from "../layout/types.ts";
 import { rendererTheme, type Appearance } from "../theme.ts";
 import { CommandError, type TermSize } from "../transport/types.ts";
 import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX } from "../tuning.ts";
@@ -75,6 +82,8 @@ export class PaneViews {
   #zoomPx = 0;
   /** A pass over the layout is wanted once the one in progress is done. */
   #scheduled = false;
+  /** Which layout the views were last brought in line with. */
+  #epoch: number | undefined;
 
   constructor(services: ViewsServices) {
     this.#services = services;
@@ -196,7 +205,18 @@ export class PaneViews {
     const { layout, titles } = this.#services;
     const state = layout.getState();
     if (!state.ready) return;
+    // Another layout altogether: nothing of the old one's terminals carries over.
+    if (this.#epoch !== undefined && this.#epoch !== state.epoch) {
+      this.dispose();
+      titles.clear();
+    }
+    this.#epoch = state.epoch;
     const panes = new Set(selectWindowPanes(state));
+    // The scratch terminal, put away, stays with the window that had it on show.
+    const parked = state.scratch?.parked?.pane;
+    if (parked && this.#entries.has(parked.id)) panes.add(parked.id);
+    const contentOf = (pane: PaneId): PaneContent | undefined =>
+      pane === parked?.id ? parked.content : state.panes[pane]?.content;
     for (const [pane, entry] of this.#entries) {
       if (panes.has(pane)) continue;
       entry.view.dispose();
@@ -206,7 +226,7 @@ export class PaneViews {
 
     const sessionless: PaneId[] = [];
     for (const pane of panes) {
-      const content = state.panes[pane]?.content;
+      const content = contentOf(pane);
       if (content?.type !== "terminal") continue;
       const entry = this.#entries.get(pane) ?? this.#create(pane);
       if (content.session === null) {
@@ -354,7 +374,7 @@ export class PaneViews {
     );
     const dpr = window.devicePixelRatio;
     const metrics = shared.host.measureCells(rendererTheme(settings.appearance, fontSizePx), dpr);
-    return gridFor(rect, area.chrome(beside), metrics, dpr);
+    return gridFor(rect, area.chrome(beside, float !== undefined), metrics, dpr);
   }
 
   /** Disposes of every view. Their sessions carry on. */

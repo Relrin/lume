@@ -92,6 +92,36 @@ export interface ConfigView {
   /** Every design token's value. */
   readonly tokens: Tokens;
   readonly keymap: { readonly bindings: readonly KeyBinding[] };
+  /**
+   * Who draws the window's title bar: the page, with its own buttons in the top bar,
+   * or the window system. Already decided for the platform.
+   */
+  readonly title_bar: TitleBar;
+}
+
+/** Who draws a window's title bar. */
+export type TitleBar = "custom" | "system";
+
+/** What a window is doing on the desktop, as far as the page shows it. */
+export interface WindowState {
+  readonly maximised: boolean;
+  readonly fullscreen: boolean;
+  /** Whether the window is the one the user is working in. */
+  readonly focused: boolean;
+}
+
+/** What a page may ask to have done to its own window. */
+export type WindowAction = "minimise" | "maximise" | "close";
+
+/** The workspaces there are, as `workspaces_list` returns them. */
+export interface WorkspaceList {
+  /** The name of the workspace on show. */
+  readonly active: string;
+  readonly workspaces: readonly {
+    readonly name: string;
+    /** The folder new terminals of the workspace start in, if it has one. */
+    readonly root: string | null;
+  }[];
 }
 
 /** The layout as `layout_view` returns it. */
@@ -165,6 +195,7 @@ export type Notice =
       readonly view: ConfigView;
     }
   | { readonly type: "config_error"; readonly problems: readonly ConfigProblem[] }
+  | ({ readonly type: "window_state" } & WindowState)
   | {
       readonly type: "notice";
       readonly level: "info" | "warning" | "error";

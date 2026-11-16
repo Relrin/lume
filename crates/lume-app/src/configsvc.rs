@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
+use lume_config::schema::TitleBar;
 use lume_config::{
     ColorScheme, ConfigError, ConfigStore, Dirs, Platform, Problem, Resolved, WatchEvent, Watcher,
 };
@@ -108,8 +109,10 @@ impl ConfigService {
             .chain(&token_problems)
             .chain(&keymap.problems)
             .collect();
+        let title_bar = resolved.config.window.title_bar_on(self.platform);
         json!({
             "platform": self.platform.as_str(),
+            "title_bar": title_bar,
             "scheme": scheme,
             "theme": { "id": tokens.theme, "scheme": tokens.scheme },
             "config": resolved.config,
@@ -198,6 +201,32 @@ impl ConfigService {
         }
     }
 
+    /// Whether the windows are drawn without the system's title bar, the page drawing
+    /// its own.
+    pub fn title_bar_custom(&self) -> bool {
+        self.current().config.window.title_bar_on(self.platform) == TitleBar::Custom
+    }
+
+    /// The workspace whose file is laid over the user's.
+    #[cfg(test)]
+    pub fn workspace(&self) -> Option<String> {
+        self.store.workspace()
+    }
+
+    /// Makes `workspace` the one whose file is laid over the user's.
+    pub fn set_workspace(&self, workspace: Option<&str>) {
+        self.store.set_workspace(workspace);
+        self.announce();
+    }
+
+    /// Sets or clears the folder of the workspace called `name`, in that workspace's
+    /// own file.
+    pub fn set_workspace_root(&self, name: &str, root: Option<&str>) -> Result<(), ConfigError> {
+        self.store.set_workspace_root(name, root)?;
+        self.announce();
+        Ok(())
+    }
+
     /// Gives a user who has no `config.toml` one that shows every setting.
     pub fn ensure_default_file(&self) {
         if let Err(error) = self.store.ensure_default_file() {
@@ -264,6 +293,12 @@ mod tests {
         let view = service.view();
         assert_eq!(view["revision"], 1);
         assert_eq!(view["scheme"], "dark");
+        let expected = if cfg!(target_os = "linux") {
+            "system"
+        } else {
+            "custom"
+        };
+        assert_eq!(view["title_bar"], expected);
         assert_eq!(view["theme"]["id"], "lume-dark");
         assert_eq!(view["config"]["font"]["family"], "JetBrains Mono");
         assert!(view["tokens"]["color.surface"].is_string());

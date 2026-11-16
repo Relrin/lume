@@ -1,7 +1,7 @@
 //! `lume`: the console command.
 //!
 //! On its own it starts the application, or brings its window to the front if it is
-//! running. `lume ctl` drives the running application: it starts sessions, types into
+//! running; it can name the workspace to show and a program to run in a tab. `lume ctl` drives the running application: it starts sessions, types into
 //! them, waits for text or for an exit, reads the screen, and so on. Each command is one
 //! request on the application's control endpoint, which only the user who runs the
 //! application can reach.
@@ -45,7 +45,18 @@ fn main() -> ExitCode {
             let (mut out, mut err) = (std::io::stdout().lock(), std::io::stderr().lock());
             return ExitCode::from(offline::run(command, dirs.as_ref(), &mut out, &mut err));
         }
-        Command::Start { endpoint } => (Some(endpoint), None),
+        Command::Start {
+            endpoint,
+            workspace,
+            exec,
+        } => (
+            Some(launch::Start {
+                endpoint,
+                workspace,
+                exec,
+            }),
+            None,
+        ),
         Command::Ctl(ctl) => (None, Some(ctl)),
     };
 
@@ -63,7 +74,7 @@ fn main() -> ExitCode {
         if let Some(ctl) = ctl {
             return ExitCode::from(ctl::run(ctl).await);
         }
-        match launch::start(start.flatten().as_deref()).await {
+        match launch::start(start.unwrap_or_default()).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(problem) => {
                 eprintln!("lume: {problem}");

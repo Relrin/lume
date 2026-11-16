@@ -61,7 +61,7 @@ fn log_dir(variable: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
 }
 
 /// The file to log to: the one named, or the default in the user's log directory.
-fn log_file() -> Option<PathBuf> {
+pub fn log_file() -> Option<PathBuf> {
     let variable = |name: &str| {
         std::env::var_os(name)
             .filter(|v| !v.is_empty())

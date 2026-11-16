@@ -19,6 +19,9 @@ import type {
   Notice,
   PaneStart,
   SessionsStarted,
+  WindowAction,
+  WindowState,
+  WorkspaceList,
 } from "./types.ts";
 
 /** What a page does with what the core sends it. */
@@ -101,6 +104,26 @@ export class CoreClient {
   /** Runs a command that is carried out in the core. */
   commandRun(id: string, args: unknown = null): Promise<void> {
     return this.transport.command("command_run", { id, args });
+  }
+
+  /** Starts moving this page's window with the pointer that is pressed on it. */
+  windowDrag(): Promise<void> {
+    return this.transport.command("window_drag");
+  }
+
+  /** Minimises or closes this page's window, or maximises it or puts it back. */
+  windowControl(action: WindowAction): Promise<void> {
+    return this.transport.command("window_control", { action });
+  }
+
+  /** What this page's window is doing on the desktop. */
+  windowState(): Promise<WindowState> {
+    return this.transport.command("window_state");
+  }
+
+  /** The workspaces there are, and which of them is on show. */
+  workspacesList(): Promise<WorkspaceList> {
+    return this.transport.command("workspaces_list");
   }
 
   /** The text on the system clipboard, or nothing when it holds no text. */

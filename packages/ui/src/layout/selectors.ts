@@ -8,10 +8,30 @@
  */
 
 import type { LayoutState, SplitEntry, TabEntry, TreeNode, WindowEntry } from "./store.ts";
-import type { Pane, PaneId, SplitId, TabId, UnitRect, WindowId } from "./types.ts";
+import type {
+  Area,
+  DockArea,
+  Pane,
+  PaneId,
+  Panel,
+  PanelId,
+  SplitId,
+  TabId,
+  UnitRect,
+  WindowId,
+} from "./types.ts";
 
 /** No ids: one list for every window that has none, so a selector's answer stays the same. */
 const NO_IDS: readonly string[] = [];
+
+/** No panels: one list for every area that has none. */
+const NO_PANELS: readonly Panel[] = [];
+
+/** The id of the panel that lists a window's tabs, wherever it is docked. */
+export const TAB_LIST_PANEL: PanelId = "lume.tabs";
+
+/** The areas at a window's edges that panels can be moved between. The top bar is fixed. */
+export const SIDE_AREAS = ["left", "right", "bottom"] as const satisfies readonly Area[];
 
 /** What a tab is called when nothing names it. */
 export const UNTITLED_TAB = "Terminal";
@@ -40,6 +60,54 @@ export function selectFocus(state: LayoutState, window?: WindowId): PaneId | nul
 /** The panes floating over a window, from the back to the front. */
 export function selectFloating(state: LayoutState, window?: WindowId): readonly PaneId[] {
   return selectWindow(state, window)?.floating ?? NO_IDS;
+}
+
+/**
+ * Those of a window's floating panes that are put away at its corner, in the order
+ * they float in. The same array until it changes.
+ */
+export function selectMinimised(state: LayoutState, window?: WindowId): readonly PaneId[] {
+  return selectWindow(state, window)?.minimised ?? NO_IDS;
+}
+
+/** Whether a floating pane is put away at the corner of its window. */
+export function isMinimised(state: LayoutState, pane: PaneId): boolean {
+  return (state.floats[pane]?.minimised ?? null) !== null;
+}
+
+/** One of the areas at a window's edges. The same object until that area changes. */
+export function selectDock(
+  state: LayoutState,
+  area: Area,
+  window?: WindowId,
+): DockArea | undefined {
+  return selectWindow(state, window)?.dock[area];
+}
+
+/** The panels docked at one edge of a window, in order. */
+export function selectPanels(state: LayoutState, area: Area, window?: WindowId): readonly Panel[] {
+  return selectDock(state, area, window)?.panels ?? NO_PANELS;
+}
+
+/** The area a panel is docked in, if the window has the panel at one of its sides. */
+export function selectPanelArea(
+  state: LayoutState,
+  panel: PanelId,
+  window?: WindowId,
+): (typeof SIDE_AREAS)[number] | null {
+  const dock = selectWindow(state, window)?.dock;
+  if (!dock) return null;
+  return SIDE_AREAS.find((area) => dock[area].panels.some((held) => held.id === panel)) ?? null;
+}
+
+/**
+ * Whether a window's tabs are listed in a panel on show at one of its sides. When they
+ * are, the top bar does not list them as well. A side that is folded away shows
+ * nothing, so its list does not count: the tabs are always somewhere to be seen.
+ */
+export function hasTabListPanel(state: LayoutState, window?: WindowId): boolean {
+  const area = selectPanelArea(state, TAB_LIST_PANEL, window);
+  return area !== null && selectDock(state, area, window)?.collapsed === false;
 }
 
 /** One tab. */
@@ -100,7 +168,8 @@ export function selectWindowOf(state: LayoutState, pane: PaneId): WindowId | und
  * no other pane of that tab is zoomed over it.
  */
 export function isPaneVisible(state: LayoutState, pane: PaneId): boolean {
-  if (pane in state.floats) return true;
+  const float = state.floats[pane];
+  if (float) return float.minimised === null;
   const tab = state.tabs[state.paneTabs[pane] ?? ""];
   if (!tab) return false;
   if (state.windows[tab.window]?.active !== tab.id) return false;
@@ -134,7 +203,7 @@ export function selectVisiblePanes(state: LayoutState, window?: WindowId): PaneI
   if (!entry) return [];
   const tab = entry.active === null ? undefined : state.tabs[entry.active];
   const tiled = tab ? (tab.zoomed === null ? panesOf(tab.root) : [tab.zoomed]) : [];
-  return [...tiled, ...entry.floating];
+  return [...tiled, ...entry.floating.filter((pane) => !isMinimised(state, pane))];
 }
 
 /** Every pane of a window: each tab's in order, then the floating ones. Builds a list. */

@@ -135,6 +135,8 @@ function fixtureConfig(): ConfigView {
     problems: [],
     tokens: DEFAULT_TOKENS,
     keymap: { bindings: [] },
+    // The system draws the title bar, so the page draws no window buttons of its own.
+    title_bar: "system",
   };
 }
 
@@ -179,6 +181,10 @@ export class FakeCore implements Carrier {
         return answer(this.#config);
       case "commands_list":
         return answer([]);
+      case "window_state":
+        return answer({ maximised: false, fullscreen: false, focused: true });
+      case "workspaces_list":
+        return answer({ active: "fixture", workspaces: [{ name: "fixture", root: null }] });
       case "session_attach":
         this.#streams.set(String(args["session"]), Number(args["stream"]));
         return answer({
@@ -197,6 +203,9 @@ export class FakeCore implements Carrier {
       case "command_run":
       case "page_reply":
       case "clipboard_write":
+      case "window_drag":
+      case "window_control":
+      case "config_set":
         return answer(null);
       default:
         this.unanswered.push(name);

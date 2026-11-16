@@ -140,6 +140,13 @@ enum Op {
     WindowFocus {
         window: usize,
     },
+    WorkspaceRename {
+        name: usize,
+    },
+    Minimise {
+        pane: usize,
+        on: bool,
+    },
 }
 
 fn ops() -> impl Strategy<Value = Vec<Op>> {
@@ -185,7 +192,7 @@ fn ops() -> impl Strategy<Value = Vec<Op>> {
         )
             .prop_map(|(window, index, activate)| Op::TabNew { window, index, activate }),
         2 => position.clone().prop_map(|tab| Op::TabClose { tab }),
-        2 => (position.clone(), 0u32..4).prop_map(|(tab, index)| Op::TabMove { tab, index }),
+        4 => (position.clone(), 0u32..4).prop_map(|(tab, index)| Op::TabMove { tab, index }),
         1 => (position.clone(), any::<bool>())
             .prop_map(|(tab, named)| Op::TabRename { tab, named }),
         4 => (position.clone(), 0usize..4, 0u32..4)
@@ -210,7 +217,9 @@ fn ops() -> impl Strategy<Value = Vec<Op>> {
             .prop_map(|(pane, session)| Op::SessionSet { pane, session }),
         1 => (position.clone(), -100i32..100)
             .prop_map(|(window, x)| Op::WindowBounds { window, x }),
-        1 => position.prop_map(|window| Op::WindowFocus { window }),
+        1 => position.clone().prop_map(|window| Op::WindowFocus { window }),
+        1 => position.clone().prop_map(|name| Op::WorkspaceRename { name }),
+        4 => (position, any::<bool>()).prop_map(|(pane, on)| Op::Minimise { pane, on }),
     ];
     proptest::collection::vec(op, 1..70)
 }
@@ -538,6 +547,19 @@ fn resolve(workspace: &Workspace, op: &Op) -> Intent {
         Op::WindowFocus { window: position } => Intent::WindowFocus {
             window: window(position),
         },
+        Op::Minimise { pane: position, on } => Intent::Minimise {
+            pane: pane(position),
+            on: *on,
+        },
+        Op::WorkspaceRename { name: position } => Intent::WorkspaceRename {
+            // A device's name and a path are no names a workspace may have.
+            name: pick(
+                &["work", "notes 2", "site.v2", "a-b_c", "con"],
+                *position,
+                "bad/name",
+            )
+            .to_owned(),
+        },
     }
 }
 
@@ -692,6 +714,8 @@ fn the_sequences_exercise_every_kind_of_intent() {
         "panel_set",
         "window_bounds",
         "window_focus",
+        "workspace_rename",
+        "minimise",
     ] {
         assert!(
             accepted.get(kind).copied().unwrap_or(0) >= 5,

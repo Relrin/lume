@@ -6,9 +6,11 @@
 //! path.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use lume_layout::WindowId;
+use lume_layout::{Intent, NewContent, PaneId, SpawnRequest, WindowId};
 use lume_proto::app::{AppReplyBody, PageRequestBody};
+use lume_session::Launcher;
 use serde_json::Value;
 
 use crate::builtins;
@@ -20,6 +22,7 @@ use crate::registry::{Registry, Runs};
 use crate::state::AppState;
 use crate::tuning::PAGE_ANSWER_TIMEOUT;
 use crate::window::label_of;
+use crate::workspaces::Find;
 
 /// Who asked for a command to be run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,7 +42,62 @@ pub struct Services {
     pub shell: Arc<dyn Shell>,
 }
 
+/// The session of a pane that runs `exec`: a program and its arguments.
+pub fn exec_request(exec: &[String], cwd: Option<String>) -> Option<SpawnRequest> {
+    let (program, args) = exec.split_first()?;
+    Some(SpawnRequest {
+        launcher: Some(Launcher::Shell {
+            program: program.clone(),
+            args: args.to_vec(),
+            login: false,
+        }),
+        cwd,
+        ..SpawnRequest::default()
+    })
+}
+
 impl Services {
+    /// Does what starting the application again asks for: its window comes to the
+    /// front, the workspace named is put on show, begun if there is none of that
+    /// name, and the program named is run in a new tab. Returns the pane the program
+    /// runs in. `page_wait` is how long a window that has only just been opened is
+    /// given to load its page, which says how large the tab's pane will be.
+    pub async fn launch(
+        &self,
+        workspace: Option<&str>,
+        exec: &[String],
+        cwd: Option<String>,
+        page_wait: Duration,
+    ) -> Result<Option<PaneId>, CommandError> {
+        if let Some(name) = workspace {
+            self.panes.switch(name, Find::Either).await?;
+        }
+        self.shell.activate();
+        let Some(request) = exec_request(exec, cwd) else {
+            return Ok(None);
+        };
+        let window = self.panes.focused_window().ok_or_else(|| {
+            CommandError::new(
+                lume_proto::app::codes::NO_WINDOW,
+                "the application has no window to open a tab in",
+            )
+        })?;
+        let label = label_of(window);
+        self.state
+            .soon(page_wait, |state| state.page_of(&label))
+            .await;
+        let applied = self
+            .panes
+            .apply(Intent::TabNew {
+                window,
+                content: NewContent::Terminal(request),
+                index: None,
+                activate: true,
+            })
+            .await?;
+        Ok(applied.created.pane)
+    }
+
     /// Runs a command in a window.
     ///
     /// A command that runs in the application is carried out here. One that runs in a

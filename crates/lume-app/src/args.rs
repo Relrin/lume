@@ -1,19 +1,25 @@
 //! The command line of `lume-gui`.
 //!
-//! Started with no arguments it opens the terminal. The other ways of starting it are for
-//! checks that need a real webview: `--probe` reports what the webview offers, and
-//! `--harness` runs a test suite inside it. Both print a report and exit with a status.
+//! Started with no arguments it opens the terminal, and may be told which workspace to
+//! show and a program to run in a tab. The other ways of starting it are for checks
+//! that need a real webview: `--probe` reports what the webview offers, and `--harness`
+//! runs a test suite inside it. Both print a report and exit with a status.
 
 use std::path::PathBuf;
 
 /// What the arguments may be, shown when they are not understood.
 pub const USAGE: &str = "\
-usage: lume-gui [--endpoint <name>]
+usage: lume-gui [--endpoint <name>] [--workspace <name>] [--cwd <dir>]
+                [-e <program> [arguments...]]
        lume-gui --probe
        lume-gui --harness <corpus|snapshots|bench> [--report <file>] [--out <dir>]
                 [--references <dir>] [--update]
 
   --endpoint <name>  serve the control endpoint under this name instead of the default
+  --workspace <name> show this workspace, beginning it if there is none of that name
+  --cwd <dir>        the directory the program given with -e starts in
+  -e, --exec <program> [arguments...]
+                     run this program in a tab; everything after it is the program's
   --probe            report what the webview offers, then exit
   --harness <suite>  run a test suite in the webview, then exit
   --report <file>    also write the suite's report to this file
@@ -73,6 +79,12 @@ pub struct Args {
     pub mode: Mode,
     /// The name to serve the control endpoint under, when the default is not wanted.
     pub endpoint: Option<String>,
+    /// The workspace to show, when it is not the one the configuration would choose.
+    pub workspace: Option<String>,
+    /// A program to run in a tab, and its arguments. Empty when none was given.
+    pub exec: Vec<String>,
+    /// The directory that program starts in.
+    pub cwd: Option<String>,
     /// A file that receives the report as well as standard output. A program without a
     /// console has no standard output anyone can read.
     pub report: Option<PathBuf>,
@@ -89,6 +101,9 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, String> {
     let mut parsed = Args {
         mode: Mode::Terminal,
         endpoint: None,
+        workspace: None,
+        exec: Vec::new(),
+        cwd: None,
         report: None,
         out: None,
         references: None,
@@ -97,6 +112,15 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, String> {
     let mut args = args.into_iter();
     let mut modes = 0;
     while let Some(arg) = args.next() {
+        // Everything after this is the program to run and what it is given, whatever
+        // it looks like.
+        if arg == "-e" || arg == "--exec" {
+            parsed.exec = args.by_ref().collect();
+            if parsed.exec.is_empty() {
+                return Err(format!("{arg} needs a program to run"));
+            }
+            break;
+        }
         // A value may be joined to its option with `=`. Programs that start the
         // application for a test pass every argument as a switch of its own, so a value
         // that follows as a separate argument does not survive them.
@@ -129,6 +153,8 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, String> {
                 modes += 1;
             }
             "--endpoint" => parsed.endpoint = Some(value("a name")?),
+            "--workspace" => parsed.workspace = Some(value("a workspace's name")?),
+            "--cwd" => parsed.cwd = Some(value("a directory")?),
             "--report" => parsed.report = Some(PathBuf::from(value("a file")?)),
             "--out" => parsed.out = Some(PathBuf::from(value("a directory")?)),
             "--references" => parsed.references = Some(PathBuf::from(value("a directory")?)),
@@ -151,6 +177,11 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, String> {
         || parsed.update;
     if !harness && for_harness {
         return Err("--report, --out, --references and --update belong to --harness".to_owned());
+    }
+    let for_terminal =
+        parsed.workspace.is_some() || parsed.cwd.is_some() || !parsed.exec.is_empty();
+    if parsed.mode != Mode::Terminal && for_terminal {
+        return Err("--workspace, --cwd and -e belong to the terminal".to_owned());
     }
     Ok(parsed)
 }
@@ -175,6 +206,31 @@ mod tests {
         let args = parsed(&["--endpoint", "trial-7"]).unwrap();
         assert_eq!(args.endpoint.as_deref(), Some("trial-7"));
         assert_eq!(args.mode, Mode::Terminal);
+    }
+
+    #[test]
+    fn a_workspace_and_a_program_to_run_can_be_named() {
+        let args = parsed(&[
+            "--workspace",
+            "site v2",
+            "--cwd=/work",
+            "-e",
+            "htop",
+            "--delay",
+            "5",
+            "-e",
+        ])
+        .unwrap();
+        assert_eq!(args.workspace.as_deref(), Some("site v2"));
+        assert_eq!(args.cwd.as_deref(), Some("/work"));
+        // What follows the program is the program's, options and all.
+        assert_eq!(args.exec, ["htop", "--delay", "5", "-e"]);
+        assert_eq!(args.mode, Mode::Terminal);
+
+        assert!(parsed(&["-e"]).is_err());
+        assert!(parsed(&["--exec"]).is_err());
+        assert!(parsed(&["--probe", "--workspace", "x"]).is_err());
+        assert!(parsed(&["--harness", "corpus", "-e", "sh"]).is_err());
     }
 
     #[test]

@@ -8,23 +8,34 @@
  *
  * A divider being dragged follows the pointer at once, with ratios of its own. The core
  * is told a few times a second and once more when the pointer lets go, and what the
- * core then says the ratios are is what holds.
+ * core then says the ratios are is what holds. A floating pane being moved or resized
+ * is followed the same way, with a rectangle of its own.
  */
 
 import type { Tokens } from "@lume/tokens";
 
 import type { ConfigView } from "../core/types.ts";
-import { DIVIDER_INTENT_INTERVAL_MS, DIVIDER_SETTLE_TIMEOUT_MS, PANE_MIN_PX } from "../tuning.ts";
+import {
+  DIVIDER_INTENT_INTERVAL_MS,
+  DIVIDER_SETTLE_TIMEOUT_MS,
+  DRAG_SETTLE_TIMEOUT_MS,
+  FLOAT_INTENT_INTERVAL_MS,
+  FLOAT_MIN_PX,
+  PANE_MIN_PX,
+} from "../tuning.ts";
 import { shapeOf, type CardChrome } from "./estimate.ts";
+import { dragFloat, type FloatGrip } from "./floats.ts";
 import {
   computeRects,
   dragRatios,
   equalRatios,
+  pxToUnitRect,
+  unitRectToPx,
   type Divider,
   type Rect,
   type Rects,
 } from "./geometry.ts";
-import { panesOf, selectActiveTab } from "./selectors.ts";
+import { panesOf, selectActiveTab, selectFloating } from "./selectors.ts";
 import type { LayoutState, LayoutStore } from "./store.ts";
 import type { Intent, PaneId, SplitId, TabId } from "./types.ts";
 
@@ -64,6 +75,44 @@ interface Drag {
   sent: readonly number[] | undefined;
 }
 
+/** A rectangle that is being tried out for a floating pane, in place of the layout's. */
+interface FloatOverride {
+  readonly pane: PaneId;
+  readonly rect: Rect;
+  /**
+   * The layout's revision once the core had taken the last rectangle it was told.
+   * Nothing until the core has answered.
+   */
+  settledAt: number | undefined;
+}
+
+/** A floating pane that the pointer has hold of. */
+interface FloatDrag {
+  readonly pointerId: number;
+  readonly pane: PaneId;
+  readonly grip: FloatGrip;
+  /** Where the pointer was when it took hold. */
+  readonly x: number;
+  readonly y: number;
+  /** The pane's rectangle at that moment. */
+  readonly rect: Rect;
+  /** When the core was last told, on the page's clock. */
+  told: number;
+  /** What the core was last told, written out. */
+  sent: string | undefined;
+  /** Stops listening to the pointer. */
+  release(): void;
+}
+
+/** The first card that floats is drawn above everything that does not. */
+const FLOAT_Z_BASE = 20;
+
+/** The revision an answer to an applied intent names, if it is such an answer. */
+function revisionOf(applied: unknown): number | undefined {
+  if (typeof applied !== "object" || applied === null || !("revision" in applied)) return undefined;
+  return typeof applied.revision === "number" ? applied.revision : undefined;
+}
+
 function sameRatios(a: readonly number[], b: readonly number[] | undefined): boolean {
   return b !== undefined && a.length === b.length && a.every((ratio, index) => ratio === b[index]);
 }
@@ -83,6 +132,12 @@ export class TabAreaController {
   #override: Override | undefined;
   #drag: Drag | undefined;
   #settle: number | undefined;
+  #floatRects = new Map<PaneId, Rect>();
+  #floatOverride: FloatOverride | undefined;
+  #floatDrag: FloatDrag | undefined;
+  #floatSettle: number | undefined;
+  /** The core's answer to the last place of a floating pane it was told. */
+  #lastFloatTold: Promise<unknown> = Promise.resolve(undefined);
 
   constructor(services: AreaServices) {
     this.#services = services;
@@ -103,12 +158,12 @@ export class TabAreaController {
   /**
    * The parts of a card that are not terminal, for a card in a tab of `panes` panes. A
    * header that is shown only when it is needed is left off a pane that has its tab to
-   * itself.
+   * itself. A floating card always has its header: it is what the card is moved by.
    */
-  chrome(panes: number): CardChrome {
+  chrome(panes: number, floating = false): CardChrome {
     const tokens = this.#tokens();
     const mode = this.#services.config()?.config.appearance["pane-header"] ?? "always";
-    const header = mode === "always" || (mode === "auto" && panes > 1);
+    const header = floating || mode === "always" || (mode === "auto" && panes > 1);
     return {
       headerPx: header ? Math.round(tokens["size.header"]) : 0,
       borderPx: Math.round(tokens["size.border"]),
@@ -141,6 +196,21 @@ export class TabAreaController {
   /** The tab on show laid out as it is now, a drag in progress included. */
   rects(): Rects {
     return this.#rects;
+  }
+
+  /** Where a floating pane of this window is drawn, a drag in progress included. */
+  floatRect(pane: PaneId): Rect | undefined {
+    return this.#floatRects.get(pane);
+  }
+
+  /** The element the panes are laid out in, while there is one. */
+  container(): HTMLElement | undefined {
+    return this.#container;
+  }
+
+  /** The card of a pane, while it is rendered. */
+  paneElement(pane: PaneId): HTMLElement | undefined {
+    return this.#panes.get(pane);
   }
 
   // The elements.
@@ -208,6 +278,7 @@ export class TabAreaController {
   layout(): void {
     const state = this.#services.layout.getState();
     const box = this.box();
+    this.#layoutFloats(state, box);
     const tab = state.tabs[this.#tab(state) ?? ""];
     if (!box || !tab) {
       this.#rects = { panes: [], dividers: [] };
@@ -226,6 +297,30 @@ export class TabAreaController {
       const element = this.#dividers.get(dividerKey(divider.split, divider.index));
       if (element) this.#place(element, divider.rect);
     }
+  }
+
+  /**
+   * Places the panes that float over this window: each where the layout says, or where
+   * the pointer has it, and each above the ones behind it.
+   */
+  #layoutFloats(state: LayoutState, box: Rect | undefined): void {
+    const rects = new Map<PaneId, Rect>();
+    if (box && state.ready) {
+      const override = this.#floatOverride;
+      selectFloating(state).forEach((pane, order) => {
+        const float = state.floats[pane];
+        // A pane that is put away has no card.
+        if (!float || float.minimised !== null) return;
+        const rect = override?.pane === pane ? override.rect : unitRectToPx(float.rect, box);
+        rects.set(pane, rect);
+        const element = this.#panes.get(pane);
+        if (!element) return;
+        this.#place(element, rect);
+        const above = String(FLOAT_Z_BASE + order);
+        if (element.style.zIndex !== above) element.style.zIndex = above;
+      });
+    }
+    this.#floatRects = rects;
   }
 
   /**
@@ -249,7 +344,21 @@ export class TabAreaController {
       const held = this.#services.layout.getState().splits[override.split]?.ratios;
       if (held === undefined || sameRatios(override.ratios, held)) this.#release();
     }
+    // A floating pane's own rectangle gives way once the layout holds what the core
+    // made of the last one it was told, or the pane floats no more.
+    const float = this.#floatOverride;
+    if (float && !this.#floatDrag) {
+      const state = this.#services.layout.getState();
+      const caughtUp = float.settledAt !== undefined && state.revision >= float.settledAt;
+      if (caughtUp || !state.floats[float.pane]) this.#releaseFloat();
+    }
     this.layout();
+  }
+
+  #releaseFloat(): void {
+    this.#floatOverride = undefined;
+    if (this.#floatSettle !== undefined) window.clearTimeout(this.#floatSettle);
+    this.#floatSettle = undefined;
   }
 
   #release(): void {
@@ -353,6 +462,110 @@ export class TabAreaController {
     this.#services
       .apply({ type: "resize", split, ratios: equalRatios(count) })
       .catch(() => undefined);
+  }
+
+  // Moving and resizing a floating pane.
+
+  /**
+   * Lets the pointer that was pressed on `handle` move a floating pane, or one of its
+   * edges, until it lets go. `handle` is the element the press was on: the header of
+   * the pane's card, or one of the card's edge handles.
+   */
+  startFloatDrag(pane: PaneId, grip: FloatGrip, event: PointerEvent, handle: HTMLElement): void {
+    if (event.button !== 0 || this.#floatDrag) return;
+    const rect = this.#floatRects.get(pane);
+    if (!rect) return;
+    const move = (moved: PointerEvent) => this.#onFloatMove(moved);
+    const up = (ended: PointerEvent) => this.#onFloatUp(ended);
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+    handle.setPointerCapture(event.pointerId);
+    const card = this.#panes.get(pane);
+    if (card) card.dataset["moving"] = "true";
+    this.#releaseFloat();
+    this.#floatDrag = {
+      pointerId: event.pointerId,
+      pane,
+      grip,
+      x: event.clientX,
+      y: event.clientY,
+      rect,
+      told: performance.now(),
+      sent: undefined,
+      release: () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", up);
+        handle.removeEventListener("pointercancel", up);
+        if (card) delete card.dataset["moving"];
+      },
+    };
+    this.#floatOverride = { pane, rect, settledAt: undefined };
+  }
+
+  #onFloatMove(event: PointerEvent): void {
+    const drag = this.#floatDrag;
+    const box = this.box();
+    if (!drag || drag.pointerId !== event.pointerId || !box) return;
+    const rect = dragFloat(
+      drag.rect,
+      drag.grip,
+      event.clientX - drag.x,
+      event.clientY - drag.y,
+      box,
+      FLOAT_MIN_PX,
+    );
+    this.#floatOverride = { pane: drag.pane, rect, settledAt: undefined };
+    this.layout();
+    const now = performance.now();
+    if (now - drag.told >= FLOAT_INTENT_INTERVAL_MS) this.#tellFloat(drag, rect, box, now);
+  }
+
+  #onFloatUp(event: PointerEvent): void {
+    const drag = this.#floatDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    this.#floatDrag = undefined;
+    drag.release();
+    const override = this.#floatOverride;
+    const box = this.box();
+    // A press that moved nothing leaves the pane where the layout has it.
+    if (!override || !box || override.rect === drag.rect) {
+      this.#releaseFloat();
+      this.layout();
+      return;
+    }
+    // The last place is always told. The card stays where the pointer left it until
+    // the layout holds what the core made of that place.
+    const settled = this.#tellFloat(drag, override.rect, box, performance.now());
+    void settled.then(
+      (applied) => {
+        if (this.#floatOverride !== override) return;
+        override.settledAt = revisionOf(applied) ?? 0;
+        this.#onLayout();
+      },
+      () => {
+        if (this.#floatOverride !== override) return;
+        this.#releaseFloat();
+        this.layout();
+      },
+    );
+    this.#floatSettle = window.setTimeout(() => {
+      this.#releaseFloat();
+      this.layout();
+    }, DRAG_SETTLE_TIMEOUT_MS);
+  }
+
+  #tellFloat(drag: FloatDrag, rect: Rect, box: Rect, now: number): Promise<unknown> {
+    drag.told = now;
+    const unit = pxToUnitRect(rect, box);
+    const written = `${unit.x},${unit.y},${unit.w},${unit.h}`;
+    if (written === drag.sent) return this.#lastFloatTold;
+    drag.sent = written;
+    const sent = this.#services.apply({ type: "float_move", pane: drag.pane, rect: unit });
+    // A refusal while dragging is passed over: the next place is told anyway.
+    sent.catch(() => undefined);
+    this.#lastFloatTold = sent;
+    return sent;
   }
 
   /** How many panes the tab that holds a pane has: what decides whether it has a header. */

@@ -184,7 +184,15 @@ export type PaneContent =
 export interface Floating {
   readonly pane: Pane;
   readonly rect: UnitRect;
+  /**
+   * Set while the pane is put away at the corner of its window, and says where it goes
+   * when it is brought back: to float where it floated, or among the tabs again.
+   */
+  readonly minimised: Minimised | null;
 }
+
+/** Where a pane that is put away goes when it is brought back. */
+export type Minimised = "floating" | "tab";
 
 /** A rectangle within a whole that is {@link UNITS} wide and high. */
 export interface UnitRect {
@@ -259,6 +267,7 @@ export type Intent =
   | { readonly type: "zoom"; readonly pane: PaneId; readonly on: boolean }
   | { readonly type: "float"; readonly pane: PaneId; readonly rect?: UnitRect | null }
   | { readonly type: "float_move"; readonly pane: PaneId; readonly rect: UnitRect }
+  | { readonly type: "minimise"; readonly pane: PaneId; readonly on: boolean }
   | { readonly type: "dock"; readonly pane: PaneId; readonly to?: Place | null }
   | { readonly type: "pane_rename"; readonly pane: PaneId; readonly title?: string | null }
   | {
@@ -365,6 +374,7 @@ export type LayoutChange =
   | { readonly type: "window_closed"; readonly window: WindowId }
   | { readonly type: "scratch"; readonly scratch: Scratch | null }
   | { readonly type: "window_focused"; readonly window: WindowId | null }
+  | { readonly type: "workspace_name"; readonly name: string }
   | { readonly type: "pane_closed"; readonly pane: PaneId; readonly content: PaneContent };
 
 /** What an intent made. */

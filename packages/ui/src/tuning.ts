@@ -94,3 +94,60 @@ export const DRAG_START_PX = 4;
  * hanging on one that never does.
  */
 export const FONT_LOAD_TIMEOUT_MS = 3000;
+
+/**
+ * How near an edge of a card, as a share of the card's extent, a dragged card must be
+ * dropped to go beside the card on that side. Dropped nearer the middle, the two cards
+ * change places.
+ */
+export const DROP_EDGE_FRACTION = 0.25;
+
+/** The smallest a floating pane may be made by dragging its edges, in CSS pixels. */
+export const FLOAT_MIN_PX = { width: 240, height: 120 } as const;
+
+/**
+ * How often, at most, a floating pane being moved or resized tells the core where it
+ * is. The page follows the pointer on every frame.
+ */
+export const FLOAT_INTENT_INTERVAL_MS = 50;
+
+/** The narrowest and the widest a dock area may be dragged, in CSS pixels. */
+export const DOCK_SIZE_MIN_PX = 120;
+export const DOCK_SIZE_MAX_PX = 800;
+
+/** How often, at most, a dock area being resized tells the core its new size. */
+export const DOCK_INTENT_INTERVAL_MS = 50;
+
+/**
+ * How long something that was dragged and let go keeps the place the pointer left it
+ * in while the core's answer has not arrived. Past this the layout the core has is
+ * shown.
+ */
+export const DRAG_SETTLE_TIMEOUT_MS = 1000;
+
+/**
+ * How far from its left end the top bar's contents begin on a Mac whose window draws
+ * no title bar of its own: the system's three window buttons sit there.
+ */
+export const TRAFFIC_LIGHTS_INSET_PX = 78;
+
+/** The most rows the command palette lists at once. */
+export const PALETTE_RESULTS_MAX = 50;
+
+/** How many of the commands last run from the palette it remembers and lists first. */
+export const PALETTE_RECENTS_MAX = 8;
+
+/** How long a notice stays before it goes by itself: one that only informs. */
+export const NOTICE_INFO_MS = 5000;
+
+/** How long a warning or an error stays before it goes by itself. */
+export const NOTICE_PROBLEM_MS = 12_000;
+
+/** The most notices on show at once. An older one makes way for a newer. */
+export const NOTICES_MAX = 4;
+
+/**
+ * How far from a side of the window, as a share of the window's extent that way, a
+ * panel that is being dragged must be let go to be docked at that side.
+ */
+export const PANEL_DROP_FRACTION = 1 / 3;

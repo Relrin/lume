@@ -40,7 +40,7 @@ pub use geometry::{neighbour, tab_rects};
 pub use ids::{PaneId, PanelId, SplitId, TabId, WindowId, WorkspaceId};
 pub use intent::{Dir, FocusTarget, Intent, NewContent, Place, SpawnRequest, TabTarget};
 pub use model::{
-    Area, Axis, Bounds, DockArea, DockAreas, Floating, Node, Pane, PaneContent, Panel,
+    Area, Axis, Bounds, DockArea, DockAreas, Floating, Minimised, Node, Pane, PaneContent, Panel,
     PanelContent, Scratch, Slot, Split, Tab, TabGroup, TerminalPane, UnitRect, Window, Workspace,
 };
 pub use persist::{Loaded, Store, StoreError, WorkspaceFile, valid_name};

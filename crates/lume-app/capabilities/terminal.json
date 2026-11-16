@@ -21,6 +21,10 @@
     "allow-config-view",
     "allow-config-set",
     "allow-config-unset",
-    "allow-config-open"
+    "allow-config-open",
+    "allow-window-drag",
+    "allow-window-control",
+    "allow-window-state",
+    "allow-workspaces-list"
   ]
 }

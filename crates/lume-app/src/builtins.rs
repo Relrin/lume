@@ -10,7 +10,8 @@
 //! the font size of a window) are listed here and carried out there.
 
 use lume_layout::{
-    Dir, FocusTarget, Intent, NewContent, PaneId, SpawnRequest, TabId, TabTarget, UNITS, WindowId,
+    Area, Dir, FocusTarget, Intent, NewContent, PaneId, Place, SpawnRequest, TabId, TabTarget,
+    UNITS, WindowId,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -21,13 +22,38 @@ use crate::error::CommandError;
 use crate::opener;
 use crate::panes::{Panes, equal_ratios};
 use crate::registry::{CommandSpec, Owner, Registry, Runs};
+use crate::workspaces::Find;
 
 /// One row of the table of commands: id, title, category, where it runs, and whether
 /// the palette offers it.
 type Row = (&'static str, &'static str, &'static str, Runs, bool);
 
+/// Where the application's source and its issues are.
+const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
+
 const COMMANDS: &[Row] = &[
     ("lume.app.quit", "Quit", "Application", Runs::Core, true),
+    (
+        "lume.app.show-logs",
+        "Show Logs",
+        "Application",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.app.report-issue",
+        "Report an Issue",
+        "Application",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.app.whats-new",
+        "What's New",
+        "Application",
+        Runs::Core,
+        true,
+    ),
     (
         "lume.config.open",
         "Open Configuration File",
@@ -136,6 +162,98 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     ("lume.pane.rename", "Rename Pane", "Pane", Runs::Core, false),
+    (
+        "lume.pane.float",
+        "Float or Dock Pane",
+        "Pane",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.pane.minimise",
+        "Minimise or Restore Pane",
+        "Pane",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.pane.scratch",
+        "Toggle Scratch Terminal",
+        "Pane",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.pane.move-to-new-tab",
+        "Move Pane to New Tab",
+        "Pane",
+        Runs::Core,
+        true,
+    ),
+    ("lume.window.new", "New Window", "Window", Runs::Core, true),
+    (
+        "lume.window.close",
+        "Close Window",
+        "Window",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.panel.toggle",
+        "Toggle Side Panel",
+        "Panel",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.workspace.switch",
+        "Switch Workspace",
+        "Workspace",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.workspace.new",
+        "New Workspace",
+        "Workspace",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.workspace.rename",
+        "Rename Workspace",
+        "Workspace",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.workspace.delete",
+        "Delete Workspace",
+        "Workspace",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.workspace.set-root",
+        "Set Workspace Folder",
+        "Workspace",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.workspace.save",
+        "Save Workspace",
+        "Workspace",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.palette.open",
+        "Command Palette",
+        "View",
+        Runs::Page,
+        false,
+    ),
     ("lume.terminal.copy", "Copy", "Terminal", Runs::Page, true),
     ("lume.terminal.paste", "Paste", "Terminal", Runs::Page, true),
     (
@@ -233,7 +351,55 @@ fn arguments(id: &str) -> Option<Value> {
         | "lume.pane.split-down"
         | "lume.pane.split-left"
         | "lume.pane.split-up"
-        | "lume.pane.zoom" => Some(object(json!({ "pane": pane }), &[])),
+        | "lume.pane.zoom"
+        | "lume.pane.float"
+        | "lume.pane.minimise"
+        | "lume.pane.move-to-new-tab" => Some(object(json!({ "pane": pane }), &[])),
+        "lume.panel.toggle" => Some(object(
+            json!({ "area": {
+                "type": "string",
+                "enum": ["left", "right", "bottom"],
+                "description": "The side to fold away or open; the one with the tabs if left out.",
+            } }),
+            &[],
+        )),
+        "lume.workspace.switch" => Some(object(
+            json!({ "name": {
+                "type": "string",
+                "description": "The workspace to show",
+                "x-lume-choices": "workspaces",
+            } }),
+            &["name"],
+        )),
+        "lume.workspace.delete" => Some(object(
+            json!({ "name": {
+                "type": "string",
+                "description": "The workspace to delete",
+                "x-lume-choices": "workspaces",
+            } }),
+            &["name"],
+        )),
+        "lume.workspace.new" => Some(object(
+            json!({
+                "name": { "type": "string", "description": "A name for the new workspace" },
+                "root": {
+                    "type": ["string", "null"],
+                    "description": "The folder its terminals start in",
+                },
+            }),
+            &["name"],
+        )),
+        "lume.workspace.rename" => Some(object(
+            json!({ "name": { "type": "string", "description": "The workspace's new name" } }),
+            &["name"],
+        )),
+        "lume.workspace.set-root" => Some(object(
+            json!({ "root": {
+                "type": "string",
+                "description": "The folder new terminals start in; empty for none",
+            } }),
+            &["root"],
+        )),
         _ => None,
     }
 }
@@ -307,6 +473,22 @@ impl Context<'_> {
     }
 }
 
+/// The workspace's name a command was given.
+fn name(args: &Value) -> Result<String, CommandError> {
+    argument::<String>(args, "name")?
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| CommandError::bad_request("which workspace: `name`"))
+}
+
+/// Opens a place of the application's own: a page of its repository in the browser,
+/// or one of its files shown in its folder.
+async fn open_link(link: String) -> Result<(), CommandError> {
+    tokio::task::spawn_blocking(move || opener::open(&link))
+        .await
+        .map_err(|error| CommandError::internal(error.to_string()))?
+}
+
 fn terminal() -> NewContent {
     NewContent::Terminal(SpawnRequest::default())
 }
@@ -338,6 +520,14 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
                 .map_err(|error| CommandError::internal(error.to_string()))?;
         }
         "lume.config.reload" => return Ok(context.config.reload()?),
+        "lume.app.show-logs" => {
+            let shown = crate::log::log_file()
+                .and_then(|file| url::Url::from_file_path(file).ok())
+                .ok_or_else(|| CommandError::not_found("the application keeps no log"))?;
+            return open_link(shown.into()).await;
+        }
+        "lume.app.report-issue" => return open_link(format!("{REPOSITORY}/issues/new")).await,
+        "lume.app.whats-new" => return open_link(format!("{REPOSITORY}/releases")).await,
         "lume.tab.new" => Intent::TabNew {
             window,
             content: terminal(),
@@ -431,6 +621,91 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
             pane: context.pane(args)?,
             title: argument(args, "title")?,
         },
+        "lume.pane.float" => {
+            let pane = context.pane(args)?;
+            if panes.is_floating(pane) {
+                Intent::Dock { pane, to: None }
+            } else {
+                Intent::Float { pane, rect: None }
+            }
+        }
+        "lume.pane.minimise" => {
+            let pane = context.pane(args)?;
+            Intent::Minimise {
+                pane,
+                on: !panes.is_minimised(pane),
+            }
+        }
+        "lume.pane.scratch" => {
+            if panes.scratch_shown_in(window) {
+                Intent::ScratchHide {}
+            } else {
+                Intent::ScratchShow {
+                    window,
+                    content: Some(terminal()),
+                }
+            }
+        }
+        "lume.pane.move-to-new-tab" => Intent::Move {
+            pane: context.pane(args)?,
+            to: Place::NewTab {
+                window,
+                index: None,
+            },
+        },
+        "lume.window.new" => Intent::WindowNew {
+            content: terminal(),
+            bounds: None,
+        },
+        "lume.window.close" => {
+            // The last window closes the application, which keeps the layout as it
+            // is; any other takes its tabs with it.
+            if panes.workspace().windows.len() <= 1 {
+                context.shell.quit();
+                return Ok(());
+            }
+            Intent::WindowClose { window }
+        }
+        "lume.panel.toggle" => {
+            let area = match argument::<Area>(args, "area")? {
+                Some(Area::Top) => {
+                    return Err(CommandError::bad_request(
+                        "the bar at the top cannot be folded away",
+                    ));
+                }
+                Some(area) => Some(area),
+                None => panes.dock_to_toggle(window),
+            };
+            // With no panel at any side there is nothing to fold away.
+            let Some(area) = area else {
+                return Ok(());
+            };
+            Intent::PanelToggle {
+                window,
+                area,
+                on: None,
+            }
+        }
+        "lume.workspace.switch" => {
+            return panes.switch(&name(args)?, Find::Existing).await;
+        }
+        "lume.workspace.new" => {
+            panes.switch(&name(args)?, Find::New).await?;
+            return match argument::<String>(args, "root")? {
+                Some(root) if !root.trim().is_empty() => panes.set_root(Some(&root)).await,
+                _ => Ok(()),
+            };
+        }
+        "lume.workspace.rename" => return panes.rename(&name(args)?).await,
+        "lume.workspace.delete" => return panes.delete(&name(args)?).await,
+        "lume.workspace.set-root" => {
+            let root: Option<String> = argument(args, "root")?;
+            return panes.set_root(root.as_deref()).await;
+        }
+        "lume.workspace.save" => {
+            panes.save().await;
+            return Ok(());
+        }
         _ => {
             return Err(CommandError::not_found(format!(
                 "the application has no command called `{id}`"
@@ -456,15 +731,7 @@ mod tests {
     #[test]
     fn every_default_key_runs_a_command_there_is_or_one_still_to_come() {
         // The keys bound out of the box name these commands, which are not made yet.
-        const TO_COME: [&str; 7] = [
-            "lume.pane.float",
-            "lume.pane.scratch",
-            "lume.palette.open",
-            "lume.search.open",
-            "lume.settings.open",
-            "lume.window.new",
-            "lume.panel.toggle",
-        ];
+        const TO_COME: [&str; 2] = ["lume.search.open", "lume.settings.open"];
         let registry = registry();
         for platform in lume_config::Platform::ALL {
             for binding in lume_config::default_bindings(platform) {

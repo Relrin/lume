@@ -8,13 +8,33 @@
 //! the layout's window `w3` is the webview window `w-3`. The commands a terminal's page
 //! may call are granted to every label of that form. The window that only reports on
 //! the webview, or runs a test suite, has a label of its own and is granted less.
+//!
+//! The layout says which windows there are, and the windows here follow it: one is
+//! opened when the layout gains a window and closed when it loses one. In the other
+//! direction a window tells the layout where it is on the desktop, a moment after it
+//! was last moved, so that it can be opened in the same place another day.
+//!
+//! A window is drawn with the system's title bar or without one. Without, the page
+//! draws the bar itself and asks for what a title bar does: moving the window, and
+//! the three controls at its end.
 
-use lume_layout::WindowId;
-use tauri::{App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use lume_layout::{Bounds, Intent, WindowId};
+use serde::Serialize;
+use serde_json::json;
+use tauri::{
+    App, AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 
 use crate::args::Mode;
+use crate::bounds::{Reading, Screen, clamp_bounds, merge_bounds};
+use crate::configsvc::ConfigService;
 use crate::control::Shell;
-use crate::tuning::TITLE_MAX_BYTES;
+use crate::state::AppState;
+use crate::tuning::{BOUNDS_DEBOUNCE, TITLE_MAX_BYTES};
 
 /// The label of the window that shows no terminals: the webview report, or a test
 /// suite.
@@ -43,58 +63,304 @@ const DEFAULT_TITLE: &str = "Lume";
 /// The page a harness run shows in place of the terminal.
 const HARNESS_PAGE: &str = "harness.html";
 
-/// Opens the window the configuration describes. `layout` is the window of the layout
-/// it shows, for a window that shows terminals.
-pub fn open(
-    app: &App,
-    mode: Mode,
-    layout: Option<WindowId>,
-) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error>> {
-    let mut described = app
-        .config()
+/// The window the configuration file describes, which every window starts from.
+fn described(app: &AppHandle) -> Result<tauri::utils::config::WindowConfig, String> {
+    app.config()
         .app
         .windows
         .first()
         .cloned()
-        .ok_or("the configuration describes no window")?;
+        .ok_or_else(|| "the configuration describes no window".to_owned())
+}
+
+/// Keeps a window's title the title of its page. The page names its document after
+/// the terminal's title, and a program in the terminal chooses that title, so it is
+/// checked here as well as in the page.
+fn follow_title(window: WebviewWindow, title: String) {
+    if let Err(error) = window.set_title(&window_title(&title)) {
+        tracing::debug!(%error, "the window's title could not be set");
+    }
+}
+
+/// Opens the window that shows no terminals: the one that reports on the webview, or
+/// runs a test suite.
+pub fn open(app: &App, mode: Mode) -> Result<WebviewWindow, Box<dyn std::error::Error>> {
+    let mut described = described(app.handle())?;
     if matches!(mode, Mode::Harness(_)) {
         described.url = WebviewUrl::App(HARNESS_PAGE.into());
     }
-    if let Some(window) = layout {
-        described.label = label_of(window);
-    }
     let window = WebviewWindowBuilder::from_config(app.handle(), &described)?
-        // The page names its document after the terminal's title, and the window follows
-        // the document. A program in the terminal chooses that title, so it is checked
-        // here as well as in the page.
-        .on_document_title_changed(|window, title| {
-            if let Err(error) = window.set_title(&window_title(&title)) {
-                tracing::debug!(%error, "the window's title could not be set");
-            }
-        })
+        .on_document_title_changed(follow_title)
         .build()?;
     Ok(window)
 }
 
-/// The window as the control endpoint reaches it.
-pub struct WindowShell {
-    app: AppHandle,
+/// What a window is doing, as its page is told: the page draws the window's controls
+/// when the system does not.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct WindowState {
+    pub maximised: bool,
+    pub fullscreen: bool,
+    pub focused: bool,
 }
 
-impl WindowShell {
-    pub fn new(app: AppHandle) -> Self {
-        Self { app }
+/// What one of a window's controls does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Control {
+    Minimise,
+    /// Fills the screen, or goes back to the size it had.
+    Maximise,
+    Close,
+}
+
+impl Control {
+    /// The control a page names.
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "minimise" => Some(Control::Minimise),
+            "maximise" => Some(Control::Maximise),
+            "close" => Some(Control::Close),
+            _ => None,
+        }
     }
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// What a window is doing now.
+pub fn state_of(window: &WebviewWindow) -> WindowState {
+    WindowState {
+        maximised: window.is_maximized().unwrap_or(false),
+        fullscreen: window.is_fullscreen().unwrap_or(false),
+        focused: window.is_focused().unwrap_or(false),
+    }
+}
+
+/// Does what one of a window's controls does.
+pub fn control(window: &WebviewWindow, control: Control) -> tauri::Result<()> {
+    match control {
+        Control::Minimise => window.minimize(),
+        Control::Maximise if window.is_maximized()? => window.unmaximize(),
+        Control::Maximise => window.maximize(),
+        // Asked, not forced: the application decides what closing this window means.
+        Control::Close => window.close(),
+    }
+}
+
+/// The application's windows: opening and closing the ones the layout names, and
+/// telling the layout and the pages what the windows do.
+pub struct WindowShell {
+    app: AppHandle,
+    state: Arc<AppState>,
+    config: Arc<ConfigService>,
+    /// Counts the times each window was moved or resized. A window's place is kept
+    /// once it has stopped changing: when the count has not gone up for a while.
+    moved: Mutex<HashMap<String, u64>>,
+    /// What each window's page was last told the window is doing.
+    told: Mutex<HashMap<String, WindowState>>,
+}
+
 impl WindowShell {
-    /// The window the user is working in, or any window if none has the keyboard.
-    fn front(&self) -> Option<tauri::WebviewWindow> {
+    pub fn new(app: AppHandle, state: Arc<AppState>, config: Arc<ConfigService>) -> Arc<Self> {
+        Arc::new(Self {
+            app,
+            state,
+            config,
+            moved: Mutex::new(HashMap::new()),
+            told: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// The window the user is working in: the one that has the keyboard, else the one
+    /// the layout says last had it, else any.
+    fn front(&self) -> Option<WebviewWindow> {
         let windows = self.app.webview_windows();
         let focused = windows
             .values()
             .find(|window| window.is_focused().unwrap_or(false));
-        focused.or_else(|| windows.values().next()).cloned()
+        let last = || {
+            let window = self.state.panes()?.focused_window()?;
+            windows.get(&label_of(window))
+        };
+        focused
+            .or_else(last)
+            .or_else(|| windows.values().next())
+            .cloned()
+    }
+
+    /// The screens there are, the main one first.
+    fn screens(&self) -> Vec<Screen> {
+        let main = self.app.primary_monitor().ok().flatten();
+        let mut monitors = self.app.available_monitors().unwrap_or_default();
+        if let Some(main) = &main {
+            monitors.sort_by_key(|monitor| monitor.position() != main.position());
+        }
+        monitors
+            .iter()
+            .map(|monitor| {
+                let area = monitor.work_area();
+                Screen {
+                    x: area.position.x,
+                    y: area.position.y,
+                    width: area.size.width,
+                    height: area.size.height,
+                    scale: monitor.scale_factor(),
+                }
+            })
+            .collect()
+    }
+
+    fn build(
+        &self,
+        window: WindowId,
+        bounds: Option<Bounds>,
+    ) -> Result<WebviewWindow, Box<dyn std::error::Error>> {
+        let mut described = described(&self.app)?;
+        described.label = label_of(window);
+        let custom = self.config.title_bar_custom();
+        // Shown once it is where it belongs, so it is not seen to jump there.
+        let builder = WebviewWindowBuilder::from_config(&self.app, &described)?
+            .on_document_title_changed(follow_title)
+            .visible(false);
+        // A Mac keeps its three buttons and lays them over the page's own bar; elsewhere
+        // a window without the system's bar has no frame at all.
+        #[cfg(target_os = "macos")]
+        let builder = if custom {
+            builder
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true)
+        } else {
+            builder
+        };
+        #[cfg(not(target_os = "macos"))]
+        let builder = builder.decorations(!custom);
+        let opened = builder.build()?;
+
+        let restore = self.config.current().config.window.restore_bounds;
+        let placement = bounds
+            .filter(|_| restore)
+            .and_then(|bounds| clamp_bounds(&bounds, &self.screens()));
+        if let Some(placement) = placement {
+            opened.set_size(PhysicalSize::new(placement.width, placement.height))?;
+            opened.set_position(PhysicalPosition::new(placement.x, placement.y))?;
+            if placement.maximised {
+                opened.maximize()?;
+            }
+            if placement.fullscreen {
+                opened.set_fullscreen(true)?;
+            }
+        }
+        opened.show()?;
+        opened.set_focus()?;
+        Ok(opened)
+    }
+
+    /// What a window says of where it is.
+    fn read(window: &WebviewWindow) -> tauri::Result<Reading> {
+        let position = window.outer_position()?;
+        let size = window.inner_size()?;
+        Ok(Reading {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+            scale: window.scale_factor()?,
+            maximised: window.is_maximized()?,
+            fullscreen: window.is_fullscreen()?,
+            minimised: window.is_minimized()?,
+        })
+    }
+
+    /// The place to keep for a window, if it differs from the one that is kept.
+    fn place_to_keep(&self, label: &str) -> Option<(WindowId, Bounds)> {
+        let window = window_of(label)?;
+        let webview = self.app.get_webview_window(label)?;
+        let panes = self.state.panes()?;
+        let kept = panes.workspace().window(window)?.bounds;
+        let reading = match Self::read(&webview) {
+            Ok(reading) => reading,
+            Err(error) => {
+                tracing::debug!(%error, label, "a window did not say where it is");
+                return None;
+            }
+        };
+        let bounds = merge_bounds(kept, &reading)?;
+        (Some(bounds) != kept).then_some((window, bounds))
+    }
+
+    /// Notes that a window was moved or resized. Where it is now is kept with the
+    /// layout once it has been left alone for a moment.
+    pub fn moved(self: &Arc<Self>, label: &str) {
+        if window_of(label).is_none() {
+            return;
+        }
+        let turn = {
+            let mut moved = lock(&self.moved);
+            let turn = moved.entry(label.to_owned()).or_insert(0);
+            *turn += 1;
+            *turn
+        };
+        let shell = Arc::clone(self);
+        let label = label.to_owned();
+        self.state.runtime().spawn(async move {
+            tokio::time::sleep(BOUNDS_DEBOUNCE).await;
+            if lock(&shell.moved).get(&label).copied() != Some(turn) {
+                return;
+            }
+            let Some((window, bounds)) = shell.place_to_keep(&label) else {
+                return;
+            };
+            if let Some(panes) = shell.state.panes() {
+                let _ = panes
+                    .apply_core(Intent::WindowBounds { window, bounds })
+                    .await;
+            }
+        });
+    }
+
+    /// Keeps where a window is now, at once: it is about to close. Call from the
+    /// thread the windows live on.
+    pub fn keep_place(&self, label: &str) {
+        let Some((window, bounds)) = self.place_to_keep(label) else {
+            return;
+        };
+        if let Some(panes) = self.state.panes() {
+            // Recording a place starts nothing and waits for nothing.
+            let _ = tauri::async_runtime::block_on(
+                panes.apply_core(Intent::WindowBounds { window, bounds }),
+            );
+        }
+    }
+
+    /// Tells a window's page what the window is doing, if that has changed since the
+    /// page was last told.
+    pub fn tell_state(&self, label: &str) {
+        if window_of(label).is_none() {
+            return;
+        }
+        let Some(window) = self.app.get_webview_window(label) else {
+            return;
+        };
+        let now = state_of(&window);
+        if lock(&self.told).insert(label.to_owned(), now) == Some(now) {
+            return;
+        }
+        if let Some(page) = self.state.page_of(label) {
+            page.notify(&json!({
+                "type": "window_state",
+                "maximised": now.maximised,
+                "fullscreen": now.fullscreen,
+                "focused": now.focused,
+            }));
+        }
+    }
+
+    /// Forgets what was kept about a window that is gone.
+    pub fn forget(&self, label: &str) {
+        lock(&self.moved).remove(label);
+        lock(&self.told).remove(label);
     }
 }
 
@@ -122,12 +388,48 @@ impl Shell for WindowShell {
         !tauri::is_dev()
     }
 
+    fn open_window(&self, window: WindowId, bounds: Option<Bounds>) {
+        if self.app.get_webview_window(&label_of(window)).is_some() {
+            return;
+        }
+        if let Err(error) = self.build(window, bounds) {
+            tracing::error!(%window, %error, "a window could not be opened");
+        }
+    }
+
     fn close_window(&self, label: &str) {
         let Some(window) = self.app.get_webview_window(label) else {
             return;
         };
         if let Err(error) = window.destroy() {
             tracing::debug!(%error, label, "the window could not be closed");
+        }
+    }
+
+    fn layout_windows(&self) -> Vec<String> {
+        self.app
+            .webview_windows()
+            .into_keys()
+            .filter(|label| window_of(label).is_some())
+            .collect()
+    }
+
+    fn set_title_bar(&self, custom: bool) {
+        for (label, window) in self.app.webview_windows() {
+            if window_of(&label).is_none() {
+                continue;
+            }
+            #[cfg(target_os = "macos")]
+            let set = window.set_title_bar_style(if custom {
+                tauri::TitleBarStyle::Overlay
+            } else {
+                tauri::TitleBarStyle::Visible
+            });
+            #[cfg(not(target_os = "macos"))]
+            let set = window.set_decorations(!custom);
+            if let Err(error) = set {
+                tracing::debug!(%error, label, "the window's title bar could not be changed");
+            }
         }
     }
 }

@@ -48,7 +48,8 @@ pub enum LayoutChange {
     Ratios { split: SplitId, ratios: Vec<u32> },
     /// What a pane shows, or its name, changed.
     Pane { pane: Pane },
-    /// The panes floating over a window changed: which there are, or their order.
+    /// The panes floating over a window changed: which there are, their order, or
+    /// which of them are put away.
     Floating {
         window: WindowId,
         floating: Vec<Floating>,
@@ -78,6 +79,8 @@ pub enum LayoutChange {
     Scratch { scratch: Option<Scratch> },
     /// Which window the user is working in changed.
     WindowFocused { window: Option<WindowId> },
+    /// The workspace was given another name.
+    WorkspaceName { name: String },
     /// A pane is gone from the workspace. What it showed is given, so whoever kept
     /// something for the pane, such as its session, can let go of it. The changes
     /// before this one have already taken the pane out of wherever it was.

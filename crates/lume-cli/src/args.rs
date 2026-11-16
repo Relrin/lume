@@ -8,7 +8,7 @@ use lume_proto::{Launcher, SessionId, TermSize};
 
 /// What the arguments may be, shown on request and when they are not understood.
 pub const USAGE: &str = "\
-usage: lume [--endpoint <name>]
+usage: lume [--endpoint <name>] [--workspace <name>] [-e <program> [<arg>...]]
        lume ctl [--endpoint <name>] [--timeout <seconds>] <command>
        lume config schema | path | check [<file>]
        lume keymap [--platform windows|macos|linux] [--workspace <name>] [--json]
@@ -16,15 +16,17 @@ usage: lume [--endpoint <name>]
        lume --help | --version
 
 Without a command, lume starts the application, or brings its window to the front if
-it is running.
+it is running. --workspace shows that workspace, beginning it if there is none of that
+name. -e runs a program in a new tab, started in the directory lume was typed in;
+everything after the program is the program's own.
 
 Commands of lume ctl, which drive the running application:
   status                         what the application is and how far its start has come
   list                           every session, and the pane that shows it
-  spawn [--tab | --split left|right|up|down] [--cwd <dir>] [--size <cols>x<rows>]
-        [--env <name>=<value>]... [-- <program> [<arg>...]]
-                                 start a session in a new tab, or in a new pane beside
-                                 the focused one
+  spawn [--tab | --split left|right|up|down | --window] [--cwd <dir>]
+        [--size <cols>x<rows>] [--env <name>=<value>]... [-- <program> [<arg>...]]
+                                 start a session in a new tab, in a new pane beside
+                                 the focused one, or in a new window
   send [<target>] [--enter] [--escapes] <text>...
                                  type text into a terminal; --enter ends it with a
                                  carriage return, --escapes reads \\r \\n \\t \\e \\\\ \\xHH
@@ -37,6 +39,7 @@ Commands of lume ctl, which drive the running application:
   layout view                    print the layout: windows, tabs, splits and panes
   layout apply <intent> | -      change the layout; the intent is JSON, read from
                                  standard input when given as -
+  workspaces                     list the workspaces, and say which is on show
   commands                       list the commands there are
   command <id> [<arguments>]     run a command; its arguments are a JSON object
   quit                           close the application
@@ -73,6 +76,10 @@ pub enum Command {
     /// Start the application or bring it to the front.
     Start {
         endpoint: Option<String>,
+        /// The workspace to show.
+        workspace: Option<String>,
+        /// A program to run in a new tab, and its arguments. Empty for none.
+        exec: Vec<String>,
     },
     /// Send one request to the running application.
     Ctl(Ctl),
@@ -426,6 +433,10 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
             }
             None => return Err("ctl layout needs a command: view or apply".to_owned()),
         },
+        "workspaces" => {
+            nothing_more(words, "workspaces")?;
+            AppRequestBody::Workspaces {}
+        }
         "commands" => {
             nothing_more(words, "commands")?;
             AppRequestBody::Commands {}
@@ -538,11 +549,24 @@ fn theme(words: &mut Words) -> Result<Offline, String> {
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String> {
     let mut words: Words = args.into_iter().collect::<Vec<_>>().into_iter().peekable();
     let mut endpoint = None;
+    let mut workspace = None;
+    let mut exec = Vec::new();
     while let Some(word) = words.next() {
         match word.as_str() {
             "--help" | "-h" | "help" => return Ok(Command::Help),
             "--version" | "-V" => return Ok(Command::Version),
             "--endpoint" => endpoint = Some(value(&mut words, "--endpoint", "a name")?),
+            "--workspace" => {
+                workspace = Some(value(&mut words, "--workspace", "a workspace's name")?);
+            }
+            // Everything after this is the program and what it is given, whatever it
+            // looks like.
+            "-e" | "--exec" => {
+                exec = words.by_ref().collect();
+                if exec.is_empty() {
+                    return Err(format!("{word} needs a program to run"));
+                }
+            }
             "ctl" => {
                 let mut ctl = ctl(&mut words)?;
                 // An endpoint named before `ctl` holds unless one is named after it.
@@ -555,7 +579,11 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
             other => return Err(format!("{other} is not something lume knows")),
         }
     }
-    Ok(Command::Start { endpoint })
+    Ok(Command::Start {
+        endpoint,
+        workspace,
+        exec,
+    })
 }
 
 #[cfg(test)]
@@ -579,13 +607,29 @@ mod tests {
 
     #[test]
     fn no_arguments_start_the_application() {
-        assert_eq!(parsed(&[]), Ok(Command::Start { endpoint: None }));
+        let start = |endpoint: Option<&str>, workspace: Option<&str>, exec: &[&str]| {
+            Ok(Command::Start {
+                endpoint: endpoint.map(str::to_owned),
+                workspace: workspace.map(str::to_owned),
+                exec: exec.iter().map(|word| (*word).to_owned()).collect(),
+            })
+        };
+        assert_eq!(parsed(&[]), start(None, None, &[]));
         assert_eq!(
             parsed(&["--endpoint", "trial"]),
-            Ok(Command::Start {
-                endpoint: Some("trial".to_owned())
-            })
+            start(Some("trial"), None, &[])
         );
+        assert_eq!(
+            parsed(&["--workspace", "site v2"]),
+            start(None, Some("site v2"), &[])
+        );
+        // What follows the program is the program's, even what lume would understand.
+        assert_eq!(
+            parsed(&["--workspace", "site", "-e", "htop", "--help", "ctl"]),
+            start(None, Some("site"), &["htop", "--help", "ctl"])
+        );
+        assert!(parsed(&["-e"]).is_err());
+        assert!(parsed(&["--workspace"]).is_err());
         assert_eq!(parsed(&["--help"]), Ok(Command::Help));
         assert_eq!(parsed(&["--version"]), Ok(Command::Version));
     }
@@ -595,6 +639,10 @@ mod tests {
         assert_eq!(request(&["ctl", "status"]), AppRequestBody::Status {});
         assert_eq!(request(&["ctl", "list"]), AppRequestBody::List {});
         assert_eq!(request(&["ctl", "quit"]), AppRequestBody::Quit {});
+        assert_eq!(
+            request(&["ctl", "workspaces"]),
+            AppRequestBody::Workspaces {}
+        );
         assert!(parsed(&["ctl", "list", "all"]).is_err());
         assert!(parsed(&["ctl"]).is_err());
         assert!(parsed(&["ctl", "dance"]).is_err());

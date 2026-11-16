@@ -6,16 +6,21 @@
  * between the children of a split. It renders again only when the tab's structure
  * changes: another tab is shown, a pane is made or closed, a pane is zoomed. Where the
  * cards and handles lie is not its business.
+ *
+ * The panes that float over the tabs are rendered inside the same element, after the
+ * others, so that they share the space the tab's panes are laid out in.
  */
 
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { useStore } from "zustand";
 
-import { panesOf, selectActiveTab } from "../layout/selectors.ts";
+import { panesOf, selectActiveTab, selectFloating, selectMinimised } from "../layout/selectors.ts";
 import type { TreeNode } from "../layout/store.ts";
 import type { Axis, SplitId } from "../layout/types.ts";
 import { useShell } from "./context.ts";
+import { FloatingLayer } from "./FloatingLayer.tsx";
 import { useKeyHint } from "./hints.ts";
+import { MinimisedTray } from "./MinimisedTray.tsx";
 import { PaneCard } from "./PaneCard.tsx";
 import { PlusIcon } from "./icons.tsx";
 
@@ -82,10 +87,18 @@ export function TabArea() {
   }, [app]);
 
   const ready = useStore(app.layout, (state) => state.ready);
+  // A card belongs to one layout: another workspace's pane of the same name gets a
+  // card of its own, and with it a terminal of its own.
+  const epoch = useStore(app.layout, (state) => state.epoch);
   const tab = useStore(app.layout, (state) => (state.ready ? selectActiveTab(state) : null));
   const root = useStore(app.layout, (state) => (tab === null ? undefined : state.tabs[tab]?.root));
   const zoomed = useStore(app.layout, (state) =>
     tab === null ? null : (state.tabs[tab]?.zoomed ?? null),
+  );
+  // Panes that are put away do not fill the window: only those on show do.
+  const floats = useStore(
+    app.layout,
+    (state) => state.ready && selectFloating(state).length > selectMinimised(state).length,
   );
   const mode = useStore(
     app.config,
@@ -100,13 +113,15 @@ export function TabArea() {
 
   return (
     <main ref={container} className="tab-area">
-      {ready && tab === null && <EmptyWindow />}
+      {ready && tab === null && !floats && <EmptyWindow />}
       {shown.map((pane) => (
-        <PaneCard key={pane} pane={pane} header={header} />
+        <PaneCard key={`${epoch}:${pane}`} pane={pane} header={header} />
       ))}
       {gaps.map((gap) => (
         <DividerHandle key={`${gap.split}:${gap.index}`} {...gap} />
       ))}
+      <FloatingLayer />
+      <MinimisedTray />
     </main>
   );
 }

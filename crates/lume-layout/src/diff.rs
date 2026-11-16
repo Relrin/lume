@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use crate::change::LayoutChange;
 use crate::ids::{PaneId, TabId};
-use crate::model::{Area, Tab, Window, Workspace};
+use crate::model::{Area, Minimised, Tab, Window, Workspace};
 
 /// The changes that take `before` to `after`, in an order in which each can be
 /// applied to a copy of `before`.
@@ -55,6 +55,11 @@ pub(crate) fn diff(before: &Workspace, after: &Workspace) -> Vec<LayoutChange> {
     if before.focused_window != after.focused_window {
         changes.push(LayoutChange::WindowFocused {
             window: after.focused_window,
+        });
+    }
+    if before.name != after.name {
+        changes.push(LayoutChange::WorkspaceName {
+            name: after.name.clone(),
         });
     }
 
@@ -116,11 +121,11 @@ fn diff_window(old: &Window, new: &Window, changes: &mut Vec<LayoutChange>) {
         });
     }
 
-    let ids = |window: &Window| -> Vec<PaneId> {
+    let ids = |window: &Window| -> Vec<(PaneId, Option<Minimised>)> {
         window
             .floating
             .iter()
-            .map(|floating| floating.pane.id)
+            .map(|floating| (floating.pane.id, floating.minimised))
             .collect()
     };
     if ids(old) != ids(new) {

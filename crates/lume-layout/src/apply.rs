@@ -19,10 +19,11 @@ use crate::geometry::{neighbour, tab_rects};
 use crate::ids::{PaneId, SplitId, TabId, WindowId};
 use crate::intent::{Dir, FocusTarget, Intent, NewContent, Place, SpawnRequest, TabTarget};
 use crate::model::{
-    Area, Axis, Floating, Location, Node, Pane, PaneContent, Panel, PanelContent, Scratch, Split,
-    Tab, TerminalPane, UnitRect, Window, Workspace,
+    Area, Axis, Floating, Location, Minimised, Node, Pane, PaneContent, Panel, PanelContent,
+    Scratch, Split, Tab, TerminalPane, UnitRect, Window, Workspace,
 };
 use crate::normalise::{contain, fit, mend, release, tidy_trees};
+use crate::persist::valid_name;
 use crate::tuning::{
     DOCK_PANELS_MAX, DOCK_SIZE_MAX, DOCK_SIZE_MIN, FLOAT_CASCADE, FLOAT_DEFAULT, FLOATING_MAX,
     RATIO_TOLERANCE, SHARE_MIN, SPLIT_CHILDREN_MAX, TAB_PANES_MAX, TABS_MAX, TITLE_MAX_CHARS,
@@ -239,7 +240,9 @@ fn focus(window: &mut Window, pane: PaneId) {
         }
         window.centre.active = Some(tab.id);
     } else if let Some(index) = window.floating_index(pane) {
-        let floating = window.floating.remove(index);
+        // The keyboard cannot be with a pane that is put away: it is brought back.
+        let mut floating = window.floating.remove(index);
+        floating.minimised = None;
         window.floating.push(floating);
     }
     window.focus = Some(pane);
@@ -493,6 +496,27 @@ fn dock(
     Ok(created)
 }
 
+/// Gives a floating pane of a window the keyboard, bringing it back first if it is
+/// put away: to float where it floated, or among the tabs again if that is where it
+/// was taken from.
+fn bring_back(
+    workspace: &mut Workspace,
+    window: usize,
+    pane: PaneId,
+) -> Result<Created, IntentError> {
+    let floating = &mut workspace.windows[window].floating;
+    let index = floating
+        .iter()
+        .position(|floating| floating.pane.id == pane)
+        .ok_or(IntentError::NoSuchPane(pane))?;
+    if floating[index].minimised == Some(Minimised::Tab) {
+        let taken = floating.remove(index).pane;
+        return dock(workspace, window, taken, None);
+    }
+    focus(&mut workspace.windows[window], pane);
+    Ok(Created::default())
+}
+
 /// Carries out an intent, leaving the tidying to the caller.
 fn change(
     workspace: &mut Workspace,
@@ -527,13 +551,14 @@ fn change(
             }
         }
         Intent::Focus { target } => match target {
-            FocusTarget::Pane { pane } => {
-                let window = match shown(workspace, pane)? {
-                    Location::Tab { window, .. } | Location::Floating { window, .. } => window,
-                    Location::Parked => return Err(IntentError::NoSuchPane(pane)),
-                };
-                focus(&mut workspace.windows[window], pane);
-            }
+            FocusTarget::Pane { pane } => match shown(workspace, pane)? {
+                Location::Tab { window, .. } => focus(&mut workspace.windows[window], pane),
+                // Asking for a pane that is put away brings it back.
+                Location::Floating { window, .. } => {
+                    created = bring_back(workspace, window, pane)?;
+                }
+                Location::Parked => return Err(IntentError::NoSuchPane(pane)),
+            },
             FocusTarget::Next { window } | FocusTarget::Previous { window } => {
                 let forward = matches!(target, FocusTarget::Next { .. });
                 let window = window_index(workspace, window)?;
@@ -555,11 +580,14 @@ fn change(
             FocusTarget::Back { window } => {
                 let window = window_index(workspace, window)?;
                 let window = &mut workspace.windows[window];
+                // A pane that is put away is brought back by asking for it, not by
+                // going back to it.
+                let candidates = window.focusable();
                 let before = window
                     .history
                     .iter()
                     .copied()
-                    .find(|pane| Some(*pane) != window.focus && window.contains(*pane));
+                    .find(|pane| Some(*pane) != window.focus && candidates.contains(pane));
                 if let Some(pane) = before {
                     focus(window, pane);
                 }
@@ -573,8 +601,7 @@ fn change(
                 // a tab has those of its tab.
                 let rects = if window.floating_index(from).is_some() {
                     window
-                        .floating
-                        .iter()
+                        .shown_floating()
                         .map(|floating| (floating.pane.id, floating.rect))
                         .collect()
                 } else {
@@ -674,9 +701,42 @@ fn change(
             let (window, taken) = take_pane(workspace, pane)?;
             let window = &mut workspace.windows[window];
             let rect = rect.unwrap_or_else(|| default_float(window));
-            window.floating.push(Floating { pane: taken, rect });
+            window.floating.push(Floating {
+                pane: taken,
+                rect,
+                minimised: None,
+            });
             focus(window, pane);
         }
+        Intent::Minimise { pane, on } => match (shown(workspace, pane)?, on) {
+            (Location::Floating { window, index }, true) => {
+                // One that is put away already keeps where it came from.
+                workspace.windows[window].floating[index]
+                    .minimised
+                    .get_or_insert(Minimised::Floating);
+            }
+            (Location::Floating { window, index }, false) => {
+                if workspace.windows[window].floating[index]
+                    .minimised
+                    .is_some()
+                {
+                    created = bring_back(workspace, window, pane)?;
+                }
+            }
+            (Location::Tab { .. }, true) => {
+                let (window, taken) = take_pane(workspace, pane)?;
+                let window = &mut workspace.windows[window];
+                let rect = default_float(window);
+                window.floating.push(Floating {
+                    pane: taken,
+                    rect,
+                    minimised: Some(Minimised::Tab),
+                });
+            }
+            // A pane in a tab is on show already.
+            (Location::Tab { .. }, false) => {}
+            (Location::Parked, _) => return Err(IntentError::NoSuchPane(pane)),
+        },
         Intent::FloatMove { pane, rect } => {
             let Location::Floating { window, index } = shown(workspace, pane)? else {
                 return Err(IntentError::NotFloating(pane));
@@ -838,7 +898,14 @@ fn change(
                     let id = pane.id;
                     created.pane = Some(id);
                     let rect = default_float(&workspace.windows[window]);
-                    (Floating { pane, rect }, id)
+                    (
+                        Floating {
+                            pane,
+                            rect,
+                            minimised: None,
+                        },
+                        id,
+                    )
                 }
             };
             workspace.scratch = Some(Scratch { pane, parked: None });
@@ -922,6 +989,12 @@ fn change(
         Intent::WindowFocus { window } => {
             window_index(workspace, window)?;
             workspace.focused_window = Some(window);
+        }
+        Intent::WorkspaceRename { name } => {
+            if !valid_name(&name) {
+                return Err(IntentError::BadName(name));
+            }
+            workspace.name = name;
         }
     }
     Ok(created)

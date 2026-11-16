@@ -147,6 +147,7 @@ impl Projection {
             }
             LayoutChange::Scratch { scratch } => workspace.scratch = scratch.clone(),
             LayoutChange::WindowFocused { window } => workspace.focused_window = *window,
+            LayoutChange::WorkspaceName { name } => workspace.name.clone_from(name),
             // The changes before it have already taken the pane out.
             LayoutChange::PaneClosed { .. } => {}
         }
