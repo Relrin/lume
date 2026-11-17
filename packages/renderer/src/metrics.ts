@@ -38,9 +38,13 @@ export function cellMetrics(
   const underline = baseline + Math.round(raw.descent * UNDERLINE_POSITION_RATIO);
   // A double underline needs three thicknesses below this; keep it inside the cell.
   const underlineTop = Math.max(0, Math.min(underline, cellHeight - lineThickness));
+  // A line shorter than its letters puts the baseline below the cell; both lines stay in it.
   const strikethroughTop = Math.max(
     0,
-    baseline - Math.round(raw.ascent * STRIKETHROUGH_POSITION_RATIO) - (lineThickness >> 1),
+    Math.min(
+      cellHeight - lineThickness,
+      baseline - Math.round(raw.ascent * STRIKETHROUGH_POSITION_RATIO) - (lineThickness >> 1),
+    ),
   );
 
   return {

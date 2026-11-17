@@ -22,11 +22,18 @@ pub const PAGES_KEY: &str = "x-lume-pages";
 /// The group of pages the application's own are listed under.
 const APPLICATION: &str = "Application";
 
-/// The unit of a length, of a share of a whole, and of a count of lines.
+/// The unit of a length, of a share of a whole, of a count of lines and of a time.
 const PIXELS: &str = "px";
 const PERCENT: &str = "%";
 const LINES: &str = "lines";
 const SECONDS: &str = "seconds";
+
+/// How many times bigger a share of a whole is shown than it is written: from 0 to 100
+/// for one written from 0 to 1.
+const PERCENT_SCALE: f64 = 100.0;
+
+/// The platforms a setting may be shown on alone, as the configuration names them.
+pub const PLATFORMS: [&str; 3] = ["windows", "macos", "linux"];
 
 /// The kind of control that sets a setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -40,6 +47,9 @@ pub enum Control {
     Segmented,
     /// Whatever is typed.
     Text,
+    /// A number that is typed, held between the least and the greatest the setting
+    /// takes.
+    Number,
 }
 
 /// One thing a setting can be set to, and what that is called.
@@ -87,52 +97,22 @@ pub struct Shown {
     /// The design token that holds the value in effect while the setting is left out.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<&'static str>,
-    /// What the value is counted in: `px`, `lines`, or `%` for a share written from 0
-    /// to 1 and shown from 0 to 100.
+    /// What the value is counted in: `px`, `lines`, `seconds`, or `%` for a share
+    /// written from 0 to 1 and shown from 0 to 100.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unit: Option<&'static str>,
+    /// How far the arrow keys move a typed number, in what it is shown in. The least
+    /// and the greatest it may be are the `minimum` and `maximum` of the schema.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
+    /// How many times bigger a typed number is shown than it is written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<When>,
-}
-
-/// A whole number as one, and any other as it is: `10`, not `10.0`.
-fn number(value: f64) -> Value {
-    // Rounded to what the steps are written to, so 0.1 added three times is 0.3.
-    let value = (value * 1000.0).round() / 1000.0;
-    if value.fract() == 0.0 && value.abs() < 1e15 {
-        #[allow(clippy::cast_possible_truncation)]
-        Value::from(value as i64)
-    } else {
-        Value::from(value)
-    }
-}
-
-/// The values from `first` to `last` in steps of `step`, both ends included.
-fn steps((first, last, step): (f64, f64, f64)) -> Vec<f64> {
-    let mut values = Vec::new();
-    let mut count = 0.0;
-    loop {
-        let value = first + count * step;
-        // A step's worth of rounding does not drop the last value.
-        if value > last + step / 1000.0 {
-            return values;
-        }
-        values.push((value * 1000.0).round() / 1000.0);
-        count += 1.0;
-    }
-}
-
-/// A count with its thousands set apart: `10,000`.
-fn grouped(count: u32) -> String {
-    let digits = count.to_string();
-    let mut grouped = String::new();
-    for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            grouped.push(',');
-        }
-        grouped.push(digit);
-    }
-    grouped
+    /// The only platform the setting is shown on, for one that does nothing elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<&'static str>,
 }
 
 impl Shown {
@@ -155,7 +135,10 @@ impl Shown {
             unset: None,
             token: None,
             unit: None,
+            step: None,
+            scale: None,
             when: None,
+            platform: None,
         }
     }
 
@@ -194,6 +177,20 @@ impl Shown {
         Self::new(page, group, order, label, Control::Text)
     }
 
+    /// A number that is typed, which the arrow keys move by `step`.
+    pub fn number(
+        page: &'static str,
+        group: &'static str,
+        order: u32,
+        label: &'static str,
+        step: f64,
+    ) -> Self {
+        Self {
+            step: Some(step),
+            ..Self::new(page, group, order, label, Control::Number)
+        }
+    }
+
     /// A line said under the label.
     #[must_use]
     pub fn help(mut self, help: &'static str) -> Self {
@@ -214,76 +211,31 @@ impl Shown {
         self
     }
 
-    /// Lengths in pixels to choose from: the first, the last and the step between.
+    /// A length in pixels.
     #[must_use]
-    pub fn lengths(mut self, range: (f64, f64, f64)) -> Self {
-        self.options = steps(range)
-            .into_iter()
-            .map(|value| Choice {
-                value: number(value),
-                label: format!("{} {PIXELS}", number(value)),
-            })
-            .collect();
+    pub fn pixels(mut self) -> Self {
         self.unit = Some(PIXELS);
         self
     }
 
-    /// Shares of a whole to choose from, written from 0 to 1 and called by their
-    /// hundredths. `none` is what a share of nothing is called, if it has a name.
+    /// A share of a whole, written from 0 to 1 and shown in hundredths.
     #[must_use]
-    pub fn shares(mut self, range: (f64, f64, f64), none: Option<&str>) -> Self {
-        self.options = steps(range)
-            .into_iter()
-            .map(|value| Choice {
-                value: number(value),
-                label: match none {
-                    Some(none) if value == 0.0 => none.to_owned(),
-                    _ => format!("{}{PERCENT}", number(value * 100.0)),
-                },
-            })
-            .collect();
+    pub fn percent(mut self) -> Self {
         self.unit = Some(PERCENT);
+        self.scale = Some(PERCENT_SCALE);
         self
     }
 
-    /// Plain numbers to choose from, in steps of tenths.
+    /// A count of lines.
     #[must_use]
-    pub fn numbers(mut self, range: (f64, f64, f64)) -> Self {
-        self.options = steps(range)
-            .into_iter()
-            .map(|value| Choice {
-                value: number(value),
-                // One decimal place throughout: 1.0 beside 1.1.
-                label: format!("{value:.1}"),
-            })
-            .collect();
-        self
-    }
-
-    /// Counts of lines to choose from.
-    #[must_use]
-    pub fn lines(mut self, counts: &[u32]) -> Self {
-        self.options = counts
-            .iter()
-            .map(|count| Choice {
-                value: Value::from(*count),
-                label: format!("{} {LINES}", grouped(*count)),
-            })
-            .collect();
+    pub fn lines(mut self) -> Self {
         self.unit = Some(LINES);
         self
     }
 
-    /// Durations in whole seconds to choose from.
+    /// A time in whole seconds.
     #[must_use]
-    pub fn seconds(mut self, counts: &[u32]) -> Self {
-        self.options = counts
-            .iter()
-            .map(|count| Choice {
-                value: Value::from(*count),
-                label: format!("{count} {SECONDS}"),
-            })
-            .collect();
+    pub fn seconds(mut self) -> Self {
         self.unit = Some(SECONDS);
         self
     }
@@ -313,6 +265,13 @@ impl Shown {
     #[must_use]
     pub fn when_unset(mut self, path: &'static str) -> Self {
         self.when = Some(When { path, is: "unset" });
+        self
+    }
+
+    /// Shown only on one platform, for a setting that does nothing on the others.
+    #[must_use]
+    pub fn only_on(mut self, platform: &'static str) -> Self {
+        self.platform = Some(platform);
         self
     }
 }
@@ -356,8 +315,8 @@ pub fn pages() -> [Page; 3] {
             label: "Terminal",
             icon: "terminal",
             group: APPLICATION,
-            blurb: "Cursor, scrollback and what happens when a program ends.",
-            groups: &["Cursor", "Buffer", "Closing"],
+            blurb: "The terminal new tabs open, the cursor, scrollback and what happens when a program ends.",
+            groups: &["New terminals", "Cursor", "Buffer", "Closing"],
         },
     ]
 }
@@ -398,50 +357,36 @@ mod tests {
     }
 
     #[test]
-    fn whole_numbers_are_written_whole_and_steps_do_not_drift() {
-        assert_eq!(number(10.0), json!(10));
-        assert_eq!(number(1.2), json!(1.2));
-        assert_eq!(steps((0.0, 0.5, 0.1)), [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]);
-        assert_eq!(steps((1.0, 1.6, 0.1)).len(), 7);
-        assert_eq!(steps((0.0, 18.0, 2.0)).last(), Some(&18.0));
-        assert_eq!(grouped(100_000), "100,000");
-        assert_eq!(grouped(5000), "5,000");
-        assert_eq!(grouped(500), "500");
-    }
-
-    #[test]
-    fn choices_are_called_by_their_unit() {
-        let lengths = Shown::select("p", "g", 1, "l").lengths((0.0, 4.0, 2.0));
+    fn a_typed_number_says_its_step_unit_and_scale() {
+        let length = Shown::number("p", "g", 1, "l", 1.0).pixels();
         assert_eq!(
-            serde_json::to_value(&lengths.options).unwrap(),
-            json!([
-                { "value": 0, "label": "0 px" },
-                { "value": 2, "label": "2 px" },
-                { "value": 4, "label": "4 px" },
-            ])
+            serde_json::to_value(&length).unwrap(),
+            json!({
+                "page": "p",
+                "group": "g",
+                "order": 1,
+                "label": "l",
+                "control": "number",
+                "unit": "px",
+                "step": 1.0,
+            })
         );
-        let shares = Shown::select("p", "g", 1, "l").shares((0.0, 0.2, 0.1), Some("Off"));
+        let share = Shown::number("p", "g", 1, "l", 1.0).percent();
+        assert_eq!(share.unit, Some("%"));
+        assert_eq!(share.scale, Some(100.0));
         assert_eq!(
-            serde_json::to_value(&shares.options).unwrap(),
-            json!([
-                { "value": 0, "label": "Off" },
-                { "value": 0.1, "label": "10%" },
-                { "value": 0.2, "label": "20%" },
-            ])
+            Shown::number("p", "g", 1, "l", 1000.0).lines().unit,
+            Some("lines")
         );
-        let numbers = Shown::select("p", "g", 1, "l").numbers((1.0, 1.1, 0.1));
-        assert_eq!(numbers.options[0].label, "1.0");
-        assert_eq!(numbers.options[1].label, "1.1");
-        assert_eq!(numbers.unit, None);
-        let lines = Shown::select("p", "g", 1, "l").lines(&[1000]);
-        assert_eq!(lines.options[0].label, "1,000 lines");
-        assert_eq!(lines.unit, Some("lines"));
-        let seconds = Shown::select("p", "g", 1, "l").seconds(&[30]);
         assert_eq!(
-            serde_json::to_value(&seconds.options).unwrap(),
-            json!([{ "value": 30, "label": "30 seconds" }])
+            Shown::number("p", "g", 1, "l", 1.0).seconds().unit,
+            Some("seconds")
         );
-        assert_eq!(seconds.unit, Some("seconds"));
+        let windows = Shown::switch("p", "g", 1, "l").only_on("windows");
+        assert_eq!(
+            serde_json::to_value(&windows).unwrap()["platform"],
+            "windows"
+        );
     }
 
     #[test]
@@ -519,11 +464,34 @@ mod tests {
                 "select" => assert!(fixed > 0 || listed, "{path:?} offers nothing"),
                 "segmented" => assert!((2..=3).contains(&fixed) && !listed, "{path:?}"),
                 "text" => assert!(fixed == 0 && !listed, "{path:?}"),
+                "number" => {
+                    assert!(fixed == 0 && !listed, "{path:?}");
+                    // A setting that may be left out is a number or nothing.
+                    let types: Vec<&Value> = match &schema["type"] {
+                        Value::Array(types) => types.iter().collect(),
+                        one => vec![one],
+                    };
+                    assert!(
+                        types
+                            .iter()
+                            .any(|kind| *kind == "number" || *kind == "integer"),
+                        "{path:?} is not a number"
+                    );
+                    let least = schema["minimum"].as_f64().expect("a least value");
+                    let most = schema["maximum"].as_f64().expect("a greatest value");
+                    let scale = says["scale"].as_f64().unwrap_or(1.0);
+                    let step = says["step"].as_f64().expect("a step");
+                    assert!(least < most, "{path:?}");
+                    assert!(step > 0.0 && step <= (most - least) * scale, "{path:?}");
+                }
                 other => panic!("{path:?} is set by `{other}`"),
             }
             if let Some(list) = says.get("list") {
                 let known = ["themes", "fonts", "shells", "workspaces", "profiles"];
                 assert!(known.contains(&list.as_str().unwrap()), "{path:?}");
+            }
+            if let Some(platform) = says.get("platform") {
+                assert!(PLATFORMS.contains(&platform.as_str().unwrap()), "{path:?}");
             }
         }
     }

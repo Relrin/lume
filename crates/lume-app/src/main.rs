@@ -38,6 +38,7 @@ mod configsvc;
 mod control;
 mod error;
 mod fonts;
+mod frames;
 mod harness;
 mod log;
 mod marks;
@@ -57,7 +58,6 @@ mod workspaces;
 
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use lume_config::schema::Confirm;
 use lume_config::{ColorScheme, Dirs};
@@ -369,11 +369,11 @@ fn main() -> ExitCode {
             }
 
             // A change of the configuration reaches the pages, and what the application
-            // itself draws from it follows: the windows' title bars, and where the
-            // list of tabs is.
+            // itself draws from it follows: the windows' frames, and where the list of
+            // tabs is.
             let telling = Arc::clone(&serving);
             let following = Arc::downgrade(&services);
-            let custom = AtomicBool::new(services.config.title_bar_custom());
+            let frames = frames::Frames::new(&services.config);
             services.config.watch(move |notice| {
                 let changed = notice["type"] == "config_changed";
                 telling.broadcast(&notice);
@@ -381,10 +381,7 @@ fn main() -> ExitCode {
                     return;
                 };
                 services.panes.profiles.config_changed();
-                let now = services.config.title_bar_custom();
-                if custom.swap(now, Ordering::Relaxed) != now {
-                    services.shell.set_title_bar(now);
-                }
+                frames.follow(&services.config, services.shell.as_ref());
                 let panes = Arc::clone(&services.panes);
                 telling
                     .runtime()

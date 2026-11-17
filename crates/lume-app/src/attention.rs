@@ -579,7 +579,7 @@ mod tests {
     async fn the_application_asks_for_attention_to_a_window_not_in_use() {
         let app = app(
             "attention",
-            "notify-long-command = true\nlong-command-seconds = 1",
+            "notify-long-command = true\nlong-command-seconds = 5",
         )
         .await;
         let reports = app.services.state.reports();
@@ -601,7 +601,7 @@ mod tests {
 
         // A command that ran long enough, named by what the pane runs.
         reports.on_event(&app.key, &SessionEvent::CommandStarted { command: None });
-        tokio::time::sleep(Duration::from_millis(1100)).await;
+        tokio::time::sleep(Duration::from_millis(5100)).await;
         reports.on_event(&app.key, &SessionEvent::CommandFinished { exit: Some(4) });
         until("the notification", || !shell.notified().is_empty()).await;
         let shell_name = if cfg!(windows) { "cmd" } else { "sh" };
@@ -609,7 +609,7 @@ mod tests {
             app.shell.notified(),
             vec![(
                 "A command failed with exit code 4".to_owned(),
-                format!("{shell_name}: it ran for 1 s"),
+                format!("{shell_name}: it ran for 5 s"),
             )]
         );
         app.services.state.shutdown().await;

@@ -53,6 +53,9 @@ pub trait Shell: Send + Sync + 'static {
     fn layout_windows(&self) -> Vec<String>;
     /// Draws every window with the page's own title bar, or with the system's.
     fn set_title_bar(&self, custom: bool);
+    /// Rounds the corners of every window's frame as asked, where the window system
+    /// lets the application choose.
+    fn set_corners(&self, corners: lume_config::WindowCorners);
     /// Shows the settings window, at a section if one is named: opens it in the middle
     /// of the screen the window `from` is on, or brings it forward if it is open.
     fn open_settings(&self, section: Option<&str>, from: Option<WindowId>);

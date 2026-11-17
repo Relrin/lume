@@ -135,6 +135,14 @@ export function ChevronDownIcon({ size = 12 }: { size?: number }) {
   );
 }
 
+export function ChevronRightIcon({ size = 12 }: { size?: number }) {
+  return (
+    <Icon size={size} weight={2.2}>
+      <polyline points="9 6 15 12 9 18" />
+    </Icon>
+  );
+}
+
 export function CheckIcon({ size = 13 }: { size?: number }) {
   return (
     <Icon size={size} weight={2.2}>

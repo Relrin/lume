@@ -70,6 +70,37 @@ describe("a setting drawn as a row", () => {
     expect(html).toContain('<option value="2">10 px</option>');
   });
 
+  it("draws a typed number with its bounds and unit, and a way back to the theme's", () => {
+    const shape = { min: 0, max: 100, step: 1, unit: "%", scale: 100, integer: false };
+    const left = markup(
+      row({
+        control: "number",
+        number: shape,
+        value: null,
+        effective: 0.15,
+        unsetLabel: "Theme’s (15%)",
+      }),
+    );
+    expect(left).toContain('role="spinbutton"');
+    expect(left).toContain('inputMode="decimal"');
+    expect(left).toContain('aria-valuemin="0" aria-valuemax="100" aria-valuenow="15"');
+    expect(left).toContain('placeholder="15"');
+    expect(left).toContain('value=""');
+    expect(left).toContain('<span class="settings-number-unit" aria-hidden="true">%</span>');
+    expect(left).not.toContain("settings-reset");
+
+    const set = markup(
+      row({ control: "number", number: shape, value: 0.4, effective: 0.4, unsetLabel: "Theme’s" }),
+    );
+    expect(set).toContain('value="40"');
+    expect(set).toContain('aria-label="Use the theme’s"');
+    // Seconds are written short, as the field has little room.
+    const seconds = markup(
+      row({ control: "number", number: { ...shape, unit: "seconds", scale: 1 }, value: 10 }),
+    );
+    expect(seconds).toContain('aria-hidden="true">s</span>');
+  });
+
   it("draws segments as buttons, the one in use pressed", () => {
     const html = markup(
       row({

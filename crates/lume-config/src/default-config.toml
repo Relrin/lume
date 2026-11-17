@@ -29,6 +29,9 @@
 # Flash the taskbar button (or bounce the dock icon) when a program rings the bell in a
 # window that is not in use.
 # bell-attention = true
+# How round the corners of a window's own frame are, where the system lets Lume choose
+# (Windows 11): "round", "small" or "square".
+# corners = "round"
 
 [workspace]
 # What happens to a workspace's programs when another workspace is opened: "close".
@@ -40,9 +43,11 @@
 #   theme = "lume-dark"
 # theme-light = "lume-light"
 # theme-dark = "lume-dark"
-# The radius of a pane's corners and the space between panes, in pixels. Left out, the
-# theme decides.
+# The radius of the corners of panes (and of menus and palettes), of controls (tabs,
+# buttons, fields and menu items), and the space between panes, in pixels. Left out, the
+# theme decides. 0 makes them square.
 #   card-radius = 12
+#   control-radius = 8
 #   gap = 8
 # When a pane shows its header: "always", "auto" (only beside other panes) or "never".
 # pane-header = "always"
@@ -73,7 +78,7 @@
 # bold-weight = 700
 # The font and size of everything that is not a terminal.
 # ui-family = "system-ui"
-# ui-size = 13.0
+# ui-size = 12.0
 
 [terminal]
 # The program a new terminal runs, and its arguments. Empty, it is your own shell.
@@ -92,7 +97,7 @@
 # Whether closing a pane asks first: "never" or "always".
 # confirm-close = "never"
 # A desktop notification when a command ends in a window that is not in use, if it ran
-# for at least this many seconds. It needs the shell to report its commands.
+# for at least this many seconds (5 or more). It needs the shell to report its commands.
 # notify-long-command = false
 # long-command-seconds = 10
 

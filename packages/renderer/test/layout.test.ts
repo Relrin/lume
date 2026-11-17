@@ -102,9 +102,11 @@ describe("cell metrics", () => {
   });
 
   it("keep the underline and the strikethrough inside the cell", () => {
-    for (const lineHeight of [0.8, 1, 1.2, 2]) {
+    for (const lineHeight of [0.1, 0.5, 0.8, 1, 1.2, 2, 3]) {
       const m = cellMetrics({ advance: 9, ascent: 14, descent: 9 }, { ...font, lineHeight }, 0, 1);
+      expect(m.cellHeight).toBeGreaterThanOrEqual(1);
       expect(m.underlineTop + m.lineThickness).toBeLessThanOrEqual(m.cellHeight);
+      expect(m.strikethroughTop + m.lineThickness).toBeLessThanOrEqual(m.cellHeight);
       expect(m.strikethroughTop).toBeGreaterThanOrEqual(0);
       expect(m.strikethroughTop).toBeLessThan(m.baseline);
     }

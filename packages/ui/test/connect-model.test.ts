@@ -13,7 +13,7 @@ import {
 } from "../src/connect/model.ts";
 import { CONNECT_GROUP_MAX, NEW_TAB_MENU_MAX } from "../src/connect/tuning.ts";
 import type { Profile, ProfileList } from "../src/core/types.ts";
-import { newTabItems } from "../src/shell/NewTabButton.tsx";
+import { newTabWithItems } from "../src/shell/AppMenu.tsx";
 
 function shell(id: string, name: string, program: string, extra: Partial<Profile> = {}): Profile {
   return {
@@ -220,41 +220,42 @@ describe("what the Connect palette says of a profile", () => {
   });
 });
 
-describe("the menu beside the new-tab button", () => {
+describe("the menu of New tab with", () => {
   const opened: (string | null)[] = [];
   const open = (profile: string | null) => opened.push(profile);
   let mores = 0;
   const more = () => (mores += 1);
 
-  it("lists the default first and ticked, then the others there are to list, then more", () => {
-    const items = newTabItems(LIST, open, more);
-    expect(items.map((item) => [item.label, item.hint, item.checked])).toEqual([
-      ["PowerShell", "Local", true],
-      ["Nushell", "Local", false],
+  it("lists the default terminal, then the others there are to list, then more", () => {
+    const items = newTabWithItems(LIST, open, more, "Ctrl Shift L");
+    expect(items.map((item) => [item.label, item.hint, item.separated ?? false])).toEqual([
+      ["Default terminal", "PowerShell", false],
+      ["Nushell", "Local", true],
       ["Build box", "SSH", false],
       ["Ubuntu", "WSL", false],
       ["dev-staging", "SSH", false],
-      ["More…", undefined, undefined],
+      ["More…", "Ctrl Shift L", true],
     ]);
-    expect(items.at(-1)!.separated).toBe(true);
+    // Every terminal has a picture of its kind; the way to the rest has none.
+    expect(items.slice(0, -1).every((item) => item.icon !== undefined)).toBe(true);
+    expect(items.at(-1)!.icon).toBeUndefined();
+    expect(items.some((item) => item.checked !== undefined)).toBe(false);
     items[0]!.choose();
     items[2]!.choose();
     items.at(-1)!.choose();
-    expect(opened).toEqual(["auto.pwsh", "box"]);
+    expect(opened).toEqual([null, "box"]);
     expect(mores).toBe(1);
   });
 
-  it("offers the default shell when no profile is the default, and keeps to its limit", () => {
+  it("names the system's shell when no profile is the default, and keeps to its limit", () => {
     const many = Array.from({ length: NEW_TAB_MENU_MAX + 4 }, (_, index) =>
       shell(`s${index}`, `Shell ${index}`, "sh"),
     );
-    const items = newTabItems({ ...LIST, profiles: many, default: null }, open, more);
-    expect(items[0]).toMatchObject({ key: "default", label: "Default shell", checked: true });
+    const items = newTabWithItems({ ...LIST, profiles: many, default: null }, open, more);
+    expect(items[0]).toMatchObject({ key: "default", hint: "System default" });
     // The default, the most others there may be, and the way to the rest.
     expect(items).toHaveLength(NEW_TAB_MENU_MAX + 2);
-    opened.length = 0;
-    items[0]!.choose();
-    expect(opened).toEqual([null]);
-    expect(newTabItems(null, open, more).map((item) => item.key)).toEqual(["default", "more"]);
+    expect(items.at(-1)!.hint).toBeUndefined();
+    expect(newTabWithItems(null, open, more).map((item) => item.key)).toEqual(["default", "more"]);
   });
 });

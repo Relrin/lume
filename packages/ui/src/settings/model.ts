@@ -22,7 +22,7 @@ import { profileChoices } from "../palette/choices.ts";
 export type SettingValue = string | number | boolean;
 
 /** The kinds of control a row has. */
-export type SettingControl = "switch" | "select" | "segmented" | "text";
+export type SettingControl = "switch" | "select" | "segmented" | "text" | "number";
 
 /** The lists a setting's choices may be taken from. */
 export type SettingList = "themes" | "fonts" | "shells" | "workspaces" | "profiles";
@@ -42,8 +42,27 @@ export interface SettingAnnotation {
   /** The design token that says what the setting comes to while it is left out. */
   readonly token?: string;
   readonly unit?: string;
+  /** How far the arrow keys move a typed number, in what it is shown in. */
+  readonly step?: number;
+  /** How many times bigger a typed number is shown than it is written. */
+  readonly scale?: number;
   /** The row is shown only while another setting is, or is not, in the file. */
   readonly when?: { readonly path: string; readonly is: "unset" | "set" };
+  /** The only platform the row is shown on. */
+  readonly platform?: string;
+}
+
+/** What a typed number may be, as it is shown: from `min` to `max`, in `unit`. */
+export interface NumberShape {
+  readonly min: number;
+  readonly max: number;
+  /** How far the arrow keys move it. */
+  readonly step: number;
+  readonly unit?: string;
+  /** How many times bigger it is shown than it is written: 100 for a share. */
+  readonly scale: number;
+  /** Whether only whole numbers are written. */
+  readonly integer: boolean;
 }
 
 /** What the schema says of a page of settings: one entry of the keyword `x-lume-pages`. */
@@ -73,8 +92,10 @@ export interface SettingRow {
   readonly label: string;
   readonly help?: string;
   readonly control: SettingControl;
-  /** What it may be set to. Empty for a switch and for text. */
+  /** What it may be set to. Empty for a switch, for text and for a number. */
   readonly choices: readonly SettingChoice[];
+  /** What a typed number may be. Given only for a number. */
+  readonly number?: NumberShape;
   /** What it is set to, or `null` while it is left out. */
   readonly value: SettingValue | null;
   /** What it comes to: its value, or what stands in while it is left out. */
@@ -165,7 +186,11 @@ function text(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-const CONTROLS: readonly SettingControl[] = ["switch", "select", "segmented", "text"];
+function finite(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+const CONTROLS: readonly SettingControl[] = ["switch", "select", "segmented", "text", "number"];
 const LISTS: readonly SettingList[] = ["themes", "fonts", "shells", "workspaces", "profiles"];
 
 /** What the schema says of a setting, if it says it in the form this reads. */
@@ -188,6 +213,9 @@ function annotationOf(raw: unknown): SettingAnnotation | undefined {
   const unset = text(raw["unset"]);
   const token = text(raw["token"]);
   const unit = text(raw["unit"]);
+  const step = finite(raw["step"]);
+  const scale = finite(raw["scale"]);
+  const platform = text(raw["platform"]);
   return {
     page,
     group,
@@ -200,6 +228,9 @@ function annotationOf(raw: unknown): SettingAnnotation | undefined {
     ...(unset === undefined ? {} : { unset }),
     ...(token === undefined ? {} : { token }),
     ...(unit === undefined ? {} : { unit }),
+    ...(step === undefined ? {} : { step }),
+    ...(scale === undefined ? {} : { scale }),
+    ...(platform === undefined ? {} : { platform }),
     ...(isObject(when) &&
     typeof when["path"] === "string" &&
     (when["is"] === "unset" || when["is"] === "set")
@@ -359,14 +390,17 @@ function rowOf(found: Found, view: ConfigView, lists: SettingsLists): SettingRow
     const named = choices.find((choice) => choice.value === standsIn)?.label;
     const shown = standsIn === null ? undefined : (named ?? withUnit(standsIn, annotation.unit));
     unsetLabel = shown === undefined ? annotation.unset : `${annotation.unset} (${shown})`;
-    if (annotation.control !== "text") choices.unshift({ value: null, label: unsetLabel });
+    if (annotation.control !== "text" && annotation.control !== "number")
+      choices.unshift({ value: null, label: unsetLabel });
   }
 
   const source = sourceOf(view, path);
   const problem = view.problems.find((candidate) => candidate.path === path);
   const when = annotation.when;
   const shown =
-    when === undefined || (valueAt(view.config, when.path) === null) === (when.is === "unset");
+    (when === undefined || (valueAt(view.config, when.path) === null) === (when.is === "unset")) &&
+    (annotation.platform === undefined || annotation.platform === view.platform);
+  const number = annotation.control === "number" ? numberShape(schema, annotation) : undefined;
 
   return {
     path,
@@ -374,6 +408,7 @@ function rowOf(found: Found, view: ConfigView, lists: SettingsLists): SettingRow
     ...(annotation.help === undefined ? {} : { help: annotation.help }),
     control: annotation.control,
     choices,
+    ...(number === undefined ? {} : { number }),
     value,
     effective,
     ...(unsetLabel === undefined ? {} : { unsetLabel }),
@@ -381,6 +416,27 @@ function rowOf(found: Found, view: ConfigView, lists: SettingsLists): SettingRow
     overridden: source === "workspace" || source === "profile",
     ...(problem === undefined ? {} : { problem: describeProblem(problem) }),
     shown,
+  };
+}
+
+/** Whether a schema's type is, or may be, a whole number. */
+function isInteger(schema: Json): boolean {
+  const kind = schema["type"];
+  return Array.isArray(kind) ? kind.includes("integer") : kind === "integer";
+}
+
+/** What a typed number may be: the schema's own bounds, shown as the row shows them. */
+function numberShape(schema: Json, annotation: SettingAnnotation): NumberShape {
+  const scale = annotation.scale ?? 1;
+  const least = finite(schema["minimum"]);
+  const most = finite(schema["maximum"]);
+  return {
+    min: least === undefined ? -Infinity : rounded(least * scale),
+    max: most === undefined ? Infinity : rounded(most * scale),
+    step: annotation.step ?? 1,
+    ...(annotation.unit === undefined ? {} : { unit: annotation.unit }),
+    scale,
+    integer: isInteger(schema),
   };
 }
 
@@ -489,4 +545,61 @@ export function writeSwitch(row: SettingRow, on: boolean): SettingWrite {
 export function writeText(row: SettingRow, typed: string): SettingWrite {
   const value = typed.trim();
   return value === "" ? { op: "unset", path: row.path } : { op: "set", path: row.path, value };
+}
+
+/** How many decimal places a number is kept to, so 0.1 added three times is 0.3. */
+const NUMBER_PLACES = 1000;
+
+function rounded(value: number): number {
+  return Math.round(value * NUMBER_PLACES) / NUMBER_PLACES;
+}
+
+/** A number of a row as the row shows it: `15` for a share written as `0.15`. */
+export function shownNumber(row: SettingRow, value: SettingValue | null): string {
+  if (typeof value !== "number") return "";
+  return String(rounded(value * (row.number?.scale ?? 1)));
+}
+
+/** The number a row shows, held to its bounds and written as the file takes it. */
+function written(shape: NumberShape, shown: number): number {
+  const held = Math.min(shape.max, Math.max(shape.min, shown));
+  const value = held / shape.scale;
+  return shape.integer ? Math.round(value) : rounded(value);
+}
+
+/**
+ * The change that typing a number into a row asks for. It is held to the setting's
+ * bounds rather than refused. A unit typed after it is passed over, and a comma is
+ * taken for a decimal point. Nothing typed leaves out a setting that can be left out.
+ * `null` asks for no change: nothing typed into one that cannot, or no number at all.
+ */
+export function writeNumber(row: SettingRow, typed: string): SettingWrite | null {
+  const shape = row.number;
+  if (!shape) return null;
+  // A unit typed after the number, whichever way it is written: `12px`, `50 %`, `10 s`.
+  const plain = typed
+    .trim()
+    .replace(/(?<=[\d.])\s*[a-z%]+$/i, "")
+    .replace(",", ".");
+  if (plain === "") return row.unsetLabel === undefined ? null : { op: "unset", path: row.path };
+  // `Number` takes things a person would not call a number, such as `0x10` or `1e3`.
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(plain)) return null;
+  return { op: "set", path: row.path, value: written(shape, Number(plain)) };
+}
+
+/**
+ * The change the arrow keys ask for: the row's number moved by `steps` of its step,
+ * from `from` (what is typed, as shown) or else what the row comes to.
+ */
+export function stepNumber(
+  row: SettingRow,
+  from: number | null,
+  steps: number,
+): SettingWrite | null {
+  const shape = row.number;
+  if (!shape) return null;
+  const base =
+    from ?? (typeof row.effective === "number" ? row.effective * shape.scale : shape.min);
+  const next = rounded(base + steps * shape.step);
+  return { op: "set", path: row.path, value: written(shape, Number.isFinite(next) ? next : 0) };
 }

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { SCROLLBACK_DEFAULT_LINES, SCROLLBACK_MAX_LINES } from "../src/limits.ts";
 import { contrast, DEFAULT_APPEARANCE, rendererTheme } from "../src/theme.ts";
+import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX } from "../src/tuning.ts";
 
 const BLACK = { r: 0, g: 0, b: 0 };
 const WHITE = { r: 255, g: 255, b: 255 };
@@ -60,5 +61,17 @@ describe("how many lines a terminal keeps", () => {
     const lines = schema.properties.terminal.properties["scrollback-lines"]!;
     expect(SCROLLBACK_MAX_LINES).toBe(lines.maximum);
     expect(SCROLLBACK_DEFAULT_LINES).toBe(lines.default);
+  });
+});
+
+describe("how big terminal text can be made", () => {
+  it("is as small and as large as the configuration may set it", () => {
+    const path = fileURLToPath(new URL("../../../schemas/config.schema.json", import.meta.url));
+    const schema = JSON.parse(readFileSync(path, "utf8")) as {
+      properties: { font: { properties: Record<string, { minimum: number; maximum: number }> } };
+    };
+    const size = schema.properties.font.properties["size"]!;
+    expect(FONT_SIZE_MIN_PX).toBe(size.minimum);
+    expect(FONT_SIZE_MAX_PX).toBe(size.maximum);
   });
 });

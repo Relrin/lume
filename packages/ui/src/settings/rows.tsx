@@ -11,10 +11,13 @@
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
 
-import { ChevronDownIcon } from "../shell/icons.tsx";
+import { AgainIcon, ChevronDownIcon } from "../shell/icons.tsx";
 import {
   chosenIndex,
+  shownNumber,
+  stepNumber,
   writeChoice,
+  writeNumber,
   writeSwitch,
   writeText,
   type SettingRow,
@@ -160,6 +163,109 @@ function TextField({ row, labelled, write }: ControlProps) {
   );
 }
 
+/** How a unit is written after a number in its field: short, as a field has no room. */
+const UNIT_SHORT: Readonly<Record<string, string>> = { seconds: "s" };
+
+/**
+ * A number that is typed. What is typed is held to the setting's bounds when it is
+ * written, so the field shows the nearest value the setting takes once the
+ * configuration comes back. The arrow keys move it by its step, ten steps with Shift.
+ * While a setting that can be left out is left out, the field is empty and shows what
+ * stands in for it; while it is set, a button beside it leaves it out again.
+ */
+function NumberField({ row, labelled, write }: ControlProps) {
+  const field = useRef<HTMLInputElement>(null);
+  const shape = row.number;
+  const held = shownNumber(row, row.value);
+  // The field shows what is in use whenever that changes, unless it is being typed in.
+  useEffect(() => {
+    const element = field.current;
+    if (element && document.activeElement !== element) element.value = held;
+  }, [held]);
+  if (!shape) return null;
+
+  /** Asks for a change and shows at once the value it asks for. */
+  const ask = (change: SettingWrite | null) => {
+    const element = field.current;
+    if (change === null || (change.op === "set" && change.value === row.value)) {
+      if (element) element.value = held;
+      return;
+    }
+    if (change.op === "unset" && row.value === null) return;
+    if (element) element.value = change.op === "set" ? shownNumber(row, change.value) : "";
+    write(change);
+  };
+  const commit = () => {
+    const typed = field.current?.value ?? "";
+    if (typed.trim() !== held) ask(writeNumber(row, typed));
+  };
+  const unit = shape.unit === undefined ? undefined : (UNIT_SHORT[shape.unit] ?? shape.unit);
+  const now = typeof row.effective === "number" ? row.effective * shape.scale : undefined;
+  return (
+    <span className="settings-number-group">
+      {row.unsetLabel !== undefined && row.value !== null && (
+        <button
+          type="button"
+          className="settings-reset"
+          aria-label={`Use the ${row.unsetLabel.toLowerCase()}`}
+          title={`Use the ${row.unsetLabel.toLowerCase()}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            ask({ op: "unset", path: row.path });
+          }}
+        >
+          <AgainIcon />
+        </button>
+      )}
+      <span
+        className="settings-number"
+        onClick={(event) => {
+          event.stopPropagation();
+          field.current?.focus();
+        }}
+      >
+        <input
+          ref={field}
+          type="text"
+          inputMode="decimal"
+          role="spinbutton"
+          aria-labelledby={labelled}
+          aria-valuemin={Number.isFinite(shape.min) ? shape.min : undefined}
+          aria-valuemax={Number.isFinite(shape.max) ? shape.max : undefined}
+          aria-valuenow={now}
+          defaultValue={held}
+          placeholder={shownNumber(row, row.value === null ? row.effective : null)}
+          spellCheck={false}
+          autoComplete="off"
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              commit();
+            } else if (event.key === "Escape") {
+              // What was typed is given up, and the key goes no further: it does not
+              // also close the window.
+              event.currentTarget.value = held;
+              event.currentTarget.blur();
+              event.stopPropagation();
+            } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+              event.preventDefault();
+              const typed = event.currentTarget.value.trim().replace(",", ".");
+              const from = typed === "" || Number.isNaN(Number(typed)) ? null : Number(typed);
+              const by = (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1);
+              ask(stepNumber(row, from, by));
+            }
+          }}
+        />
+        {unit !== undefined && (
+          <span className="settings-number-unit" aria-hidden="true">
+            {unit}
+          </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
 /** Where a setting that the user's file does not decide gets its value. */
 function overriddenNote(row: SettingRow): string {
   return row.source === "workspace"
@@ -219,6 +325,7 @@ export function Row({
       {row.control === "select" && <Select {...control} />}
       {row.control === "segmented" && <Segmented {...control} />}
       {row.control === "text" && <TextField {...control} />}
+      {row.control === "number" && <NumberField {...control} />}
     </div>
   );
 }

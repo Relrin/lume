@@ -20,9 +20,12 @@ export const CLICK_REPEAT_DISTANCE_CELLS = 1;
 /** How often the view scrolls by a row while a selection is dragged past its edge. */
 export const AUTOSCROLL_INTERVAL_MS = 50;
 
-/** How much one step of zooming changes the font size, and how far it can go. */
+/**
+ * How much one step of zooming changes the font size, and how far it can go: as far as
+ * the configuration's `font.size` may be set.
+ */
 export const FONT_ZOOM_STEP_PX = 1;
-export const FONT_SIZE_MIN_PX = 6;
+export const FONT_SIZE_MIN_PX = 1;
 export const FONT_SIZE_MAX_PX = 72;
 
 /**

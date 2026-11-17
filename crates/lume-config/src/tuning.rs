@@ -18,30 +18,39 @@ pub const SUGGEST_MAX_DISTANCE: usize = 2;
 /// full of terminals can hold.
 pub const SCROLLBACK_LINES_MAX: u32 = 100_000;
 
-/// The smallest and largest font size, in CSS pixels.
-pub const FONT_SIZE_MIN: f64 = 6.0;
+/// The smallest and largest size of terminal text, in CSS pixels.
+pub const FONT_SIZE_MIN: f64 = 1.0;
 pub const FONT_SIZE_MAX: f64 = 72.0;
 
-/// What the settings window offers for a setting that is a size or a share: the first
-/// value, the last, and the step between them. The file takes any value the setting
-/// allows; these are the ones there is a choice for.
-pub const SETTINGS_TERMINAL_TEXT_SIZES: (f64, f64, f64) = (10.0, 24.0, 1.0);
-pub const SETTINGS_INTERFACE_TEXT_SIZES: (f64, f64, f64) = (11.0, 16.0, 1.0);
-pub const SETTINGS_LINE_HEIGHTS: (f64, f64, f64) = (1.0, 1.6, 0.1);
-pub const SETTINGS_CORNER_RADII: (f64, f64, f64) = (0.0, 18.0, 2.0);
-pub const SETTINGS_GAPS: (f64, f64, f64) = (0.0, 16.0, 2.0);
-pub const SETTINGS_PADDINGS: (f64, f64, f64) = (0.0, 16.0, 2.0);
-pub const SETTINGS_DIMMINGS: (f64, f64, f64) = (0.0, 0.5, 0.1);
-pub const SETTINGS_BLURS: (f64, f64, f64) = (0.0, 40.0, 4.0);
-pub const SETTINGS_OPACITIES: (f64, f64, f64) = (0.1, 1.0, 0.1);
+/// The smallest and largest size of the text of everything that is not a terminal, in
+/// CSS pixels.
+pub const UI_FONT_SIZE_MIN: f64 = 1.0;
+pub const UI_FONT_SIZE_MAX: f64 = 32.0;
 
-/// The counts of scrollback lines the settings window offers.
-pub const SETTINGS_SCROLLBACK_LINES: [u32; 5] =
-    [1_000, 5_000, 10_000, 50_000, SCROLLBACK_LINES_MAX];
+/// The smallest and largest height of a line of terminal text, as a multiple of its
+/// size. Below 1 a line is shorter than its letters, which are cut to it.
+pub const LINE_HEIGHT_MIN: f64 = 0.1;
+pub const LINE_HEIGHT_MAX: f64 = 3.0;
 
-/// How long a command runs, in seconds, before its end is worth a notification, as the
-/// settings window offers it.
-pub const SETTINGS_LONG_COMMAND_SECONDS: [u32; 6] = [5, 10, 30, 60, 300, 900];
+/// The largest radius of a corner, and the largest space between panes or between a
+/// pane's edge and its text, in pixels.
+pub const PANE_LENGTH_MAX: f64 = 64.0;
+
+/// The most the picture behind the panes may be blurred, in pixels.
+pub const BACKGROUND_BLUR_MAX: f64 = 50.0;
+
+/// How far the arrow keys move a typed number in the settings window, in what the
+/// number is shown in: pixels, a multiple of the text's size, hundredths, lines and
+/// seconds.
+pub const SETTINGS_STEP_LENGTH: f64 = 1.0;
+pub const SETTINGS_STEP_LINE_HEIGHT: f64 = 0.1;
+pub const SETTINGS_STEP_PERCENT: f64 = 1.0;
+pub const SETTINGS_STEP_LINES: f64 = 1000.0;
+pub const SETTINGS_STEP_SECONDS: f64 = 1.0;
+
+/// The shortest a command may be said to run before its end is worth a notification.
+/// Anything shorter would notify about commands that are typed and done.
+pub const LONG_COMMAND_SECONDS_MIN: u32 = 5;
 
 /// How long a command runs, in seconds, before its end is worth a notification, unless
 /// the settings say otherwise.

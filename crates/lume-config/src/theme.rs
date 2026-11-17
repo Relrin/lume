@@ -565,6 +565,7 @@ pub fn resolve_tokens(
 
     let lengths = [
         ("radius.card", appearance.card_radius),
+        ("radius.control", appearance.control_radius),
         ("space.gap", appearance.gap),
         ("background.blur", appearance.background_blur),
         ("space.padding", config.terminal.padding),
@@ -840,7 +841,7 @@ mod tests {
     #[test]
     fn the_settings_override_the_theme_and_the_token_table_overrides_both() {
         let text = "\
-[appearance]\ncard-radius = 4\ngap = 2\ndim-unfocused = 0.4\nbackground-image = \"wall.png\"\n\
+[appearance]\ncard-radius = 4\ncontrol-radius = 3\ngap = 2\ndim-unfocused = 0.4\nbackground-image = \"wall.png\"\n\
 background-blur = 10\nbackground-opacity = 0.5\n\
 [appearance.tokens.radius]\ncard = 20\n\
 [appearance.tokens.color]\naccent = \"#FF8800\"\n\
@@ -851,6 +852,7 @@ background-blur = 10\nbackground-opacity = 0.5\n\
         let (tokens, problems) = resolve(text, &Themes::builtin(), ColorScheme::Dark);
         assert_eq!(problems, vec![]);
         assert_eq!(tokens.get("radius.card"), Some(&TokenValue::Length(20.0)));
+        assert_eq!(tokens.get("radius.control"), Some(&TokenValue::Length(3.0)));
         assert_eq!(tokens.get("space.gap"), Some(&TokenValue::Length(2.0)));
         assert_eq!(tokens.get("opacity.dim"), Some(&TokenValue::Number(0.4)));
         assert_eq!(

@@ -54,7 +54,8 @@ pub use profiles::{
     LauncherKind, Profile, ProfileEntry, ProfileOrigin, ShellIntegration, merge_profiles,
 };
 pub use schema::{
-    CloseOnExit, Config, ProgramIcon, WorkspaceSettings, config_schema, default_config_text,
+    CloseOnExit, Config, ProgramIcon, WindowCorners, WorkspaceSettings, config_schema,
+    default_config_text,
 };
 pub use source::{Problem, ProblemKind, Source};
 pub use store::{ConfigStore, Resolved, check_setting};

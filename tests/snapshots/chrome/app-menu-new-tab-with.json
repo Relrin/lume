@@ -11,8 +11,85 @@
             "role": "button",
             "name": "Lume menu",
             "state": {
-              "expanded": "false"
+              "expanded": "true"
             }
+          },
+          {
+            "role": "menubar",
+            "name": "Application menu",
+            "parts": [
+              {
+                "role": "menuitem",
+                "name": "View",
+                "state": {
+                  "expanded": "false"
+                }
+              },
+              {
+                "role": "menuitem",
+                "name": "Help",
+                "state": {
+                  "expanded": "false"
+                }
+              }
+            ]
+          },
+          {
+            "role": "menu",
+            "name": "Lume",
+            "parts": [
+              {
+                "role": "menuitem",
+                "name": "New tabCtrl Shift T"
+              },
+              {
+                "role": "menuitem",
+                "name": "New tab with",
+                "state": {
+                  "expanded": "true"
+                }
+              }
+            ]
+          },
+          {
+            "role": "menu",
+            "name": "New tab with",
+            "parts": [
+              {
+                "role": "menuitem",
+                "name": "Default terminalPowerShell"
+              },
+              {
+                "role": "separator"
+              },
+              {
+                "role": "menuitem",
+                "name": "Build boxSSH"
+              },
+              {
+                "role": "menuitem",
+                "name": "Git BashLocal"
+              },
+              {
+                "role": "menuitem",
+                "name": "UbuntuWSL"
+              },
+              {
+                "role": "menuitem",
+                "name": "DebianWSL"
+              },
+              {
+                "role": "menuitem",
+                "name": "dev-stagingSSH"
+              },
+              {
+                "role": "separator"
+              },
+              {
+                "role": "menuitem",
+                "name": "More…"
+              }
+            ]
           },
           {
             "role": "button",
@@ -41,68 +118,6 @@
           {
             "role": "button",
             "name": "New tab"
-          },
-          {
-            "role": "button",
-            "name": "New tab with a profile",
-            "state": {
-              "expanded": "true"
-            }
-          },
-          {
-            "role": "menu",
-            "name": "New tab with a profile",
-            "parts": [
-              {
-                "role": "menuitemradio",
-                "name": "PowerShellLocal",
-                "state": {
-                  "checked": "true"
-                }
-              },
-              {
-                "role": "menuitemradio",
-                "name": "Build boxSSH",
-                "state": {
-                  "checked": "false"
-                }
-              },
-              {
-                "role": "menuitemradio",
-                "name": "Git BashLocal",
-                "state": {
-                  "checked": "false"
-                }
-              },
-              {
-                "role": "menuitemradio",
-                "name": "UbuntuWSL",
-                "state": {
-                  "checked": "false"
-                }
-              },
-              {
-                "role": "menuitemradio",
-                "name": "DebianWSL",
-                "state": {
-                  "checked": "false"
-                }
-              },
-              {
-                "role": "menuitemradio",
-                "name": "dev-stagingSSH",
-                "state": {
-                  "checked": "false"
-                }
-              },
-              {
-                "role": "separator"
-              },
-              {
-                "role": "menuitem",
-                "name": "More…"
-              }
-            ]
           }
         ]
       },

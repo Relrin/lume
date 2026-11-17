@@ -255,12 +255,16 @@ function buildCursor(
     case CursorShape.Underline:
       writeRect(overlayRect, 0, x, y + cellHeight - t, width, t, color);
       return { rects: 1, glyphs: 0 };
-    case CursorShape.HollowBlock:
+    case CursorShape.HollowBlock: {
+      // In a cell no taller than two lines the sides have no room left: the sizes are
+      // written unsigned, and a negative one would reach across the whole screen.
+      const side = Math.max(0, cellHeight - 2 * t);
       writeRect(overlayRect, 0, x, y, width, t, color);
       writeRect(overlayRect, 1, x, y + cellHeight - t, width, t, color);
-      writeRect(overlayRect, 2, x, y + t, t, cellHeight - 2 * t, color);
-      writeRect(overlayRect, 3, x + width - t, y + t, t, cellHeight - 2 * t, color);
+      writeRect(overlayRect, 2, x, y + t, t, side, color);
+      writeRect(overlayRect, 3, x + width - t, y + t, t, side, color);
       return { rects: 4, glyphs: 0 };
+    }
     default: {
       writeRect(overlayRect, 0, x, y, width, cellHeight, color);
       const slot = glyphSlot(frame, index, atlas);

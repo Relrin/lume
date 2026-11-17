@@ -10,12 +10,21 @@
  * whose command needs something asked for, such as a workspace's name, hands it to
  * the command palette, which asks. An item is left out when the application has no
  * such command.
+ *
+ * Below "New tab" stands "New tab with", whose own menu opens a tab with a profile
+ * other than the default: the default first, then the others, then the way to the
+ * palette that finds any of them.
  */
 
 import { useRef, useState } from "react";
 import { useStore } from "zustand";
 
 import { keyLabel } from "../commands/store.ts";
+import { KindIcon } from "../connect/icons.tsx";
+import { kindOf } from "../connect/model.ts";
+import { NEW_TAB_MENU_MAX } from "../connect/tuning.ts";
+import type { ProfileList } from "../core/types.ts";
+import { profileGroup } from "../palette/choices.ts";
 import { useShell } from "./context.ts";
 import { MenuIcon } from "./icons.tsx";
 import { Menu, type MenuItem } from "./Menu.tsx";
@@ -92,11 +101,59 @@ function isRow(place: Row | readonly Row[]): place is Row {
   return typeof place[0] === "string";
 }
 
+/** The size of the pictures of the kinds of terminal in the menu of "New tab with". */
+const KIND_ICON_PX = 14;
+
+/**
+ * The menu of "New tab with": the default terminal, with what it is; the other
+ * profiles there are to list, each with its kind; and the way to all of them, with the
+ * keys that take it there too. `open` is given a profile's id, or `null` for the
+ * default.
+ */
+export function newTabWithItems(
+  list: ProfileList | null,
+  open: (profile: string | null) => void,
+  more: () => void,
+  moreHint?: string,
+): MenuItem[] {
+  const visible = (list?.profiles ?? []).filter((profile) => !profile.hidden);
+  const fallback = visible.find((profile) => profile.id === list?.default);
+  const items: MenuItem[] = [
+    {
+      key: "default",
+      label: "Default terminal",
+      hint: fallback?.name ?? "System default",
+      icon: <KindIcon kind={fallback ? kindOf(fallback) : "local"} size={KIND_ICON_PX} />,
+      choose: () => open(null),
+    },
+  ];
+  for (const profile of visible.filter((candidate) => candidate !== fallback)) {
+    if (items.length > NEW_TAB_MENU_MAX) break;
+    items.push({
+      key: `profile:${profile.id}`,
+      label: profile.name,
+      hint: profileGroup(profile),
+      icon: <KindIcon kind={kindOf(profile)} size={KIND_ICON_PX} />,
+      separated: items.length === 1,
+      choose: () => open(profile.id),
+    });
+  }
+  items.push({
+    key: "more",
+    label: "More\u2026",
+    ...(moreHint === undefined || moreHint === "" ? {} : { hint: moreHint }),
+    separated: true,
+    choose: more,
+  });
+  return items;
+}
+
 /** The button that opens the application's menu, and the menu. */
 export function AppMenu() {
   const app = useShell();
   const known = useStore(app.commandStore, (state) => state.byId);
   const config = useStore(app.config, (state) => state.view);
+  const profiles = useStore(app.profiles, (state) => state.list);
   const [open, setOpen] = useState<Which | null>(null);
   const button = useRef<HTMLButtonElement>(null);
 
@@ -106,6 +163,9 @@ export function AppMenu() {
     if (app.views.focused()) app.views.focus();
     else button.current?.focus();
   };
+
+  const hintOf = (command: string) =>
+    config ? menuKey(keyLabel(config.keymap.bindings, command, config.platform)) : undefined;
 
   const itemsOf = (which: Which): MenuItem[] => {
     const items: MenuItem[] = [];
@@ -118,9 +178,7 @@ export function AppMenu() {
         items.push({
           key: command,
           label,
-          hint: config
-            ? menuKey(keyLabel(config.keymap.bindings, command, config.platform))
-            : undefined,
+          hint: hintOf(command),
           separated: first && items.length > 0,
           choose: () => {
             if (how === "ask") app.palette.getState().openFor(command);
@@ -128,6 +186,19 @@ export function AppMenu() {
           },
         });
         first = false;
+        if (command === "lume.tab.new") {
+          items.push({
+            key: "new-tab-with",
+            label: "New tab with",
+            items: newTabWithItems(
+              profiles,
+              (profile) => app.commands.run("lume.tab.new", profile === null ? null : { profile }),
+              () => app.commands.run("lume.connect.open"),
+              known.has("lume.connect.open") ? hintOf("lume.connect.open") : undefined,
+            ),
+            choose: () => undefined,
+          });
+        }
       }
     }
     return items;

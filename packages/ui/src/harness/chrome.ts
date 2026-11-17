@@ -180,6 +180,7 @@ interface SettingsScene {
 
 const SETTINGS_SCENES: readonly SettingsScene[] = [
   { name: "settings", page: "appearance" },
+  { name: "settings-terminal", page: "terminal" },
   { name: "settings-search", page: "general", query: "cursor" },
 ];
 
@@ -294,6 +295,17 @@ export async function mountWindow(
  * a person to look at. Nothing is written down or compared.
  */
 export async function showScene(name: string, scheme: "light" | "dark"): Promise<string[]> {
+  const settings = SETTINGS_SCENES.find((candidate) => candidate.name === name);
+  if (settings) {
+    // The settings window is written down in the dark look only, as it is shown here.
+    const mounted = await mountSettings(settings.page);
+    if (settings.query !== undefined) {
+      const field = mounted.container.querySelector<HTMLInputElement>(".settings-search input");
+      if (field) typeInto(field, settings.query);
+    }
+    await sleep(CHROME_SETTLE_MS);
+    return [];
+  }
   const scene = SCENES.find((candidate) => candidate.name === name);
   if (!scene) throw new Error(`there is no scene called ${name}`);
   const mounted = await mountWindow({ ...scene.window, scheme });

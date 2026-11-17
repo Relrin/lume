@@ -20,10 +20,11 @@ use crate::paths::Platform;
 use crate::profiles::ProfileEntry;
 use crate::settings::{PAGES_KEY, Shown, pages};
 use crate::tuning::{
-    FONT_SIZE_MAX, FONT_SIZE_MIN, LONG_COMMAND_SECONDS_DEFAULT, LONG_COMMAND_SECONDS_MAX,
-    SCROLLBACK_LINES_MAX, SETTINGS_BLURS, SETTINGS_CORNER_RADII, SETTINGS_DIMMINGS, SETTINGS_GAPS,
-    SETTINGS_INTERFACE_TEXT_SIZES, SETTINGS_LINE_HEIGHTS, SETTINGS_LONG_COMMAND_SECONDS,
-    SETTINGS_OPACITIES, SETTINGS_PADDINGS, SETTINGS_SCROLLBACK_LINES, SETTINGS_TERMINAL_TEXT_SIZES,
+    BACKGROUND_BLUR_MAX, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
+    LONG_COMMAND_SECONDS_DEFAULT, LONG_COMMAND_SECONDS_MAX, LONG_COMMAND_SECONDS_MIN,
+    PANE_LENGTH_MAX, SCROLLBACK_LINES_MAX, SETTINGS_STEP_LENGTH, SETTINGS_STEP_LINE_HEIGHT,
+    SETTINGS_STEP_LINES, SETTINGS_STEP_PERCENT, SETTINGS_STEP_SECONDS, UI_FONT_SIZE_MAX,
+    UI_FONT_SIZE_MIN,
 };
 
 /// The two answers to whether closing asks first, as the settings window calls them.
@@ -59,7 +60,7 @@ pub struct Config {
     pub ssh: SshConfig,
     /// The profile new terminals use, by its id. Empty, new terminals run the shell of
     /// `terminal.shell`.
-    #[schemars(extend("x-lume-settings" = Shown::select("general", "Startup", 20, "Default profile")
+    #[schemars(extend("x-lume-settings" = Shown::select("terminal", "New terminals", 10, "Default terminal")
         .help("Used for new terminal tabs and panes. A workspace's own choice comes first")
         .list("profiles")
         .unset("System default")))]
@@ -166,6 +167,26 @@ pub struct WindowConfig {
     #[schemars(extend("x-lume-settings" = Shown::switch("general", "Attention", 10, "Flash the window on a bell")
         .help("When a program rings the bell in a window you are not using")))]
     pub bell_attention: bool,
+    /// How round the corners of a window's own frame are, where the window system lets
+    /// the application choose: Windows 11.
+    #[schemars(extend("x-lume-settings" = Shown::segmented("appearance", "Panes", 12, "Window corners")
+        .help("The corners of the window itself")
+        .options(&[("round", "Round"), ("small", "Small"), ("square", "Square")])
+        .only_on("windows")))]
+    pub corners: WindowCorners,
+}
+
+/// How round the corners of a window's own frame are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum WindowCorners {
+    /// As round as the window system makes them.
+    #[default]
+    Round,
+    /// Rounded a little.
+    Small,
+    /// Not rounded.
+    Square,
 }
 
 impl Default for WindowConfig {
@@ -176,6 +197,7 @@ impl Default for WindowConfig {
             confirm_close: Confirm::Never,
             restore_bounds: true,
             bell_attention: true,
+            corners: WindowCorners::Round,
         }
     }
 }
@@ -248,19 +270,31 @@ pub struct AppearanceConfig {
         .list("themes")
         .when_unset("appearance.theme")))]
     pub theme_dark: String,
-    /// The radius of a pane's corners, in pixels. Left out, the theme's.
+    /// The radius of a pane's corners, in pixels. Menus and palettes follow it. Left
+    /// out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(range(min = 0.0, max = 64.0))]
-    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Panes", 10, "Panel corners")
-        .lengths(SETTINGS_CORNER_RADII)
+    #[schemars(range(min = 0.0, max = PANE_LENGTH_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("appearance", "Panes", 10, "Pane corners", SETTINGS_STEP_LENGTH)
+        .help("The radius of a pane's corners, and of menus and palettes")
+        .pixels()
         .unset("Theme's")
         .token("radius.card")))]
     pub card_radius: Option<f64>,
+    /// The radius of the corners of tabs, buttons, fields and menu items, in pixels.
+    /// Nothing smaller inside them is rounder. Left out, the theme's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 0.0, max = PANE_LENGTH_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("appearance", "Panes", 11, "Control corners", SETTINGS_STEP_LENGTH)
+        .help("The radius of tabs, buttons, fields and menu items")
+        .pixels()
+        .unset("Theme's")
+        .token("radius.control")))]
+    pub control_radius: Option<f64>,
     /// The space between panes and around them, in pixels. Left out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(range(min = 0.0, max = 64.0))]
-    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Panes", 20, "Gap between panes")
-        .lengths(SETTINGS_GAPS)
+    #[schemars(range(min = 0.0, max = PANE_LENGTH_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("appearance", "Panes", 20, "Gap between panes", SETTINGS_STEP_LENGTH)
+        .pixels()
         .unset("Theme's")
         .token("space.gap")))]
     pub gap: Option<f64>,
@@ -273,9 +307,9 @@ pub struct AppearanceConfig {
     /// out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 1.0))]
-    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Panes", 40, "Dim unfocused panes")
+    #[schemars(extend("x-lume-settings" = Shown::number("appearance", "Panes", 40, "Dim unfocused panes", SETTINGS_STEP_PERCENT)
         .help("How much a pane without the keyboard is dimmed")
-        .shares(SETTINGS_DIMMINGS, Some("Off"))
+        .percent()
         .unset("Theme's")
         .token("opacity.dim")))]
     pub dim_unfocused: Option<f64>,
@@ -287,17 +321,17 @@ pub struct AppearanceConfig {
     pub background_image: Option<String>,
     /// How much the picture is blurred, in pixels. Left out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(range(min = 0.0, max = 200.0))]
-    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Background", 20, "Blur")
-        .lengths(SETTINGS_BLURS)
+    #[schemars(range(min = 0.0, max = BACKGROUND_BLUR_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("appearance", "Background", 20, "Blur", SETTINGS_STEP_LENGTH)
+        .pixels()
         .unset("Theme's")
         .token("background.blur")))]
     pub background_blur: Option<f64>,
     /// How opaque the picture is, from 0 to 1. Left out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = 1.0))]
-    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Background", 30, "Opacity")
-        .shares(SETTINGS_OPACITIES, None)
+    #[schemars(extend("x-lume-settings" = Shown::number("appearance", "Background", 30, "Opacity", SETTINGS_STEP_PERCENT)
+        .percent()
         .unset("Theme's")
         .token("opacity.background-image")))]
     pub background_opacity: Option<f64>,
@@ -339,6 +373,7 @@ impl Default for AppearanceConfig {
             theme_light: "lume-light".to_owned(),
             theme_dark: "lume-dark".to_owned(),
             card_radius: None,
+            control_radius: None,
             gap: None,
             pane_header: PaneHeader::Always,
             dim_unfocused: None,
@@ -363,14 +398,13 @@ pub struct FontConfig {
     pub fallback: Vec<String>,
     /// The size of terminal text, in pixels.
     #[schemars(range(min = FONT_SIZE_MIN, max = FONT_SIZE_MAX))]
-    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Type", 30, "Terminal text size")
-        .lengths(SETTINGS_TERMINAL_TEXT_SIZES)))]
+    #[schemars(extend("x-lume-settings" = Shown::number("appearance", "Type", 30, "Terminal text size", SETTINGS_STEP_LENGTH)
+        .pixels()))]
     pub size: f64,
     /// The height of a line of terminal text, as a multiple of the font's size.
-    #[schemars(range(min = 0.8, max = 3.0))]
-    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Type", 40, "Line height")
-        .help("The height of a line of terminal text, as a multiple of its size")
-        .numbers(SETTINGS_LINE_HEIGHTS)))]
+    #[schemars(range(min = LINE_HEIGHT_MIN, max = LINE_HEIGHT_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("appearance", "Type", 40, "Line height", SETTINGS_STEP_LINE_HEIGHT)
+        .help("The height of a line of terminal text, as a multiple of its size")))]
     pub line_height: f64,
     /// The weight of ordinary text, as fonts number weights: 400 is regular.
     #[schemars(range(min = 1, max = 1000))]
@@ -381,9 +415,9 @@ pub struct FontConfig {
     /// The font of everything that is not a terminal: tabs, headers, menus.
     pub ui_family: String,
     /// The size of that text, in pixels.
-    #[schemars(range(min = 8.0, max = 32.0))]
-    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Type", 10, "Interface text size")
-        .lengths(SETTINGS_INTERFACE_TEXT_SIZES)))]
+    #[schemars(range(min = UI_FONT_SIZE_MIN, max = UI_FONT_SIZE_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("appearance", "Type", 10, "Interface text size", SETTINGS_STEP_LENGTH)
+        .pixels()))]
     pub ui_size: f64,
 }
 
@@ -405,7 +439,7 @@ impl Default for FontConfig {
             weight: 400,
             bold_weight: 700,
             ui_family: "system-ui".to_owned(),
-            ui_size: 13.0,
+            ui_size: 12.0,
         }
     }
 }
@@ -447,9 +481,9 @@ pub struct TerminalConfig {
     pub shell_args: Vec<String>,
     /// How many lines that have scrolled off the top are kept.
     #[schemars(range(min = 0, max = SCROLLBACK_LINES_MAX))]
-    #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Buffer", 10, "Scrollback")
+    #[schemars(extend("x-lume-settings" = Shown::number("terminal", "Buffer", 10, "Scrollback", SETTINGS_STEP_LINES)
         .help("Older lines are dropped past this limit. New terminals use it")
-        .lines(&SETTINGS_SCROLLBACK_LINES)))]
+        .lines()))]
     pub scrollback_lines: u32,
     /// The cursor's shape, until a program chooses another.
     #[schemars(extend("x-lume-settings" = Shown::segmented("terminal", "Cursor", 10, "Cursor style")
@@ -460,10 +494,10 @@ pub struct TerminalConfig {
     pub cursor_blink: bool,
     /// The space between a pane's edge and its text, in pixels. Left out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(range(min = 0.0, max = 64.0))]
-    #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Buffer", 20, "Padding")
+    #[schemars(range(min = 0.0, max = PANE_LENGTH_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("terminal", "Buffer", 20, "Padding", SETTINGS_STEP_LENGTH)
         .help("The space between a pane's edge and its text")
-        .lengths(SETTINGS_PADDINGS)
+        .pixels()
         .unset("Theme's")
         .token("space.padding")))]
     pub padding: Option<f64>,
@@ -486,10 +520,10 @@ pub struct TerminalConfig {
         .help("A desktop notification when a command ends in a window you are not using")))]
     pub notify_long_command: bool,
     /// How long a command runs, in seconds, before its end is notified.
-    #[schemars(range(min = 1, max = LONG_COMMAND_SECONDS_MAX))]
-    #[schemars(extend("x-lume-settings" = Shown::select("general", "Attention", 30, "Long command")
+    #[schemars(range(min = LONG_COMMAND_SECONDS_MIN, max = LONG_COMMAND_SECONDS_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("general", "Attention", 30, "Long command", SETTINGS_STEP_SECONDS)
         .help("How long a command runs before its end is notified")
-        .seconds(&SETTINGS_LONG_COMMAND_SECONDS)))]
+        .seconds()))]
     pub long_command_seconds: u32,
 }
 

@@ -94,26 +94,55 @@
             "name": "Type"
           },
           {
-            "role": "combobox"
+            "role": "spinbutton"
           },
           {
             "role": "combobox"
           },
           {
-            "role": "combobox"
+            "role": "spinbutton"
           },
           {
-            "role": "combobox"
+            "role": "spinbutton"
           },
           {
             "role": "heading",
             "name": "Panes"
           },
           {
-            "role": "combobox"
+            "role": "spinbutton"
           },
           {
-            "role": "combobox"
+            "role": "spinbutton"
+          },
+          {
+            "role": "group",
+            "parts": [
+              {
+                "role": "button",
+                "name": "Round",
+                "state": {
+                  "pressed": "true"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Small",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Square",
+                "state": {
+                  "pressed": "false"
+                }
+              }
+            ]
+          },
+          {
+            "role": "spinbutton"
           },
           {
             "role": "group",
@@ -142,7 +171,7 @@
             ]
           },
           {
-            "role": "combobox"
+            "role": "spinbutton"
           },
           {
             "role": "group",
@@ -178,10 +207,10 @@
             "role": "textbox"
           },
           {
-            "role": "combobox"
+            "role": "spinbutton"
           },
           {
-            "role": "combobox"
+            "role": "spinbutton"
           }
         ]
       }

@@ -7,7 +7,10 @@ import {
   chosenIndex,
   searchSettings,
   settingsPages,
+  shownNumber,
+  stepNumber,
   writeChoice,
+  writeNumber,
   writeSwitch,
   writeText,
   type SettingRow,
@@ -39,11 +42,13 @@ describe("the settings as pages of rows", () => {
     ]);
     expect(appearance.groups[1]!.rows.map((held) => held.path)).toEqual([
       "appearance.card-radius",
+      "appearance.dim-unfocused",
       "appearance.background-image",
       "window.title-bar",
+      "window.corners",
     ]);
     // A heading only a setting names follows the ones its page names.
-    expect(pages[1]!.groups.map((group) => group.label)).toEqual(["Cursor", "Shell"]);
+    expect(pages[1]!.groups.map((group) => group.label)).toEqual(["Cursor", "Buffer", "Shell"]);
     expect(pages[1]!.groups[0]!.rows.map((held) => held.label)).toEqual([
       "Cursor style",
       "Blinking cursor",
@@ -62,35 +67,87 @@ describe("the settings as pages of rows", () => {
     expect(paths.some((held) => held.path === "appearance.tokens")).toBe(false);
   });
 
-  it("offers a setting left out as a choice that names what stands in for it", () => {
+  it("types a number left out as nothing, and names what stands in for it", () => {
     const radius = row(settingsPages(SCHEMA, view(), LISTS), "appearance.card-radius");
     const standsIn = DEFAULT_TOKENS["radius.card"];
     expect(radius.value).toBeNull();
     expect(radius.effective).toBe(standsIn);
-    expect(radius.unsetLabel).toBe(`Theme\u2019s (${standsIn} px)`);
-    expect(radius.choices[0]).toEqual({ value: null, label: radius.unsetLabel });
-    expect(chosenIndex(radius)).toBe(0);
-    expect(writeChoice(radius, radius.choices[0]!)).toEqual({
-      op: "unset",
-      path: "appearance.card-radius",
+    expect(radius.unsetLabel).toBe(`Theme’s (${standsIn} px)`);
+    expect(radius.choices).toEqual([]);
+    expect(radius.number).toEqual({
+      min: 0,
+      max: 64,
+      step: 1,
+      unit: "px",
+      scale: 1,
+      integer: false,
     });
-    expect(writeChoice(radius, radius.choices[2]!)).toEqual({
+    expect(shownNumber(radius, radius.value)).toBe("");
+    expect(shownNumber(radius, radius.effective)).toBe(String(standsIn));
+    expect(writeNumber(radius, "  ")).toEqual({ op: "unset", path: "appearance.card-radius" });
+    expect(writeNumber(radius, "6")).toEqual({
       op: "set",
       path: "appearance.card-radius",
       value: 6,
     });
   });
 
-  it("adds a value written by hand to the choices while it is the one in use", () => {
+  it("holds a typed number to its bounds and reads it as a person writes it", () => {
     const radius = row(
       settingsPages(SCHEMA, view({}, { "card-radius": 13 }), LISTS),
       "appearance.card-radius",
     );
-    expect(radius.choices.at(-1)).toEqual({ value: 13, label: "13 px" });
-    expect(chosenIndex(radius)).toBe(radius.choices.length - 1);
-    expect(radius.effective).toBe(13);
+    expect(radius.value).toBe(13);
+    expect(shownNumber(radius, radius.value)).toBe("13");
     // What would stand in for it is not known while it is made: the token says 13 too.
-    expect(radius.choices[0]).toEqual({ value: null, label: "Theme’s" });
+    expect(radius.unsetLabel).toBe("Theme’s");
+    const set = (typed: string) => writeNumber(radius, typed);
+    expect(set("80")).toMatchObject({ value: 64 });
+    expect(set("-3")).toMatchObject({ value: 0 });
+    expect(set("12,5 px")).toMatchObject({ value: 12.5 });
+    expect(set("7px")).toMatchObject({ value: 7 });
+    expect(set(".5")).toMatchObject({ value: 0.5 });
+    expect(set("0.12345")).toMatchObject({ value: 0.123 });
+    expect(set("twelve")).toBeNull();
+    expect(set("0x10")).toBeNull();
+    expect(set("1e3")).toBeNull();
+    expect(stepNumber(radius, null, 1)).toMatchObject({ value: 14 });
+    expect(stepNumber(radius, 63, 10)).toMatchObject({ value: 64 });
+    expect(stepNumber(radius, 2, -10)).toMatchObject({ value: 0 });
+  });
+
+  it("shows a share in hundredths and writes it from 0 to 1", () => {
+    const dim = row(
+      settingsPages(SCHEMA, view({}, { "dim-unfocused": 0.15 }), LISTS),
+      "appearance.dim-unfocused",
+    );
+    expect(dim.number).toMatchObject({ min: 0, max: 100, unit: "%", scale: 100 });
+    expect(shownNumber(dim, dim.value)).toBe("15");
+    expect(writeNumber(dim, "35")).toMatchObject({ value: 0.35 });
+    expect(writeNumber(dim, "35 %")).toMatchObject({ value: 0.35 });
+    expect(writeNumber(dim, "150")).toMatchObject({ value: 1 });
+    expect(writeNumber(dim, "12.5")).toMatchObject({ value: 0.125 });
+    expect(stepNumber(dim, null, 1)).toMatchObject({ value: 0.16 });
+    expect(stepNumber(dim, 35, -10)).toMatchObject({ value: 0.25 });
+  });
+
+  it("writes a whole number for a setting that takes only whole numbers", () => {
+    const lines = row(settingsPages(SCHEMA, view(), LISTS), "terminal.scrollback-lines");
+    expect(lines.number).toMatchObject({ integer: true, step: 1000, unit: "lines" });
+    expect(writeNumber(lines, "1234.6")).toMatchObject({ value: 1235 });
+    expect(stepNumber(lines, null, 1)).toMatchObject({ value: 11_000 });
+    expect(stepNumber(lines, 99_500, 1)).toMatchObject({ value: 100_000 });
+    // A setting that cannot be left out keeps what it has when nothing is typed.
+    expect(writeNumber(lines, "")).toBeNull();
+  });
+
+  it("shows a row meant for one platform only on that platform", () => {
+    const here = settingsPages(SCHEMA, view(), LISTS);
+    expect(row(here, "window.corners").shown).toBe(true);
+    const elsewhere = settingsPages(SCHEMA, view({ platform: "macos" }), LISTS);
+    expect(row(elsewhere, "window.corners").shown).toBe(false);
+    expect(searchSettings(elsewhere, "window corners").count).toBe(0);
+    expect(searchSettings(here, "window corners").count).toBe(1);
   });
 
   it("takes choices from the machine's lists, the value the application starts with first", () => {
@@ -252,7 +309,7 @@ describe("searching the settings", () => {
 
   it("finds rows by name, by what is said of them, by heading and by page", () => {
     const byName = searchSettings(pages, "corners");
-    expect(byName.count).toBe(1);
+    expect(byName.count).toBe(2);
     expect(byName.groups).toHaveLength(1);
     expect(byName.groups[0]).toMatchObject({
       label: "Application \u203a Appearance \u203a Panes",
@@ -262,7 +319,7 @@ describe("searching the settings", () => {
       "appearance.background-image",
     );
     expect(searchSettings(pages, "cursor").count).toBe(2);
-    expect(searchSettings(pages, "terminal").count).toBe(5);
+    expect(searchSettings(pages, "terminal").count).toBe(6);
   });
 
   it("finds nothing for nothing typed, and counts nothing it does not show", () => {
@@ -342,6 +399,12 @@ describe("the configuration's own schema", () => {
           }
           if (held.control === "switch") {
             expect(typeof held.effective, held.path).toBe("boolean");
+          }
+          if (held.control === "number") {
+            expect(held.number, held.path).toBeDefined();
+            expect(Number.isFinite(held.number!.min), held.path).toBe(true);
+            expect(Number.isFinite(held.number!.max), held.path).toBe(true);
+            expect(typeof held.effective, held.path).toBe("number");
           }
         }
       }

@@ -284,6 +284,23 @@ describe("the cursor", () => {
     expect(area).toBe(2 * CW * t + 2 * (CH - 2 * t) * t);
   });
 
+  it("keeps a hollow cursor inside a cell too short for its sides", () => {
+    for (const sizePx of [1, 2]) {
+      const { renderer, backend } = setup({
+        ...TEST_THEME,
+        font: { family: "Test Mono", sizePx, lineHeight: 0.1 },
+      });
+      const frame = makeFrame(80, 24);
+      setCursor(frame, 4, 2, CursorShape.HollowBlock);
+      renderer.draw(frame);
+      const { cellHeight } = renderer.metrics;
+      for (const i of [0, 1, 2, 3]) {
+        const drawn = rect(backend.planes!.overlayRect, i);
+        if (drawn) expect(drawn.h, `side ${i} at ${sizePx}px`).toBeLessThanOrEqual(cellHeight);
+      }
+    }
+  });
+
   it("is hollow in every shape while the terminal lacks focus", () => {
     expect(cursorRects(CursorShape.Bar, false).rects.length).toBe(4);
     expect(cursorRects(CursorShape.Block, false).glyph).toBeUndefined();

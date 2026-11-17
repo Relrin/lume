@@ -1122,7 +1122,9 @@ export class TerminalView implements FrameView {
     const m = renderer.metrics;
     const left = (m.padding + cursor.x * m.cellWidth) / this.#dpr;
     const top = (m.padding + cursor.y * m.cellHeight) / this.#dpr;
-    const height = m.cellHeight / this.#dpr;
+    // At least the text's own size: a line may be shorter than its letters, and what is
+    // being composed must still be readable.
+    const height = Math.max(m.cellHeight / this.#dpr, this.#fontSizePx);
     const at = `${left},${top},${height},${this.#fontSizePx}`;
     if (at === this.#inputAt) return;
     this.#inputAt = at;

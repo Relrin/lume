@@ -223,9 +223,27 @@ pub struct FakeShell {
     attention: Mutex<Vec<lume_layout::WindowId>>,
     /// The notifications shown, as title and body, in order.
     notified: Mutex<Vec<(String, String)>>,
+    /// Whether the windows were asked for their own title bar or the system's, in order.
+    title_bars: Mutex<Vec<bool>>,
+    /// How round the windows' corners were asked to be, in order.
+    corners: Mutex<Vec<lume_config::WindowCorners>>,
 }
 
 impl FakeShell {
+    pub fn title_bars(&self) -> Vec<bool> {
+        self.title_bars
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn corners(&self) -> Vec<lume_config::WindowCorners> {
+        self.corners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     pub fn activations(&self) -> usize {
         self.activated.load(Ordering::Relaxed)
     }
@@ -336,7 +354,19 @@ impl crate::control::Shell for FakeShell {
         self.open()
     }
 
-    fn set_title_bar(&self, _custom: bool) {}
+    fn set_title_bar(&self, custom: bool) {
+        self.title_bars
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(custom);
+    }
+
+    fn set_corners(&self, corners: lume_config::WindowCorners) {
+        self.corners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(corners);
+    }
 
     fn open_settings(&self, section: Option<&str>, _from: Option<lume_layout::WindowId>) {
         self.settings

@@ -161,22 +161,31 @@ export const CONNECT_SCENES: readonly Scene[] = [
     },
   },
   {
-    name: "new-tab-menu",
+    name: "app-menu-new-tab-with",
     window: WINDOW,
     prepare: async (app) => {
       await until("the profiles arriving", () => app.profiles.getState().list);
-      const chevron = await until("the new-tab menu's button", () =>
-        document.querySelector<HTMLButtonElement>(".tab-new-menu"),
+      const button = await until("the application's menu button", () =>
+        document.querySelector<HTMLButtonElement>(".app-menu-button"),
       );
-      chevron.click();
-      await until("the new-tab menu opening", () => document.querySelector(".tab-new-group .menu"));
+      button.click();
+      const item = await until("the item that opens a tab with a profile", () =>
+        document.querySelector<HTMLButtonElement>('.app-menu-drop [data-key="new-tab-with"]'),
+      );
+      // From the keyboard, as a person without a pointer opens it: the right arrow on
+      // the item opens its menu, and the keyboard goes into it.
+      item.focus();
+      item.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      await until("its menu opening with the keyboard in it", () =>
+        document.activeElement?.closest(".menu-sub-place") ? true : null,
+      );
     },
     check: (page) => {
-      const items = [...page.querySelectorAll(".tab-new-group .menu-item")].map(
+      const items = [...page.querySelectorAll(".menu-sub-place .menu-item")].map(
         (item) => item.querySelector(".menu-label")?.textContent ?? "",
       );
       const wanted = [
-        "PowerShell",
+        "Default terminal",
         "Build box",
         "Git Bash",
         "Ubuntu",
@@ -186,7 +195,7 @@ export const CONNECT_SCENES: readonly Scene[] = [
       ];
       return JSON.stringify(items) === JSON.stringify(wanted)
         ? []
-        : [`the new-tab menu lists ${JSON.stringify(items)}`];
+        : [`the menu of "New tab with" lists ${JSON.stringify(items)}`];
     },
   },
 ];

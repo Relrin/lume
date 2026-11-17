@@ -26,6 +26,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use lume_config::WindowCorners;
 use lume_layout::{Bounds, Intent, WindowId};
 use serde::Serialize;
 use serde_json::json;
@@ -323,6 +324,7 @@ impl WindowShell {
         // Shown once it is where it belongs, so it is not seen to jump there.
         let builder = WebviewWindowBuilder::from_config(&self.app, &described)?.visible(false);
         let opened = self.with_title_bar(builder).build()?;
+        set_corners(&opened, self.config.current().config.window.corners);
 
         let beside = from.and_then(|window| self.app.get_webview_window(&label_of(window)));
         let screen = beside
@@ -386,6 +388,7 @@ impl WindowShell {
             .on_document_title_changed(follow_title)
             .visible(false);
         let opened = self.with_title_bar(builder).build()?;
+        set_corners(&opened, self.config.current().config.window.corners);
 
         let restore = self.config.current().config.window.restore_bounds;
         let placement = bounds
@@ -655,7 +658,55 @@ impl Shell for WindowShell {
             }
         }
     }
+
+    fn set_corners(&self, corners: WindowCorners) {
+        for window in self.app.webview_windows().values() {
+            set_corners(window, corners);
+        }
+    }
 }
+
+/// Asks the window system to round a window's frame as the settings say. Only
+/// Windows 11 lets an application choose; elsewhere, and on older Windows, the frame
+/// stays as the system draws it.
+#[cfg(windows)]
+fn set_corners(window: &WebviewWindow, corners: WindowCorners) {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWM_WINDOW_CORNER_PREFERENCE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT,
+        DWMWCP_DONOTROUND, DWMWCP_ROUNDSMALL, DwmSetWindowAttribute,
+    };
+
+    let label = window.label();
+    let hwnd = match window.hwnd() {
+        Ok(hwnd) => hwnd,
+        Err(error) => {
+            tracing::debug!(%error, label, "the window has no handle to round");
+            return;
+        }
+    };
+    let preference: DWM_WINDOW_CORNER_PREFERENCE = match corners {
+        WindowCorners::Round => DWMWCP_DEFAULT,
+        WindowCorners::Small => DWMWCP_ROUNDSMALL,
+        WindowCorners::Square => DWMWCP_DONOTROUND,
+    };
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (attribute, size) = (
+        DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+        size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
+    );
+    // SAFETY: the handle is the window's own and lives as long as `window`; the value
+    // is read during the call only, and `size` is its size.
+    let result =
+        unsafe { DwmSetWindowAttribute(hwnd.0, attribute, (&raw const preference).cast(), size) };
+    if result == 0 {
+        tracing::debug!(label, ?corners, "the window's corners were set");
+    } else {
+        tracing::debug!(label, result, "the window system did not take the corners");
+    }
+}
+
+#[cfg(not(windows))]
+fn set_corners(_window: &WebviewWindow, _corners: WindowCorners) {}
 
 /// What the window may be called, given what a page asked for: no control characters,
 /// nothing that changes the direction text is read in, and no more than a line of it.

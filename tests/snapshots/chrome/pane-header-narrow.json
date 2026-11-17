@@ -42,13 +42,6 @@
           {
             "role": "button",
             "name": "New tab"
-          },
-          {
-            "role": "button",
-            "name": "New tab with a profile",
-            "state": {
-              "expanded": "false"
-            }
           }
         ]
       },
