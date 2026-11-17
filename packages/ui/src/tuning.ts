@@ -143,6 +143,21 @@ export const PALETTE_RECENTS_MAX = 8;
 /** How many pictures of its panes' programs a tab shows, one over another. */
 export const TAB_ICONS_MAX = 3;
 
+/** The places a program's tile is shown. */
+export type TilePlace = "tab" | "header" | "tray";
+
+/**
+ * How big a program's tile is in each place, in pixels: a little wider than tall, with
+ * its drawing in the middle.
+ */
+export const TILE_SIZES: Readonly<
+  Record<TilePlace, { readonly width: number; readonly height: number; readonly glyph: number }>
+> = {
+  tab: { width: 18, height: 14, glyph: 10 },
+  header: { width: 20, height: 16, glyph: 11 },
+  tray: { width: 16, height: 12, glyph: 9 },
+};
+
 /** How long a notice stays before it goes by itself: one that only informs. */
 export const NOTICE_INFO_MS = 5000;
 

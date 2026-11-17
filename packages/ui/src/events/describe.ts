@@ -11,7 +11,15 @@ import type { Machine, Profile, ProfileList } from "../core/types.ts";
 import { findProfile } from "../profiles/store.ts";
 import type { DisconnectReason, ExitStatus, Launcher, ProgramStatus } from "../transport/types.ts";
 import type { Activity } from "./activity.ts";
-import { isShell, programIcon, programKey, type ProgramIcon } from "./programs.ts";
+import {
+  distributionIcon,
+  isShell,
+  plainIcon,
+  programIcon,
+  programKey,
+  type PaneIcon,
+  type ProgramIcon,
+} from "./programs.ts";
 import type { PaneReport } from "./store.ts";
 import { homeShortened, lastFolder, localPlace, parseFileUrl } from "./where.ts";
 
@@ -65,8 +73,8 @@ export interface PaneDescription {
   readonly kind: PaneKind;
   /** What the pane is called. */
   readonly name: string;
-  /** The picture for what runs in it. */
-  readonly icon: ProgramIcon;
+  /** The tile for what runs in it. */
+  readonly icon: PaneIcon;
   /** Where it is, shortened, or nothing when nothing says. */
   readonly where: string;
   /** Where it is in full. */
@@ -199,6 +207,32 @@ function remoteWhere(
   return { short: named ? path : full, full };
 }
 
+/** What the program a pane runs last said it is, where it said. */
+function appOf(statuses: readonly ProgramStatus[]): string | undefined {
+  return statuses.findLast((status) => status.app !== undefined && status.app !== "")?.app;
+}
+
+/**
+ * The tile for what runs in a pane. A program other than a shell is known by what it
+ * says it is or by its name, and given a plain tile when neither is known; a shell at
+ * its prompt shows where it runs: here, in a distribution, or on another machine.
+ */
+function paneIcon(
+  program: string | undefined,
+  launcher: Launcher | undefined,
+  statuses: readonly ProgramStatus[],
+  context: DescribeContext,
+): PaneIcon {
+  if (program !== undefined) {
+    const shell = isShell(program);
+    const known = programIcon(program, context.icons, shell ? undefined : appOf(statuses));
+    if (known) return known;
+    if (!shell) return plainIcon(program);
+  }
+  if (launcher?.type === "wsl") return distributionIcon(launcher.distro) ?? "terminal";
+  return launcher?.type === "ssh" ? "remote" : "terminal";
+}
+
 /** Describes a pane. */
 export function describePane(
   report: PaneReport,
@@ -237,9 +271,7 @@ export function describePane(
     where = localWhere(report, facts, context);
   }
 
-  const icon =
-    (program === undefined ? undefined : programIcon(program, context.icons)) ??
-    (kind === "ssh" ? "remote" : "terminal");
+  const icon = paneIcon(program, launcher, report.statuses, context);
   const failed =
     !running && command?.state === "finished" && command.exit !== undefined && command.exit !== 0
       ? command.exit

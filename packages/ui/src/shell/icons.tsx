@@ -1,90 +1,43 @@
 /**
- * The shell's icons: small line drawings in the colour of the text around them.
+ * The shell's icons: small line drawings in the colour of the text around them, and the
+ * tiles that show what program a pane runs.
  *
  * Each is decoration beside a label or inside a button that names itself, so none is
  * announced on its own.
  */
 
-import type { ReactNode } from "react";
+import type { CSSProperties } from "react";
 
-import type { ProgramIcon } from "../events/programs.ts";
-
-function Icon({ size, weight, children }: { size: number; weight: number; children: ReactNode }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={weight}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {children}
-    </svg>
-  );
-}
+import { BrandMark, Glyph } from "../icons/Glyph.tsx";
+import { tileOf, type TileId } from "../icons/tiles.ts";
+import { TILE_SIZES, type TilePlace } from "../tuning.ts";
 
 /** A shell's prompt: what a terminal is. */
 export function TerminalIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
-    </Icon>
-  );
+  return <Glyph name="terminal" size={size} />;
 }
 
 export function PlusIcon({ size = 14 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </Icon>
-  );
+  return <Glyph name="plus" size={size} />;
 }
 
 export function CloseIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </Icon>
-  );
+  return <Glyph name="x" size={size} />;
 }
 
 /** A pane divided into a left and a right half. */
 export function SplitRightIcon({ size = 14 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.8}>
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <line x1="12" y1="3" x2="12" y2="21" />
-    </Icon>
-  );
+  return <Glyph name="columns-2" size={size} weight={1.8} />;
 }
 
 /** A pane divided into an upper and a lower half. */
 export function SplitDownIcon({ size = 14 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.8}>
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <line x1="3" y1="12" x2="21" y2="12" />
-    </Icon>
-  );
+  return <Glyph name="rows-2" size={size} weight={1.8} />;
 }
 
 /** Two arrows pointing apart: a pane grown to fill its tab. */
 export function ZoomIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.8}>
-      <polyline points="15 3 21 3 21 9" />
-      <polyline points="9 21 3 21 3 15" />
-      <line x1="21" y1="3" x2="14" y2="10" />
-      <line x1="3" y1="21" x2="10" y2="14" />
-    </Icon>
-  );
+  return <Glyph name="maximize-2" size={size} weight={1.8} />;
 }
 
 /** A ring with a dot: the application's mark. */
@@ -99,163 +52,82 @@ export function LumeMark({ size = 18 }: { size?: number }) {
 
 /** Two overlapping squares: a pane lifted off the others. */
 export function FloatIcon({ size = 14 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.8}>
-      <rect x="8" y="8" width="13" height="13" rx="2" />
-      <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
-    </Icon>
-  );
+  return <Glyph name="copy" size={size} weight={1.8} />;
 }
 
-/** A line along the bottom: a pane put away at the corner. */
+/** A short line: a pane put away at the corner. */
 export function PutAwayIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <line x1="5" y1="18" x2="19" y2="18" />
-    </Icon>
-  );
+  return <Glyph name="minus" size={size} />;
 }
 
 /** Three lines: the application's menu. */
 export function MenuIcon({ size = 16 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <line x1="4" y1="7" x2="20" y2="7" />
-      <line x1="4" y1="12" x2="20" y2="12" />
-      <line x1="4" y1="17" x2="20" y2="17" />
-    </Icon>
-  );
+  return <Glyph name="menu" size={size} />;
 }
 
 export function ChevronDownIcon({ size = 12 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2.2}>
-      <polyline points="6 9 12 15 18 9" />
-    </Icon>
-  );
+  return <Glyph name="chevron-down" size={size} weight={2.2} />;
 }
 
 export function ChevronRightIcon({ size = 12 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2.2}>
-      <polyline points="9 6 15 12 9 18" />
-    </Icon>
-  );
+  return <Glyph name="chevron-right" size={size} weight={2.2} />;
 }
 
 export function CheckIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2.2}>
-      <polyline points="5 12 10 17 19 7" />
-    </Icon>
-  );
+  return <Glyph name="check" size={size} weight={2.2} />;
 }
 
-/** A line near the bottom: a window put away. */
+/** A line: a window put away. */
 export function MinimiseIcon({ size = 12 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </Icon>
-  );
+  return <Glyph name="minus" size={size} />;
 }
 
 /** A square: a window grown to fill the screen. */
 export function MaximiseIcon({ size = 11 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <rect x="4" y="4" width="16" height="16" rx="2" />
-    </Icon>
-  );
+  return <Glyph name="square" size={size} />;
 }
 
 /** A square in front of another: a window put back to the size it had. */
 export function RestoreIcon({ size = 12 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <rect x="4" y="8" width="12" height="12" rx="2" />
-      <path d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2" />
-    </Icon>
-  );
+  return <Glyph name="copy" size={size} />;
 }
 
 /** A bar folded against an edge: a panel put away. */
 export function CollapseIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.9}>
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <line x1="9" y1="4" x2="9" y2="20" />
-    </Icon>
-  );
+  return <Glyph name="panel-left" size={size} weight={1.9} />;
 }
 
 export function SearchIcon({ size = 15 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <circle cx="11" cy="11" r="6.5" />
-      <line x1="20" y1="20" x2="16" y2="16" />
-    </Icon>
-  );
+  return <Glyph name="search" size={size} />;
 }
 
-/** A dot with rays about it: how the application as a whole behaves. */
+/** A cog: how the application as a whole behaves. */
 export function GeneralIcon({ size = 15 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.8}>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1" />
-    </Icon>
-  );
+  return <Glyph name="settings" size={size} weight={1.8} />;
 }
 
 /** A disc, one half of it filled: how things look. */
 export function AppearanceIcon({ size = 15 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.8}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" />
-    </Icon>
-  );
+  return <Glyph name="contrast" size={size} weight={1.8} />;
 }
 
 /** A line that forks: a branch of a repository. */
 export function BranchIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.9}>
-      <line x1="6" y1="4" x2="6" y2="15" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="7" r="3" />
-      <path d="M18 10a8 8 0 0 1-8 8" />
-    </Icon>
-  );
+  return <Glyph name="git-branch" size={size} weight={1.9} />;
 }
 
 /** A heartbeat: something running. */
 export function PulseIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <polyline points="3 12 7 12 10 4 14 20 17 12 21 12" />
-    </Icon>
-  );
+  return <Glyph name="activity" size={size} />;
 }
 
 export function FolderIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.9}>
-      <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-    </Icon>
-  );
+  return <Glyph name="folder" size={size} weight={1.9} />;
 }
 
 /** A triangle with a mark in it: something that wants attention. */
 export function AlertIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.9}>
-      <path d="M12 4 3 19h18z" />
-      <line x1="12" y1="10" x2="12" y2="14" />
-      <line x1="12" y1="16.5" x2="12" y2="16.6" />
-    </Icon>
-  );
+  return <Glyph name="triangle-exclamation-point" size={size} weight={1.9} />;
 }
 
 /** A filled dot. */
@@ -267,84 +139,69 @@ export function DotIcon({ size = 9 }: { size?: number }) {
   );
 }
 
-/** A page with a folded corner: an editor, or something that shows a file. */
+/** A page with lines on it: an editor, or something that shows a file. */
 export function EditorIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.9}>
-      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-      <polyline points="14 3 14 9 20 9" />
-    </Icon>
-  );
+  return <Glyph name="file-text" size={size} weight={1.9} />;
 }
 
-/** A four-pointed spark: a coding agent. */
+/** A page with a folded corner: a file to open. */
+export function FileIcon({ size = 15 }: { size?: number }) {
+  return <Glyph name="file" size={size} weight={1.8} />;
+}
+
+/** Sparks: a coding agent. */
 export function SparkleIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
-    </Icon>
-  );
+  return <Glyph name="sparkles" size={size} />;
 }
 
 /** A globe: another machine. */
 export function GlobeIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.8}>
-      <circle cx="12" cy="12" r="9" />
-      <line x1="3" y1="12" x2="21" y2="12" />
-      <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18" />
-    </Icon>
-  );
+  return <Glyph name="globe" size={size} weight={1.8} />;
+}
+
+/** Stacked layers: a system inside this one. */
+export function LayersIcon({ size = 15 }: { size?: number }) {
+  return <Glyph name="layers" size={size} weight={1.8} />;
 }
 
 /** A box: a container or a virtual machine. */
 export function BoxIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={1.8}>
-      <path d="M21 8 12 3 3 8v8l9 5 9-5z" />
-      <polyline points="3 8 12 13 21 8" />
-      <line x1="12" y1="13" x2="12" y2="21" />
-    </Icon>
-  );
+  return <Glyph name="box" size={size} weight={1.8} />;
 }
 
 /** A tick: something finished. */
 export function DoneIcon({ size = 11 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={3}>
-      <polyline points="20 6 9 17 4 12" />
-    </Icon>
-  );
+  return <Glyph name="check" size={size} weight={3} />;
 }
 
 /** An arrow going round: start something again. */
 export function AgainIcon({ size = 12 }: { size?: number }) {
-  return (
-    <Icon size={size} weight={2}>
-      <path d="M20 11a8 8 0 1 0-2.3 5.7" />
-      <polyline points="20 5 20 11 14 11" />
-    </Icon>
-  );
+  return <Glyph name="rotate-cw" size={size} />;
 }
 
-/** The picture of a program, by the name the configuration gives it. */
-export function ProgramIconView({ icon, size = 13 }: { icon: ProgramIcon; size?: number }) {
-  switch (icon) {
-    case "editor":
-      return <EditorIcon size={size} />;
-    case "git":
-      return <BranchIcon size={size} />;
-    case "monitor":
-      return <PulseIcon size={size} />;
-    case "agent":
-      return <SparkleIcon size={size} />;
-    case "remote":
-      return <GlobeIcon size={size} />;
-    case "container":
-      return <BoxIcon size={size} />;
-    case "files":
-      return <FolderIcon size={size} />;
-    case "terminal":
-      return <TerminalIcon size={size} />;
-  }
+/** Two arrows chasing each other: look again. */
+export function RefreshIcon({ size = 15 }: { size?: number }) {
+  return <Glyph name="refresh-cw" size={size} weight={1.8} />;
+}
+
+/** The tile of a program: its drawing on its colour, sized for the place it is shown. */
+export function ProgramTile({ tile, place }: { tile: TileId; place: TilePlace }) {
+  const drawn = tileOf(tile);
+  const size = TILE_SIZES[place];
+  const style = {
+    "--tile-own-bg": drawn.background,
+    "--tile-own-ink": drawn.ink,
+    "--tile-width": `${size.width}px`,
+    width: size.width,
+    height: size.height,
+  } as CSSProperties;
+  return (
+    <span className="tile" data-tile={tile} data-edge={drawn.edge || undefined} style={style}>
+      {drawn.glyph.kind === "brand" ? (
+        <BrandMark name={drawn.glyph.name} size={size.glyph} frame={size} />
+      ) : (
+        <Glyph name={drawn.glyph.name} size={size.glyph} weight={2.4} frame={size} />
+      )}
+    </span>
+  );
 }

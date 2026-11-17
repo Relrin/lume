@@ -12,7 +12,7 @@ import { useStore } from "zustand";
 import { selectMinimised } from "../layout/selectors.ts";
 import type { PaneId } from "../layout/types.ts";
 import { useShell } from "./context.ts";
-import { ProgramIconView } from "./icons.tsx";
+import { ProgramTile } from "./icons.tsx";
 import { usePaneName, useProgramIcon } from "./PaneCard.tsx";
 
 /** No panes: one list for every window that has none put away. */
@@ -41,7 +41,7 @@ function MinimisedPill({ pane }: { pane: PaneId }) {
       }}
     >
       <span className="pane-pill-icon">
-        <ProgramIconView icon={icon} size={10} />
+        <ProgramTile tile={icon} place="tray" />
       </span>
       <span className="pane-pill-name" ref={name} />
       <span className="pane-pill-mark" aria-hidden="true" />

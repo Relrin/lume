@@ -200,6 +200,9 @@
             ]
           },
           {
+            "role": "combobox"
+          },
+          {
             "role": "heading",
             "name": "Background"
           },

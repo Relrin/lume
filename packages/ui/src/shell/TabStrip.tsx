@@ -20,7 +20,7 @@ import {
 import { useStore } from "zustand";
 
 import { NEW_TAB_DROP } from "../drag/controller.ts";
-import type { ProgramIcon } from "../events/programs.ts";
+import type { PaneIcon } from "../events/programs.ts";
 import { selectActiveTab, selectTabOrder } from "../layout/selectors.ts";
 import type { TabId } from "../layout/types.ts";
 import { DRAG_START_PX } from "../tuning.ts";
@@ -28,7 +28,7 @@ import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
 import { describeTabNow, followTab, mark } from "./describing.ts";
 import { useKeyHint } from "./hints.ts";
-import { CloseIcon, ProgramIconView } from "./icons.tsx";
+import { CloseIcon, ProgramTile } from "./icons.tsx";
 import { NewTabButton } from "./NewTabButton.tsx";
 import { roveWithin } from "./roving.ts";
 
@@ -63,15 +63,18 @@ function useTabMarks(
     useCallback((changed) => followTab(app, tab, changed), [app, tab]),
     () => describeTabNow(app, tab).icons.join(" "),
   );
-  return { label, icons: icons === "" ? [] : (icons.split(" ") as ProgramIcon[]) };
+  return { label, icons: icons === "" ? [] : (icons.split(" ") as PaneIcon[]) };
 }
 
-/** The pictures of a tab's programs: one, or several laid over one another. */
-function TabIcons({ icons }: { icons: readonly ProgramIcon[] }) {
+/**
+ * The tiles of a tab's programs: one, or several, each behind the one before it and a
+ * little along, the one the tab is named after in front.
+ */
+function TabIcons({ icons }: { icons: readonly PaneIcon[] }) {
   if (icons.length <= 1) {
     return (
       <span className="tab-icon">
-        <ProgramIconView icon={icons[0] ?? "terminal"} />
+        <ProgramTile tile={icons[0] ?? "terminal"} place="tab" />
       </span>
     );
   }
@@ -79,7 +82,7 @@ function TabIcons({ icons }: { icons: readonly ProgramIcon[] }) {
     <span className="tab-icon tab-icons" data-count={icons.length}>
       {icons.map((icon, index) => (
         <span key={index} className="tab-icons-one">
-          <ProgramIconView icon={icon} size={12} />
+          <ProgramTile tile={icon} place="tab" />
         </span>
       ))}
     </span>

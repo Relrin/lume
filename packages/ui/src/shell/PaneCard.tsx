@@ -23,7 +23,7 @@ import {
 import { useStore } from "zustand";
 
 import type { PaneDescription } from "../events/describe.ts";
-import type { ProgramIcon } from "../events/programs.ts";
+import type { PaneIcon } from "../events/programs.ts";
 import { FLOAT_EDGES } from "../layout/floats.ts";
 import { selectFocus } from "../layout/selectors.ts";
 import type { PaneId } from "../layout/types.ts";
@@ -38,7 +38,7 @@ import {
   CloseIcon,
   DoneIcon,
   FloatIcon,
-  ProgramIconView,
+  ProgramTile,
   PutAwayIcon,
   SplitDownIcon,
   SplitRightIcon,
@@ -51,7 +51,7 @@ import {
  * render.
  */
 interface HeaderMarks {
-  readonly icon: ProgramIcon;
+  readonly icon: PaneIcon;
   readonly running: boolean;
   readonly failed: number | null;
   readonly status: PaneDescription["status"];
@@ -131,7 +131,7 @@ export function usePaneName(app: ShellApp, pane: PaneId, holder?: RefObject<HTML
 }
 
 /** The picture for what runs in a pane, rendering only when it changes. */
-export function useProgramIcon(app: ShellApp, pane: PaneId): ProgramIcon {
+export function useProgramIcon(app: ShellApp, pane: PaneId): PaneIcon {
   return useSyncExternalStore(
     useCallback((changed) => followPane(app, pane, changed), [app, pane]),
     () => describeNow(app, pane).icon,
@@ -264,7 +264,7 @@ function PaneHeader({
       }}
     >
       <span className="pane-icon">
-        <ProgramIconView icon={marks.icon} size={10} />
+        <ProgramTile tile={marks.icon} place="header" />
         <span className="pane-activity" aria-hidden="true" />
       </span>
       <span className="pane-title" ref={name} />

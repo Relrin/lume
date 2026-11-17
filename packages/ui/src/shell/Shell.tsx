@@ -4,6 +4,8 @@
  * of it over the picture the configuration puts behind the panes, if it names one.
  */
 
+import { useStore } from "zustand";
+
 import { ConnectPalette } from "../connect/ConnectPalette.tsx";
 import { Palette } from "../palette/Palette.tsx";
 import { Prompts } from "../Prompts.tsx";
@@ -17,9 +19,14 @@ import { TopBar } from "./TopBar.tsx";
 
 /** The whole of a terminal window. `app` is what was started for the page. */
 export function Shell({ app }: { app: ShellApp }) {
+  // Which program tiles keep their colours: the style sheet greys the others.
+  const tileColor = useStore(
+    app.config,
+    (state) => state.view?.config.appearance["tile-color"] ?? "always",
+  );
   return (
     <ShellContext value={app}>
-      <div className="shell">
+      <div className="shell" data-tile-color={tileColor}>
         <Background />
         <TopBar />
         <div className="shell-body">

@@ -655,22 +655,117 @@
     flex-shrink: 0;
   }
 
-  /* The programs of a tab's panes, each tucked behind the one before it. */
-  .tab-icons {
+  /*
+   * A program's tile: its colour, a sheen over its upper part, an inner rim that keeps
+   * it apart from a background of the same colour, a soft shadow under it, and its
+   * drawing in the middle. The colours it is given are its own; the rules below may
+   * put others over them.
+   */
+  .tile {
+    --tile-bg: var(--tile-own-bg);
+    --tile-ink: var(--tile-own-ink);
+    --tile-shadow: 0 0.5px 1.5px color-mix(in srgb, black 18%, transparent);
+    display: inline-flex;
+    position: relative;
     align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    /* About a quarter of its height at each corner, the same both ways. */
+    border-radius: 25% / 32%;
+    color: var(--tile-ink);
+    background: var(--tile-bg);
+    box-shadow: var(--tile-shadow);
+  }
+
+  .tile::before,
+  .tile::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+  }
+
+  .tile::before {
+    inset: 0 0 40%;
+    background: linear-gradient(color-mix(in srgb, white 18%, transparent), transparent);
+  }
+
+  .tile::after {
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lume-color-text) 14%, transparent);
+  }
+
+  /* A pale tile needs a firmer edge to be seen on a light window. */
+  .tile[data-edge]::after {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lume-color-text) 26%, transparent);
+  }
+
+  .tile svg {
+    position: relative;
+  }
+
+  /*
+   * The tiles `appearance.tile-color` leaves without their colours: drawn in the
+   * theme's muted ink on a control's colour.
+   */
+  .shell[data-tile-color="never"] .tile,
+  .shell:is([data-tile-color="active-tab"], [data-tile-color="active-pane"])
+    .tab:not([data-active="true"])
+    .tile,
+  .shell[data-tile-color="active-pane"] .pane-card:not([data-focused="true"]) .tile,
+  .shell[data-tile-color="active-pane"] .pane-pill .tile {
+    --tile-bg: var(--lume-color-control);
+    --tile-ink: var(--lume-color-text-muted);
+  }
+
+  .shell[data-tile-color="never"] .tile::before,
+  .shell:is([data-tile-color="active-tab"], [data-tile-color="active-pane"])
+    .tab:not([data-active="true"])
+    .tile::before,
+  .shell[data-tile-color="active-pane"] .pane-card:not([data-focused="true"]) .tile::before,
+  .shell[data-tile-color="active-pane"] .pane-pill .tile::before {
+    display: none;
+  }
+
+  /*
+   * The programs of a tab's panes: the one the tab is named after in front, and each of
+   * the others behind the one before it, the same size and height, showing a sliver at
+   * its right. The more there are, the thinner the sliver, so a stack stays little
+   * wider than one tile.
+   */
+  .tab-icons {
+    --tile-stack-step: 4px;
+    align-items: center;
+    isolation: isolate;
+  }
+
+  .tab-icons:not([data-count="2"]) {
+    --tile-stack-step: 3px;
   }
 
   .tab-icons-one {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
+    position: relative;
   }
 
-  .tab-icons-one + .tab-icons-one {
-    margin-left: -4px;
-    mask: radial-gradient(circle at -3px 50%, transparent 7px, #000 7.5px);
+  .tab-icons-one:nth-child(1) {
+    z-index: 3;
+  }
+
+  .tab-icons-one:nth-child(2) {
+    z-index: 2;
+  }
+
+  .tab-icons-one + .tab-icons-one .tile {
+    margin-left: calc(var(--tile-stack-step) - var(--tile-width));
+  }
+
+  /* A shadow cast on the tile behind keeps each apart from it, whatever the tab's colour. */
+  .tab-icons-one:not(:last-child) .tile {
+    box-shadow:
+      var(--tile-shadow),
+      1.5px 0 2px color-mix(in srgb, black 40%, transparent);
   }
 
   .tab-activity {
@@ -1037,15 +1132,10 @@
   }
 
   .pane-icon {
-    @apply text-accent;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    width: 16px;
-    height: 16px;
-    border-radius: min(4px, var(--lume-radius-control));
-    background: color-mix(in srgb, var(--lume-color-accent) 16%, transparent);
   }
 
   .pane-title {
@@ -1107,22 +1197,19 @@
   }
 
   /*
-   * What runs in a pane and where: the picture's tile is tinted by where the session
-   * runs, here, in a Linux distribution here, or on another machine.
+   * Where a shell at its prompt runs, in a Linux distribution here or on another
+   * machine, as the colour of its prompt. A program's own tile keeps its colours.
    */
   .pane-icon {
     position: relative;
-    --kind-tone: var(--lume-color-accent);
-    color: var(--kind-tone);
-    background: color-mix(in srgb, var(--kind-tone) 16%, transparent);
   }
 
-  .pane-header[data-pane-kind="wsl"] .pane-icon {
-    --kind-tone: var(--lume-color-status-warning);
+  .pane-header[data-pane-kind="wsl"] .tile[data-tile="terminal"] {
+    --tile-ink: var(--lume-color-status-warning);
   }
 
-  .pane-header[data-pane-kind="ssh"] .pane-icon {
-    --kind-tone: var(--lume-color-status-info);
+  .pane-header[data-pane-kind="ssh"] .tile[data-tile="terminal"] {
+    --tile-ink: var(--lume-color-status-info);
   }
 
   /* What a pane the user is not looking at has gathered, as a dot on its tile's corner. */
@@ -1430,15 +1517,10 @@
   }
 
   .pane-pill-icon {
-    @apply text-accent;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    width: 18px;
-    height: 18px;
-    border-radius: min(5px, var(--lume-radius-control));
-    background: color-mix(in srgb, var(--lume-color-accent) 16%, transparent);
   }
 
   .pane-pill-name {

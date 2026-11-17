@@ -13,8 +13,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 
 import { useShell } from "../shell/context.ts";
-import { SearchIcon } from "../shell/icons.tsx";
-import { FileIcon, KindIcon, RefreshIcon } from "./icons.tsx";
+import { FileIcon, RefreshIcon, SearchIcon } from "../shell/icons.tsx";
+import { KindIcon } from "./icons.tsx";
 import {
   CONNECT_FILTERS,
   connectGroups,

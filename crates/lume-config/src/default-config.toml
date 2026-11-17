@@ -57,9 +57,15 @@
 #   background-image = "C:/Users/me/Pictures/wallpaper.jpg"
 #   background-blur = 0
 #   background-opacity = 1.0
-# The picture a pane's header and its tab show for a program, by the program's name:
-# "terminal", "editor", "git", "monitor", "agent", "remote", "container" or "files".
-#   program-icons = { nvim = "editor", lazygit = "git" }
+# The tile a pane's header and its tab show for a program, by the program's name. A
+# kind of program: "terminal", "editor", "git", "monitor", "agent", "remote",
+# "container" or "files"; or a well-known one, such as "claude", "neovim", "python",
+# "postgres", "terraform" or "ubuntu" (the settings schema lists them all). A shell
+# shows the prompt unless its own mark is chosen: "bash", "zsh", "fish" or "nushell".
+#   program-icons = { nvim = "editor", ipython = "python", zsh = "zsh" }
+# Which program tiles are drawn in colour: "always", "active-pane", "active-tab" or
+# "never". The others are drawn in the theme's muted ink.
+# tile-color = "always"
 #
 # Any design token can be set over the theme's, in a table named after its group:
 #

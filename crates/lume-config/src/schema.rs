@@ -338,13 +338,42 @@ pub struct AppearanceConfig {
     /// Design tokens set over the theme's, written as a theme file writes them: a
     /// table for each group, such as `[appearance.tokens.color]` with `accent = "#ff8800"`.
     pub tokens: BTreeMap<String, Value>,
-    /// The picture a pane's header and its tab show for a program, by the program's
-    /// name without its folder or `.exe`, such as `nvim = "editor"`. These come before
-    /// the pictures the application knows.
+    /// The tile a pane's header and its tab show for a program, by the program's name
+    /// without its folder or `.exe`, such as `nvim = "editor"`. These come before the
+    /// tiles the application knows.
     pub program_icons: BTreeMap<String, ProgramIcon>,
+    /// Which program tiles are drawn in their colours. The others are drawn in the
+    /// theme's muted ink.
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Panes", 60, "Program icon colour")
+        .help("Which tabs and pane headers show program icons in colour")
+        .options(&[
+            ("always", "Always"),
+            ("active-pane", "Active pane"),
+            ("active-tab", "Active tab"),
+            ("never", "Never"),
+        ])))]
+    pub tile_color: TileColor,
 }
 
-/// A picture for the program a pane runs.
+/// Which program tiles are drawn in their colours.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum TileColor {
+    /// Every tile.
+    #[default]
+    Always,
+    /// The tiles of the pane with the focus and of the tab it is in.
+    ActivePane,
+    /// The tiles of the tab on show and of its panes.
+    ActiveTab,
+    /// None: every tile is drawn in the theme's muted ink.
+    Never,
+}
+
+/// A tile for the program a pane runs: a kind of program, drawn with a line drawing
+/// on a colour of the terminal's palette, or a well-known program, drawn with its mark
+/// on its colour. A shell shows the prompt unless one of the shells' marks is chosen
+/// for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProgramIcon {
@@ -352,7 +381,7 @@ pub enum ProgramIcon {
     Terminal,
     /// A page being written: an editor or a pager.
     Editor,
-    /// A branch: a version control tool.
+    /// Git's mark: Git and the tools that work on it.
     Git,
     /// A pulse: a monitor of the system or of a process.
     Monitor,
@@ -364,6 +393,302 @@ pub enum ProgramIcon {
     Container,
     /// A folder: a file manager.
     Files,
+    /// AlmaLinux.
+    Alma,
+    /// Alpine Linux.
+    Alpine,
+    /// Ansible.
+    Ansible,
+    /// Arch Linux.
+    Arch,
+    /// Argo.
+    Argo,
+    /// GNU Bash.
+    Bash,
+    /// Bazel.
+    Bazel,
+    /// Google BigQuery.
+    Bigquery,
+    /// Bitwarden.
+    Bitwarden,
+    /// Bun.
+    Bun,
+    /// Caddy.
+    Caddy,
+    /// Apache Cassandra.
+    Cassandra,
+    /// CentOS.
+    Centos,
+    /// Chocolatey.
+    Chocolatey,
+    /// Claude.
+    Claude,
+    /// ClickHouse.
+    Clickhouse,
+    /// Cline.
+    Cline,
+    /// Clojure.
+    Clojure,
+    /// Cloudflare.
+    Cloudflare,
+    /// CMake.
+    Cmake,
+    /// Cockroach Labs.
+    Cockroachdb,
+    /// CodeRabbit.
+    Coderabbit,
+    /// Anaconda.
+    Conda,
+    /// Consul.
+    Consul,
+    /// GitHub Copilot.
+    Copilot,
+    /// Crystal.
+    Crystal,
+    /// curl.
+    Curl,
+    /// Cursor.
+    Cursor,
+    /// Dart.
+    Dart,
+    /// Debian.
+    Debian,
+    /// Deno.
+    Deno,
+    /// DigitalOcean.
+    Digitalocean,
+    /// Docker.
+    Docker,
+    /// .NET.
+    Dotnet,
+    /// DuckDB.
+    Duckdb,
+    /// Elasticsearch.
+    Elasticsearch,
+    /// Elixir.
+    Elixir,
+    /// GNU Emacs.
+    Emacs,
+    /// Erlang.
+    Erlang,
+    /// Fedora.
+    Fedora,
+    /// FFmpeg.
+    Ffmpeg,
+    /// Firebase.
+    Firebase,
+    /// fish shell.
+    Fish,
+    /// Flutter.
+    Flutter,
+    /// Fly.io.
+    Fly,
+    /// Forgejo.
+    Forgejo,
+    /// Fossil SCM.
+    Fossil,
+    /// Google Cloud.
+    Gcloud,
+    /// Google Gemini.
+    Gemini,
+    /// Gentoo.
+    Gentoo,
+    /// Gitea.
+    Gitea,
+    /// GitHub.
+    Github,
+    /// GitLab.
+    Gitlab,
+    /// Gleam.
+    Gleam,
+    /// Go.
+    Go,
+    /// GNU Privacy Guard.
+    Gpg,
+    /// Gradle.
+    Gradle,
+    /// Haskell.
+    Haskell,
+    /// Helix.
+    Helix,
+    /// Helm.
+    Helm,
+    /// Homebrew.
+    Homebrew,
+    /// htop.
+    Htop,
+    /// HTTPie.
+    Httpie,
+    /// Hugging Face.
+    Huggingface,
+    /// InfluxDB.
+    Influxdb,
+    /// OpenJDK.
+    Java,
+    /// Julia.
+    Julia,
+    /// Jupyter.
+    Jupyter,
+    /// K3s.
+    K3s,
+    /// Kali Linux.
+    Kali,
+    /// Kotlin.
+    Kotlin,
+    /// Kubernetes.
+    Kubernetes,
+    /// Lapce.
+    Lapce,
+    /// LM Studio.
+    Lmstudio,
+    /// Lua.
+    Lua,
+    /// Manjaro.
+    Manjaro,
+    /// MariaDB.
+    Mariadb,
+    /// Mercurial.
+    Mercurial,
+    /// Linux Mint.
+    Mint,
+    /// Mistral AI.
+    Mistral,
+    /// MongoDB.
+    Mongodb,
+    /// MySQL.
+    Mysql,
+    /// Neo4j.
+    Neo4j,
+    /// Neovim.
+    Neovim,
+    /// Netlify.
+    Netlify,
+    /// NGINX.
+    Nginx,
+    /// Nim.
+    Nim,
+    /// NixOS.
+    Nix,
+    /// Node.js.
+    Node,
+    /// Nomad.
+    Nomad,
+    /// npm.
+    Npm,
+    /// Nushell.
+    Nushell,
+    /// Obsidian.
+    Obsidian,
+    /// OCaml.
+    Ocaml,
+    /// Ollama.
+    Ollama,
+    /// 1Password.
+    Onepassword,
+    /// OpenCode.
+    Opencode,
+    /// openSUSE.
+    Opensuse,
+    /// OpenTofu.
+    Opentofu,
+    /// Packer.
+    Packer,
+    /// Perl.
+    Perl,
+    /// PHP.
+    Php,
+    /// PlanetScale.
+    Planetscale,
+    /// pnpm.
+    Pnpm,
+    /// Poetry.
+    Poetry,
+    /// PostgreSQL.
+    Postgres,
+    /// Prisma.
+    Prisma,
+    /// Pulumi.
+    Pulumi,
+    /// Python.
+    Python,
+    /// QWen.
+    Qwen,
+    /// R.
+    R,
+    /// Racket.
+    Racket,
+    /// Ruby on Rails.
+    Rails,
+    /// Railway.
+    Railway,
+    /// Red Hat.
+    Redhat,
+    /// Redis.
+    Redis,
+    /// Rocky Linux.
+    Rocky,
+    /// Ruby.
+    Ruby,
+    /// Rust.
+    Rust,
+    /// Scala.
+    Scala,
+    /// Slackware.
+    Slackware,
+    /// Snowflake.
+    Snowflake,
+    /// SQLite.
+    Sqlite,
+    /// Sublime Text.
+    Sublime,
+    /// Subversion.
+    Subversion,
+    /// Supabase.
+    Supabase,
+    /// SurrealDB.
+    Surrealdb,
+    /// Swift.
+    Swift,
+    /// Tailscale.
+    Tailscale,
+    /// Terraform.
+    Terraform,
+    /// tmux.
+    Tmux,
+    /// Turso.
+    Turso,
+    /// TypeScript.
+    Typescript,
+    /// Ubuntu.
+    Ubuntu,
+    /// uv.
+    Uv,
+    /// Vagrant.
+    Vagrant,
+    /// Vault.
+    Vault,
+    /// Vercel.
+    Vercel,
+    /// Vim.
+    Vim,
+    /// Vite.
+    Vite,
+    /// Void Linux.
+    Void,
+    /// VSCodium.
+    Vscodium,
+    /// WireGuard.
+    Wireguard,
+    /// Wireshark.
+    Wireshark,
+    /// Yarn.
+    Yarn,
+    /// Zed Industries.
+    Zed,
+    /// Zig.
+    Zig,
+    /// Zsh.
+    Zsh,
 }
 
 impl Default for AppearanceConfig {
@@ -382,6 +707,7 @@ impl Default for AppearanceConfig {
             background_opacity: None,
             tokens: BTreeMap::new(),
             program_icons: BTreeMap::new(),
+            tile_color: TileColor::Always,
         }
     }
 }

@@ -57,6 +57,8 @@ export interface KeyBinding {
 export interface ConfigSettings {
   readonly appearance: {
     readonly "pane-header": "always" | "auto" | "never";
+    /** Which program tiles are drawn in colour. A core that does not say means all of them. */
+    readonly "tile-color"?: "always" | "active-pane" | "active-tab" | "never";
     readonly [key: string]: unknown;
   };
   readonly terminal: {

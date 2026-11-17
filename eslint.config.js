@@ -30,9 +30,14 @@ export default tseslint.config(
   {
     // The window is drawn with design tokens and nothing else: a colour written into
     // its code would not follow the theme. The test harness and the renderer lab draw
-    // fixed pictures and are left out.
+    // fixed pictures and are left out, and so are the marks of programs, which come in
+    // their owners' colours whatever the theme.
     files: ["packages/ui/src/**/*.{ts,tsx}"],
-    ignores: ["packages/ui/src/harness/**", "packages/ui/src/lab/**"],
+    ignores: [
+      "packages/ui/src/harness/**",
+      "packages/ui/src/lab/**",
+      "packages/ui/src/icons/glyphs.generated.ts",
+    ],
     rules: {
       "no-restricted-syntax": [
         "error",

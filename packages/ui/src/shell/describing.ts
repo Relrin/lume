@@ -16,7 +16,7 @@ import {
   type PaneDescription,
   type PaneFacts,
 } from "../events/describe.ts";
-import { iconChoices, type ProgramIcon } from "../events/programs.ts";
+import { iconChoices, type PaneIcon, type ProgramIcon } from "../events/programs.ts";
 import { panesOf, selectTitlePane, UNTITLED_TAB } from "../layout/selectors.ts";
 import type { LayoutState } from "../layout/store.ts";
 import type { PaneId, TabId } from "../layout/types.ts";
@@ -85,7 +85,7 @@ export function mark(element: HTMLElement, name: string, value: string, usual: s
 export interface TabDescription {
   readonly label: string;
   /** The pictures of the programs of its panes, the one it is named after first. */
-  readonly icons: readonly ProgramIcon[];
+  readonly icons: readonly PaneIcon[];
   readonly activity: Activity;
 }
 

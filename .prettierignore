@@ -13,3 +13,5 @@ schemas/
 packages/tokens/src/generated.ts
 packages/tokens/src/defaults.css
 tests/layout/vectors/
+packages/ui/src/icons/glyphs.generated.ts
+packages/ui/src/icons/NOTICE.md

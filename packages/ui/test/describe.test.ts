@@ -9,7 +9,14 @@ import {
   type DescribeContext,
   type PaneFacts,
 } from "../src/events/describe.ts";
-import { iconChoices, PROGRAM_ICONS, programIcon } from "../src/events/programs.ts";
+import {
+  distributionIcon,
+  iconChoices,
+  plainIcon,
+  PROGRAM_ICONS,
+  programIcon,
+} from "../src/events/programs.ts";
+import { PLAIN_TILE_COUNT, tileOf } from "../src/icons/tiles.ts";
 import type { PaneReport } from "../src/events/store.ts";
 import {
   homeShortened,
@@ -142,7 +149,7 @@ describe("what a pane is called and where it is", () => {
       NO_FACTS,
       WINDOWS,
     );
-    expect(editing).toMatchObject({ name: "nvim", icon: "editor", running: true });
+    expect(editing).toMatchObject({ name: "nvim", icon: "neovim", running: true });
   });
 
   it("takes the command line's program when only the shell is seen to run", () => {
@@ -163,7 +170,7 @@ describe("what a pane is called and where it is", () => {
       NO_FACTS,
       WINDOWS,
     );
-    expect(lost).toMatchObject({ name: "vim", icon: "editor", running: true });
+    expect(lost).toMatchObject({ name: "vim", icon: "vim", running: true });
     // A program that is seen is what is named, whatever the command line says.
     const seen = describePane(
       report({
@@ -213,7 +220,7 @@ describe("what a pane is called and where it is", () => {
 
   it("puts the name the user gave first, and keeps the picture of what runs", () => {
     const named = describePane(
-      report({ foreground: { pid: 1, name: "htop" } }),
+      report({ foreground: { pid: 1, name: "btop" } }),
       { ...NO_FACTS, name: "Watching" },
       WINDOWS,
     );
@@ -232,7 +239,12 @@ describe("what a pane is called and where it is", () => {
       facts,
       WINDOWS,
     );
-    expect(idle).toMatchObject({ kind: "wsl", name: "Ubuntu", where: "/home/relrin" });
+    expect(idle).toMatchObject({
+      kind: "wsl",
+      name: "Ubuntu",
+      icon: "ubuntu",
+      where: "/home/relrin",
+    });
     const running = describePane(
       report({
         launcher: { type: "wsl", distro: "Ubuntu" },
@@ -242,7 +254,7 @@ describe("what a pane is called and where it is", () => {
       NO_FACTS,
       WINDOWS,
     );
-    expect(running).toMatchObject({ name: "vim", icon: "editor", where: "Ubuntu:/home/relrin" });
+    expect(running).toMatchObject({ name: "vim", icon: "vim", where: "Ubuntu:/home/relrin" });
   });
 
   it("shows another machine's place with its name, and its title before it says", () => {
@@ -364,6 +376,78 @@ describe("the pictures of programs", () => {
       icons: choices,
     });
     expect(named.icon).toBe("agent");
+  });
+
+  it("know well-known programs by their own tiles, through versions and other names", () => {
+    const none = new Map();
+    expect(programIcon("python3.12", none)).toBe("python");
+    expect(programIcon("C:\\Tools\\Codex.EXE", none)).toBe("agent");
+    expect(programIcon("claude", none)).toBe("claude");
+    expect(programIcon("redis-cli", none)).toBe("redis");
+    expect(programIcon("npx", none)).toBe("node");
+    expect(programIcon("nvim", none)).toBe("neovim");
+    expect(programIcon("pwsh", none)).toBe("terminal");
+    expect(programIcon("zsh", none)).toBe("terminal");
+    expect(programIcon("zsh", new Map([["zsh", "zsh"]]))).toBe("zsh");
+    expect(programIcon("tmux", none)).toBe("tmux");
+    expect(programIcon("hg", none)).toBe("mercurial");
+    expect(programIcon("lazygit", none)).toBe("git");
+    expect(programIcon("cursor-agent", none)).toBe("cursor");
+    expect(programIcon("mongosh", none)).toBe("mongodb");
+    expect(programIcon("clickhouse-client", none)).toBe("clickhouse");
+    expect(programIcon("tofu", none)).toBe("opentofu");
+    expect(programIcon("Rscript", none)).toBe("r");
+    expect(programIcon("r2", none)).toBeUndefined();
+    expect(programIcon("podman", none)).toBe("container");
+    expect(distributionIcon("Ubuntu-24.04")).toBe("ubuntu");
+    expect(distributionIcon("openSUSE-Leap-15.6")).toBe("opensuse");
+    expect(distributionIcon("docker-desktop")).toBe("docker");
+    expect(distributionIcon("MyDistro")).toBeUndefined();
+  });
+
+  it("take what a program says it is before its name, but after the user's choice", () => {
+    expect(programIcon("node", new Map(), "claude-code")).toBe("claude");
+    expect(programIcon("node", new Map(), "unheard-of")).toBe("node");
+    expect(programIcon("node", new Map([["node", "files"]]), "claude-code")).toBe("files");
+    const said = describePane(
+      report({
+        foreground: { pid: 1, name: "node" },
+        statuses: [{ state: "working", app: "claude-code" }],
+      }),
+      NO_FACTS,
+      WINDOWS,
+    );
+    expect(said.icon).toBe("claude");
+    // At the prompt, what a program said before it ended no longer names the pane.
+    const back = describePane(
+      report({
+        foreground: { pid: 1, name: "pwsh" },
+        statuses: [{ state: "done", app: "claude-code" }],
+      }),
+      NO_FACTS,
+      WINDOWS,
+    );
+    expect(back.icon).toBe("terminal");
+  });
+
+  it("give a program known to nothing a plain tile, the same one for its name each time", () => {
+    const sleep = plainIcon("sleep");
+    expect(sleep).toBe(plainIcon("C:\\bin\\SLEEP.exe"));
+    expect(Number(sleep.slice("plain-".length))).toBeLessThan(PLAIN_TILE_COUNT);
+    const names = ["sleep", "make", "ffmpeg", "terraform", "jq", "curl", "wget", "tar"];
+    expect(new Set(names.map(plainIcon)).size).toBeGreaterThan(1);
+    const pane = describePane(report({ foreground: { pid: 1, name: "sleep" } }), NO_FACTS, WINDOWS);
+    expect(pane.icon).toBe(sleep);
+    expect(tileOf(sleep).glyph).toEqual({ kind: "line", name: "terminal" });
+  });
+
+  it("are drawn with a glyph that exists and a colour", () => {
+    for (const id of [...PROGRAM_ICONS, plainIcon("x")]) {
+      const tile = tileOf(id);
+      expect(tile.background, id).not.toBe("");
+      expect(tile.ink, id).not.toBe("");
+    }
+    expect(tileOf("claude")).toMatchObject({ glyph: { kind: "brand", name: "claude" } });
   });
 
   it("are the ones the configuration can name", () => {

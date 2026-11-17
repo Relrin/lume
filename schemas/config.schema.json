@@ -43,6 +43,7 @@
         "program-icons": {},
         "theme-dark": "lume-dark",
         "theme-light": "lume-light",
+        "tile-color": "always",
         "tokens": {}
       },
       "description": "How things look: the theme and what overrides it.",
@@ -239,7 +240,7 @@
         },
         "program-icons": {
           "additionalProperties": {
-            "description": "A picture for the program a pane runs.",
+            "description": "A tile for the program a pane runs: a kind of program, drawn with a line drawing\non a colour of the terminal's palette, or a well-known program, drawn with its mark\non its colour. A shell shows the prompt unless one of the shells' marks is chosen\nfor it.",
             "oneOf": [
               {
                 "const": "terminal",
@@ -253,7 +254,7 @@
               },
               {
                 "const": "git",
-                "description": "A branch: a version control tool.",
+                "description": "Git's mark: Git and the tools that work on it.",
                 "type": "string"
               },
               {
@@ -280,11 +281,751 @@
                 "const": "files",
                 "description": "A folder: a file manager.",
                 "type": "string"
+              },
+              {
+                "const": "alma",
+                "description": "AlmaLinux.",
+                "type": "string"
+              },
+              {
+                "const": "alpine",
+                "description": "Alpine Linux.",
+                "type": "string"
+              },
+              {
+                "const": "ansible",
+                "description": "Ansible.",
+                "type": "string"
+              },
+              {
+                "const": "arch",
+                "description": "Arch Linux.",
+                "type": "string"
+              },
+              {
+                "const": "argo",
+                "description": "Argo.",
+                "type": "string"
+              },
+              {
+                "const": "bash",
+                "description": "GNU Bash.",
+                "type": "string"
+              },
+              {
+                "const": "bazel",
+                "description": "Bazel.",
+                "type": "string"
+              },
+              {
+                "const": "bigquery",
+                "description": "Google BigQuery.",
+                "type": "string"
+              },
+              {
+                "const": "bitwarden",
+                "description": "Bitwarden.",
+                "type": "string"
+              },
+              {
+                "const": "bun",
+                "description": "Bun.",
+                "type": "string"
+              },
+              {
+                "const": "caddy",
+                "description": "Caddy.",
+                "type": "string"
+              },
+              {
+                "const": "cassandra",
+                "description": "Apache Cassandra.",
+                "type": "string"
+              },
+              {
+                "const": "centos",
+                "description": "CentOS.",
+                "type": "string"
+              },
+              {
+                "const": "chocolatey",
+                "description": "Chocolatey.",
+                "type": "string"
+              },
+              {
+                "const": "claude",
+                "description": "Claude.",
+                "type": "string"
+              },
+              {
+                "const": "clickhouse",
+                "description": "ClickHouse.",
+                "type": "string"
+              },
+              {
+                "const": "cline",
+                "description": "Cline.",
+                "type": "string"
+              },
+              {
+                "const": "clojure",
+                "description": "Clojure.",
+                "type": "string"
+              },
+              {
+                "const": "cloudflare",
+                "description": "Cloudflare.",
+                "type": "string"
+              },
+              {
+                "const": "cmake",
+                "description": "CMake.",
+                "type": "string"
+              },
+              {
+                "const": "cockroachdb",
+                "description": "Cockroach Labs.",
+                "type": "string"
+              },
+              {
+                "const": "coderabbit",
+                "description": "CodeRabbit.",
+                "type": "string"
+              },
+              {
+                "const": "conda",
+                "description": "Anaconda.",
+                "type": "string"
+              },
+              {
+                "const": "consul",
+                "description": "Consul.",
+                "type": "string"
+              },
+              {
+                "const": "copilot",
+                "description": "GitHub Copilot.",
+                "type": "string"
+              },
+              {
+                "const": "crystal",
+                "description": "Crystal.",
+                "type": "string"
+              },
+              {
+                "const": "curl",
+                "description": "curl.",
+                "type": "string"
+              },
+              {
+                "const": "cursor",
+                "description": "Cursor.",
+                "type": "string"
+              },
+              {
+                "const": "dart",
+                "description": "Dart.",
+                "type": "string"
+              },
+              {
+                "const": "debian",
+                "description": "Debian.",
+                "type": "string"
+              },
+              {
+                "const": "deno",
+                "description": "Deno.",
+                "type": "string"
+              },
+              {
+                "const": "digitalocean",
+                "description": "DigitalOcean.",
+                "type": "string"
+              },
+              {
+                "const": "docker",
+                "description": "Docker.",
+                "type": "string"
+              },
+              {
+                "const": "dotnet",
+                "description": ".NET.",
+                "type": "string"
+              },
+              {
+                "const": "duckdb",
+                "description": "DuckDB.",
+                "type": "string"
+              },
+              {
+                "const": "elasticsearch",
+                "description": "Elasticsearch.",
+                "type": "string"
+              },
+              {
+                "const": "elixir",
+                "description": "Elixir.",
+                "type": "string"
+              },
+              {
+                "const": "emacs",
+                "description": "GNU Emacs.",
+                "type": "string"
+              },
+              {
+                "const": "erlang",
+                "description": "Erlang.",
+                "type": "string"
+              },
+              {
+                "const": "fedora",
+                "description": "Fedora.",
+                "type": "string"
+              },
+              {
+                "const": "ffmpeg",
+                "description": "FFmpeg.",
+                "type": "string"
+              },
+              {
+                "const": "firebase",
+                "description": "Firebase.",
+                "type": "string"
+              },
+              {
+                "const": "fish",
+                "description": "fish shell.",
+                "type": "string"
+              },
+              {
+                "const": "flutter",
+                "description": "Flutter.",
+                "type": "string"
+              },
+              {
+                "const": "fly",
+                "description": "Fly.io.",
+                "type": "string"
+              },
+              {
+                "const": "forgejo",
+                "description": "Forgejo.",
+                "type": "string"
+              },
+              {
+                "const": "fossil",
+                "description": "Fossil SCM.",
+                "type": "string"
+              },
+              {
+                "const": "gcloud",
+                "description": "Google Cloud.",
+                "type": "string"
+              },
+              {
+                "const": "gemini",
+                "description": "Google Gemini.",
+                "type": "string"
+              },
+              {
+                "const": "gentoo",
+                "description": "Gentoo.",
+                "type": "string"
+              },
+              {
+                "const": "gitea",
+                "description": "Gitea.",
+                "type": "string"
+              },
+              {
+                "const": "github",
+                "description": "GitHub.",
+                "type": "string"
+              },
+              {
+                "const": "gitlab",
+                "description": "GitLab.",
+                "type": "string"
+              },
+              {
+                "const": "gleam",
+                "description": "Gleam.",
+                "type": "string"
+              },
+              {
+                "const": "go",
+                "description": "Go.",
+                "type": "string"
+              },
+              {
+                "const": "gpg",
+                "description": "GNU Privacy Guard.",
+                "type": "string"
+              },
+              {
+                "const": "gradle",
+                "description": "Gradle.",
+                "type": "string"
+              },
+              {
+                "const": "haskell",
+                "description": "Haskell.",
+                "type": "string"
+              },
+              {
+                "const": "helix",
+                "description": "Helix.",
+                "type": "string"
+              },
+              {
+                "const": "helm",
+                "description": "Helm.",
+                "type": "string"
+              },
+              {
+                "const": "homebrew",
+                "description": "Homebrew.",
+                "type": "string"
+              },
+              {
+                "const": "htop",
+                "description": "htop.",
+                "type": "string"
+              },
+              {
+                "const": "httpie",
+                "description": "HTTPie.",
+                "type": "string"
+              },
+              {
+                "const": "huggingface",
+                "description": "Hugging Face.",
+                "type": "string"
+              },
+              {
+                "const": "influxdb",
+                "description": "InfluxDB.",
+                "type": "string"
+              },
+              {
+                "const": "java",
+                "description": "OpenJDK.",
+                "type": "string"
+              },
+              {
+                "const": "julia",
+                "description": "Julia.",
+                "type": "string"
+              },
+              {
+                "const": "jupyter",
+                "description": "Jupyter.",
+                "type": "string"
+              },
+              {
+                "const": "k3s",
+                "description": "K3s.",
+                "type": "string"
+              },
+              {
+                "const": "kali",
+                "description": "Kali Linux.",
+                "type": "string"
+              },
+              {
+                "const": "kotlin",
+                "description": "Kotlin.",
+                "type": "string"
+              },
+              {
+                "const": "kubernetes",
+                "description": "Kubernetes.",
+                "type": "string"
+              },
+              {
+                "const": "lapce",
+                "description": "Lapce.",
+                "type": "string"
+              },
+              {
+                "const": "lmstudio",
+                "description": "LM Studio.",
+                "type": "string"
+              },
+              {
+                "const": "lua",
+                "description": "Lua.",
+                "type": "string"
+              },
+              {
+                "const": "manjaro",
+                "description": "Manjaro.",
+                "type": "string"
+              },
+              {
+                "const": "mariadb",
+                "description": "MariaDB.",
+                "type": "string"
+              },
+              {
+                "const": "mercurial",
+                "description": "Mercurial.",
+                "type": "string"
+              },
+              {
+                "const": "mint",
+                "description": "Linux Mint.",
+                "type": "string"
+              },
+              {
+                "const": "mistral",
+                "description": "Mistral AI.",
+                "type": "string"
+              },
+              {
+                "const": "mongodb",
+                "description": "MongoDB.",
+                "type": "string"
+              },
+              {
+                "const": "mysql",
+                "description": "MySQL.",
+                "type": "string"
+              },
+              {
+                "const": "neo4j",
+                "description": "Neo4j.",
+                "type": "string"
+              },
+              {
+                "const": "neovim",
+                "description": "Neovim.",
+                "type": "string"
+              },
+              {
+                "const": "netlify",
+                "description": "Netlify.",
+                "type": "string"
+              },
+              {
+                "const": "nginx",
+                "description": "NGINX.",
+                "type": "string"
+              },
+              {
+                "const": "nim",
+                "description": "Nim.",
+                "type": "string"
+              },
+              {
+                "const": "nix",
+                "description": "NixOS.",
+                "type": "string"
+              },
+              {
+                "const": "node",
+                "description": "Node.js.",
+                "type": "string"
+              },
+              {
+                "const": "nomad",
+                "description": "Nomad.",
+                "type": "string"
+              },
+              {
+                "const": "npm",
+                "description": "npm.",
+                "type": "string"
+              },
+              {
+                "const": "nushell",
+                "description": "Nushell.",
+                "type": "string"
+              },
+              {
+                "const": "obsidian",
+                "description": "Obsidian.",
+                "type": "string"
+              },
+              {
+                "const": "ocaml",
+                "description": "OCaml.",
+                "type": "string"
+              },
+              {
+                "const": "ollama",
+                "description": "Ollama.",
+                "type": "string"
+              },
+              {
+                "const": "onepassword",
+                "description": "1Password.",
+                "type": "string"
+              },
+              {
+                "const": "opencode",
+                "description": "OpenCode.",
+                "type": "string"
+              },
+              {
+                "const": "opensuse",
+                "description": "openSUSE.",
+                "type": "string"
+              },
+              {
+                "const": "opentofu",
+                "description": "OpenTofu.",
+                "type": "string"
+              },
+              {
+                "const": "packer",
+                "description": "Packer.",
+                "type": "string"
+              },
+              {
+                "const": "perl",
+                "description": "Perl.",
+                "type": "string"
+              },
+              {
+                "const": "php",
+                "description": "PHP.",
+                "type": "string"
+              },
+              {
+                "const": "planetscale",
+                "description": "PlanetScale.",
+                "type": "string"
+              },
+              {
+                "const": "pnpm",
+                "description": "pnpm.",
+                "type": "string"
+              },
+              {
+                "const": "poetry",
+                "description": "Poetry.",
+                "type": "string"
+              },
+              {
+                "const": "postgres",
+                "description": "PostgreSQL.",
+                "type": "string"
+              },
+              {
+                "const": "prisma",
+                "description": "Prisma.",
+                "type": "string"
+              },
+              {
+                "const": "pulumi",
+                "description": "Pulumi.",
+                "type": "string"
+              },
+              {
+                "const": "python",
+                "description": "Python.",
+                "type": "string"
+              },
+              {
+                "const": "qwen",
+                "description": "QWen.",
+                "type": "string"
+              },
+              {
+                "const": "r",
+                "description": "R.",
+                "type": "string"
+              },
+              {
+                "const": "racket",
+                "description": "Racket.",
+                "type": "string"
+              },
+              {
+                "const": "rails",
+                "description": "Ruby on Rails.",
+                "type": "string"
+              },
+              {
+                "const": "railway",
+                "description": "Railway.",
+                "type": "string"
+              },
+              {
+                "const": "redhat",
+                "description": "Red Hat.",
+                "type": "string"
+              },
+              {
+                "const": "redis",
+                "description": "Redis.",
+                "type": "string"
+              },
+              {
+                "const": "rocky",
+                "description": "Rocky Linux.",
+                "type": "string"
+              },
+              {
+                "const": "ruby",
+                "description": "Ruby.",
+                "type": "string"
+              },
+              {
+                "const": "rust",
+                "description": "Rust.",
+                "type": "string"
+              },
+              {
+                "const": "scala",
+                "description": "Scala.",
+                "type": "string"
+              },
+              {
+                "const": "slackware",
+                "description": "Slackware.",
+                "type": "string"
+              },
+              {
+                "const": "snowflake",
+                "description": "Snowflake.",
+                "type": "string"
+              },
+              {
+                "const": "sqlite",
+                "description": "SQLite.",
+                "type": "string"
+              },
+              {
+                "const": "sublime",
+                "description": "Sublime Text.",
+                "type": "string"
+              },
+              {
+                "const": "subversion",
+                "description": "Subversion.",
+                "type": "string"
+              },
+              {
+                "const": "supabase",
+                "description": "Supabase.",
+                "type": "string"
+              },
+              {
+                "const": "surrealdb",
+                "description": "SurrealDB.",
+                "type": "string"
+              },
+              {
+                "const": "swift",
+                "description": "Swift.",
+                "type": "string"
+              },
+              {
+                "const": "tailscale",
+                "description": "Tailscale.",
+                "type": "string"
+              },
+              {
+                "const": "terraform",
+                "description": "Terraform.",
+                "type": "string"
+              },
+              {
+                "const": "tmux",
+                "description": "tmux.",
+                "type": "string"
+              },
+              {
+                "const": "turso",
+                "description": "Turso.",
+                "type": "string"
+              },
+              {
+                "const": "typescript",
+                "description": "TypeScript.",
+                "type": "string"
+              },
+              {
+                "const": "ubuntu",
+                "description": "Ubuntu.",
+                "type": "string"
+              },
+              {
+                "const": "uv",
+                "description": "uv.",
+                "type": "string"
+              },
+              {
+                "const": "vagrant",
+                "description": "Vagrant.",
+                "type": "string"
+              },
+              {
+                "const": "vault",
+                "description": "Vault.",
+                "type": "string"
+              },
+              {
+                "const": "vercel",
+                "description": "Vercel.",
+                "type": "string"
+              },
+              {
+                "const": "vim",
+                "description": "Vim.",
+                "type": "string"
+              },
+              {
+                "const": "vite",
+                "description": "Vite.",
+                "type": "string"
+              },
+              {
+                "const": "void",
+                "description": "Void Linux.",
+                "type": "string"
+              },
+              {
+                "const": "vscodium",
+                "description": "VSCodium.",
+                "type": "string"
+              },
+              {
+                "const": "wireguard",
+                "description": "WireGuard.",
+                "type": "string"
+              },
+              {
+                "const": "wireshark",
+                "description": "Wireshark.",
+                "type": "string"
+              },
+              {
+                "const": "yarn",
+                "description": "Yarn.",
+                "type": "string"
+              },
+              {
+                "const": "zed",
+                "description": "Zed Industries.",
+                "type": "string"
+              },
+              {
+                "const": "zig",
+                "description": "Zig.",
+                "type": "string"
+              },
+              {
+                "const": "zsh",
+                "description": "Zsh.",
+                "type": "string"
               }
             ]
           },
           "default": {},
-          "description": "The picture a pane's header and its tab show for a program, by the program's\nname without its folder or `.exe`, such as `nvim = \"editor\"`. These come before\nthe pictures the application knows.",
+          "description": "The tile a pane's header and its tab show for a program, by the program's name\nwithout its folder or `.exe`, such as `nvim = \"editor\"`. These come before the\ntiles the application knows.",
           "type": "object"
         },
         "theme": {
@@ -338,6 +1079,58 @@
               "is": "unset",
               "path": "appearance.theme"
             }
+          }
+        },
+        "tile-color": {
+          "default": "always",
+          "description": "Which program tiles are drawn in their colours. The others are drawn in the\ntheme's muted ink.",
+          "oneOf": [
+            {
+              "const": "always",
+              "description": "Every tile.",
+              "type": "string"
+            },
+            {
+              "const": "active-pane",
+              "description": "The tiles of the pane with the focus and of the tab it is in.",
+              "type": "string"
+            },
+            {
+              "const": "active-tab",
+              "description": "The tiles of the tab on show and of its panes.",
+              "type": "string"
+            },
+            {
+              "const": "never",
+              "description": "None: every tile is drawn in the theme's muted ink.",
+              "type": "string"
+            }
+          ],
+          "x-lume-settings": {
+            "control": "select",
+            "group": "Panes",
+            "help": "Which tabs and pane headers show program icons in colour",
+            "label": "Program icon colour",
+            "options": [
+              {
+                "label": "Always",
+                "value": "always"
+              },
+              {
+                "label": "Active pane",
+                "value": "active-pane"
+              },
+              {
+                "label": "Active tab",
+                "value": "active-tab"
+              },
+              {
+                "label": "Never",
+                "value": "never"
+              }
+            ],
+            "order": 60,
+            "page": "appearance"
           }
         },
         "tokens": {
