@@ -7,6 +7,8 @@
 
 import type { ReactNode } from "react";
 
+import type { ProgramIcon } from "../events/programs.ts";
+
 function Icon({ size, weight, children }: { size: number; weight: number; children: ReactNode }) {
   return (
     <svg
@@ -255,4 +257,86 @@ export function DotIcon({ size = 9 }: { size?: number }) {
       <circle cx="12" cy="12" r="9" fill="currentColor" />
     </svg>
   );
+}
+
+/** A page with a folded corner: an editor, or something that shows a file. */
+export function EditorIcon({ size = 13 }: { size?: number }) {
+  return (
+    <Icon size={size} weight={1.9}>
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+      <polyline points="14 3 14 9 20 9" />
+    </Icon>
+  );
+}
+
+/** A four-pointed spark: a coding agent. */
+export function SparkleIcon({ size = 13 }: { size?: number }) {
+  return (
+    <Icon size={size} weight={2}>
+      <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+    </Icon>
+  );
+}
+
+/** A globe: another machine. */
+export function GlobeIcon({ size = 13 }: { size?: number }) {
+  return (
+    <Icon size={size} weight={1.8}>
+      <circle cx="12" cy="12" r="9" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18" />
+    </Icon>
+  );
+}
+
+/** A box: a container or a virtual machine. */
+export function BoxIcon({ size = 13 }: { size?: number }) {
+  return (
+    <Icon size={size} weight={1.8}>
+      <path d="M21 8 12 3 3 8v8l9 5 9-5z" />
+      <polyline points="3 8 12 13 21 8" />
+      <line x1="12" y1="13" x2="12" y2="21" />
+    </Icon>
+  );
+}
+
+/** A tick: something finished. */
+export function DoneIcon({ size = 11 }: { size?: number }) {
+  return (
+    <Icon size={size} weight={3}>
+      <polyline points="20 6 9 17 4 12" />
+    </Icon>
+  );
+}
+
+/** An arrow going round: start something again. */
+export function AgainIcon({ size = 12 }: { size?: number }) {
+  return (
+    <Icon size={size} weight={2}>
+      <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+      <polyline points="20 5 20 11 14 11" />
+    </Icon>
+  );
+}
+
+/** The picture of a program, by the name the configuration gives it. */
+export function ProgramIconView({ icon, size = 13 }: { icon: ProgramIcon; size?: number }) {
+  switch (icon) {
+    case "editor":
+      return <EditorIcon size={size} />;
+    case "git":
+      return <BranchIcon size={size} />;
+    case "monitor":
+      return <PulseIcon size={size} />;
+    case "agent":
+      return <SparkleIcon size={size} />;
+    case "remote":
+      return <GlobeIcon size={size} />;
+    case "container":
+      return <BoxIcon size={size} />;
+    case "files":
+      return <FolderIcon size={size} />;
+    case "terminal":
+      return <TerminalIcon size={size} />;
+  }
 }

@@ -21,8 +21,9 @@ import { createCommandStore, type CommandStore } from "../commands/store.ts";
 import { applyConfig, describeProblem } from "../config/apply.ts";
 import { loadTerminalFonts } from "../config/fonts.ts";
 import { createConfigStore, type ConfigStore } from "../config/store.ts";
+import { createConnectStore, type ConnectStore } from "../connect/store.ts";
 import { CoreClient } from "../core/client.ts";
-import type { ConfigView, Notice } from "../core/types.ts";
+import type { ConfigView, Machine, Notice } from "../core/types.ts";
 import { checkFrameContract } from "../frame-contract.ts";
 import { CardDrag } from "../drag/controller.ts";
 import { createPanelDragStore, type PanelDragStore } from "../drag/panels.ts";
@@ -33,8 +34,11 @@ import { panesOf, selectActiveTab, selectFocus } from "../layout/selectors.ts";
 import { createLayoutStore, type LayoutStore } from "../layout/store.ts";
 import type { Intent, PaneId } from "../layout/types.ts";
 import { createPaletteStore, type PaletteStore } from "../palette/store.ts";
+import { PaneReports } from "../events/store.ts";
+import { PaneLooks } from "../panes/looks.ts";
 import { PaneTitles } from "../panes/titles.ts";
 import { PaneViews } from "../panes/views.ts";
+import { createProfilesStore, findProfile, type ProfilesStore } from "../profiles/store.ts";
 import { SearchController } from "../search/controller.ts";
 import { createStatusStore, type StatusStore } from "../status/registry.ts";
 import { currentPlatform, KeyLayout } from "../terminal/keyboard.ts";
@@ -47,6 +51,7 @@ import { CommandError } from "../transport/types.ts";
 import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX } from "../tuning.ts";
 import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
 import { closeRequested, mayRun } from "./closing.ts";
+import { describeTabNow, paneFacts } from "./describing.ts";
 import { focusBar } from "./focus-bar.ts";
 import { NoticeStore, sentence } from "./notices.ts";
 
@@ -65,11 +70,19 @@ export interface ShellApp {
   readonly area: TabAreaController;
   readonly views: PaneViews;
   readonly titles: PaneTitles;
+  /** What the sessions of the window's panes have reported. */
+  readonly reports: PaneReports;
   readonly commands: Commands;
   readonly prompts: PromptStore;
   readonly notices: NoticeStore;
   /** Whether the command palette is on show, and what for. */
   readonly palette: PaletteStore;
+  /** Whether the palette that opens a terminal from a profile is on show. */
+  readonly connect: ConnectStore;
+  /** The ways there are to start a terminal. */
+  readonly profiles: ProfilesStore;
+  /** What the page knows of the machine it runs on. */
+  readonly machine: Machine;
   /** The status items the window's bars show. */
   readonly status: StatusStore;
   /** What the window is doing on the desktop. */
@@ -120,6 +133,12 @@ const NO_CONTEXT: ReadonlySet<string> = new Set();
 /** The context of a key pressed while the command palette is on show. */
 const PALETTE_CONTEXT: ReadonlySet<string> = new Set(["palette"]);
 
+/** The context of a key pressed while the Connect palette is on show. */
+const CONNECT_CONTEXT: ReadonlySet<string> = new Set(["connect"]);
+
+/** A machine the page was told nothing about. */
+const UNKNOWN_MACHINE: Machine = { name: null, home: null };
+
 /** A pane's search bar, as an element is asked whether it is in one. */
 const SEARCH_BAR = "[data-search-bar]";
 
@@ -147,8 +166,29 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   const commandStore = createCommandStore();
   const titles = new PaneTitles();
   const palette = createPaletteStore();
+  const connect = createConnectStore();
+  const profiles = createProfilesStore();
   const status = createStatusStore();
   const windowState = createWindowStateStore();
+  // The user looks at the pane that has the keyboard, while the window is the one in use.
+  const attended = (pane: PaneId): boolean => {
+    const state = layout.getState();
+    return windowState.getState().focused && state.ready && selectFocus(state) === pane;
+  };
+  const reports = new PaneReports(attended);
+  const looks = new PaneLooks();
+  /** The look of a pane's terminal: the window's, or the one its profile asks for. */
+  const appearanceOf = (pane: PaneId): Appearance => {
+    const report = reports.get(pane);
+    const list = profiles.getState().list;
+    // A session says what it was started from; a pane yet to have one runs what it
+    // names, or the default.
+    const id =
+      report.session !== null
+        ? report.profile
+        : (paneFacts(layout.getState(), pane).profile ?? list?.default ?? undefined);
+    return looks.of(look, findProfile(list, id), list?.looks);
+  };
   const panelDrag = createPanelDragStore();
 
   // What the core sends before the page has its first copies is kept and followed
@@ -186,6 +226,16 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   config.getState().set(configView);
   commandStore.getState().set(commandList);
   applyConfig(configView);
+  const machine = layoutView.machine ?? UNKNOWN_MACHINE;
+  // What is made further on, for what is called back before it is.
+  const made: { shell?: ShellApp; views?: PaneViews } = {};
+  // Looking at the machine takes the core a moment; nothing waits for it.
+  client.profilesList().then(
+    (list) => {
+      if (profiles.getState().set(list)) made.views?.restyle();
+    },
+    (error: unknown) => notices.push("error", `The profiles could not be read: ${reason(error)}`),
+  );
 
   const appearance = (): Appearance => {
     const view = config.getState().view;
@@ -202,6 +252,13 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     apply: (intent) => client.layoutApply(intent),
     defaults: DEFAULT_TOKENS,
   });
+
+  /** The context of the palette on show, if one is: it takes every key. */
+  const overlayContext = (): ReadonlySet<string> | undefined => {
+    if (palette.getState().shown) return PALETTE_CONTEXT;
+    if (connect.getState().shown) return CONNECT_CONTEXT;
+    return undefined;
+  };
 
   const platform = currentPlatform();
   // Running a command needs the views, and the views need the shortcuts.
@@ -229,13 +286,16 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     client,
     area,
     titles,
+    reports,
     config: () => config.getState().view,
     appearance: () => look,
+    appearanceOf: (pane) => appearanceOf(pane),
     shortcut: (pane, event, alternateScreen) => {
-      // While the palette is on show every key is the palette's, wherever the
-      // keyboard happens to be: none reaches a program.
-      if (palette.getState().shown) {
-        shortcuts.handle(event, PALETTE_CONTEXT);
+      // While a palette is on show every key is the palette's, wherever the keyboard
+      // happens to be: none reaches a program.
+      const overlay = overlayContext();
+      if (overlay) {
+        shortcuts.handle(event, overlay);
         return true;
       }
       const contexts = new Set(["terminal"]);
@@ -246,6 +306,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     keyboard: (pane) => search.setKeyboard(pane, "terminal"),
     searched: (pane) => search.touched(pane),
   });
+  made.views = views;
   // A search works in stretches with the page's other work between them. A message to
   // oneself is the soonest a task can be had that still lets a frame or a key in
   // first: a timer of no length is made to wait some milliseconds.
@@ -267,6 +328,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     client,
     views,
     palette,
+    connect,
     search,
     mayRun: (id, args) => mayRun({ layout, config, views, prompts, client, notices }, id, args),
     focusBar: () => focusBar(),
@@ -337,6 +399,10 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       case "close_requested":
         void closeRequested({ layout, config, views, prompts, client, notices });
         break;
+      case "profiles_changed":
+        // A profile's look may be another now.
+        if (profiles.getState().set(notice)) views.restyle();
+        break;
       case "notice":
         notices.push(notice.level, notice.message);
         break;
@@ -377,12 +443,28 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         const tab = state.tabs[state.paneTabs[intent.pane] ?? ""];
         beside = (tab ? panesOf(tab.root).length : 1) + 1;
       }
+      // The new pane's text is the size its profile asks for: the one the intent names,
+      // or, for a split, the divided pane's.
+      const list = profiles.getState().list;
+      const content = "content" in intent ? intent.content : undefined;
+      const named =
+        content && content.type === "terminal" && "profile" in content
+          ? content.profile
+          : undefined;
+      const paneLook =
+        named !== undefined && named !== null
+          ? looks.of(look, findProfile(list, named), list?.looks)
+          : intent.type === "split"
+            ? views.get(intent.pane)
+              ? appearanceOf(intent.pane)
+              : look
+            : looks.of(look, findProfile(list, list?.default), list?.looks);
       const fontSizePx = Math.min(
-        Math.max(look.fontSizePx + views.zoomPx, FONT_SIZE_MIN_PX),
+        Math.max(paneLook.fontSizePx + views.zoomPx, FONT_SIZE_MIN_PX),
         FONT_SIZE_MAX_PX,
       );
       const dpr = window.devicePixelRatio;
-      const metrics = host.measureCells(rendererTheme(look, fontSizePx), dpr);
+      const metrics = host.measureCells(rendererTheme(paneLook, fontSizePx), dpr);
       return gridFor(rect, area.chrome(beside, floating), metrics, dpr);
     },
     command: (id, args) => {
@@ -410,26 +492,35 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
 
   // The keyboard and the window's title follow the layout's focus.
 
-  // While the palette is on show the keyboard is the palette's, and when the palette
-  // is put away the keyboard goes back to where the user was working: the terminal of
-  // the focused pane, or that pane's search bar if they were typing there.
+  // While a palette is on show the keyboard is the palette's, and when the palettes
+  // are put away the keyboard goes back to where the user was working: the terminal
+  // of the focused pane, or that pane's search bar if they were typing there.
   const refocus = (): void => {
-    if (palette.getState().shown) return;
+    if (overlayContext()) return;
     const pane = selectFocus(layout.getState());
     if (pane !== null && search.focusBar(pane)) return;
     views.focus();
   };
-  let paletteShown = false;
-  palette.subscribe((state) => {
-    if (state.shown === paletteShown) return;
-    paletteShown = state.shown;
-    if (!paletteShown) queueMicrotask(refocus);
-  });
+  let overlayShown = false;
+  const followOverlay = (): void => {
+    const shown = overlayContext() !== undefined;
+    if (shown === overlayShown) return;
+    overlayShown = shown;
+    if (!shown) queueMicrotask(refocus);
+  };
+  palette.subscribe(followOverlay);
+  connect.subscribe(followOverlay);
   let focus: PaneId | null = null;
   let active: string | null = null;
+  // The window is called what its tab on show is called.
   const retitle = (): void => {
-    document.title = (focus === null ? undefined : titles.get(focus)) ?? DEFAULT_TITLE;
+    const shell = made.shell;
+    const title = shell && active !== null ? describeTabNow(shell, active).label : DEFAULT_TITLE;
+    if (document.title !== title) document.title = title;
   };
+  reports.subscribeAll((pane) => {
+    if (active !== null && layout.getState().paneTabs[pane] === active) retitle();
+  });
   let epoch: number | undefined;
   layout.subscribe((state) => {
     if (!state.ready) return;
@@ -443,12 +534,17 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     if (now === focus && tab === active) return;
     focus = now;
     active = tab;
+    if (now !== null && windowState.getState().focused) reports.attend(now);
     retitle();
     // The card of a pane in a tab that has just been shown is rendered after this.
     queueMicrotask(refocus);
   });
   titles.subscribe((pane) => {
     if (pane === focus) retitle();
+  });
+  // A window that comes into use shows its focused pane, which has then been seen.
+  windowState.subscribe((state, before) => {
+    if (state.focused && !before.focused && focus !== null) reports.attend(focus);
   });
   const onWindowFocus = (): void => {
     // The keyboard comes back to the terminal unless something else in the window
@@ -464,10 +560,8 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     const where = event.target;
     if (!(where instanceof Element)) return;
     if (where.closest(KEEPS_KEYS)) return;
-    let contexts = NO_CONTEXT;
-    if (palette.getState().shown) {
-      contexts = PALETTE_CONTEXT;
-    } else if (where.closest(SEARCH_BAR)) {
+    let contexts = overlayContext() ?? NO_CONTEXT;
+    if (contexts === NO_CONTEXT && where.closest(SEARCH_BAR)) {
       // A search bar is not its terminal: a key that copies from a terminal, say,
       // must be left to the field.
       const pane = where.closest<HTMLElement>("[data-pane]")?.dataset.pane;
@@ -503,7 +597,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   };
   ready();
 
-  return {
+  const shell: ShellApp = {
     layout,
     config,
     commandStore,
@@ -511,10 +605,14 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     area,
     views,
     titles,
+    reports,
     commands,
     prompts,
     notices,
     palette,
+    connect,
+    profiles,
+    machine,
     status,
     windowState,
     cardDrag,
@@ -532,6 +630,12 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       host.dispose();
     },
   };
+  made.shell = shell;
+  // What the profiles and the configuration say changes what the window is called.
+  profiles.subscribe(retitle);
+  config.subscribe(retitle);
+  retitle();
+  return shell;
 }
 
 let app: Promise<ShellApp> | undefined;

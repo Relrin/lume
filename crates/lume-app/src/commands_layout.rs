@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use lume_layout::{Applied, Intent, WindowId};
+use lume_layout::{Applied, Intent, PaneId, WindowId};
 use serde_json::Value;
 use tauri::{State, Webview};
 
@@ -65,6 +65,23 @@ pub async fn sessions_start(
     let window = window_for(&webview)?;
     services.state.check_carrier(webview.label(), carrier)?;
     Ok(services.panes.start_sessions(window, panes).await)
+}
+
+/// Which of the calling window's `panes` run something that closing them would end.
+/// A pane that is not in the window runs nothing of the window's.
+#[tauri::command]
+pub fn panes_busy(
+    webview: Webview,
+    services: Shared<'_>,
+    panes: Vec<PaneId>,
+) -> Result<Vec<PaneId>, CommandError> {
+    let window = window_for(&webview)?;
+    let workspace = services.panes.workspace();
+    Ok(panes
+        .into_iter()
+        .filter(|pane| workspace.window_of(*pane) == Some(window))
+        .filter(|pane| services.panes.busy(*pane))
+        .collect())
 }
 
 /// Every command there is.

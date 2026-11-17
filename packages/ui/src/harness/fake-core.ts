@@ -19,6 +19,7 @@ import type {
   CommandSpec,
   ConfigView,
   KeyBinding,
+  Machine,
   Notice,
   Scheme,
   ProfileList,
@@ -26,6 +27,7 @@ import type {
   ThemeEntry,
   TitleBar,
 } from "../core/types.ts";
+import type { ExitStatus, Launcher, SessionEvent } from "../transport/types.ts";
 import type {
   Area,
   DockArea,
@@ -86,8 +88,24 @@ function sessionOfNumber(number: number): string {
   return number.toString(16).padStart(16, "0");
 }
 
+/** What a pane of a fixture runs, as the core would know it. */
+export interface FixturePane {
+  /** What its session was started to run. */
+  readonly launcher?: Launcher;
+  /** The profile it was started from. */
+  readonly profile?: string;
+  /** The directory it was started in. */
+  readonly cwd?: string;
+  /** Whether the pane says what it runs itself, as a pane started from a profile does. */
+  readonly saved?: boolean;
+}
+
+/** The machine a fixture's page runs on. */
+export const FIXTURE_MACHINE: Machine = { name: "FIXTURE", home: "C:\\Users\\fixture" };
+
 /** A terminal pane that shows the session called `session`. */
-function terminal(id: PaneId, session: string): PaneNode {
+function terminal(id: PaneId, session: string, setup: FixturePane = {}): PaneNode {
+  const saved = setup.saved === true;
   return {
     type: "pane" as const,
     id,
@@ -96,12 +114,28 @@ function terminal(id: PaneId, session: string): PaneNode {
       type: "terminal" as const,
       backend: "local",
       session,
-      profile: null,
-      launcher: null,
-      cwd: null,
+      profile: saved ? (setup.profile ?? null) : null,
+      launcher: saved ? (setup.launcher ?? null) : null,
+      cwd: setup.cwd ?? null,
       env: [],
     },
   };
+}
+
+/** An exit status as a frame carries it: how it ended, and the code or signal. */
+function exitPayload(status: ExitStatus): Uint8Array {
+  const bytes = new Uint8Array(5);
+  const view = new DataView(bytes.buffer);
+  if (status === "unknown") {
+    view.setUint8(0, 2);
+  } else if ("code" in status) {
+    view.setUint8(0, 0);
+    view.setUint32(1, status.code >>> 0, true);
+  } else {
+    view.setUint8(0, 1);
+    view.setUint32(1, status.signal, true);
+  }
+  return bytes;
 }
 
 /** The sessions of the fixture's panes, when nothing is asked for. */
@@ -141,6 +175,12 @@ export interface FakeCoreOptions {
   readonly commands?: readonly CommandSpec[];
   /** The keys in effect. Left out, none. */
   readonly bindings?: readonly KeyBinding[];
+  /** What some of the panes run, by pane. Left out, a pane says nothing of it. */
+  readonly panes?: Readonly<Record<PaneId, FixturePane>>;
+  /** The profiles there are. Left out, a shell, a distribution and a host. */
+  readonly profiles?: ProfileList;
+  /** Settings of the page's own to lay over the fixture's, by section. */
+  readonly settings?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
 /** One tab of a fixture: its panes, in order, and the splits that divide it. */
@@ -171,7 +211,7 @@ function arrange(options: FakeCoreOptions): Arrangement {
     panes += 1;
     const id = `p${panes}`;
     sessions.set(id, sessionOfNumber(panes));
-    return terminal(id, sessionOfNumber(panes));
+    return terminal(id, sessionOfNumber(panes), options.panes?.[id]);
   };
   const split = (): SplitId => {
     splits += 1;
@@ -309,6 +349,9 @@ export class FakeCore implements Carrier {
   readonly #streams = new Map<string, number>();
   #receive: (frames: Uint8Array) => void = () => undefined;
   #revision = 1;
+  #profiles: ProfileList;
+  /** The panes whose program has ended. */
+  readonly #ended = new Set<PaneId>();
   /** Commands the page called that this core has no answer for. */
   readonly unanswered: string[] = [];
 
@@ -319,6 +362,13 @@ export class FakeCore implements Carrier {
     this.#active = first?.id ?? FIXTURE_TABS.first;
     this.#focus = first?.panes[0] ?? "p1";
     this.#scheme = options.scheme ?? "dark";
+    this.#profiles = options.profiles ?? PROFILES;
+  }
+
+  /** The pane that shows a session of the fixture. */
+  #paneOf(session: string): PaneId | undefined {
+    for (const [pane, shown] of this.#fixture.sessions) if (shown === session) return pane;
+    return undefined;
   }
 
   /** Every pane of the fixture, those of the tabs first. */
@@ -371,7 +421,7 @@ export class FakeCore implements Carrier {
     const float = (pane: PaneId | null, minimised: Floating["minimised"]): void => {
       if (pane === null) return;
       floats.push({
-        pane: terminal(pane, this.#fixture.sessions.get(pane) ?? ""),
+        pane: terminal(pane, this.#fixture.sessions.get(pane) ?? "", this.#options.panes?.[pane]),
         rect: FLOAT_RECT,
         minimised,
       });
@@ -412,11 +462,12 @@ export class FakeCore implements Carrier {
       scheme: this.#scheme,
       theme: { id: light ? "lume-light" : "lume-dark", scheme: this.#scheme },
       config: {
-        appearance: { "pane-header": "always" },
+        appearance: { "pane-header": "always", ...this.#options.settings?.["appearance"] },
         terminal: {
           "scrollback-lines": this.#options.scrollbackLines ?? 1000,
           "cursor-style": "block",
           "cursor-blink": false,
+          ...this.#options.settings?.["terminal"],
         },
         layout: { "tab-placement": this.#options.tabPlacement ?? "top" },
         renderer: { tier: this.#options.tier ?? "auto" },
@@ -455,7 +506,14 @@ export class FakeCore implements Carrier {
           epoch: 1,
           revision: this.#revision,
           workspace: this.#workspace(),
+          machine: FIXTURE_MACHINE,
         });
+      case "panes_busy": {
+        const asked = Array.isArray(args["panes"]) ? (args["panes"] as PaneId[]) : [];
+        return answer(
+          asked.filter((pane) => this.#fixture.sessions.has(pane) && !this.#ended.has(pane)),
+        );
+      }
       case "config_view":
         return answer(this.#config());
       case "commands_list":
@@ -464,8 +522,11 @@ export class FakeCore implements Carrier {
         return answer({ maximised: false, fullscreen: false, focused: true });
       case "workspaces_list":
         return answer({ active: "fixture", workspaces: [{ name: "fixture", root: null }] });
-      case "session_attach":
-        this.#streams.set(String(args["session"]), Number(args["stream"]));
+      case "session_attach": {
+        const session = String(args["session"]);
+        this.#streams.set(session, Number(args["stream"]));
+        const pane = this.#paneOf(session);
+        const setup = pane === undefined ? undefined : this.#options.panes?.[pane];
         return answer({
           size: { cols: 80, rows: 24 },
           resize_pulls_scrollback: false,
@@ -477,7 +538,10 @@ export class FakeCore implements Carrier {
             responder: "client",
             hydrate: { snapshot: false, vt_replay: false },
           },
+          ...(setup?.launcher ? { launcher: setup.launcher } : {}),
+          ...(setup?.profile !== undefined ? { profile: setup.profile } : {}),
         });
+      }
       case "layout_apply":
         this.#apply(args["intent"] as Intent);
         return answer({
@@ -492,7 +556,7 @@ export class FakeCore implements Carrier {
       case "shells_list":
         return answer(SHELLS);
       case "profiles_list":
-        return answer(PROFILES);
+        return answer(this.#profiles);
       case "font_families":
         return answer(FONTS);
       // No picture is behind the panes: no bytes.
@@ -552,12 +616,43 @@ export class FakeCore implements Carrier {
    * frame may be, as the core does. Returns how many bytes went.
    */
   output(pane: PaneId, bytes: Uint8Array): number {
-    const stream = this.#streams.get(this.#fixture.sessions.get(pane) ?? "");
+    const stream = this.#streamOf(pane);
     if (stream === undefined) return 0;
     for (let at = 0; at < bytes.length; at += LIMITS.maxPayload) {
       this.#receive(frame(stream, Kind.Data, bytes.subarray(at, at + LIMITS.maxPayload)));
     }
     return bytes.length;
+  }
+
+  /** The stream the page attached to the session of `pane` on, once it has. */
+  #streamOf(pane: PaneId): number | undefined {
+    return this.#streams.get(this.#fixture.sessions.get(pane) ?? "");
+  }
+
+  /**
+   * Sends something the session of `pane` reported, as the core passes it on. Returns
+   * whether the page had attached to that session to be told.
+   */
+  event(pane: PaneId, event: SessionEvent): boolean {
+    const stream = this.#streamOf(pane);
+    if (stream === undefined) return false;
+    this.#receive(frame(stream, Kind.Event, new TextEncoder().encode(JSON.stringify(event))));
+    return true;
+  }
+
+  /** Ends the program of `pane`'s session, as the core says when it does. */
+  exit(pane: PaneId, status: ExitStatus): boolean {
+    const stream = this.#streamOf(pane);
+    if (stream === undefined) return false;
+    this.#ended.add(pane);
+    this.#receive(frame(stream, Kind.Exit, exitPayload(status)));
+    return true;
+  }
+
+  /** Changes the profiles there are, as the core does when it finds others. */
+  profilesChanged(list: Omit<ProfileList, "revision">): void {
+    this.#profiles = { ...list, revision: this.#profiles.revision + 1 };
+    this.#notify({ type: "profiles_changed", ...this.#profiles });
   }
 
   #notify(notice: Notice): void {

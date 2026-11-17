@@ -137,6 +137,9 @@ export const PALETTE_RESULTS_MAX = 50;
 /** How many of the commands last run from the palette it remembers and lists first. */
 export const PALETTE_RECENTS_MAX = 8;
 
+/** How many pictures of its panes' programs a tab shows, one over another. */
+export const TAB_ICONS_MAX = 3;
+
 /** How long a notice stays before it goes by itself: one that only informs. */
 export const NOTICE_INFO_MS = 5000;
 

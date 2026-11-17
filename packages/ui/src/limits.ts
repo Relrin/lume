@@ -32,6 +32,12 @@ export const OSC52_WRITE_MAX_BYTES = 1024 * 1024;
 /** The longest window title a program may set, in bytes of UTF-8. The rest is cut off. */
 export const TITLE_MAX_BYTES = 1024;
 
+/**
+ * The most status records a pane keeps of its programs. The core keeps as many; a
+ * record that would be one too many pushes out the one reported longest ago.
+ */
+export const STATUS_RECORDS_MAX = 64;
+
 /** The kinds of link the shell will open. Anything else in a link is only text. */
 export const LINK_SCHEMES = ["http", "https", "file"] as const;
 

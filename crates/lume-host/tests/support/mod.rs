@@ -38,6 +38,14 @@ pub const PRINT_MARK: &str = "echo lume-%LUME_MARK%-done";
 #[cfg(unix)]
 pub const PRINT_MARK: &str = "echo \"lume-${LUME_MARK}-done\"";
 
+/// A command line that starts a program of its own, which prints a line now and then
+/// until it is ended.
+#[cfg(windows)]
+pub const PRINTS_NOW_AND_THEN: &str =
+    "cmd /d /c \"for /l %i in () do @(echo tick & ping -n 2 127.0.0.1 >nul)\"";
+#[cfg(unix)]
+pub const PRINTS_NOW_AND_THEN: &str = "sh -c 'while :; do echo tick; sleep 1; done'";
+
 /// A command line that prints the terminal size, columns after rows.
 #[cfg(windows)]
 pub const PRINT_SIZE: &str = "mode con";

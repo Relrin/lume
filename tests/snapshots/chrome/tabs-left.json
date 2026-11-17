@@ -90,6 +90,13 @@
                       {
                         "role": "button",
                         "name": "New tab"
+                      },
+                      {
+                        "role": "button",
+                        "name": "New tab with a profile",
+                        "state": {
+                          "expanded": "false"
+                        }
                       }
                     ]
                   }
@@ -258,7 +265,7 @@
       "size.topbar": "44px",
       "a pane's background": "#171a1e",
       "a pane's corner": "10px",
-      "the window's text": "#dfe3ee"
+      "the window's text": "#e6e8ea"
     },
     "light": {
       "color.surface": "#e6e9ef",
@@ -277,7 +284,7 @@
       "size.topbar": "44px",
       "a pane's background": "#ffffff",
       "a pane's corner": "10px",
-      "the window's text": "#dfe3ee"
+      "the window's text": "#1c1f2a"
     }
   }
 }

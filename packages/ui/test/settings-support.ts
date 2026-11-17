@@ -31,6 +31,20 @@ export const SCHEMA = {
   ],
   // The keys are out of order on purpose: nothing may depend on their order.
   properties: {
+    // A setting at the top of the file, outside every table, which is empty when unset.
+    "default-profile": {
+      type: "string",
+      default: "",
+      "x-lume-settings": {
+        page: "terminal",
+        group: "Shell",
+        order: 40,
+        label: "Default profile",
+        control: "select",
+        list: "profiles",
+        unset: "System default",
+      },
+    },
     terminal: {
       type: "object",
       properties: {
@@ -193,6 +207,29 @@ export const LISTS: SettingsLists = {
   fonts: ["Cascadia Mono", "Consolas"],
   shells: [{ name: "PowerShell", program: "pwsh.exe" }],
   workspaces: ["default", "notes"],
+  profiles: [
+    {
+      id: "box",
+      name: "Box",
+      launcher: { type: "ssh", host: "box.example" },
+      hidden: false,
+      origin: "user",
+    },
+    {
+      id: "auto.wsl.Ubuntu",
+      name: "Ubuntu",
+      launcher: { type: "wsl", distro: "Ubuntu" },
+      hidden: false,
+      origin: "generated",
+    },
+    {
+      id: "auto.cmd",
+      name: "Command Prompt",
+      launcher: { type: "shell", program: "cmd.exe", args: [], login: false },
+      hidden: true,
+      origin: "generated",
+    },
+  ],
 };
 
 /**

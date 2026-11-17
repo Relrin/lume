@@ -6,13 +6,14 @@
  * among the tabs again if that is where it was taken from.
  */
 
+import { useRef } from "react";
 import { useStore } from "zustand";
 
 import { selectMinimised } from "../layout/selectors.ts";
 import type { PaneId } from "../layout/types.ts";
 import { useShell } from "./context.ts";
-import { TerminalIcon } from "./icons.tsx";
-import { usePaneTitle } from "./PaneCard.tsx";
+import { ProgramIconView } from "./icons.tsx";
+import { usePaneName, useProgramIcon } from "./PaneCard.tsx";
 
 /** No panes: one list for every window that has none put away. */
 const NONE: readonly PaneId[] = [];
@@ -20,9 +21,12 @@ const NONE: readonly PaneId[] = [];
 /** The marker of one pane that is put away. */
 function MinimisedPill({ pane }: { pane: PaneId }) {
   const app = useShell();
-  const name = usePaneTitle(app, pane);
+  const pill = useRef<HTMLButtonElement>(null);
+  const name = usePaneName(app, pane, pill);
+  const icon = useProgramIcon(app, pane);
   return (
     <button
+      ref={pill}
       type="button"
       className="pane-pill"
       title="Restore pane"
@@ -37,9 +41,10 @@ function MinimisedPill({ pane }: { pane: PaneId }) {
       }}
     >
       <span className="pane-pill-icon">
-        <TerminalIcon size={10} />
+        <ProgramIconView icon={icon} size={10} />
       </span>
       <span className="pane-pill-name" ref={name} />
+      <span className="pane-pill-mark" aria-hidden="true" />
     </button>
   );
 }

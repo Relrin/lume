@@ -62,12 +62,22 @@ export function closingText(closing: Closing): string {
   const programs = one
     ? "a program that is still running"
     : `${running} programs that are still running`;
+  // The count is of panes: a pane with a command running counts once.
   return `${has} ${programs}. Closing the ${what} ends ${one ? "it" : "them"}.`;
 }
 
-/** How many of some panes have a program that has not ended. */
-function running(app: ClosingApp, panes: readonly PaneId[]): number {
-  return panes.filter((pane) => app.views.get(pane)?.ended === false).length;
+/**
+ * How many of some panes run something that closing them would end. The core knows
+ * best: which program has each terminal, and whether a shell is running a command. If
+ * it cannot be asked, a pane whose program has not ended counts.
+ */
+async function running(app: ClosingApp, panes: readonly PaneId[]): Promise<number> {
+  if (panes.length === 0) return 0;
+  try {
+    return (await app.client.panesBusy(panes)).length;
+  } catch {
+    return panes.filter((pane) => app.views.get(pane)?.ended === false).length;
+  }
 }
 
 /**
@@ -79,7 +89,7 @@ export async function mayRun(app: ClosingApp, id: string, args: unknown): Promis
   if (view?.config.terminal["confirm-close"] !== "always") return true;
   const closed = panesClosedBy(app.layout.getState(), id, args);
   if (!closed) return true;
-  const live = running(app, closed.panes);
+  const live = await running(app, closed.panes);
   if (live === 0) return true;
   const agreed = await app.prompts.confirmClose({ what: closed.what, running: live });
   // The keyboard goes back to where the user was working when nothing is closed.
@@ -93,7 +103,7 @@ export async function mayRun(app: ClosingApp, id: string, args: unknown): Promis
  */
 export async function closeRequested(app: ClosingApp): Promise<void> {
   const state = app.layout.getState();
-  const live = state.ready ? running(app, selectWindowPanes(state)) : 0;
+  const live = state.ready ? await running(app, selectWindowPanes(state)) : 0;
   if (live > 0 && !(await app.prompts.confirmClose({ what: "window", running: live }))) {
     app.views.focus();
     return;

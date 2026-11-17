@@ -26,6 +26,7 @@ const APPLICATION: &str = "Application";
 const PIXELS: &str = "px";
 const PERCENT: &str = "%";
 const LINES: &str = "lines";
+const SECONDS: &str = "seconds";
 
 /// The kind of control that sets a setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -273,6 +274,20 @@ impl Shown {
         self
     }
 
+    /// Durations in whole seconds to choose from.
+    #[must_use]
+    pub fn seconds(mut self, counts: &[u32]) -> Self {
+        self.options = counts
+            .iter()
+            .map(|count| Choice {
+                value: Value::from(*count),
+                label: format!("{count} {SECONDS}"),
+            })
+            .collect();
+        self.unit = Some(SECONDS);
+        self
+    }
+
     /// Choices that depend on the machine, after the fixed ones.
     #[must_use]
     pub fn list(mut self, list: &'static str) -> Self {
@@ -325,8 +340,8 @@ pub fn pages() -> [Page; 3] {
             label: "General",
             icon: "general",
             group: APPLICATION,
-            blurb: "How Lume starts, and what closing does.",
-            groups: &["Startup", "Windows", "Closing"],
+            blurb: "How Lume starts, how it gets your attention, and what closing does.",
+            groups: &["Startup", "Windows", "Attention", "Closing"],
         },
         Page {
             id: "appearance",
@@ -421,6 +436,12 @@ mod tests {
         let lines = Shown::select("p", "g", 1, "l").lines(&[1000]);
         assert_eq!(lines.options[0].label, "1,000 lines");
         assert_eq!(lines.unit, Some("lines"));
+        let seconds = Shown::select("p", "g", 1, "l").seconds(&[30]);
+        assert_eq!(
+            serde_json::to_value(&seconds.options).unwrap(),
+            json!([{ "value": 30, "label": "30 seconds" }])
+        );
+        assert_eq!(seconds.unit, Some("seconds"));
     }
 
     #[test]
@@ -501,7 +522,7 @@ mod tests {
                 other => panic!("{path:?} is set by `{other}`"),
             }
             if let Some(list) = says.get("list") {
-                let known = ["themes", "fonts", "shells", "workspaces"];
+                let known = ["themes", "fonts", "shells", "workspaces", "profiles"];
                 assert!(known.contains(&list.as_str().unwrap()), "{path:?}");
             }
         }

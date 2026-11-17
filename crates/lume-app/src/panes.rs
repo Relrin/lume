@@ -332,21 +332,32 @@ impl Spawner for PaneSpawner {
             size: request.size.unwrap_or_else(default_size),
             shell_integration,
         };
-        let session = state
-            .router()
-            .get(&backend)
-            .map_err(Self::failure)?
-            .spawn(spec)
-            .await
-            .map_err(Self::failure)?;
-        // What the session runs decides later what a directory it reports is good for.
-        state.reports().started(
-            SessionKey {
-                backend: backend.clone(),
-                session,
-            },
-            launcher,
-        );
+        let host = state.router().get(&backend).map_err(Self::failure)?;
+        let session = host.spawn(spec).await.map_err(Self::failure)?;
+        let key = SessionKey {
+            backend: backend.clone(),
+            session,
+        };
+        // What the session runs decides later what a directory it reports is good for,
+        // and how its pane is shown.
+        state
+            .reports()
+            .started(key.clone(), launcher, profile.map(|profile| profile.id));
+        // Which process is the shell tells it from a program it runs. Nothing waits
+        // for that.
+        let reports = Arc::clone(state.reports());
+        tokio::spawn(async move {
+            let listed = host.list().await;
+            let pid = listed.ok().and_then(|sessions| {
+                sessions
+                    .into_iter()
+                    .find(|info| info.id == key.session)
+                    .and_then(|info| info.pid)
+            });
+            if let Some(pid) = pid {
+                reports.set_pid(&key, pid);
+            }
+        });
         Ok(Started {
             backend,
             session,
@@ -492,7 +503,9 @@ impl Panes {
         self.layout.workspace()
     }
 
-    /// The layout as the page of `window` is given it.
+    /// The layout as the page of `window` is given it, with what the page needs to
+    /// know of this machine to show where a shell says it is: the machine's name, which
+    /// a report from another machine does not carry, and the user's home folder.
     pub fn view(&self, window: WindowId) -> Value {
         let snapshot = self.snapshot();
         json!({
@@ -500,6 +513,10 @@ impl Panes {
             "epoch": snapshot.epoch,
             "revision": snapshot.revision,
             "workspace": snapshot.workspace,
+            "machine": {
+                "name": lume_session::cwd::machine_name(),
+                "home": std::env::home_dir().map(|home| home.to_string_lossy().into_owned()),
+            },
         })
     }
 
@@ -574,26 +591,26 @@ impl Panes {
         })
     }
 
-    /// Whether a program still runs in a pane of `window`: whether closing the window
-    /// would end something.
-    pub fn runs_something(&self, window: WindowId) -> bool {
+    /// Whether something runs in a pane that closing it would end.
+    pub fn busy(&self, pane: PaneId) -> bool {
         let Some(state) = self.state.upgrade() else {
             return false;
         };
+        self.session_of(pane)
+            .is_some_and(|key| state.reports().busy(&key, state.ended(&key)))
+    }
+
+    /// Whether something runs in a pane of `window`: whether closing the window would
+    /// end something.
+    pub fn runs_something(&self, window: WindowId) -> bool {
         let workspace = self.workspace();
         let Some(window) = workspace.window(window) else {
             return false;
         };
-        window.panes().into_iter().any(|pane| {
-            terminal_of(pane)
-                .and_then(|terminal| {
-                    Some(SessionKey {
-                        backend: self.backend_of(terminal),
-                        session: terminal.session?,
-                    })
-                })
-                .is_some_and(|key| !state.ended(&key))
-        })
+        window
+            .panes()
+            .into_iter()
+            .any(|pane| terminal_of(pane).is_some() && self.busy(pane.id))
     }
 
     /// Whether a session is in a pane of `window`: whether that window's page may
@@ -1679,7 +1696,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_window_runs_something_until_the_programs_of_its_panes_have_ended() {
+    async fn a_window_runs_something_while_a_program_other_than_a_shell_at_its_prompt_runs() {
         let app = running("runs", "").await;
         let pane = only_pane(&app);
         // A pane whose session has not been started runs nothing.
@@ -1687,17 +1704,37 @@ mod tests {
 
         let (_carrier, id) = page(&app).await;
         let session = start(&app, pane).await;
+        // Nothing is known yet of what has the terminal, so something may run.
         assert!(app.panes.runs_something(app.window));
 
         attach(&app, id, &session, 1).await;
-        type_into(&app, id, 1, "exit 3\r").await;
         let panes = Arc::clone(&app.panes);
         let window = app.window;
-        until("the program to have ended", || {
+        until("the shell to be seen at its prompt", || {
             !panes.runs_something(window)
         })
         .await;
-        // The pane is still there, with nothing running in it.
+
+        // A program the shell runs is something closing would end.
+        let program = if cfg!(windows) {
+            "ping -n 6 127.0.0.1 >nul\r"
+        } else {
+            "sleep 5\r"
+        };
+        type_into(&app, id, 1, program).await;
+        until("the program to be seen", || panes.runs_something(window)).await;
+        assert!(app.panes.busy(pane));
+        until("the shell to be back at its prompt", || {
+            !panes.runs_something(window)
+        })
+        .await;
+
+        // A program that has ended runs nothing, and its pane stays.
+        type_into(&app, id, 1, "exit 3\r").await;
+        let state = Arc::clone(&app.state);
+        until("the program to have ended", || state.ended(&session)).await;
+        assert!(!app.panes.runs_something(app.window));
+        assert!(!app.panes.busy(pane));
         assert!(app.panes.workspace().pane(pane).is_some());
         app.state.shutdown().await;
     }
@@ -2332,6 +2369,7 @@ mod tests {
                 extra_args: Vec::new(),
                 client: None,
             },
+            None,
         );
         says_it_is_in(&app, &key, &reported(&here));
         assert_eq!(app.panes.inherited_dir(pane, None).await, None);

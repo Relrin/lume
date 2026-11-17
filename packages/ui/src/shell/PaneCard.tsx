@@ -12,9 +12,18 @@
  * resized by its edges.
  */
 
-import { useLayoutEffect, useRef } from "react";
+import {
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from "react";
 import { useStore } from "zustand";
 
+import type { PaneDescription } from "../events/describe.ts";
+import type { ProgramIcon } from "../events/programs.ts";
 import { FLOAT_EDGES } from "../layout/floats.ts";
 import { selectFocus } from "../layout/selectors.ts";
 import type { PaneId } from "../layout/types.ts";
@@ -22,42 +31,158 @@ import { SearchBar } from "../search/SearchBar.tsx";
 import { StatusSlotItems } from "../status/StatusItem.tsx";
 import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
+import { describeNow, followPane, mark } from "./describing.ts";
 import { useKeyHint } from "./hints.ts";
 import {
+  AgainIcon,
   CloseIcon,
+  DoneIcon,
   FloatIcon,
+  ProgramIconView,
   PutAwayIcon,
   SplitDownIcon,
   SplitRightIcon,
-  TerminalIcon,
   ZoomIcon,
 } from "./icons.tsx";
 
-/** What a pane is called when neither the user nor its program has named it. */
-const UNTITLED_PANE = "Terminal";
+/**
+ * The part of a header that renders: what changes seldom, such as a command starting or
+ * a program saying it waits. Kept as one string so that what has not changed does not
+ * render.
+ */
+interface HeaderMarks {
+  readonly icon: ProgramIcon;
+  readonly running: boolean;
+  readonly failed: number | null;
+  readonly status: PaneDescription["status"];
+  readonly ended: PaneDescription["ended"];
+}
 
-/** Keeps an element's text the title of a pane's program, without rendering. */
-export function usePaneTitle(app: ShellApp, pane: PaneId) {
-  const title = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    const element = title.current;
-    if (!element) return undefined;
-    const write = () => {
-      // A name the user gave the pane comes before the one its program gives itself.
-      const named = app.layout.getState().panes[pane]?.title;
-      // Set as text: a title comes from a program and is never markup.
-      element.textContent = named ?? app.titles.get(pane) ?? UNTITLED_PANE;
-    };
-    write();
-    const stops = [
-      app.titles.subscribe((changed) => {
-        if (changed === pane) write();
+function marksOf(description: PaneDescription): string {
+  const marks: HeaderMarks = {
+    icon: description.icon,
+    running: description.running,
+    failed: description.failed,
+    status: description.status,
+    ended: description.ended,
+  };
+  return JSON.stringify(marks);
+}
+
+/**
+ * Keeps what a header shows of a pane up to date: its name, where it is and what it has
+ * gathered are written to their elements; the rest, which changes seldom, comes back to
+ * be rendered.
+ */
+function usePaneHeader(
+  app: ShellApp,
+  pane: PaneId,
+  header: RefObject<HTMLElement | null>,
+  name: RefObject<HTMLElement | null>,
+  where: RefObject<HTMLElement | null>,
+): HeaderMarks {
+  const [marks, setMarks] = useState(() => marksOf(describeNow(app, pane)));
+  useLayoutEffect(
+    () =>
+      followPane(app, pane, (description) => {
+        // Set as text: all of it comes from a program, and is never markup.
+        writeText(name.current, description.name);
+        const place = where.current;
+        if (place) {
+          writeText(place, description.where);
+          place.title = description.whereInFull;
+          place.hidden = description.where === "";
+        }
+        const element = header.current;
+        if (element) {
+          mark(element, "paneKind", description.kind, "shell");
+          mark(element, "activity", description.activity, "idle");
+        }
+        setMarks(marksOf(description));
       }),
-      app.layout.subscribe(write),
-    ];
-    return () => stops.forEach((stop) => stop());
-  }, [app, pane]);
-  return title;
+    [app, pane, header, name, where],
+  );
+  return JSON.parse(marks) as HeaderMarks;
+}
+
+/** Gives an element `text`, unless it has it already. */
+function writeText(element: HTMLElement | null, text: string): void {
+  if (element && element.textContent !== text) element.textContent = text;
+}
+
+/**
+ * Keeps an element's text what a pane is called, and `holder`'s marks what the pane
+ * has gathered and whether a program in it waits on the user, without rendering.
+ */
+export function usePaneName(app: ShellApp, pane: PaneId, holder?: RefObject<HTMLElement | null>) {
+  const name = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(
+    () =>
+      followPane(app, pane, (description) => {
+        writeText(name.current, description.name);
+        const element = holder?.current;
+        if (!element) return;
+        mark(element, "activity", description.activity, "idle");
+        mark(element, "waiting", String(description.status?.state === "blocked"), "false");
+      }),
+    [app, pane, holder],
+  );
+  return name;
+}
+
+/** The picture for what runs in a pane, rendering only when it changes. */
+export function useProgramIcon(app: ShellApp, pane: PaneId): ProgramIcon {
+  return useSyncExternalStore(
+    useCallback((changed) => followPane(app, pane, changed), [app, pane]),
+    () => describeNow(app, pane).icon,
+  );
+}
+
+/** The marks a header shows after its spacer: what runs, how the program says it stands. */
+function HeaderMarksView({ pane, marks }: { pane: PaneId; marks: HeaderMarks }) {
+  const app = useShell();
+  const { running, failed, status, ended } = marks;
+  return (
+    <>
+      {running && <span className="pane-running" role="img" aria-label="Running" title="Running" />}
+      {failed !== null && (
+        <span className="pane-exit" title={`The last command ended with code ${failed}`}>
+          exit {failed}
+        </span>
+      )}
+      {status && (
+        <span
+          className="pane-status"
+          data-program-status={status.state}
+          role="img"
+          aria-label={status.label}
+          title={status.tooltip ?? status.label}
+        >
+          <span className="pane-status-mark" aria-hidden="true">
+            {status.state === "done" && <DoneIcon size={9} />}
+          </span>
+          <span className="pane-status-label" aria-hidden="true">
+            {status.label}
+          </span>
+        </span>
+      )}
+      {ended && (
+        <span className="pane-ended" data-ended={ended.again} title={ended.detail ?? ended.reason}>
+          <span className="pane-ended-reason">{ended.reason}</span>
+          <button
+            type="button"
+            className="control pane-again"
+            tabIndex={-1}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => app.commands.run("lume.pane.reconnect", { pane })}
+          >
+            <AgainIcon />
+            <span>{ended.again === "reconnect" ? "Reconnect" : "Restart"}</span>
+          </button>
+        </span>
+      )}
+    </>
+  );
 }
 
 function HeaderButton({
@@ -109,11 +234,10 @@ function PaneHeader({
   floating: boolean;
 }) {
   const app = useShell();
-  const title = usePaneTitle(app, pane);
-  const cwd = useStore(app.layout, (state) => {
-    const content = state.panes[pane]?.content;
-    return content?.type === "terminal" ? content.cwd : null;
-  });
+  const header = useRef<HTMLElement>(null);
+  const name = useRef<HTMLSpanElement>(null);
+  const where = useRef<HTMLSpanElement>(null);
+  const marks = usePaneHeader(app, pane, header, name, where);
   const zoomed = useStore(
     app.layout,
     (state) => state.tabs[state.paneTabs[pane] ?? ""]?.zoomed === pane,
@@ -129,6 +253,7 @@ function PaneHeader({
   const run = (command: string) => () => app.commands.run(command, { pane });
   return (
     <header
+      ref={header}
       className="pane-header"
       onPointerDown={(event) => {
         if (event.button !== 0 || (event.target as Element).closest("button")) return;
@@ -139,15 +264,13 @@ function PaneHeader({
       }}
     >
       <span className="pane-icon">
-        <TerminalIcon size={10} />
+        <ProgramIconView icon={marks.icon} size={10} />
+        <span className="pane-activity" aria-hidden="true" />
       </span>
-      <span className="pane-title" ref={title} />
-      {cwd !== null && (
-        <span className="pane-cwd" title={cwd}>
-          {cwd}
-        </span>
-      )}
+      <span className="pane-title" ref={name} />
+      <span className="pane-cwd" ref={where} hidden />
       <span className="pane-spacer" />
+      <HeaderMarksView pane={pane} marks={marks} />
       <StatusSlotItems store={app.status} slot="pane.header" pane={pane} />
       <span className="pane-buttons">
         {focused && !zoomed && !floating && (
@@ -229,6 +352,27 @@ export function PaneCard({
   const preedit = useRef<HTMLDivElement>(null);
   const status = useRef<HTMLDivElement>(null);
   const focused = useStore(app.layout, (state) => state.ready && selectFocus(state) === pane);
+  const headed = header || floating;
+
+  // A card without a header says how its program ended on the terminal's own line,
+  // since there is nowhere else to say it.
+  useLayoutEffect(() => {
+    if (headed) return undefined;
+    let said = "";
+    const stop = followPane(app, pane, (description) => {
+      const ended = description.ended;
+      const now = ended
+        ? `${ended.reason}. Press Enter to ${ended.again === "reconnect" ? "reconnect" : "start it again"}.`
+        : "";
+      if (now === said) return;
+      said = now;
+      app.views.get(pane)?.showMessage(now);
+    });
+    return () => {
+      stop();
+      if (said !== "") app.views.get(pane)?.showMessage("");
+    };
+  }, [app, pane, headed]);
 
   useLayoutEffect(() => {
     const elements = {
@@ -269,7 +413,7 @@ export function PaneCard({
         if (view && (!focused || !view.hasFocus)) view.focus();
       }}
     >
-      {(header || floating) && <PaneHeader pane={pane} focused={focused} floating={floating} />}
+      {headed && <PaneHeader pane={pane} focused={focused} floating={floating} />}
       <SearchBar pane={pane} />
       <div className="terminal" ref={root}>
         <div className="terminal-surface" ref={surface} />

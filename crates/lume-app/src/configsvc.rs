@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use lume_config::schema::TitleBar;
 use lume_config::{
     ColorScheme, ConfigError, ConfigStore, Dirs, Platform, Problem, Resolved, TokenValue,
-    WatchEvent, Watcher,
+    WatchEvent, Watcher, resolve_tokens,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -287,6 +287,19 @@ impl ConfigService {
                 builtin: theme.file.is_none(),
             })
             .collect()
+    }
+
+    /// The look of a terminal drawn with the theme `id` in place of the one the settings
+    /// choose: every token's value, the user's own settings still laid over, and the
+    /// theme's colour scheme, as a page is told them. `None` when there is no such theme.
+    pub fn look_with_theme(&self, id: &str) -> Option<Value> {
+        let resolved = self.current();
+        resolved.themes.get(id)?;
+        let mut config = resolved.config.clone();
+        config.appearance.theme = Some(id.to_owned());
+        let scheme = *lock(&self.scheme);
+        let (tokens, _) = resolve_tokens(&config, &resolved.sources, &resolved.themes, scheme);
+        Some(json!({ "scheme": tokens.scheme, "tokens": tokens.to_json() }))
     }
 
     /// The file of the picture shown behind the panes, if the theme in use or the

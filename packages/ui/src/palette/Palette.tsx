@@ -140,6 +140,7 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   const app = useShell();
   const commands = useStore(app.commandStore, (state) => state.commands);
   const view = useStore(app.config, (state) => state.view);
+  const profiles = useStore(app.profiles, (state) => state.list);
   const field = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const storage = useMemo(pageStorage, []);
@@ -153,11 +154,18 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
-  /** What a prompt's value is chosen from, once it has been fetched. */
-  const [choices, setChoices] = useState<readonly Choice[] | null>(null);
+  /** The workspaces a prompt's value is chosen from, once they have been fetched. */
+  const [workspaces, setWorkspaces] = useState<readonly Choice[] | null>(null);
 
   const prompt = stage.kind === "args" ? stage.prompts[stage.at] : undefined;
   const source = prompt?.choices ?? null;
+  // The profiles are kept up to date for the whole window; the workspaces are asked
+  // for each time they are needed, since other windows make and remove them.
+  const choices = useMemo(() => {
+    if (source === "profiles") return profiles ? profileChoices(profiles) : null;
+    if (source === "workspaces") return workspaces;
+    return null;
+  }, [source, profiles, workspaces]);
 
   // Putting the palette away gives the keyboard back to where the user was working.
   const close = () => app.palette.getState().close();
@@ -180,22 +188,21 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   });
 
   useEffect(() => {
-    setChoices(null);
-    if (source === null) return undefined;
+    setWorkspaces(null);
+    if (source !== "workspaces") return undefined;
     let current = true;
-    const listed: Promise<Choice[]> =
-      source === "profiles"
-        ? app.client.profilesList().then(profileChoices)
-        : app.client.workspacesList().then(workspaceChoices);
-    listed.then(
-      (found) => {
-        if (current) setChoices(found);
-      },
-      () => {
-        // Without the list the name can still be typed.
-        if (current) setChoices([]);
-      },
-    );
+    app.client
+      .workspacesList()
+      .then(workspaceChoices)
+      .then(
+        (found) => {
+          if (current) setWorkspaces(found);
+        },
+        () => {
+          // Without the list the name can still be typed.
+          if (current) setWorkspaces([]);
+        },
+      );
     return () => {
       current = false;
     };

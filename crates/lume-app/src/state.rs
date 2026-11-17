@@ -27,8 +27,8 @@ use std::time::{Duration, Instant};
 use lume_proto::HydrateMode;
 use lume_proto::app::{AppError, codes};
 use lume_session::{
-    BackendCaps, BackendId, ClientFacts, ExitStatus, Hydrate, LocalBackend, Router, SessionId,
-    SessionInfo, SpawnSpec, TermSize,
+    BackendCaps, BackendId, ClientFacts, ExitStatus, Hydrate, Launcher, LocalBackend, Router,
+    SessionId, SessionInfo, SpawnSpec, TermSize,
 };
 use serde::Serialize;
 use tokio::runtime::Handle;
@@ -96,6 +96,13 @@ pub struct Attached {
     pub hydrate: HydrateMode,
     /// What the session's backend can do.
     pub caps: BackendCaps,
+    /// What the session runs, where the application started it: a pane that runs the
+    /// default profile does not say so itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launcher: Option<Launcher>,
+    /// The profile it was started from, if it was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
 }
 
 /// One session and the backend it runs on.
@@ -437,6 +444,7 @@ impl AppState {
         let backend_id = backend;
         let backend = self.router.get(backend_id)?;
         let attachment = backend.attach(session, facts).await?;
+        let launched = self.reports.launched(&key);
         let attached = Attached {
             size: attachment.size,
             resize_pulls_scrollback: attachment.resize_pulls_scrollback,
@@ -446,6 +454,8 @@ impl AppState {
                 Hydrate::VtReplay(_) => HydrateMode::VtReplay,
             },
             caps: backend.caps(),
+            launcher: launched.as_ref().map(|launched| launched.launcher.clone()),
+            profile: launched.and_then(|launched| launched.profile),
         };
         link.bind(stream, key.clone(), attachment).await?;
         // A pane's session lives as long as its pane; only a page's own needs a holder.
@@ -778,7 +788,8 @@ mod tests {
         assert_eq!(attached.resize_pulls_scrollback, cfg!(unix));
 
         // A shell prints a prompt as soon as it starts, and the command below prints
-        // more. Without credit none of it may arrive.
+        // more. Without credit none of it may arrive. What the session reports needs
+        // no credit, and may: which program has the terminal, for one.
         send(
             &state,
             id,
@@ -786,7 +797,15 @@ mod tests {
         )
         .await;
         sleep(Duration::from_millis(300)).await;
-        assert_eq!(carrier.messages(), vec![]);
+        assert_eq!(output(&carrier, 5), "");
+        assert!(
+            carrier
+                .messages()
+                .iter()
+                .all(|message| matches!(message.body, Body::Event(_))),
+            "{:?}",
+            carrier.messages()
+        );
 
         send(&state, id, &[Message::new(5, Body::Credit(CREDIT))]).await;
         until("the command's output", || {

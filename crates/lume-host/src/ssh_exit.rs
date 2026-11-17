@@ -96,7 +96,12 @@ fn plain(bytes: &[u8]) -> String {
 /// What one of the client's lines says about how the connection ended, if anything.
 fn reason_in(line: &str) -> Option<DisconnectReason> {
     const SAYS: [(&[&str], DisconnectReason); 4] = [
-        (&["Permission denied"], DisconnectReason::AuthFailed),
+        // The server's refusal names the ways of signing in it would take. A file of
+        // this machine the client could not read is denied too, and is another matter.
+        (
+            &["Permission denied (", "Too many authentication failures"],
+            DisconnectReason::AuthFailed,
+        ),
         (
             &[
                 "Host key verification failed",
@@ -233,6 +238,15 @@ mod tests {
             (
                 "Timeout, server box not responding.\r\n",
                 DisconnectReason::ConnectionLost,
+            ),
+            (
+                "Received disconnect from 127.0.0.1 port 2222:2: Too many authentication failures\r\n",
+                DisconnectReason::AuthFailed,
+            ),
+            // A file here the client could not read is no refusal by the server.
+            (
+                "Can't open user config file : Permission denied\r\n",
+                DisconnectReason::Failed,
             ),
             ("something nobody expected\r\n", DisconnectReason::Failed),
             ("", DisconnectReason::Failed),

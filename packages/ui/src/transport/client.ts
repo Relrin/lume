@@ -29,6 +29,7 @@ import {
   type ClientFacts,
   CommandError,
   factsToWire,
+  type Launcher,
   sessionFromWire,
   type SessionInfo,
   type SpawnRequest,
@@ -52,6 +53,10 @@ export interface Attachment {
   /** Whether a hydrate frame precedes the output. */
   readonly hydrate: HydrateMode;
   readonly caps: BackendCaps;
+  /** What the session runs, where the application started it and so knows. */
+  readonly launcher?: Launcher;
+  /** The profile it was started from, if it was. */
+  readonly profile?: string;
 
   /**
    * Starts the flow. `receive` gets every frame in order, beginning with any that arrived
@@ -82,6 +87,8 @@ interface WireAttached {
   resize_pulls_scrollback: boolean;
   hydrate: HydrateMode;
   caps: unknown;
+  launcher?: Launcher;
+  profile?: string;
 }
 
 export interface TransportOptions {
@@ -191,6 +198,8 @@ export class TransportClient {
       resizePullsScrollback: attached.resize_pulls_scrollback,
       hydrate: attached.hydrate,
       caps: capsFromWire(attached.caps),
+      ...(attached.launcher ? { launcher: attached.launcher } : {}),
+      ...(typeof attached.profile === "string" ? { profile: attached.profile } : {}),
       start: (receive) => {
         if (!open() || stream.receive) return;
         stream.receive = receive;

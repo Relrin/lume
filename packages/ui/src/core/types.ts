@@ -162,6 +162,12 @@ export interface Profile {
   readonly detail?: string;
 }
 
+/** A theme's look as a profile that names it is drawn with. */
+export interface ProfileLook {
+  readonly scheme: Scheme;
+  readonly tokens: Tokens;
+}
+
 /** The profiles there are, as `profiles_list` returns them. */
 export interface ProfileList {
   readonly revision: number;
@@ -172,6 +178,16 @@ export interface ProfileList {
   readonly notes: readonly string[];
   /** Whether the machine has been looked at yet. Before that only the user's own are listed. */
   readonly looked: boolean;
+  /** The look of each theme a profile names, by the theme's id. */
+  readonly looks?: Readonly<Record<string, ProfileLook>>;
+}
+
+/** What a page knows of the machine it runs on. */
+export interface Machine {
+  /** The machine's name, as the system gives it, where it does. */
+  readonly name: string | null;
+  /** The user's home folder. */
+  readonly home: string | null;
 }
 
 /** The layout as `layout_view` returns it. */
@@ -183,6 +199,8 @@ export interface LayoutView {
   /** Counts the changes in this epoch. */
   readonly revision: number;
   readonly workspace: Workspace;
+  /** What the page needs of this machine. Sent with the view the page asks for. */
+  readonly machine?: Machine;
 }
 
 /** What `layout_apply` returns. */

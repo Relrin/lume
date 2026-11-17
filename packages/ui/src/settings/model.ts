@@ -5,7 +5,7 @@
  * settings a person is shown, on which page and under which heading, with what kind of
  * control and which choices; the configuration in use says what each is set to and
  * where that came from. This puts the two together, with the lists only the machine
- * knows: its themes, fonts, shells and workspaces.
+ * knows: its themes, fonts, shells, workspaces and profiles.
  *
  * A page is plain data, so a page that does not come from the schema can be drawn by
  * the same window. Nothing here touches the page, so all of it is tested with plain
@@ -15,7 +15,8 @@
 import type { ComponentType } from "react";
 
 import { describeProblem } from "../config/apply.ts";
-import type { ConfigView, ShellEntry, ThemeEntry } from "../core/types.ts";
+import type { ConfigView, Profile, ShellEntry, ThemeEntry } from "../core/types.ts";
+import { profileChoices } from "../palette/choices.ts";
 
 /** What a setting is set to. */
 export type SettingValue = string | number | boolean;
@@ -24,7 +25,7 @@ export type SettingValue = string | number | boolean;
 export type SettingControl = "switch" | "select" | "segmented" | "text";
 
 /** The lists a setting's choices may be taken from. */
-export type SettingList = "themes" | "fonts" | "shells" | "workspaces";
+export type SettingList = "themes" | "fonts" | "shells" | "workspaces" | "profiles";
 
 /** What the schema says of a setting a person is shown: the keyword `x-lume-settings`. */
 export interface SettingAnnotation {
@@ -117,10 +118,17 @@ export interface SettingsLists {
   readonly fonts: readonly string[];
   readonly shells: readonly ShellEntry[];
   readonly workspaces: readonly string[];
+  readonly profiles: readonly Profile[];
 }
 
 /** No lists: what a window has before the core has sent any. */
-export const NO_LISTS: SettingsLists = { themes: [], fonts: [], shells: [], workspaces: [] };
+export const NO_LISTS: SettingsLists = {
+  themes: [],
+  fonts: [],
+  shells: [],
+  workspaces: [],
+  profiles: [],
+};
 
 /** A change to the user's file that a row asks for. */
 export type SettingWrite =
@@ -158,7 +166,7 @@ function text(value: unknown): string | undefined {
 }
 
 const CONTROLS: readonly SettingControl[] = ["switch", "select", "segmented", "text"];
-const LISTS: readonly SettingList[] = ["themes", "fonts", "shells", "workspaces"];
+const LISTS: readonly SettingList[] = ["themes", "fonts", "shells", "workspaces", "profiles"];
 
 /** What the schema says of a setting, if it says it in the form this reads. */
 function annotationOf(raw: unknown): SettingAnnotation | undefined {
@@ -304,14 +312,20 @@ function listed(list: SettingList, lists: SettingsLists): SettingChoice[] {
       return lists.shells.map((shell) => ({ value: shell.program, label: shell.name }));
     case "workspaces":
       return lists.workspaces.map((name) => ({ value: name, label: name }));
+    case "profiles":
+      return profileChoices(lists);
   }
 }
 
 function rowOf(found: Found, view: ConfigView, lists: SettingsLists): SettingRow {
   const { path, schema, annotation } = found;
-  const value = valueAt(view.config, path);
+  // A setting that can be left out and is empty is as good as left out: the file says
+  // `default-profile = ""` for no profile at all.
+  const leftOut = (held: SettingValue | null): SettingValue | null =>
+    annotation.unset !== undefined && held === "" ? null : held;
+  const value = leftOut(valueAt(view.config, path));
   const token = annotation.token === undefined ? undefined : valueOfToken(view, annotation.token);
-  const fallback = isValue(schema["default"]) ? schema["default"] : null;
+  const fallback = leftOut(isValue(schema["default"]) ? schema["default"] : null);
   const effective = value ?? token ?? decided(view, path) ?? fallback;
 
   const choices: SettingChoice[] = [];

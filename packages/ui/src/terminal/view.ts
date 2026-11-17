@@ -56,6 +56,9 @@ import {
   MAX_DIMENSION,
   type CellPx,
   type ClientFacts,
+  type ExitStatus,
+  type Launcher,
+  type SessionEvent,
   type TermSize,
 } from "../transport/types.ts";
 import {
@@ -100,7 +103,6 @@ import {
 } from "./mouse.ts";
 import type { PromptStore } from "./prompts.ts";
 import { TerminalSession } from "./session.ts";
-import { sanitizeTitle } from "./title.ts";
 
 /** The elements a view works on. They are created once and never replaced. */
 export interface ViewElements {
@@ -155,8 +157,21 @@ export interface ViewServices {
    * took it: it ran a command, or the key begins a sequence that may.
    */
   shortcut(event: KeyboardEvent, context: { readonly alternateScreen: boolean }): boolean;
-  /** Told the title the program gave its terminal, with nothing unsafe left in it. */
-  title(title: string): void;
+  /**
+   * Told that the view now shows another session, with what the core said it runs, or
+   * none: what was reported of the session before is no longer the view's.
+   */
+  attached(
+    about: {
+      readonly session: string;
+      readonly launcher?: Launcher;
+      readonly profile?: string;
+    } | null,
+  ): void;
+  /** Told what the session reported besides its output, as it arrives. */
+  reported(event: SessionEvent): void;
+  /** Told that the session's program has ended. */
+  exited(status: ExitStatus): void;
   /** Told that the view's terminal has taken the keyboard. */
   focused(): void;
   /** Starts a new session in place of one whose program has ended. */
@@ -677,16 +692,23 @@ export class TerminalView implements FrameView {
     size?: TermSize,
   ): Promise<void> {
     const { vt } = this.#services;
-    const appearance = this.#appearance;
     const pin = size ? { size, fitted: this.#fitted() } : undefined;
     const facts = { ...this.facts(), ...(size ? { size } : {}) };
     const attachment = await client.attach(backend, session, facts);
     this.#dropSession();
+    // Before the session starts, which hands over at once what it reported so far.
+    this.#services.attached({
+      session,
+      ...(attachment.launcher ? { launcher: attachment.launcher } : {}),
+      ...(attachment.profile === undefined ? {} : { profile: attachment.profile }),
+    });
     this.#lost = false;
     this.#pin = pin;
     this.#shown = session;
     this.#lastFacts = JSON.stringify(facts);
     this.#programClipboard = new ProgramClipboard();
+    // The look as it is now: what the session runs may have given the view another.
+    const appearance = this.#appearance;
     const opened = new TerminalSession(vt, attachment, {
       colors: terminalColors(appearance),
       scheme: appearance.scheme,
@@ -706,10 +728,15 @@ export class TerminalView implements FrameView {
           this.#holdSearch();
           this.#notify();
         },
-        // Nothing is said of it: what the program printed last is on the screen, and
-        // that the shell is gone shows there too.
-        exited: () => this.#markDirty(),
-        title: (title) => this.#services.title(sanitizeTitle(title)),
+        // The terminal says nothing of it: what the program printed last is on the
+        // screen, and how it ended is the pane's header's to show.
+        exited: (status) => {
+          this.#services.exited(status);
+          this.#markDirty();
+        },
+        // The title and the bell are taken from the session's reports, which also
+        // say them to a view that attaches later; the terminal's own are not used.
+        reported: (event) => this.#services.reported(event),
         clipboardWrite: (text, location) => this.#onProgramClipboard(text, location),
       },
     });
@@ -747,12 +774,14 @@ export class TerminalView implements FrameView {
   }
 
   #dropSession(): void {
+    const showed = this.#shown !== undefined;
     this.#gesture?.free();
     this.#gesture = undefined;
     this.#endSearch();
     this.#session?.dispose();
     this.#session = undefined;
     this.#shown = undefined;
+    if (showed) this.#services.attached(null);
     this.#pin = undefined;
     this.#pressed.clear();
     // Whoever waits on the session that is gone learns so now.

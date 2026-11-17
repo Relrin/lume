@@ -20,8 +20,9 @@ use crate::paths::Platform;
 use crate::profiles::ProfileEntry;
 use crate::settings::{PAGES_KEY, Shown, pages};
 use crate::tuning::{
-    FONT_SIZE_MAX, FONT_SIZE_MIN, SCROLLBACK_LINES_MAX, SETTINGS_BLURS, SETTINGS_CORNER_RADII,
-    SETTINGS_DIMMINGS, SETTINGS_GAPS, SETTINGS_INTERFACE_TEXT_SIZES, SETTINGS_LINE_HEIGHTS,
+    FONT_SIZE_MAX, FONT_SIZE_MIN, LONG_COMMAND_SECONDS_DEFAULT, LONG_COMMAND_SECONDS_MAX,
+    SCROLLBACK_LINES_MAX, SETTINGS_BLURS, SETTINGS_CORNER_RADII, SETTINGS_DIMMINGS, SETTINGS_GAPS,
+    SETTINGS_INTERFACE_TEXT_SIZES, SETTINGS_LINE_HEIGHTS, SETTINGS_LONG_COMMAND_SECONDS,
     SETTINGS_OPACITIES, SETTINGS_PADDINGS, SETTINGS_SCROLLBACK_LINES, SETTINGS_TERMINAL_TEXT_SIZES,
 };
 
@@ -58,6 +59,10 @@ pub struct Config {
     pub ssh: SshConfig,
     /// The profile new terminals use, by its id. Empty, new terminals run the shell of
     /// `terminal.shell`.
+    #[schemars(extend("x-lume-settings" = Shown::select("general", "Startup", 20, "Default profile")
+        .help("Used for new terminal tabs and panes. A workspace's own choice comes first")
+        .list("profiles")
+        .unset("System default")))]
     pub default_profile: String,
     /// Ways to start a terminal. Each is a `[[profile]]` table with an `id`; one with
     /// the id of a profile the application made changes that profile.
@@ -156,6 +161,11 @@ pub struct WindowConfig {
     #[schemars(extend("x-lume-settings" = Shown::switch("general", "Windows", 30, "Restore window positions")
         .help("Open windows where they were when the workspace was last open")))]
     pub restore_bounds: bool,
+    /// Ask for attention when a program rings the bell in a window that is not in use:
+    /// the taskbar button flashes, or the dock icon bounces.
+    #[schemars(extend("x-lume-settings" = Shown::switch("general", "Attention", 10, "Flash the window on a bell")
+        .help("When a program rings the bell in a window you are not using")))]
+    pub bell_attention: bool,
 }
 
 impl Default for WindowConfig {
@@ -165,6 +175,7 @@ impl Default for WindowConfig {
             close_with_last_tab: true,
             confirm_close: Confirm::Never,
             restore_bounds: true,
+            bell_attention: true,
         }
     }
 }
@@ -293,6 +304,32 @@ pub struct AppearanceConfig {
     /// Design tokens set over the theme's, written as a theme file writes them: a
     /// table for each group, such as `[appearance.tokens.color]` with `accent = "#ff8800"`.
     pub tokens: BTreeMap<String, Value>,
+    /// The picture a pane's header and its tab show for a program, by the program's
+    /// name without its folder or `.exe`, such as `nvim = "editor"`. These come before
+    /// the pictures the application knows.
+    pub program_icons: BTreeMap<String, ProgramIcon>,
+}
+
+/// A picture for the program a pane runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgramIcon {
+    /// A prompt: a shell, or a program nothing else fits.
+    Terminal,
+    /// A page being written: an editor or a pager.
+    Editor,
+    /// A branch: a version control tool.
+    Git,
+    /// A pulse: a monitor of the system or of a process.
+    Monitor,
+    /// A spark: a coding agent.
+    Agent,
+    /// A globe: a connection to another machine.
+    Remote,
+    /// A box: containers and virtual machines.
+    Container,
+    /// A folder: a file manager.
+    Files,
 }
 
 impl Default for AppearanceConfig {
@@ -309,6 +346,7 @@ impl Default for AppearanceConfig {
             background_blur: None,
             background_opacity: None,
             tokens: BTreeMap::new(),
+            program_icons: BTreeMap::new(),
         }
     }
 }
@@ -402,11 +440,8 @@ pub enum CloseOnExit {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct TerminalConfig {
-    /// The program a new terminal runs. Empty, it is the user's own shell.
-    #[schemars(extend("x-lume-settings" = Shown::select("general", "Startup", 20, "Default shell")
-        .help("Used for new terminal tabs and panes")
-        .list("shells")
-        .unset("System default")))]
+    /// The program a new terminal runs when no profile says otherwise. Empty, it is the
+    /// user's own shell.
     pub shell: String,
     /// The arguments that program is started with.
     pub shell_args: Vec<String>,
@@ -445,6 +480,17 @@ pub struct TerminalConfig {
         .help("Ask before closing a pane whose program is still running")
         .options(&CONFIRM_CHOICES)))]
     pub confirm_close: Confirm,
+    /// Show a desktop notification when a command that ran for a while ends in a window
+    /// that is not in use. It needs the shell to report its commands.
+    #[schemars(extend("x-lume-settings" = Shown::switch("general", "Attention", 20, "Notify when a long command ends")
+        .help("A desktop notification when a command ends in a window you are not using")))]
+    pub notify_long_command: bool,
+    /// How long a command runs, in seconds, before its end is notified.
+    #[schemars(range(min = 1, max = LONG_COMMAND_SECONDS_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::select("general", "Attention", 30, "Long command")
+        .help("How long a command runs before its end is notified")
+        .seconds(&SETTINGS_LONG_COMMAND_SECONDS)))]
+    pub long_command_seconds: u32,
 }
 
 impl Default for TerminalConfig {
@@ -458,6 +504,8 @@ impl Default for TerminalConfig {
             padding: None,
             close_on_exit: CloseOnExit::Clean,
             confirm_close: Confirm::Never,
+            notify_long_command: false,
+            long_command_seconds: LONG_COMMAND_SECONDS_DEFAULT,
         }
     }
 }

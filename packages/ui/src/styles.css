@@ -66,6 +66,7 @@
   /* The window. */
 
   .shell {
+    @apply text-ink;
     position: fixed;
     inset: 0;
     display: flex;
@@ -607,6 +608,28 @@
     flex-shrink: 0;
   }
 
+  /* The programs of a tab's panes, each tucked behind the one before it. */
+  .tab-icons {
+    align-items: center;
+  }
+
+  .tab-icons-one {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+  }
+
+  .tab-icons-one + .tab-icons-one {
+    margin-left: -4px;
+    mask: radial-gradient(circle at -3px 50%, transparent 7px, #000 7.5px);
+  }
+
+  .tab-activity {
+    margin-left: -3px;
+  }
+
   .tab-title {
     min-width: 0;
     overflow: hidden;
@@ -979,8 +1002,10 @@
   }
 
   .pane-title {
-    flex: 0 1 auto;
+    /* What runs in the pane is the last thing a narrow header lets go of. */
+    flex: 0 0 auto;
     min-width: 0;
+    max-width: 40cqi;
     overflow: hidden;
     font-weight: 600;
     white-space: nowrap;
@@ -1031,6 +1056,217 @@
   @container (max-width: 130px) {
     .pane-icon {
       display: none;
+    }
+  }
+
+  /*
+   * What runs in a pane and where: the picture's tile is tinted by where the session
+   * runs, here, in a Linux distribution here, or on another machine.
+   */
+  .pane-icon {
+    position: relative;
+    --kind-tone: var(--lume-color-accent);
+    color: var(--kind-tone);
+    background: color-mix(in srgb, var(--kind-tone) 16%, transparent);
+  }
+
+  .pane-header[data-pane-kind="wsl"] .pane-icon {
+    --kind-tone: var(--lume-color-status-warning);
+  }
+
+  .pane-header[data-pane-kind="ssh"] .pane-icon {
+    --kind-tone: var(--lume-color-status-info);
+  }
+
+  /* What a pane the user is not looking at has gathered, as a dot on its tile's corner. */
+  .pane-activity,
+  .tab-activity,
+  .pane-pill-mark {
+    display: none;
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--activity-tone);
+  }
+
+  .pane-activity {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    box-shadow: 0 0 0 1.5px var(--lume-color-card-header);
+  }
+
+  [data-activity="output"] {
+    --activity-tone: color-mix(in srgb, var(--lume-color-accent) 70%, transparent);
+  }
+
+  [data-activity="attention"],
+  .pane-pill[data-waiting="true"] {
+    --activity-tone: var(--lume-color-status-warning);
+  }
+
+  [data-activity="attention-error"] {
+    --activity-tone: var(--lume-color-status-danger);
+  }
+
+  .pane-header:is([data-activity="output"], [data-activity^="attention"]) .pane-activity,
+  .tab-label:is([data-activity="output"], [data-activity^="attention"]) .tab-activity,
+  .pane-pill:is([data-activity="output"], [data-activity^="attention"], [data-waiting="true"])
+    .pane-pill-mark {
+    display: block;
+  }
+
+  /* A command line is running. */
+  .pane-running {
+    flex-shrink: 0;
+    width: 10px;
+    height: 10px;
+    border: 2px solid color-mix(in srgb, var(--lume-color-accent) 25%, transparent);
+    border-top-color: var(--lume-color-accent);
+    border-radius: 50%;
+    animation: pane-spin 900ms linear infinite;
+  }
+
+  @keyframes pane-spin {
+    to {
+      rotate: 360deg;
+    }
+  }
+
+  /* The last command line failed: its exit code. */
+  .pane-exit {
+    flex-shrink: 0;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--lume-color-status-danger) 14%, transparent);
+    color: var(--lume-color-status-danger);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+
+  /* How a program in the pane says its work stands. Narrow, only its mark is left. */
+  .pane-status {
+    --status-tone: var(--lume-color-accent);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    gap: 6px;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--status-tone) 12%, transparent);
+    color: var(--status-tone);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 20px;
+    white-space: nowrap;
+  }
+
+  .pane-status[data-program-status="blocked"] {
+    --status-tone: var(--lume-color-status-warning);
+  }
+
+  .pane-status[data-program-status="error"] {
+    --status-tone: var(--lume-color-status-danger);
+  }
+
+  .pane-status[data-program-status="done"] {
+    --status-tone: var(--lume-color-status-info);
+  }
+
+  .pane-status-mark {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--status-tone);
+  }
+
+  .pane-status[data-program-status="working"] .pane-status-mark {
+    background: none;
+    border: 2px solid color-mix(in srgb, var(--status-tone) 25%, transparent);
+    border-top-color: var(--status-tone);
+    animation: pane-spin 900ms linear infinite;
+  }
+
+  .pane-status[data-program-status="done"] .pane-status-mark {
+    width: auto;
+    height: auto;
+    background: none;
+  }
+
+  /* How the pane's program ended, and the way to start it again. */
+  .pane-ended {
+    @apply text-ink-muted;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 1;
+    min-width: 0;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .pane-ended-reason {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .pane-again {
+    @apply text-ink;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 5px;
+    height: 22px;
+    padding: 0 8px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: 6px;
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  @container (max-width: 440px) {
+    .pane-status {
+      width: 20px;
+      padding: 0;
+    }
+
+    .pane-status-label,
+    .pane-ended-reason {
+      display: none;
+    }
+
+    .pane-status-mark {
+      display: inline-flex;
+    }
+  }
+
+  @container (max-width: 320px) {
+    .pane-exit {
+      display: none;
+    }
+  }
+
+  @container (max-width: 210px) {
+    .pane-again span {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pane-running,
+    .pane-status[data-program-status="working"] .pane-status-mark {
+      animation: none;
+      border-color: var(--lume-color-accent);
     }
   }
 
@@ -2377,5 +2613,451 @@
 
   .no {
     @apply text-danger;
+  }
+}
+
+/* The palette that opens a terminal from a profile, and the menu beside the new-tab button. */
+@layer components {
+  .tab-new-group {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  /* The menu opens towards the window's middle: the button is at the tabs' far end. */
+  .tab-new-group > .menu {
+    right: 0;
+    left: auto;
+  }
+
+  .tab-new-menu {
+    width: 18px;
+    height: 28px;
+    border-radius: var(--lume-radius-control);
+  }
+
+  .tab-column-new-group {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+  }
+
+  .tab-column-new-group > .tab-column-new {
+    flex: 1;
+  }
+
+  .tab-column-new-group > .tab-new-menu {
+    width: 28px;
+    height: auto;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+  }
+
+  .tab-column-new-group > .menu {
+    right: 0;
+    min-width: 0;
+  }
+
+  .connect-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: calc(var(--lume-size-topbar) + 40px) 16px 16px;
+    background: color-mix(in srgb, var(--lume-color-overlay) 60%, transparent);
+    cursor: default;
+  }
+
+  .connect {
+    @apply bg-popover;
+    container-type: inline-size;
+    display: flex;
+    flex-direction: column;
+    width: min(880px, 100%);
+    max-height: min(640px, 100%);
+    overflow: hidden;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + 4px);
+    box-shadow: var(--lume-shadow-popover);
+  }
+
+  .connect-field {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 10px;
+    height: 52px;
+    padding: 0 16px;
+    border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+  }
+
+  .connect-field-icon {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .connect-input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    background: transparent;
+    font-size: 15px;
+    outline: none;
+    user-select: text;
+  }
+
+  .connect-input::placeholder {
+    color: var(--lume-color-text-muted);
+  }
+
+  .connect-chips {
+    display: flex;
+    flex-shrink: 0;
+    gap: 4px;
+  }
+
+  .connect-chip {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .connect-chip:hover {
+    @apply bg-control-hover text-ink;
+  }
+
+  .connect-chip[aria-pressed="true"] {
+    @apply text-accent;
+    background: color-mix(in srgb, var(--lume-color-accent) 14%, transparent);
+    font-weight: 600;
+  }
+
+  .connect-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .connect-results {
+    flex: 1 1 420px;
+    min-width: 0;
+    padding: 8px;
+    overflow-y: auto;
+    border-right: var(--lume-size-border) solid var(--lume-color-border);
+    scrollbar-width: thin;
+  }
+
+  .connect-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .connect-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .connect-heading {
+    @apply text-ink-muted;
+    margin: 10px 10px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .connect-group:first-child > .connect-heading {
+    margin-top: 6px;
+  }
+
+  .connect-row,
+  .connect-action {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 10px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+    cursor: pointer;
+  }
+
+  .connect-row {
+    min-height: 44px;
+  }
+
+  .connect-action {
+    @apply text-ink-muted;
+    min-height: 36px;
+  }
+
+  .connect-row[aria-selected="true"],
+  .connect-action[aria-selected="true"] {
+    @apply bg-control-hover;
+  }
+
+  .connect-action[aria-selected="true"] {
+    @apply text-ink;
+  }
+
+  .connect-tile {
+    --connect-tone: var(--lume-color-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    color: var(--connect-tone);
+    background: color-mix(in srgb, var(--connect-tone) 14%, transparent);
+  }
+
+  .connect-tile[data-kind="wsl"] {
+    --connect-tone: var(--lume-color-status-warning);
+  }
+
+  .connect-tile[data-kind="ssh"] {
+    --connect-tone: var(--lume-color-status-info);
+  }
+
+  .connect-row-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.3;
+  }
+
+  .connect-row-name {
+    overflow: hidden;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connect-row-line {
+    @apply text-ink-muted;
+    overflow: hidden;
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connect-row-line[data-kind="ssh"] {
+    font-family: var(--font-mono);
+  }
+
+  .connect-mark {
+    @apply text-accent;
+    background: transparent;
+  }
+
+  .connect-badge {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    height: 20px;
+    padding: 0 7px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: 5px;
+    font-size: 11px;
+  }
+
+  .connect-action-icon {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .connect-action-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connect-note {
+    @apply text-ink-muted;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .connect-detail {
+    display: flex;
+    flex: 1 1 320px;
+    flex-direction: column;
+    min-width: 0;
+    gap: 14px;
+    padding: 16px;
+    overflow-y: auto;
+    background: color-mix(in srgb, var(--lume-color-surface) 55%, var(--lume-color-popover));
+  }
+
+  .connect-detail-head {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .connect-detail-name {
+    overflow-wrap: anywhere;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .connect-detail-line,
+  .connect-detail-about,
+  .connect-detail-empty {
+    @apply text-ink-muted;
+    font-size: 12px;
+  }
+
+  .connect-detail-line {
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+  }
+
+  .connect-facts {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .connect-fact {
+    padding: 8px 10px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+    background: color-mix(in srgb, var(--lume-color-control-active) 70%, transparent);
+  }
+
+  .connect-fact dt {
+    @apply text-ink-muted;
+    font-size: 11px;
+  }
+
+  .connect-fact dd {
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .connect-detail-spacer {
+    flex: 1;
+  }
+
+  .connect-detail-buttons {
+    display: flex;
+    gap: 8px;
+  }
+
+  .connect-primary,
+  .connect-secondary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      filter 120ms ease;
+  }
+
+  .connect-primary {
+    @apply bg-accent text-accent-ink;
+    flex: 1;
+    font-weight: 600;
+  }
+
+  .connect-primary:hover {
+    filter: brightness(1.08);
+  }
+
+  .connect-secondary {
+    border: var(--lume-size-border) solid var(--lume-color-border);
+  }
+
+  .connect-secondary:hover {
+    @apply bg-control-hover;
+  }
+
+  .connect-footer {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 16px;
+    min-height: 36px;
+    padding: 0 16px;
+    overflow: hidden;
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .connect-footer-spacer {
+    flex: 1;
+  }
+
+  .connect-key {
+    @apply text-ink;
+    font-family: var(--font-mono);
+  }
+
+  /* A narrow palette lists above what it says of the marked profile. */
+  @container (max-width: 640px) {
+    .connect-body {
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .connect-results {
+      flex: none;
+      overflow: visible;
+      border-right: none;
+      border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+    }
+
+    .connect-detail {
+      flex: none;
+      overflow: visible;
+    }
+
+    .connect-chip {
+      padding: 0 6px;
+    }
+  }
+
+  @container (max-width: 420px) {
+    .connect-chips {
+      display: none;
+    }
+
+    .connect-footer > span:nth-child(4) {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .connect-chip,
+    .connect-primary,
+    .connect-secondary {
+      transition: none;
+    }
   }
 }

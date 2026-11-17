@@ -39,6 +39,7 @@ sha2 = "0.11"
 static_vcruntime = "3"
 tauri = "2"
 tauri-build = "2"
+tauri-plugin-notification = "=2.8.1"
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 toml = "1"

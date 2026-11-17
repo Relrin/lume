@@ -24,6 +24,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
+mod attention;
 mod background;
 mod bounds;
 mod builtins;
@@ -317,6 +318,9 @@ fn main() -> ExitCode {
     let loading = Arc::clone(&state);
     let serving = Arc::clone(&state);
     let app = tauri::Builder::default()
+        // Notifications are shown from the application's side only; no page is granted
+        // the plugin's commands.
+        .plugin(tauri_plugin_notification::init())
         .manage(args)
         .manage(Arc::clone(&state))
         .manage(ClipboardThread::start())
@@ -393,7 +397,10 @@ fn main() -> ExitCode {
                 .panes
                 .profiles
                 .start(serving.runtime(), move |notice| telling.broadcast(&notice));
+            let attending = Arc::clone(&shell);
             services.panes.run(shell);
+            // A bell, or a long command that ends, in a window the user is not using.
+            attention::watch(&services, attending);
             if let Some((exec, cwd)) = exec {
                 let launching = Arc::clone(&services);
                 tauri::async_runtime::spawn(async move {
@@ -439,6 +446,7 @@ fn main() -> ExitCode {
             commands_layout::layout_view,
             commands_layout::layout_apply,
             commands_layout::sessions_start,
+            commands_layout::panes_busy,
             commands_layout::commands_list,
             commands_layout::command_run,
             commands_config::config_view,

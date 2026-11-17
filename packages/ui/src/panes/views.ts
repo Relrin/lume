@@ -37,12 +37,13 @@ import {
   type ViewServices,
   type ViewSettings,
 } from "../terminal/view.ts";
+import type { PaneReports } from "../events/store.ts";
 import type { PaneTitles } from "./titles.ts";
 
 /** What every view of the window shares. */
 export type SharedServices = Omit<
   ViewServices,
-  "shortcut" | "title" | "focused" | "restart" | "searched"
+  "shortcut" | "attached" | "reported" | "exited" | "focused" | "restart" | "searched"
 >;
 
 /** What the views need from their surroundings. */
@@ -52,10 +53,14 @@ export interface ViewsServices {
   readonly client: CoreClient;
   readonly area: TabAreaController;
   readonly titles: PaneTitles;
+  /** What the panes' sessions have reported. */
+  readonly reports: PaneReports;
   /** The configuration in use, or nothing before the core has sent one. */
   config(): ConfigView | null;
   /** The look the configuration comes to. */
   appearance(): Appearance;
+  /** The look of a pane's terminal: the window's, or what the pane's profile asks for. */
+  appearanceOf(pane: PaneId): Appearance;
   /** Offers a key pressed in a pane's terminal to the shell's own bindings. */
   shortcut(pane: PaneId, event: KeyboardEvent, alternateScreen: boolean): boolean;
   /** Told that a pane's terminal has taken the keyboard. */
@@ -73,6 +78,8 @@ interface Entry {
   asked: boolean;
   /** Settles when the view has attached to its session, or could not. */
   attaching: Promise<void> | undefined;
+  /** The look the view was last given. */
+  look: Appearance | undefined;
 }
 
 /** Why a session cannot be attached to for good: it is gone, not busy. */
@@ -164,10 +171,10 @@ export class PaneViews {
 
   // How the views are set up.
 
-  #settings(): ViewSettings {
+  #settings(pane: PaneId): ViewSettings {
     const terminal = this.#services.config()?.config.terminal;
     return {
-      appearance: this.#services.appearance(),
+      appearance: this.#services.appearanceOf(pane),
       cursor: {
         style: terminal?.["cursor-style"] ?? "block",
         blink: terminal?.["cursor-blink"] ?? true,
@@ -179,9 +186,30 @@ export class PaneViews {
 
   /** Sets every view up again: the configuration or the zoom changed. */
   configure(): void {
-    const settings = this.#settings();
-    for (const entry of this.#entries.values()) entry.view.configure(settings);
+    for (const [pane, entry] of this.#entries) {
+      const settings = this.#settings(pane);
+      entry.look = settings.appearance;
+      entry.view.configure(settings);
+    }
     this.#plan();
+  }
+
+  /**
+   * Gives each view its look again where it is no longer the one it has: the profiles,
+   * or what a pane was started from, changed.
+   */
+  restyle(): void {
+    let changed = false;
+    for (const [pane, entry] of this.#entries) changed = this.#restyle(pane, entry) || changed;
+    if (changed) this.#plan();
+  }
+
+  #restyle(pane: PaneId, entry: Entry): boolean {
+    const look = this.#services.appearanceOf(pane);
+    if (look === entry.look) return false;
+    entry.look = look;
+    entry.view.configure(this.#settings(pane));
+    return true;
   }
 
   /** How much larger than the configured size the window's text is, in CSS pixels. */
@@ -215,13 +243,14 @@ export class PaneViews {
 
   /** Brings the views in line with the layout as it is now. */
   reconcile(): void {
-    const { layout, titles } = this.#services;
+    const { layout, titles, reports } = this.#services;
     const state = layout.getState();
     if (!state.ready) return;
     // Another layout altogether: nothing of the old one's terminals carries over.
     if (this.#epoch !== undefined && this.#epoch !== state.epoch) {
       this.dispose();
       titles.clear();
+      reports.clear();
     }
     this.#epoch = state.epoch;
     const panes = new Set(selectWindowPanes(state));
@@ -235,6 +264,7 @@ export class PaneViews {
       entry.view.dispose();
       this.#entries.delete(pane);
       titles.forget(pane);
+      reports.forget(pane);
     }
 
     const sessionless: PaneId[] = [];
@@ -259,19 +289,39 @@ export class PaneViews {
   }
 
   #create(pane: PaneId): Entry {
-    const { shared, titles } = this.#services;
+    const { shared, titles, reports } = this.#services;
+    // A pane's title is the one its session reports, so a page that attaches later is
+    // told it too.
+    const retitle = () => titles.set(pane, reports.get(pane).title ?? "");
     const view = new TerminalView(
       {
         ...shared,
         shortcut: (event, context) => this.#services.shortcut(pane, event, context.alternateScreen),
-        title: (title) => titles.set(pane, title),
+        attached: (about) => {
+          reports.attached(pane, about);
+          retitle();
+          // What the session was started from decides its look.
+          const held = this.#entries.get(pane);
+          if (about && held) this.#restyle(pane, held);
+        },
+        reported: (event) => {
+          reports.reported(pane, event);
+          if (event.type === "title" || event.type === "state") retitle();
+        },
+        exited: (status) => reports.exited(pane, status),
         focused: () => this.#tookFocus(pane),
         restart: () => this.restart(pane),
         searched: () => this.#services.searched(pane),
       },
-      this.#settings(),
+      this.#settings(pane),
     );
-    const entry: Entry = { view, session: null, asked: false, attaching: undefined };
+    const entry: Entry = {
+      view,
+      session: null,
+      asked: false,
+      attaching: undefined,
+      look: this.#services.appearanceOf(pane),
+    };
     this.#entries.set(pane, entry);
     const planned = this.#plannedSize(this.#services.layout.getState(), pane);
     if (planned) view.setPlannedSize(planned);
@@ -382,7 +432,7 @@ export class PaneViews {
       rect = unitRectToPx(float.rect, box);
     }
     if (!rect) return undefined;
-    const settings = this.#settings();
+    const settings = this.#settings(pane);
     const fontSizePx = Math.min(
       Math.max(settings.appearance.fontSizePx + settings.zoomPx, FONT_SIZE_MIN_PX),
       FONT_SIZE_MAX_PX,

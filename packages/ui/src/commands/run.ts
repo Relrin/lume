@@ -5,9 +5,10 @@
  * A command that changes the layout, the configuration or the application is carried
  * out in the core, and the page only asks. A command that acts on what only the page
  * has is carried out here: a terminal's selection and scrollback, searching it, the
- * size of the window's text, and the command palette.
+ * size of the window's text, and the palettes.
  */
 
+import type { ConnectStore } from "../connect/store.ts";
 import type { CoreClient } from "../core/client.ts";
 import type { PaneId } from "../layout/types.ts";
 import type { PaletteStore } from "../palette/store.ts";
@@ -37,6 +38,8 @@ export interface CommandServices {
   readonly client: CoreClient;
   readonly views: PaneViews;
   readonly palette: PaletteStore;
+  /** The palette that opens a terminal from a profile. */
+  readonly connect: ConnectStore;
   readonly search: SearchController;
   /** Asks the user before a command that closes something, if they want to be asked. */
   mayRun(id: string, args: unknown): Promise<boolean>;
@@ -123,7 +126,7 @@ export class Commands {
    * cannot be: there is no such command here, or nothing for it to act on.
    */
   runInPage(id: string, args: unknown = null): void {
-    const { views, palette, search } = this.#services;
+    const { views, palette, connect, search } = this.#services;
     const action = TERMINAL_ACTIONS[id];
     if (action !== undefined) {
       this.#view(args).perform(action);
@@ -140,7 +143,12 @@ export class Commands {
         views.setZoom(0);
         return;
       case "lume.palette.open":
+        connect.getState().close();
         palette.getState().toggle();
+        return;
+      case "lume.connect.open":
+        palette.getState().close();
+        connect.getState().toggle();
         return;
       case "lume.search.open": {
         const pane = this.#pane(args);

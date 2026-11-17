@@ -53,7 +53,9 @@ pub use paths::{Dirs, Platform, check_workspace_name};
 pub use profiles::{
     LauncherKind, Profile, ProfileEntry, ProfileOrigin, ShellIntegration, merge_profiles,
 };
-pub use schema::{CloseOnExit, Config, WorkspaceSettings, config_schema, default_config_text};
+pub use schema::{
+    CloseOnExit, Config, ProgramIcon, WorkspaceSettings, config_schema, default_config_text,
+};
 pub use source::{Problem, ProblemKind, Source};
 pub use store::{ConfigStore, Resolved, check_setting};
 pub use theme::{

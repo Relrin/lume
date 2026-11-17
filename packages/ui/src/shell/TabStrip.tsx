@@ -8,39 +8,82 @@
  * to its element whenever it changes.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from "react";
 import { useStore } from "zustand";
 
 import { NEW_TAB_DROP } from "../drag/controller.ts";
-import { selectActiveTab, selectTabOrder, tabTitle } from "../layout/selectors.ts";
+import type { ProgramIcon } from "../events/programs.ts";
+import { selectActiveTab, selectTabOrder } from "../layout/selectors.ts";
 import type { TabId } from "../layout/types.ts";
 import { DRAG_START_PX } from "../tuning.ts";
 import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
+import { describeTabNow, followTab, mark } from "./describing.ts";
 import { useKeyHint } from "./hints.ts";
-import { CloseIcon, PlusIcon, TerminalIcon } from "./icons.tsx";
+import { CloseIcon, ProgramIconView } from "./icons.tsx";
+import { NewTabButton } from "./NewTabButton.tsx";
 import { roveWithin } from "./roving.ts";
 
-/** Keeps an element's text the title of a tab, without rendering. */
-function useTabLabel(app: ShellApp, tab: TabId) {
+/**
+ * Keeps a tab's label and what its panes have gathered up to date, without rendering,
+ * and returns the pictures of its programs, which render when they change.
+ */
+function useTabMarks(
+  app: ShellApp,
+  tab: TabId,
+  holder: RefObject<HTMLElement | null>,
+  renaming: boolean,
+) {
   const label = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
-    const element = label.current;
-    if (!element) return undefined;
+    // The label is another element once a rename is over.
+    if (renaming) return undefined;
     let shown: string | undefined;
-    const write = () => {
-      const title = tabTitle(app.layout.getState(), tab, app.titles.all());
-      if (title === shown) return;
-      shown = title;
-      // Set as text: a title comes from a program and is never markup.
-      element.textContent = title;
-      element.parentElement?.setAttribute("title", title);
-    };
-    write();
-    const stops = [app.layout.subscribe(write), app.titles.subscribe(write)];
-    return () => stops.forEach((stop) => stop());
-  }, [app, tab]);
-  return label;
+    return followTab(app, tab, (description) => {
+      const element = label.current;
+      if (element && description.label !== shown) {
+        shown = description.label;
+        // Set as text: a label comes from a program and is never markup.
+        element.textContent = description.label;
+        element.parentElement?.setAttribute("title", description.label);
+      }
+      const tabElement = holder.current;
+      if (tabElement) mark(tabElement, "activity", description.activity, "idle");
+    });
+  }, [app, tab, holder, renaming]);
+  const icons = useSyncExternalStore(
+    useCallback((changed) => followTab(app, tab, changed), [app, tab]),
+    () => describeTabNow(app, tab).icons.join(" "),
+  );
+  return { label, icons: icons === "" ? [] : (icons.split(" ") as ProgramIcon[]) };
+}
+
+/** The pictures of a tab's programs: one, or several laid over one another. */
+function TabIcons({ icons }: { icons: readonly ProgramIcon[] }) {
+  if (icons.length <= 1) {
+    return (
+      <span className="tab-icon">
+        <ProgramIconView icon={icons[0] ?? "terminal"} />
+      </span>
+    );
+  }
+  return (
+    <span className="tab-icon tab-icons" data-count={icons.length}>
+      {icons.map((icon, index) => (
+        <span key={index} className="tab-icons-one">
+          <ProgramIconView icon={icon} size={12} />
+        </span>
+      ))}
+    </span>
+  );
 }
 
 /** A tab being renamed: a field in the tab's place. */
@@ -95,8 +138,9 @@ export function TabItem({
   vertical?: boolean;
 }) {
   const app = useShell();
-  const label = useTabLabel(app, tab);
+  const holder = useRef<HTMLButtonElement>(null);
   const [renaming, setRenaming] = useState(false);
+  const { label, icons } = useTabMarks(app, tab, holder, renaming);
   const closeHint = useKeyHint("lume.tab.close");
   const drag = useRef<{ pointerId: number; at: number; moved: boolean } | null>(null);
   /** Where the pointer is along the direction the tabs are listed in. */
@@ -168,6 +212,7 @@ export function TabItem({
         <RenameField tab={tab} done={() => setRenaming(false)} />
       ) : (
         <button
+          ref={holder}
           type="button"
           role="tab"
           aria-selected={active}
@@ -190,10 +235,9 @@ export function TabItem({
             if (event.detail === 0) show();
           }}
         >
-          <span className="tab-icon">
-            <TerminalIcon />
-          </span>
+          <TabIcons icons={icons} />
           <span className="tab-title" ref={label} />
+          <span className="tab-activity" aria-hidden="true" />
         </button>
       )}
       <button
@@ -215,7 +259,6 @@ export function TabStrip() {
   const app = useShell();
   const tabs = useStore(app.layout, (state) => (state.ready ? selectTabOrder(state) : NO_TABS));
   const active = useStore(app.layout, (state) => (state.ready ? selectActiveTab(state) : null));
-  const newHint = useKeyHint("lume.tab.new");
   return (
     <div className="tab-strip" data-drop={NEW_TAB_DROP}>
       <div className="tab-list" role="tablist" aria-label="Tabs">
@@ -223,16 +266,7 @@ export function TabStrip() {
           <TabItem key={tab} tab={tab} active={tab === active} index={index} />
         ))}
       </div>
-      <button
-        type="button"
-        className="control tab-new"
-        aria-label="New tab"
-        title={`New tab${newHint}`}
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => app.commands.run("lume.tab.new")}
-      >
-        <PlusIcon />
-      </button>
+      <NewTabButton />
     </div>
   );
 }

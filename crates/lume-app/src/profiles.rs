@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use lume_config::{Profile, merge_profiles};
 use lume_session::{DetectOptions, Detected, detect};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher as _};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio::runtime::Handle;
 use tokio::sync::watch;
 
@@ -170,14 +170,35 @@ impl ProfileService {
             .filter(|id| !id.is_empty())
     }
 
-    /// A view without its revision.
+    /// A view without its revision. It holds the look of every theme a profile names,
+    /// since a page has only the look of the theme in use.
     fn body(&self) -> Value {
         let merged = lock(&self.merged).clone();
+        let mut notes = merged.notes.clone();
+        let mut looks = Map::new();
+        for profile in merged.profiles.iter() {
+            let Some(theme) = profile.theme.as_deref() else {
+                continue;
+            };
+            if looks.contains_key(theme) {
+                continue;
+            }
+            match self.config.look_with_theme(theme) {
+                Some(look) => {
+                    looks.insert(theme.to_owned(), look);
+                }
+                None => notes.push(format!(
+                    "profile `{}`: there is no theme called `{theme}`, so its terminals use the window's",
+                    profile.id
+                )),
+            }
+        }
         json!({
             "profiles": *merged.profiles,
             "default": self.default_id(),
-            "notes": merged.notes,
+            "notes": notes,
             "looked": *self.looked.borrow(),
+            "looks": looks,
         })
     }
 
@@ -403,6 +424,48 @@ mod tests {
         // The entry for a distribution that is not there is said, once looked.
         assert!(view["notes"][0].as_str().unwrap().contains("auto.wsl.Gone"));
         assert_eq!(service.resolve("nowhere").await, None);
+    }
+
+    #[tokio::test]
+    async fn the_look_of_each_theme_a_profile_names_is_told_with_the_profiles() {
+        let dir = TempDir::new("profiles-looks");
+        std::fs::create_dir_all(dir.dirs().config).unwrap();
+        std::fs::write(
+            dir.dirs().config_file(),
+            "[appearance]\ntheme = \"lume-dark\"\n\n\
+             [[profile]]\nid = \"bright\"\nlauncher = \"shell\"\ntheme = \"lume-light\"\n\n\
+             [[profile]]\nid = \"also\"\nlauncher = \"shell\"\ntheme = \"lume-light\"\n\n\
+             [[profile]]\nid = \"odd\"\nlauncher = \"shell\"\ntheme = \"no-such-theme\"\n",
+        )
+        .unwrap();
+        let config = ConfigService::load(dir.dirs(), None);
+        let service = ProfileService::with_found(Arc::clone(&config), vec![pwsh()]);
+        let view = service.view();
+        let looks = view["looks"].as_object().unwrap();
+        // One look for each theme named, whatever number of profiles name it.
+        assert_eq!(looks.keys().collect::<Vec<_>>(), ["lume-light"]);
+        let light = &looks["lume-light"];
+        assert_eq!(light["scheme"], "light");
+        // The same tokens a page is given for its own look, under the other theme.
+        let own = config.view();
+        assert_eq!(
+            light["tokens"].as_object().unwrap().len(),
+            own["tokens"].as_object().unwrap().len()
+        );
+        assert_ne!(light["tokens"], own["tokens"]);
+        // A theme there is not is said, and the profile keeps the window's look.
+        let notes: Vec<&str> = view["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.contains("`odd`") && note.contains("no-such-theme")),
+            "{notes:?}"
+        );
     }
 
     #[tokio::test]

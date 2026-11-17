@@ -551,6 +551,11 @@ impl Session {
         if unwatched && due {
             self.last_activity = Some(now);
             self.emit(SessionEvent::Activity, now);
+            // A session nobody sees is not looked at now and then, and what prints may
+            // be a program that has just started.
+            if !self.shown() {
+                self.poll_soon(now);
+            }
         }
     }
 
@@ -815,6 +820,11 @@ impl Session {
                 if visible && !was.visible {
                     // A session that comes on show is brought up to date.
                     self.poll_at = sooner(self.poll_at, Some(Instant::now()));
+                } else if !visible && was.visible {
+                    // Looked at once more as it goes out of sight, since it is not
+                    // looked at again while nobody sees it: what was started a moment
+                    // ago is known.
+                    self.poll_soon(Instant::now());
                 }
             }
             Command::Credit { attachment, bytes } => {

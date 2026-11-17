@@ -26,6 +26,7 @@ const COMMANDS: &[&str] = &[
     "layout_view",
     "layout_apply",
     "sessions_start",
+    "panes_busy",
     "commands_list",
     "command_run",
     "config_view",

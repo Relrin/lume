@@ -30,8 +30,8 @@ use lume_layout::{Bounds, Intent, WindowId};
 use serde::Serialize;
 use serde_json::json;
 use tauri::{
-    App, AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
+    App, AppHandle, Manager, PhysicalPosition, PhysicalSize, UserAttentionType, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
 };
 
 use crate::args::Mode;
@@ -594,6 +594,35 @@ impl Shell for WindowShell {
                 "type": "settings_show",
                 "section": settings_section(section),
             }));
+        }
+    }
+
+    fn window_focused(&self, window: WindowId) -> bool {
+        self.app
+            .get_webview_window(&label_of(window))
+            .is_some_and(|open| open.is_focused().unwrap_or(false))
+    }
+
+    fn request_attention(&self, window: WindowId) {
+        let Some(open) = self.app.get_webview_window(&label_of(window)) else {
+            return;
+        };
+        if let Err(error) = open.request_user_attention(Some(UserAttentionType::Informational)) {
+            tracing::debug!(%error, %window, "the window could not ask for attention");
+        }
+    }
+
+    fn notify(&self, title: &str, body: &str) {
+        use tauri_plugin_notification::NotificationExt;
+        let shown = self
+            .app
+            .notification()
+            .builder()
+            .title(title)
+            .body(body)
+            .show();
+        if let Err(error) = shown {
+            tracing::warn!(%error, "a notification could not be shown");
         }
     }
 

@@ -137,3 +137,15 @@ pub const SESSION_NEWS_BACKLOG: usize = 1024;
 /// The folder, in the folder of the application's state, that the scripts are written
 /// to with which shells are asked to report their directory and their commands.
 pub const SHELL_INTEGRATION_DIR: &str = "shell-integration";
+
+/// How long a window that asked for attention because of a bell waits before a bell
+/// has it ask again. A program that rings on and on does not keep the taskbar busy.
+pub const BELL_ATTENTION_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How long after a notification that a command ended the next may be shown. Commands
+/// that end together, in several panes, are not a stream of notifications.
+pub const NOTIFY_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How many processes under a shell's own name are taken for the shell itself at its
+/// prompt: the one the session started, and a child it starts as the real shell.
+pub const SHELL_ALIASES_MAX: usize = 2;

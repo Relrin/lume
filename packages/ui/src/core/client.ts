@@ -7,7 +7,7 @@
  * them.
  */
 
-import type { Intent } from "../layout/types.ts";
+import type { Intent, PaneId } from "../layout/types.ts";
 import type { Carrier } from "../transport/carrier.ts";
 import { TransportClient } from "../transport/client.ts";
 import type {
@@ -88,6 +88,11 @@ export class CoreClient {
   /** Has sessions started for panes of this window that have none. */
   sessionsStart(panes: readonly PaneStart[]): Promise<SessionsStarted> {
     return this.transport.command("sessions_start", { panes });
+  }
+
+  /** Which of this window's `panes` run something that closing them would end. */
+  panesBusy(panes: readonly PaneId[]): Promise<PaneId[]> {
+    return this.transport.command("panes_busy", { panes });
   }
 
   /** The configuration in use. */

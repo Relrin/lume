@@ -25,7 +25,7 @@ const OWN_PREFIX: &str = "lume";
 
 /// The areas the application's own commands are in. No plugin's id may be
 /// `lume.<area>` or begin with it.
-pub const AREAS: [&str; 13] = [
+pub const AREAS: [&str; 14] = [
     "app",
     "window",
     "workspace",
@@ -37,6 +37,7 @@ pub const AREAS: [&str; 13] = [
     "view",
     "config",
     "palette",
+    "connect",
     "search",
     "settings",
 ];

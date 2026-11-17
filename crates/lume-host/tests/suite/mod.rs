@@ -42,6 +42,7 @@ macro_rules! host_suite {
             what_a_program_reports_arrives_as_events_behind_its_output,
             a_client_that_attaches_is_told_what_was_reported_before,
             the_program_that_has_the_terminal_is_reported,
+            a_session_nobody_sees_is_looked_at_when_it_prints,
             output_nobody_is_watching_is_reported_now_and_then,
         );
     };
@@ -737,6 +738,44 @@ pub async fn the_program_that_has_the_terminal_is_reported<H: Harness>() {
     let shell = if cfg!(windows) { "cmd" } else { "sh" };
     assert_eq!(foreground.name, shell);
     assert_eq!(Some(foreground.pid), pid);
+    host.shutdown().await;
+}
+
+pub async fn a_session_nobody_sees_is_looked_at_when_it_prints<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::shell()).await;
+    let pid = client.only_session().await.pid;
+    // Attached out of sight, as a pane in a tab that is not on show is: nothing has it
+    // looked at now and then.
+    let mut facts = support::facts();
+    facts.focused = false;
+    facts.visible = false;
+    let attached = client
+        .request(RequestBody::Attach {
+            session,
+            stream: 1,
+            facts,
+        })
+        .await;
+    assert!(
+        matches!(attached, Ok(ResponseBody::Attached { .. })),
+        "{attached:?}"
+    );
+    client.credit(1, 1024 * 1024).await;
+
+    // A program the shell starts, which prints now and then.
+    client.type_line(1, support::PRINTS_NOW_AND_THEN).await;
+    let event = client
+        .event(
+            1,
+            "the program the shell started",
+            |event| matches!(event, SessionEvent::Foreground(found) if Some(found.pid) != pid),
+        )
+        .await;
+    assert!(matches!(event, SessionEvent::Foreground(_)), "{event:?}");
     host.shutdown().await;
 }
 

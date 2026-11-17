@@ -26,6 +26,9 @@
 # confirm-close = "never"
 # Open windows where they were when the workspace was last open.
 # restore-bounds = true
+# Flash the taskbar button (or bounce the dock icon) when a program rings the bell in a
+# window that is not in use.
+# bell-attention = true
 
 [workspace]
 # What happens to a workspace's programs when another workspace is opened: "close".
@@ -49,6 +52,9 @@
 #   background-image = "C:/Users/me/Pictures/wallpaper.jpg"
 #   background-blur = 0
 #   background-opacity = 1.0
+# The picture a pane's header and its tab show for a program, by the program's name:
+# "terminal", "editor", "git", "monitor", "agent", "remote", "container" or "files".
+#   program-icons = { nvim = "editor", lazygit = "git" }
 #
 # Any design token can be set over the theme's, in a table named after its group:
 #
@@ -85,6 +91,10 @@
 # close-on-exit = "clean"
 # Whether closing a pane asks first: "never" or "always".
 # confirm-close = "never"
+# A desktop notification when a command ends in a window that is not in use, if it ran
+# for at least this many seconds. It needs the shell to report its commands.
+# notify-long-command = false
+# long-command-seconds = 10
 
 [layout]
 # Where the list of tabs is: "top", "left" or "right".

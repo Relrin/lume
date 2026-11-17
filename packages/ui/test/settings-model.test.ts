@@ -120,6 +120,44 @@ describe("the settings as pages of rows", () => {
     ]);
   });
 
+  it("lists the profiles there are to choose from, by kind, without the hidden ones", () => {
+    const pages = settingsPages(SCHEMA, view(), LISTS);
+    expect(row(pages, "default-profile").choices).toEqual([
+      { value: null, label: "System default" },
+      { value: "box", label: "SSH: Box" },
+      { value: "auto.wsl.Ubuntu", label: "WSL: Ubuntu" },
+    ]);
+  });
+
+  it("shows a setting that can be left out and is empty as left out", () => {
+    // The configuration in use carries every setting, an empty one as nothing at all.
+    const empty = view({ config: { ...view().config, "default-profile": "" } });
+    const profile = row(settingsPages(SCHEMA, empty, LISTS), "default-profile");
+    expect(profile.value).toBeNull();
+    expect(profile.choices.some((choice) => choice.value === "")).toBe(false);
+    expect(profile.choices[chosenIndex(profile)]).toEqual({
+      value: null,
+      label: "System default",
+    });
+    expect(writeChoice(profile, profile.choices[0]!)).toEqual({
+      op: "unset",
+      path: "default-profile",
+    });
+    const base = view().config;
+    const noShell = view({ config: { ...base, terminal: { ...base.terminal, shell: "" } } });
+    const shell = row(settingsPages(SCHEMA, noShell, LISTS), "terminal.shell");
+    expect(shell.choices).toEqual([
+      { value: null, label: "System default" },
+      { value: "pwsh.exe", label: "PowerShell" },
+    ]);
+    expect(chosenIndex(shell)).toBe(0);
+
+    const chosen = view({ config: { ...view().config, "default-profile": "box" } });
+    const set = row(settingsPages(SCHEMA, chosen, LISTS), "default-profile");
+    expect(set.value).toBe("box");
+    expect(set.choices[chosenIndex(set)]).toEqual({ value: "box", label: "SSH: Box" });
+  });
+
   it("reads the choices of a setting the schema names one by one", () => {
     const style = row(settingsPages(SCHEMA, view(), LISTS), "terminal.cursor-style");
     expect(style.choices).toEqual([
@@ -224,7 +262,7 @@ describe("searching the settings", () => {
       "appearance.background-image",
     );
     expect(searchSettings(pages, "cursor").count).toBe(2);
-    expect(searchSettings(pages, "terminal").count).toBe(4);
+    expect(searchSettings(pages, "terminal").count).toBe(5);
   });
 
   it("finds nothing for nothing typed, and counts nothing it does not show", () => {

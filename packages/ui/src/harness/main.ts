@@ -8,7 +8,8 @@
  * the core, which prints it and exits with the verdict.
  *
  * Opened in a browser through the development server, the page takes the suite from
- * `?suite=` and shows the report instead, as far as a suite can run without a core.
+ * `?suite=` and shows the report instead, as far as a suite can run without a core; or
+ * shows one scene of the window's page, from `?scene=`, and leaves it there.
  */
 
 import { Vt } from "@lume/vt";
@@ -16,7 +17,7 @@ import wasmUrl from "@lume/vt/ghostty-vt.wasm?url";
 
 import { checkFrameContract } from "../frame-contract.ts";
 import { runBench } from "./bench.ts";
-import { runChrome } from "./chrome.ts";
+import { runChrome, showScene } from "./chrome.ts";
 import { runCorpus } from "./corpus.ts";
 import "./harness.css";
 import { done, harnessInfo, type HarnessInfo } from "./host.ts";
@@ -54,9 +55,29 @@ async function runSuite(suite: string, info: HarnessInfo | null): Promise<SuiteR
   }
 }
 
+/**
+ * Shows one scene of the window's page and leaves it there, for a person to look at in
+ * a browser: `?scene=<name>`, with `&look=light` for the light look.
+ */
+async function showOne(name: string, look: string | null): Promise<void> {
+  checkFrameContract();
+  try {
+    const problems = await showScene(name, look === "light" ? "light" : "dark");
+    progress(problems.length === 0 ? `${name}` : `${name}: ${problems.join("; ")}`);
+  } catch (error) {
+    progress(error instanceof Error ? error.message : String(error));
+  }
+}
+
 async function main(): Promise<void> {
   const info = await harnessInfo();
-  const suite = info?.harness ?? new URLSearchParams(window.location.search).get("suite") ?? "";
+  const asked = new URLSearchParams(window.location.search);
+  const scene = asked.get("scene");
+  if (!info && scene !== null) {
+    await showOne(scene, asked.get("look"));
+    return;
+  }
+  const suite = info?.harness ?? asked.get("suite") ?? "";
   const about = {
     suite,
     engine: info?.engine ?? "browser",

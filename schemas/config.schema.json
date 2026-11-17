@@ -40,6 +40,7 @@
     "appearance": {
       "default": {
         "pane-header": "always",
+        "program-icons": {},
         "theme-dark": "lume-dark",
         "theme-light": "lume-light",
         "tokens": {}
@@ -400,6 +401,56 @@
             "page": "appearance"
           }
         },
+        "program-icons": {
+          "additionalProperties": {
+            "description": "A picture for the program a pane runs.",
+            "oneOf": [
+              {
+                "const": "terminal",
+                "description": "A prompt: a shell, or a program nothing else fits.",
+                "type": "string"
+              },
+              {
+                "const": "editor",
+                "description": "A page being written: an editor or a pager.",
+                "type": "string"
+              },
+              {
+                "const": "git",
+                "description": "A branch: a version control tool.",
+                "type": "string"
+              },
+              {
+                "const": "monitor",
+                "description": "A pulse: a monitor of the system or of a process.",
+                "type": "string"
+              },
+              {
+                "const": "agent",
+                "description": "A spark: a coding agent.",
+                "type": "string"
+              },
+              {
+                "const": "remote",
+                "description": "A globe: a connection to another machine.",
+                "type": "string"
+              },
+              {
+                "const": "container",
+                "description": "A box: containers and virtual machines.",
+                "type": "string"
+              },
+              {
+                "const": "files",
+                "description": "A folder: a file manager.",
+                "type": "string"
+              }
+            ]
+          },
+          "default": {},
+          "description": "The picture a pane's header and its tab show for a program, by the program's\nname without its folder or `.exe`, such as `nvim = \"editor\"`. These come before\nthe pictures the application knows.",
+          "type": "object"
+        },
         "theme": {
           "description": "The theme to use whatever the system's colour scheme is. Left out, the theme\nfollows the system: `theme-light` or `theme-dark`.",
           "type": [
@@ -465,7 +516,17 @@
     "default-profile": {
       "default": "",
       "description": "The profile new terminals use, by its id. Empty, new terminals run the shell of\n`terminal.shell`.",
-      "type": "string"
+      "type": "string",
+      "x-lume-settings": {
+        "control": "select",
+        "group": "Startup",
+        "help": "Used for new terminal tabs and panes. A workspace's own choice comes first",
+        "label": "Default profile",
+        "list": "profiles",
+        "order": 20,
+        "page": "general",
+        "unset": "System default"
+      }
     },
     "font": {
       "default": {
@@ -1316,6 +1377,8 @@
         "confirm-close": "never",
         "cursor-blink": true,
         "cursor-style": "block",
+        "long-command-seconds": 10,
+        "notify-long-command": false,
         "scrollback-lines": 10000,
         "shell": "",
         "shell-args": []
@@ -1452,6 +1515,62 @@
             "page": "terminal"
           }
         },
+        "long-command-seconds": {
+          "default": 10,
+          "description": "How long a command runs, in seconds, before its end is notified.",
+          "format": "uint32",
+          "maximum": 86400,
+          "minimum": 1,
+          "type": "integer",
+          "x-lume-settings": {
+            "control": "select",
+            "group": "Attention",
+            "help": "How long a command runs before its end is notified",
+            "label": "Long command",
+            "options": [
+              {
+                "label": "5 seconds",
+                "value": 5
+              },
+              {
+                "label": "10 seconds",
+                "value": 10
+              },
+              {
+                "label": "30 seconds",
+                "value": 30
+              },
+              {
+                "label": "60 seconds",
+                "value": 60
+              },
+              {
+                "label": "300 seconds",
+                "value": 300
+              },
+              {
+                "label": "900 seconds",
+                "value": 900
+              }
+            ],
+            "order": 30,
+            "page": "general",
+            "unit": "seconds"
+          }
+        },
+        "notify-long-command": {
+          "default": false,
+          "description": "Show a desktop notification when a command that ran for a while ends in a window\nthat is not in use. It needs the shell to report its commands.",
+          "type": "boolean",
+          "x-lume-settings": {
+            "control": "switch",
+            "group": "Attention",
+            "help": "A desktop notification when a command ends in a window you are not using",
+            "label": "Notify when a long command ends",
+            "order": 20,
+            "page": "general"
+          }
+        },
         "padding": {
           "description": "The space between a pane's edge and its text, in pixels. Left out, the theme's.",
           "format": "double",
@@ -1552,18 +1671,8 @@
         },
         "shell": {
           "default": "",
-          "description": "The program a new terminal runs. Empty, it is the user's own shell.",
-          "type": "string",
-          "x-lume-settings": {
-            "control": "select",
-            "group": "Startup",
-            "help": "Used for new terminal tabs and panes",
-            "label": "Default shell",
-            "list": "shells",
-            "order": 20,
-            "page": "general",
-            "unset": "System default"
-          }
+          "description": "The program a new terminal runs when no profile says otherwise. Empty, it is the\nuser's own shell.",
+          "type": "string"
         },
         "shell-args": {
           "default": [],
@@ -1578,12 +1687,26 @@
     },
     "window": {
       "default": {
+        "bell-attention": true,
         "close-with-last-tab": true,
         "confirm-close": "never",
         "restore-bounds": true
       },
       "description": "The application's windows.",
       "properties": {
+        "bell-attention": {
+          "default": true,
+          "description": "Ask for attention when a program rings the bell in a window that is not in use:\nthe taskbar button flashes, or the dock icon bounces.",
+          "type": "boolean",
+          "x-lume-settings": {
+            "control": "switch",
+            "group": "Attention",
+            "help": "When a program rings the bell in a window you are not using",
+            "label": "Flash the window on a bell",
+            "order": 10,
+            "page": "general"
+          }
+        },
         "close-with-last-tab": {
           "default": true,
           "description": "Close a window when its last tab closes.",
@@ -1717,11 +1840,12 @@
   "type": "object",
   "x-lume-pages": [
     {
-      "blurb": "How Lume starts, and what closing does.",
+      "blurb": "How Lume starts, how it gets your attention, and what closing does.",
       "group": "Application",
       "groups": [
         "Startup",
         "Windows",
+        "Attention",
         "Closing"
       ],
       "icon": "general",

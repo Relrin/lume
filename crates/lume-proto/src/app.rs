@@ -28,7 +28,7 @@ use crate::frame::{Kind, encode_control_json};
 use crate::types::{BackendId, ExitStatus, Launcher, SessionId, SessionInfo, TermSize};
 
 /// The version of the control endpoint's messages this crate speaks.
-pub const APP_PROTO_VERSION: u32 = 5;
+pub const APP_PROTO_VERSION: u32 = 6;
 
 /// The name the control endpoint is served under, and looked for, when none is given.
 ///
@@ -406,6 +406,10 @@ pub struct AppSession {
     /// The pane that shows the session, if one does.
     pub pane: Option<String>,
     pub info: SessionInfo,
+    /// Whether something runs in the session that closing its pane would end, as far as
+    /// what the session reported tells.
+    #[serde(default)]
+    pub busy: bool,
 }
 
 /// One workspace there is.

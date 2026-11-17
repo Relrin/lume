@@ -305,6 +305,13 @@ const COMMANDS: &[Row] = &[
         false,
     ),
     (
+        "lume.connect.open",
+        "Open Terminal…",
+        "Tab",
+        Runs::Page,
+        true,
+    ),
+    (
         "lume.search.open",
         "Find in Terminal",
         "Search",
@@ -1022,6 +1029,7 @@ mod tests {
     fn searching_runs_in_the_page_and_the_settings_open_in_the_application() {
         let registry = registry();
         for id in [
+            "lume.connect.open",
             "lume.search.open",
             "lume.search.next",
             "lume.search.previous",

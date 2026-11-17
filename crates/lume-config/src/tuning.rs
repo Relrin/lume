@@ -39,6 +39,17 @@ pub const SETTINGS_OPACITIES: (f64, f64, f64) = (0.1, 1.0, 0.1);
 pub const SETTINGS_SCROLLBACK_LINES: [u32; 5] =
     [1_000, 5_000, 10_000, 50_000, SCROLLBACK_LINES_MAX];
 
+/// How long a command runs, in seconds, before its end is worth a notification, as the
+/// settings window offers it.
+pub const SETTINGS_LONG_COMMAND_SECONDS: [u32; 6] = [5, 10, 30, 60, 300, 900];
+
+/// How long a command runs, in seconds, before its end is worth a notification, unless
+/// the settings say otherwise.
+pub const LONG_COMMAND_SECONDS_DEFAULT: u32 = 10;
+
+/// The longest a command may be said to run before a notification is worth it: a day.
+pub const LONG_COMMAND_SECONDS_MAX: u32 = 86_400;
+
 /// The longest name a workspace may have, in characters.
 pub const WORKSPACE_NAME_MAX: usize = 64;
 

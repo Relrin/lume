@@ -16,6 +16,7 @@
     "allow-layout-view",
     "allow-layout-apply",
     "allow-sessions-start",
+    "allow-panes-busy",
     "allow-commands-list",
     "allow-command-run",
     "allow-config-view",

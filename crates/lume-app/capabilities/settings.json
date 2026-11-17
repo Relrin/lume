@@ -14,6 +14,7 @@
     "allow-config-schema",
     "allow-themes-list",
     "allow-shells-list",
+    "allow-profiles-list",
     "allow-font-families",
     "allow-workspaces-list",
     "allow-window-drag",

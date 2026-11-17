@@ -40,8 +40,17 @@ function view(confirm: "never" | "always"): ConfigView {
   };
 }
 
-/** A window of one tab with two panes, `p1` having the keyboard, as far as closing sees it. */
-function page(confirm: "never" | "always", ended: readonly PaneId[] = []) {
+/**
+ * A window of one tab with two panes, `p1` having the keyboard, as far as closing sees
+ * it. `ended` are the panes whose program has ended; `idle`, those whose shell the core
+ * says is at its prompt; `fails`, whether the core cannot be asked.
+ */
+function page(
+  confirm: "never" | "always",
+  ended: readonly PaneId[] = [],
+  idle: readonly PaneId[] = [],
+  fails = false,
+) {
   const layout = createLayoutStore();
   layout
     .getState()
@@ -73,6 +82,10 @@ function page(confirm: "never" | "always", ended: readonly PaneId[] = []) {
         closed.push({ action, confirmed });
         return Promise.resolve();
       },
+      panesBusy: (panes: readonly PaneId[]) =>
+        fails
+          ? Promise.reject(new Error("the core is gone"))
+          : Promise.resolve(panes.filter((id) => !ended.includes(id) && !idle.includes(id))),
     },
   } as unknown as ClosingApp;
   return { app, answer, asked, closed, refocused: () => refocused };
@@ -135,6 +148,21 @@ describe("asking before closing what still runs a program", () => {
     expect(await mayRun(none.app, "lume.tab.close", null)).toBe(true);
     expect(await mayRun(none.app, "lume.pane.close", { pane: "p2" })).toBe(true);
     expect(none.asked).toEqual([]);
+  });
+
+  it("does not ask about a shell the core says is at its prompt", async () => {
+    const { app, answer, asked } = page("always", [], ["p1"]);
+    answer(false);
+    expect(await mayRun(app, "lume.pane.close", null)).toBe(true);
+    expect(await mayRun(app, "lume.tab.close", null)).toBe(false);
+    expect(asked).toEqual([{ what: "tab", running: 1 }]);
+  });
+
+  it("counts every pane whose program has not ended when the core cannot say", async () => {
+    const { app, answer, asked } = page("always", [], ["p1", "p2"], true);
+    answer(true);
+    expect(await mayRun(app, "lume.tab.close", null)).toBe(true);
+    expect(asked).toEqual([{ what: "tab", running: 2 }]);
   });
 
   it("closes a window it was asked about once the user agrees", async () => {

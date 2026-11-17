@@ -13,7 +13,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import { applyConfig, describeProblem } from "../config/apply.ts";
 import { createConfigStore, type ConfigStore } from "../config/store.ts";
 import { CoreClient } from "../core/client.ts";
-import type { Notice } from "../core/types.ts";
+import type { Notice, ProfileList } from "../core/types.ts";
 import { NoticeStore, sentence } from "../shell/notices.ts";
 import { TauriCarrier, type Carrier } from "../transport/carrier.ts";
 import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
@@ -36,7 +36,7 @@ export interface SettingsApp {
   readonly client: CoreClient;
   /** The configuration's schema, as the core sent it. */
   readonly schema: unknown;
-  /** The machine's themes, fonts, shells and workspaces. */
+  /** The machine's themes, fonts, shells, workspaces and profiles. */
   readonly lists: StoreApi<SettingsLists>;
   /** The pages that do not come from the schema. */
   readonly registry: SettingsRegistry;
@@ -114,8 +114,19 @@ export async function startSettings(
     );
   };
 
+  // The profiles are numbered: an answer may arrive after a notice that is newer.
+  let profilesRevision = 0;
+  const takeProfiles = (list: ProfileList): void => {
+    if (list.revision <= profilesRevision) return;
+    profilesRevision = list.revision;
+    lists.setState({ ...lists.getState(), profiles: list.profiles });
+  };
+
   const follow = (notice: Notice): void => {
     switch (notice.type) {
+      case "profiles_changed":
+        takeProfiles(notice);
+        break;
       case "config_changed":
         if (!config.getState().set(notice.view)) break;
         applyConfig(notice.view);
@@ -162,8 +173,11 @@ export async function startSettings(
       [],
     ),
   ]).then(([themes, fonts, shells, workspaces]) => {
-    lists.setState({ themes, fonts, shells, workspaces });
+    lists.setState({ ...lists.getState(), themes, fonts, shells, workspaces });
   });
+  // Looking at the machine for profiles takes the core a moment; the list comes on
+  // its own, and again whenever it changes.
+  client.profilesList().then(takeProfiles, () => undefined);
 
   client.windowState().then(
     (state) => windowState.getState().set(state),

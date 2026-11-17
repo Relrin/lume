@@ -217,6 +217,12 @@ pub struct FakeShell {
     asked_to_close: Mutex<Vec<lume_layout::WindowId>>,
     /// What was put on the clipboard, in order.
     copied: Mutex<Vec<String>>,
+    /// The windows that have the keyboard.
+    focused: Mutex<Vec<lume_layout::WindowId>>,
+    /// The windows that asked for attention, in order.
+    attention: Mutex<Vec<lume_layout::WindowId>>,
+    /// The notifications shown, as title and body, in order.
+    notified: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeShell {
@@ -263,6 +269,31 @@ impl FakeShell {
     /// The windows that were asked to close, in order.
     pub fn asked_to_close(&self) -> Vec<lume_layout::WindowId> {
         self.asked_to_close
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Says whether a window has the keyboard.
+    pub fn set_focused(&self, window: lume_layout::WindowId, focused: bool) {
+        let mut windows = self.focused.lock().unwrap_or_else(PoisonError::into_inner);
+        windows.retain(|other| *other != window);
+        if focused {
+            windows.push(window);
+        }
+    }
+
+    /// The windows that asked for attention, in order.
+    pub fn attention(&self) -> Vec<lume_layout::WindowId> {
+        self.attention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The notifications shown, as title and body, in order.
+    pub fn notified(&self) -> Vec<(String, String)> {
+        self.notified
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
@@ -326,5 +357,26 @@ impl crate::control::Shell for FakeShell {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(window);
+    }
+
+    fn window_focused(&self, window: lume_layout::WindowId) -> bool {
+        self.focused
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(&window)
+    }
+
+    fn request_attention(&self, window: lume_layout::WindowId) {
+        self.attention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(window);
+    }
+
+    fn notify(&self, title: &str, body: &str) {
+        self.notified
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((title.to_owned(), body.to_owned()));
     }
 }

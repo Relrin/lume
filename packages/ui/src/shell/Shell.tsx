@@ -4,6 +4,7 @@
  * of it over the picture the configuration puts behind the panes, if it names one.
  */
 
+import { ConnectPalette } from "../connect/ConnectPalette.tsx";
 import { Palette } from "../palette/Palette.tsx";
 import { Prompts } from "../Prompts.tsx";
 import { Background } from "./Background.tsx";
@@ -31,6 +32,7 @@ export function Shell({ app }: { app: ShellApp }) {
           <DockDropPreview />
         </div>
         <Palette />
+        <ConnectPalette />
         <Notices store={app.notices} />
         <Prompts store={app.prompts} />
       </div>

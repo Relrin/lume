@@ -37,6 +37,47 @@ pub fn known_shells() -> Vec<KnownShell> {
     shells_in(platform::SHELLS, &dirs)
 }
 
+/// The names of programs that are shells: what waits at a prompt for a command line.
+/// Each is a program's name without its folder or extension, in lower case.
+const SHELL_NAMES: &[&str] = &[
+    "ash",
+    "bash",
+    "cmd",
+    "csh",
+    "dash",
+    "elvish",
+    "fish",
+    "ion",
+    "ksh",
+    "mksh",
+    "nu",
+    "osh",
+    "powershell",
+    "pwsh",
+    "sh",
+    "tcsh",
+    "xonsh",
+    "yash",
+    "zsh",
+];
+
+/// A program's name without its folder or its extension, in lower case: `bash` for
+/// `C:\Program Files\Git\bin\bash.exe`, as for `/usr/bin/bash`.
+pub fn program_stem(program: &str) -> String {
+    let file = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let file = file.to_lowercase();
+    match file.rsplit_once('.') {
+        Some((stem, "exe" | "com" | "bat" | "cmd")) if !stem.is_empty() => stem.to_owned(),
+        _ => file,
+    }
+}
+
+/// Whether a program is a shell, by its name. A program nobody named is the user's own
+/// shell.
+pub fn is_shell_program(program: &str) -> bool {
+    program.trim().is_empty() || SHELL_NAMES.contains(&program_stem(program).as_str())
+}
+
 /// Whether the file at `path` is a program that can be started.
 #[cfg(unix)]
 pub(crate) fn runnable(path: &std::path::Path) -> bool {
@@ -294,6 +335,28 @@ mod tests {
         let here = [PathBuf::from("."), PathBuf::new()];
         assert_eq!(shells_in(&[("m", "Manifest", "Cargo.toml")], &here), []);
         assert_eq!(shells_in(&[("m", "Manifest", "Cargo.toml")], &[]), []);
+    }
+
+    #[test]
+    fn a_shell_is_told_by_its_name_whatever_its_folder_and_extension() {
+        assert_eq!(program_stem(r"C:\Program Files\Git\bin\bash.exe"), "bash");
+        assert_eq!(program_stem("/usr/bin/zsh"), "zsh");
+        assert_eq!(program_stem("PowerShell.EXE"), "powershell");
+        assert_eq!(program_stem("vim"), "vim");
+        assert_eq!(program_stem("python3.12"), "python3.12");
+        for shell in [
+            r"C:\Windows\System32\cmd.exe",
+            "pwsh",
+            "/bin/sh",
+            "/opt/homebrew/bin/fish",
+            "nu.exe",
+            "",
+        ] {
+            assert!(is_shell_program(shell), "{shell}");
+        }
+        for program in ["vim", "htop", r"C:\Python\python.exe", "ssh", "wsl.exe"] {
+            assert!(!is_shell_program(program), "{program}");
+        }
     }
 
     #[test]

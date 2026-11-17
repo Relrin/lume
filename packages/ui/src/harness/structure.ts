@@ -78,6 +78,11 @@ const STATES: readonly (readonly [string, string])[] = [
   ["data-floating", "floating"],
   ["data-area", "area"],
   ["data-edge", "edge"],
+  ["data-pane-kind", "kind"],
+  ["data-activity", "activity"],
+  ["data-program-status", "status"],
+  ["data-ended", "ended"],
+  ["data-waiting", "waiting"],
 ];
 
 /** The roles of the elements that mark out a page without claiming a role. */

@@ -1540,3 +1540,69 @@ fn a_shell_reports_where_it_is_and_what_it_runs_and_keeps_its_own_prompt() {
     }
     app.quit();
 }
+
+impl App {
+    /// Whether something runs in a pane that closing it would end, as the application
+    /// tells it.
+    fn busy(&self, pane: &str) -> bool {
+        let listed = self.ctl(&["list"]).ok("list");
+        listed["sessions"]
+            .as_array()
+            .expect("a list of sessions")
+            .iter()
+            .find(|session| session["pane"] == pane)
+            .and_then(|session| session["busy"].as_bool())
+            .unwrap_or_else(|| panic!("pane {pane} shows no session: {listed}"))
+    }
+
+    /// Waits until a pane is said to run something, or not.
+    fn until_busy(&self, pane: &str, busy: bool, what: &str) {
+        let deadline = Instant::now() + START;
+        while self.busy(pane) != busy {
+            if Instant::now() >= deadline {
+                let listed = self.ctl(&["list"]).ok("list");
+                panic!("{what} never happened: {listed}");
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_shell_at_its_prompt_runs_nothing_and_a_program_it_runs_is_something() {
+    let app = App::start();
+    app.status_with_session();
+    let Some(bash) = bash() else {
+        eprintln!("skipped: there is no bash on this machine");
+        app.quit();
+        return;
+    };
+    let spawned = app
+        .ctl(&[
+            "spawn",
+            "--env",
+            "HISTFILE=/dev/null",
+            "--env",
+            "PS1=lume-idle> ",
+            "--",
+            &bash,
+            "--noprofile",
+            "--norc",
+        ])
+        .ok("starting bash");
+    let pane = pane_of(&spawned);
+    let follower = Follower::of(&app, &pane);
+    app.wait_text_in(&pane, "lume-idle>");
+    // At its prompt the shell runs nothing that closing its pane would end.
+    app.until_busy(&pane, false, "the shell to be seen at its prompt");
+
+    // A program it runs is something, until it ends.
+    app.type_line_in(&pane, "sleep 4");
+    app.until_busy(&pane, true, "the program to be seen");
+    follower.until("the command ending", |report| {
+        (report["event"]["type"] == "command_finished").then_some(())
+    });
+    app.until_busy(&pane, false, "the program to end");
+    app.quit();
+}

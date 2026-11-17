@@ -61,6 +61,14 @@ pub trait Shell: Send + Sync + 'static {
     /// Asks a window to close as pressing its own close control does, which may put a
     /// question to the user first.
     fn ask_close(&self, window: WindowId);
+    /// Whether the window that shows a window of the layout is the one the user is
+    /// working in: it has the keyboard.
+    fn window_focused(&self, window: WindowId) -> bool;
+    /// Has a window ask for the user's attention, as the system does it: its taskbar
+    /// button flashes, or the dock icon bounces.
+    fn request_attention(&self, window: WindowId);
+    /// Shows a notification on the desktop.
+    fn notify(&self, title: &str, body: &str);
 }
 
 /// What a request needs to be carried out.
@@ -559,6 +567,7 @@ impl Control {
                         };
                         AppSession {
                             pane: panes.pane_of(&key).map(|pane| pane.to_string()),
+                            busy: state.reports().busy(&key, listed.info.exit.is_some()),
                             backend: listed.backend,
                             info: listed.info,
                         }
@@ -748,7 +757,11 @@ impl Control {
                 )
             }
             AppRequestBody::Profiles {} => {
-                let profiles = panes.profiles.view();
+                let mut profiles = panes.profiles.view();
+                // The looks are for drawing a terminal, which the command line does not.
+                if let Some(view) = profiles.as_object_mut() {
+                    view.remove("looks");
+                }
                 let count = profiles["profiles"].as_array().map_or(0, Vec::len);
                 reply(
                     format!("listed {count} profiles"),

@@ -34,6 +34,9 @@ import { audit, type AuditNode } from "./audit.ts";
 import { FakeCore, FIXTURE_TABS, type FakeCoreOptions } from "./fake-core.ts";
 import { FIXTURE_BINDINGS, FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import { readReference, saveFile, type HarnessInfo } from "./host.ts";
+import { CONNECT_SCENES } from "./connect-scenes.ts";
+import { PANE_SCENES } from "./pane-scenes.ts";
+import type { Scene } from "./scene.ts";
 import { describePage, differences, plainColor, recordText, type Part } from "./structure.ts";
 import {
   CHROME_FLOOD_CHUNK_BYTES,
@@ -122,17 +125,6 @@ function chunk(pane: string, from: number): { bytes: Uint8Array; next: number } 
 
 // The scenes.
 
-/** One arrangement of the window to write down. */
-interface Scene {
-  /** Names the scene, and its reference file. */
-  readonly name: string;
-  readonly window: FakeCoreOptions;
-  /** What is done to the page once it has started, before it is written down. */
-  readonly prepare?: (app: ShellApp, core: FakeCore) => void;
-  /** What must hold of the page once it has settled, beyond what is written down. */
-  readonly check?: (page: HTMLElement) => string[];
-}
-
 /** What the pane that is searched in a scene has printed, and what is looked for in it. */
 const SEARCHED_OUTPUT = "one needle\r\ntwo\r\nanother needle and a NEEDLE\r\n";
 const SEARCHED_FOR = "needle";
@@ -173,6 +165,8 @@ const SCENES: readonly Scene[] = [
       return said === "1 of 3" ? [] : [`the search bar says ${JSON.stringify(said)}, not 1 of 3`];
     },
   },
+  ...PANE_SCENES,
+  ...CONNECT_SCENES,
 ];
 
 /** One state of the settings window to write down. */
@@ -296,6 +290,19 @@ export async function mountWindow(
 }
 
 /**
+ * Shows one scene of the window's page and leaves it on show, in the look asked for, for
+ * a person to look at. Nothing is written down or compared.
+ */
+export async function showScene(name: string, scheme: "light" | "dark"): Promise<string[]> {
+  const scene = SCENES.find((candidate) => candidate.name === name);
+  if (!scene) throw new Error(`there is no scene called ${name}`);
+  const mounted = await mountWindow({ ...scene.window, scheme });
+  await scene.prepare?.(mounted.app, mounted.core);
+  await sleep(CHROME_SETTLE_MS);
+  return scene.check?.(mounted.container) ?? [];
+}
+
+/**
  * Starts the settings window's page at `page` and draws it in a box of a known size.
  * The page has nothing to put away but its components: it shows no terminals.
  */
@@ -361,7 +368,7 @@ async function runScene(
 ): Promise<SceneResult> {
   const mounted = await mountWindow(scene.window);
   try {
-    scene.prepare?.(mounted.app, mounted.core);
+    await scene.prepare?.(mounted.app, mounted.core);
     const also = (): string[] => scene.check?.(mounted.container) ?? [];
     return await writeScene(scene.name, mounted, ".shell", also, info, problems);
   } finally {
@@ -515,9 +522,15 @@ export async function runChrome(
   const flooded = performance.now() + COMMIT_TEST_MS;
   while (performance.now() < flooded) {
     for (const pane of PANES) {
-      const { bytes, next } = chunk(pane, lines[pane]);
+      const from = lines[pane];
+      const { bytes, next } = chunk(pane, from);
       lines[pane] = next;
       outputBytes += core.output(pane, bytes);
+      // What the sessions say of themselves changes as often: the title, where the
+      // shell is, and that a pane printed while nobody looked. None of it may render.
+      core.event(pane, { type: "title", title: `${pane} at ${from}` });
+      core.event(pane, { type: "cwd", url: `file://FIXTURE/C:/flood/${pane}/${from}` });
+      core.event(pane, { type: "activity" });
     }
     // A frame is given the chance to be drawn between rounds.
     await new Promise((resolve) => requestAnimationFrame(resolve));

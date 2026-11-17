@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-panes-busy"
+description = "Enables the panes_busy command without any pre-configured scope."
+commands.allow = ["panes_busy"]
+
+[[permission]]
+identifier = "deny-panes-busy"
+description = "Denies the panes_busy command without any pre-configured scope."
+commands.deny = ["panes_busy"]

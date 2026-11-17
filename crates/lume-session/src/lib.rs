@@ -38,7 +38,7 @@ pub use lume_proto::{
 };
 pub use profiles::{DetectOptions, Detected, detect};
 pub use router::Router;
-pub use shell::{KnownShell, default_shell, known_shells};
+pub use shell::{KnownShell, default_shell, is_shell_program, known_shells, program_stem};
 
 /// Why a session operation failed.
 #[derive(Debug, thiserror::Error)]

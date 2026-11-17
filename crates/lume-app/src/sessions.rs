@@ -13,11 +13,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use lume_proto::app::SessionNews;
-use lume_session::{ExitStatus, Launcher, SessionEvent, SessionState};
+use lume_session::{
+    CommandState, ExitStatus, Foreground, Launcher, SessionEvent, SessionState, is_shell_program,
+    program_stem,
+};
 use tokio::sync::broadcast;
 
 use crate::carrier::SessionKey;
-use crate::tuning::SESSION_NEWS_BACKLOG;
+use crate::tuning::{SESSION_NEWS_BACKLOG, SHELL_ALIASES_MAX};
 
 /// Something a session reported, or its program's end.
 #[derive(Clone, Debug)]
@@ -30,7 +33,88 @@ pub struct News {
 struct Known {
     /// What the session runs, where the application started it and so knows.
     launcher: Option<Launcher>,
+    /// The profile it was started from, where it was started from one.
+    profile: Option<String>,
+    /// The process the session started, once it is known.
+    pid: Option<u32>,
+    /// Processes under the shell's own name that had the terminal before the shell
+    /// ran any command line. A shell may start the real one as a child of its own (Git
+    /// for Windows' `bin\bash.exe` does), and that child is then the shell at its
+    /// prompt. A shell of the same name started later from a command line is not.
+    shell_pids: Vec<u32>,
     state: SessionState,
+}
+
+impl Known {
+    /// Whether the program that has the terminal is the session's shell itself.
+    fn is_shell(&self, foreground: &Foreground) -> bool {
+        self.pid == Some(foreground.pid) || self.shell_pids.contains(&foreground.pid)
+    }
+
+    /// Notes the program that has the terminal, if it is the shell at its prompt.
+    fn note_foreground(&mut self) {
+        let (Some(foreground), Some(Launcher::Shell { program, .. })) =
+            (&self.state.foreground, &self.launcher)
+        else {
+            return;
+        };
+        let before_any_command = self.state.command.is_none();
+        let shell_named = program_stem(&foreground.name) == program_stem(program);
+        if before_any_command
+            && shell_named
+            && !self.shell_pids.contains(&foreground.pid)
+            && self.shell_pids.len() < SHELL_ALIASES_MAX
+        {
+            self.shell_pids.push(foreground.pid);
+        }
+    }
+}
+
+/// Whether something runs in a session that closing its pane would end.
+///
+/// - A session whose program has ended runs nothing.
+/// - Of one the application did not start, or one on another machine, nothing can be
+///   told: it is taken to run something.
+/// - A command line the shell said it is running is something.
+/// - In a Linux distribution the program here is always the distribution's own, so only
+///   the shell's word counts: it runs nothing once it said its command finished, or
+///   said where it is before it ran any, as a shell at its first prompt does.
+/// - A program that is not a shell is the something.
+/// - A shell runs something while another program has the terminal, whatever it said
+///   last: a program it runs can print a prompt's marks too.
+/// - With nothing known of the terminal, only the shell's word counts.
+pub fn runs_something(
+    ended: bool,
+    launcher: Option<&Launcher>,
+    state: &SessionState,
+    is_shell: impl Fn(&Foreground) -> bool,
+) -> bool {
+    if ended {
+        return false;
+    }
+    let finished = matches!(state.command, Some(CommandState::Finished { .. }));
+    match launcher {
+        None | Some(Launcher::Ssh { .. }) => true,
+        Some(_) if state.command_running() => true,
+        Some(Launcher::Wsl { .. }) => {
+            let at_first_prompt = state.command.is_none() && state.cwd.is_some();
+            !(finished || at_first_prompt)
+        }
+        Some(Launcher::Shell { program, .. }) if !is_shell_program(program) => true,
+        Some(Launcher::Shell { .. }) => match &state.foreground {
+            Some(foreground) => !is_shell(foreground),
+            None => !finished,
+        },
+        // A way of starting a program this does not know.
+        Some(_) => true,
+    }
+}
+
+/// What the application started a session to run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Launched {
+    pub launcher: Launcher,
+    pub profile: Option<String>,
 }
 
 pub struct SessionStates {
@@ -57,18 +141,52 @@ impl SessionStates {
         self.sessions.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Notes what a session that was just started runs.
-    pub fn started(&self, key: SessionKey, launcher: Launcher) {
-        self.sessions().entry(key).or_default().launcher = Some(launcher);
+    /// Notes what a session that was just started runs, and the profile it was started
+    /// from.
+    pub fn started(&self, key: SessionKey, launcher: Launcher, profile: Option<String>) {
+        let mut sessions = self.sessions();
+        let known = sessions.entry(key).or_default();
+        known.launcher = Some(launcher);
+        known.profile = profile;
+    }
+
+    /// What the application started a session to run, if it started it.
+    pub fn launched(&self, key: &SessionKey) -> Option<Launched> {
+        let sessions = self.sessions();
+        let known = sessions.get(key)?;
+        Some(Launched {
+            launcher: known.launcher.clone()?,
+            profile: known.profile.clone(),
+        })
+    }
+
+    /// Notes the process a session started.
+    pub fn set_pid(&self, key: &SessionKey, pid: u32) {
+        if let Some(known) = self.sessions().get_mut(key) {
+            known.pid = Some(pid);
+        }
+    }
+
+    /// Whether something runs in a session that closing its pane would end, going by
+    /// what the session reported. `ended` says its program has ended.
+    pub fn busy(&self, key: &SessionKey, ended: bool) -> bool {
+        let sessions = self.sessions();
+        match sessions.get(key) {
+            Some(known) => runs_something(ended, known.launcher.as_ref(), &known.state, |fg| {
+                known.is_shell(fg)
+            }),
+            None => !ended,
+        }
     }
 
     /// Takes in a report on its way to the page.
     pub fn on_event(&self, key: &SessionKey, event: &SessionEvent) {
-        self.sessions()
-            .entry(key.clone())
-            .or_default()
-            .state
-            .apply(event);
+        {
+            let mut sessions = self.sessions();
+            let known = sessions.entry(key.clone()).or_default();
+            known.state.apply(event);
+            known.note_foreground();
+        }
         // Nobody following is not an error.
         let _ = self.news.send(News {
             key: key.clone(),
@@ -174,13 +292,214 @@ mod tests {
         states.on_event(&key(1), &cwd("file://box/a"));
         // A session the application did not start: nothing says what it runs.
         assert_eq!(states.reported_dir(&key(1)), None);
-        states.started(key(1), shell());
+        assert_eq!(states.launched(&key(1)), None);
+        states.started(key(1), shell(), None);
         assert_eq!(
             states.reported_dir(&key(1)),
             Some((shell(), "file://box/a".to_owned()))
         );
-        states.started(key(2), shell());
+        states.started(key(2), shell(), Some("box".to_owned()));
         assert_eq!(states.reported_dir(&key(2)), None);
+        assert_eq!(
+            states.launched(&key(2)),
+            Some(Launched {
+                launcher: shell(),
+                profile: Some("box".to_owned()),
+            })
+        );
+    }
+
+    fn program(program: &str) -> Launcher {
+        Launcher::Shell {
+            program: program.to_owned(),
+            args: Vec::new(),
+            login: false,
+        }
+    }
+
+    fn distro() -> Launcher {
+        Launcher::Wsl {
+            distro: "Ubuntu".to_owned(),
+            user: None,
+        }
+    }
+
+    fn remote() -> Launcher {
+        Launcher::Ssh {
+            host: "box".to_owned(),
+            user: None,
+            port: None,
+            extra_args: Vec::new(),
+            client: None,
+        }
+    }
+
+    fn foreground(pid: u32, name: &str) -> Foreground {
+        Foreground {
+            pid,
+            name: name.to_owned(),
+        }
+    }
+
+    fn running(command: Option<&str>) -> Option<CommandState> {
+        Some(CommandState::Running {
+            command: command.map(str::to_owned),
+        })
+    }
+
+    fn finished(exit: i32) -> Option<CommandState> {
+        Some(CommandState::Finished { exit: Some(exit) })
+    }
+
+    #[test]
+    fn what_runs_in_a_session_goes_by_what_it_runs_and_what_it_said() {
+        const SHELL_PID: u32 = 10;
+        let is_shell = |found: &Foreground| found.pid == SHELL_PID;
+        let state = |command: Option<CommandState>, found: Option<Foreground>| SessionState {
+            command,
+            foreground: found,
+            ..SessionState::default()
+        };
+        let idle = state(None, None);
+        let cases: Vec<(&str, bool, Option<Launcher>, SessionState, bool)> = vec![
+            // 1. A program that has ended runs nothing, whatever else is known.
+            (
+                "ended",
+                true,
+                Some(remote()),
+                state(running(None), None),
+                false,
+            ),
+            ("ended shell", true, Some(shell()), idle.clone(), false),
+            // 2. Nothing can be told of a session the application did not start, nor of
+            // one on another machine.
+            ("not started here", false, None, idle.clone(), true),
+            ("ssh", false, Some(remote()), state(finished(0), None), true),
+            // 3. The shell's own word that a command runs.
+            (
+                "running",
+                false,
+                Some(shell()),
+                state(running(Some("make")), Some(foreground(SHELL_PID, "sh"))),
+                true,
+            ),
+            // 4. In a distribution only the shell's word counts.
+            ("wsl at first", false, Some(distro()), idle.clone(), true),
+            (
+                "wsl at its first prompt",
+                false,
+                Some(distro()),
+                SessionState {
+                    cwd: Some("file://box/home/me".to_owned()),
+                    foreground: Some(foreground(99, "wsl")),
+                    ..SessionState::default()
+                },
+                false,
+            ),
+            (
+                "wsl done",
+                false,
+                Some(distro()),
+                state(finished(0), Some(foreground(99, "wsl"))),
+                false,
+            ),
+            // 5. A pane that runs a program of its own runs it.
+            (
+                "a program",
+                false,
+                Some(program("vim")),
+                state(finished(0), Some(foreground(SHELL_PID, "vim"))),
+                true,
+            ),
+            // 6. A shell runs something while another program has the terminal, even
+            // after it said a command finished.
+            (
+                "idle shell",
+                false,
+                Some(shell()),
+                state(None, Some(foreground(SHELL_PID, "sh"))),
+                false,
+            ),
+            (
+                "another program",
+                false,
+                Some(shell()),
+                state(finished(0), Some(foreground(11, "vim"))),
+                true,
+            ),
+            // 7. With nothing known of the terminal, only the shell's word.
+            ("shell unknown", false, Some(shell()), idle.clone(), true),
+            (
+                "shell said done",
+                false,
+                Some(shell()),
+                state(finished(2), None),
+                false,
+            ),
+        ];
+        for (name, ended, launcher, state, busy) in cases {
+            assert_eq!(
+                runs_something(ended, launcher.as_ref(), &state, is_shell),
+                busy,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_shell_that_runs_the_real_one_as_its_child_is_still_at_its_prompt() {
+        let states = SessionStates::new();
+        let git_bash = program(r"C:\Program Files\Git\bin\bash.exe");
+        let seen = |raw: u64, pid: u32, name: &str| {
+            states.on_event(&key(raw), &SessionEvent::Foreground(foreground(pid, name)));
+        };
+        let command = |raw: u64| {
+            states.on_event(&key(raw), &SessionEvent::CommandStarted { command: None });
+            states.on_event(&key(raw), &SessionEvent::CommandFinished { exit: Some(0) });
+        };
+        states.started(key(1), git_bash.clone(), None);
+        // The shell's own process is seen first, before it has started the real one,
+        // and before what it is called is known.
+        seen(1, 10, "bash");
+        states.set_pid(&key(1), 10);
+        assert!(!states.busy(&key(1), false));
+        // The real one, its child, is the shell at its prompt too.
+        seen(1, 11, "bash");
+        assert!(!states.busy(&key(1), false));
+        command(1);
+        seen(1, 12, "vim");
+        assert!(states.busy(&key(1), false));
+        seen(1, 11, "bash");
+        assert!(!states.busy(&key(1), false));
+        // Another bash started from a command line is a program the shell runs.
+        command(1);
+        seen(1, 13, "bash");
+        assert!(states.busy(&key(1), false));
+        assert!(!states.busy(&key(1), true));
+
+        // A first program of another name is not taken for the shell.
+        states.started(key(2), git_bash, None);
+        states.set_pid(&key(2), 20);
+        seen(2, 21, "vim");
+        assert!(states.busy(&key(2), false));
+        seen(2, 20, "bash");
+        assert!(!states.busy(&key(2), false));
+
+        // What a whole state says counts as a report of the program too.
+        states.started(key(3), shell(), None);
+        states.on_event(
+            &key(3),
+            &SessionEvent::State {
+                state: SessionState {
+                    foreground: Some(foreground(31, "sh")),
+                    ..SessionState::default()
+                },
+            },
+        );
+        assert!(!states.busy(&key(3), false));
+        // A session nothing is known of runs something until it has ended.
+        assert!(states.busy(&key(9), false));
+        assert!(!states.busy(&key(9), true));
     }
 
     #[tokio::test]
