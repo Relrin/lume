@@ -32,6 +32,8 @@ export type TabId = string;
 export type SplitId = string;
 /** Names a window, as in `w1`. */
 export type WindowId = string;
+/** Names a group of tabs, as in `g4`. */
+export type GroupId = string;
 /** Names a panel: a dotted name, as in `lume.tabs`. */
 export type PanelId = string;
 
@@ -44,8 +46,10 @@ export interface Workspace {
   /** The window the user last worked in. */
   readonly focused_window: WindowId | null;
   readonly scratch: Scratch | null;
-  /** The number the next pane, tab, split or window is given. */
+  /** The number the next pane, tab, split, group or window is given. */
   readonly next_id: number;
+  /** The kept groups that were closed, the most recently closed last. Left out when none. */
+  readonly shelf?: readonly Shelved[];
 }
 
 /** The scratch terminal: one floating pane a workspace keeps at hand. */
@@ -114,6 +118,11 @@ export interface TabGroup {
   readonly tabs: readonly Tab[];
   /** The tab on show. */
   readonly active: TabId | null;
+  /**
+   * The groups the tabs are gathered in, in the order their first tabs come. A group's
+   * tabs stand together. Left out when there are none.
+   */
+  readonly groups?: readonly Group[];
 }
 
 /** One tab: a tree of splits and panes. */
@@ -126,6 +135,62 @@ export interface Tab {
   readonly zoomed: PaneId | null;
   /** The pane of this tab that last had the keyboard. */
   readonly last_focus: PaneId | null;
+  /** The colour the user gave the tab. Left out when none. */
+  readonly color?: TabColor;
+  /** Locked against being closed. Left out when not. */
+  readonly locked?: boolean;
+  /** The group the tab is in. Left out when none. */
+  readonly group?: GroupId;
+}
+
+/** The colours a tab or a group can be given; the theme says how each looks. */
+export type TabColor = "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "purple" | "pink";
+
+/** Every colour, in the order a tab's menu offers them. */
+export const TAB_COLORS: readonly TabColor[] = [
+  "red",
+  "orange",
+  "yellow",
+  "green",
+  "teal",
+  "blue",
+  "purple",
+  "pink",
+];
+
+/** The pictures a group's label can show. */
+export type GroupIcon =
+  "bug" | "flame" | "rocket" | "flask" | "wrench" | "layers" | "server" | "book";
+
+/** Every group picture, in the order the group editor offers them. */
+export const GROUP_ICONS: readonly GroupIcon[] = [
+  "bug",
+  "flame",
+  "rocket",
+  "flask",
+  "wrench",
+  "layers",
+  "server",
+  "book",
+];
+
+/** Tabs of a window gathered under one name and colour. */
+export interface Group {
+  readonly id: GroupId;
+  /** The name the user gave the group. Left out when none. */
+  readonly name?: string;
+  readonly color: TabColor;
+  readonly icon?: GroupIcon;
+  /** Folded: only the label shows. The tab on show is never in a folded group. */
+  readonly collapsed?: boolean;
+  /** Put away when closed, to be opened again, instead of being forgotten. */
+  readonly kept?: boolean;
+}
+
+/** A kept group that was closed, with its tabs as they were. */
+export interface Shelved {
+  readonly group: Group;
+  readonly tabs: readonly Tab[];
 }
 
 /** A node of a tab's tree. */
@@ -276,11 +341,40 @@ export type Intent =
       readonly content: NewContent;
       readonly index?: number | null;
       readonly activate?: boolean;
+      /** Opens the tab after the last tab of this group, in it. */
+      readonly group?: GroupId | null;
     }
   | { readonly type: "tab_close"; readonly tab: TabId }
+  | { readonly type: "tabs_close"; readonly tabs: readonly TabId[] }
   | { readonly type: "tab_move"; readonly tab: TabId; readonly index: number }
+  | {
+      readonly type: "tab_place";
+      readonly tab: TabId;
+      readonly index: number;
+      readonly group?: GroupId | null;
+    }
+  | { readonly type: "tab_color"; readonly tab: TabId; readonly color?: TabColor | null }
+  | { readonly type: "tab_lock"; readonly tab: TabId; readonly on: boolean }
+  | { readonly type: "tab_merge"; readonly tab: TabId; readonly into: TabId }
   | { readonly type: "tab_rename"; readonly tab: TabId; readonly title?: string | null }
   | { readonly type: "tab_activate"; readonly target: TabTarget }
+  | { readonly type: "group_new"; readonly tab: TabId }
+  | {
+      readonly type: "group_set";
+      readonly group: GroupId;
+      /** Null takes the name away; left out keeps it. */
+      readonly name?: string | null;
+      readonly color?: TabColor;
+      /** Null takes the picture away; left out keeps it. */
+      readonly icon?: GroupIcon | null;
+      readonly collapsed?: boolean;
+      readonly kept?: boolean;
+    }
+  | { readonly type: "group_move"; readonly group: GroupId; readonly index: number }
+  | { readonly type: "group_ungroup"; readonly group: GroupId }
+  | { readonly type: "group_close"; readonly group: GroupId }
+  | { readonly type: "group_reopen"; readonly group: GroupId; readonly window: WindowId }
+  | { readonly type: "group_forget"; readonly group: GroupId }
   | {
       readonly type: "panel_move";
       readonly window: WindowId;
@@ -345,6 +439,14 @@ export type LayoutChange =
     }
   | { readonly type: "tab_title"; readonly tab: TabId; readonly title: string | null }
   | {
+      readonly type: "tab_state";
+      readonly tab: TabId;
+      readonly color: TabColor | null;
+      readonly locked: boolean;
+      readonly group: GroupId | null;
+    }
+  | { readonly type: "groups"; readonly window: WindowId; readonly groups: readonly Group[] }
+  | {
       readonly type: "tab_tree";
       readonly tab: TabId;
       readonly root: Node;
@@ -375,6 +477,7 @@ export type LayoutChange =
   | { readonly type: "scratch"; readonly scratch: Scratch | null }
   | { readonly type: "window_focused"; readonly window: WindowId | null }
   | { readonly type: "workspace_name"; readonly name: string }
+  | { readonly type: "shelf"; readonly shelf: readonly Shelved[] }
   | { readonly type: "pane_closed"; readonly pane: PaneId; readonly content: PaneContent };
 
 /** What an intent made. */
@@ -382,4 +485,6 @@ export interface Created {
   readonly pane: PaneId | null;
   readonly tab: TabId | null;
   readonly window: WindowId | null;
+  /** The group a `group_new` made. Left out when none. */
+  readonly group?: GroupId;
 }

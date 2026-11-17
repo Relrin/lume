@@ -343,3 +343,66 @@ fn a_name_that_is_not_a_plain_file_name_reaches_no_file() {
     assert!(!dir.path.join("outside.json").exists());
     assert!(dir.names().is_empty());
 }
+
+#[test]
+fn groups_and_what_was_put_away_come_back_and_a_first_version_file_still_reads() {
+    let dir = TestDir::new();
+    let store = dir.store();
+    let mut workspace = furnished("default");
+    let window = workspace.windows[0].id;
+    let tabs: Vec<_> = workspace.windows[0]
+        .centre
+        .tabs
+        .iter()
+        .map(|tab| tab.id)
+        .collect();
+    let kept = must(&mut workspace, Intent::GroupNew { tab: tabs[0] })
+        .1
+        .group
+        .unwrap();
+    must(
+        &mut workspace,
+        Intent::GroupSet {
+            group: kept,
+            name: Some(Some("Kept".to_owned())),
+            color: Some(lume_layout::TabColor::Purple),
+            icon: Some(Some(lume_layout::GroupIcon::Server)),
+            collapsed: None,
+            kept: Some(true),
+        },
+    );
+    must(&mut workspace, Intent::GroupClose { group: kept });
+    must(&mut workspace, Intent::GroupNew { tab: tabs[1] });
+    must(
+        &mut workspace,
+        Intent::TabLock {
+            tab: tabs[1],
+            on: true,
+        },
+    );
+    must(
+        &mut workspace,
+        Intent::TabColor {
+            tab: tabs[1],
+            color: Some(lume_layout::TabColor::Red),
+        },
+    );
+    assert_eq!(workspace.shelf.len(), 1);
+    assert_eq!(workspace.window(window).unwrap().centre.groups.len(), 1);
+
+    store.save(&workspace, "1", 1).unwrap();
+    assert_eq!(loaded(&store, "default"), without_sessions(&workspace));
+
+    // A file written before groups existed says version 1 and has none of their fields.
+    let (old, ..) = one_pane();
+    let text = serde_json::json!({
+        "version": 1,
+        "app_version": "0.1.0",
+        "saved_unix_ms": 1,
+        "workspace": old,
+    });
+    write(&dir.file("old.json"), &text.to_string());
+    let mut expected = old.clone();
+    expected.name = "old".to_owned();
+    assert_eq!(loaded(&store, "old"), expected);
+}

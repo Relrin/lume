@@ -50,6 +50,14 @@ fn numbers(workspace: &Workspace) -> HashSet<u32> {
         }
     }
     numbers.extend(workspace.panes().into_iter().map(|pane| pane.id.get()));
+    // What is put away keeps its numbers.
+    for shelved in &workspace.shelf {
+        for tab in &shelved.tabs {
+            numbers.insert(tab.id.get());
+            numbers.extend(tab.root.splits().into_iter().map(|split| split.id.get()));
+            numbers.extend(tab.root.pane_ids().into_iter().map(|pane| pane.get()));
+        }
+    }
     numbers
 }
 
@@ -190,6 +198,7 @@ pub fn open_tab(workspace: &mut Workspace, window: WindowId) -> (TabId, PaneId) 
         content: terminal(),
         index: None,
         activate: true,
+        group: None,
     };
     let (_, created) = must(workspace, intent);
     (created.tab.unwrap(), created.pane.unwrap())

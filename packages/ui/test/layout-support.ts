@@ -26,6 +26,7 @@ export const VECTOR_NAMES = [
   "splits-and-tabs",
   "floating-and-scratch",
   "panels-and-windows",
+  "tab-groups",
 ] as const;
 
 /** One step of a recorded sequence: an intent, and what it changed or why it was refused. */
@@ -66,6 +67,9 @@ export function followerForm(workspace: Workspace): Workspace {
   for (const window of copy.windows) {
     window.history = [];
     for (const tab of window.centre.tabs) tab.last_focus = null;
+  }
+  for (const shelved of copy.shelf ?? []) {
+    for (const tab of shelved.tabs) tab.last_focus = null;
   }
   return copy;
 }
@@ -179,6 +183,34 @@ export class PlainFollower {
         if (tab) tab.title = change.title;
         return;
       }
+      case "tab_state": {
+        const tab = this.#tab(change.tab);
+        if (!tab) return;
+        // Left out when they say nothing, as the core writes a tab.
+        delete tab.color;
+        delete tab.locked;
+        delete tab.group;
+        if (change.color !== null) tab.color = change.color;
+        if (change.locked) tab.locked = true;
+        if (change.group !== null) tab.group = change.group;
+        return;
+      }
+      case "groups": {
+        const found = window(change.window);
+        if (!found) return;
+        if (change.groups.length === 0) delete found.centre.groups;
+        else found.centre.groups = clone(change.groups) as Mutable<Window>["centre"]["groups"];
+        return;
+      }
+      case "shelf":
+        if (change.shelf.length === 0) delete workspace.shelf;
+        else {
+          workspace.shelf = clone(change.shelf).map((shelved) => ({
+            ...shelved,
+            tabs: shelved.tabs.map(viewOfTab),
+          }));
+        }
+        return;
       case "tab_tree": {
         const tab = this.#tab(change.tab);
         if (!tab) return;

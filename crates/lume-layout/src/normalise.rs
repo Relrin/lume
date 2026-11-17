@@ -8,8 +8,8 @@
 
 use std::collections::HashSet;
 
-use crate::ids::PaneId;
-use crate::model::{Node, Split, UnitRect, Window, Workspace};
+use crate::ids::{GroupId, PaneId};
+use crate::model::{Node, Split, TabGroup, UnitRect, Window, Workspace};
 use crate::tuning::{FLOAT_MIN, FOCUS_HISTORY_MAX, SHARE_MIN, UNITS};
 
 /// Makes ratios add up to a whole exactly, by giving the largest what is missing or
@@ -161,8 +161,48 @@ pub(crate) fn contain(rect: UnitRect) -> UnitRect {
     }
 }
 
+/// Keeps a window's groups in their one form: every tab's group is one of the
+/// window's, the tabs of a group stand together where its first tab is, a group with
+/// no tabs is gone, and the groups are listed in the order their tabs come.
+fn mend_groups(centre: &mut TabGroup) {
+    let known: HashSet<GroupId> = centre.groups.iter().map(|group| group.id).collect();
+    for tab in &mut centre.tabs {
+        if tab.group.is_some_and(|group| !known.contains(&group)) {
+            tab.group = None;
+        }
+    }
+    let of: Vec<Option<GroupId>> = centre.tabs.iter().map(|tab| tab.group).collect();
+    let mut slots: Vec<Option<crate::model::Tab>> = std::mem::take(&mut centre.tabs)
+        .into_iter()
+        .map(Some)
+        .collect();
+    let mut order = Vec::new();
+    for index in 0..slots.len() {
+        let Some(tab) = slots[index].take() else {
+            continue;
+        };
+        centre.tabs.push(tab);
+        if let Some(group) = of[index] {
+            order.push(group);
+            for later in index + 1..slots.len() {
+                if of[later] == Some(group)
+                    && let Some(member) = slots[later].take()
+                {
+                    centre.tabs.push(member);
+                }
+            }
+        }
+    }
+    let groups = std::mem::take(&mut centre.groups);
+    centre.groups = order
+        .into_iter()
+        .filter_map(|id| groups.iter().find(|group| group.id == id).cloned())
+        .collect();
+}
+
 /// Puts right everything in a window that refers to its tabs and panes.
 fn mend_window(window: &mut Window) {
+    mend_groups(&mut window.centre);
     for tab in &mut window.centre.tabs {
         if tab.zoomed.is_some_and(|pane| !tab.contains(pane)) {
             tab.zoomed = None;
@@ -178,6 +218,12 @@ fn mend_window(window: &mut Window) {
         .is_some_and(|tab| window.centre.index_of(tab).is_some());
     if !shown {
         window.centre.active = window.centre.tabs.first().map(|tab| tab.id);
+    }
+    // The tab on show is never folded away: its group opens.
+    if let Some(group) = window.centre.active_tab().and_then(|tab| tab.group)
+        && let Some(group) = window.centre.group_mut(group)
+    {
+        group.collapsed = false;
     }
 
     for floating in &mut window.floating {

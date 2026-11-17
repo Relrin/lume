@@ -1,0 +1,1092 @@
+{
+  "end": {
+    "focused_window": "w1",
+    "id": "00000000000000a1",
+    "name": "test",
+    "next_id": 12,
+    "scratch": null,
+    "windows": [
+      {
+        "bounds": null,
+        "centre": {
+          "active": "t9",
+          "tabs": [
+            {
+              "id": "t9",
+              "last_focus": "p2",
+              "root": {
+                "axis": "row",
+                "children": [
+                  {
+                    "content": {
+                      "backend": "local",
+                      "cwd": "/work",
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": "0000000000000004",
+                      "type": "terminal"
+                    },
+                    "id": "p8",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  {
+                    "content": {
+                      "backend": null,
+                      "cwd": null,
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": null,
+                      "type": "terminal"
+                    },
+                    "id": "p2",
+                    "title": null,
+                    "type": "pane"
+                  }
+                ],
+                "id": "s11",
+                "ratios": [
+                  500000,
+                  500000
+                ],
+                "type": "split"
+              },
+              "title": null,
+              "zoomed": null
+            }
+          ]
+        },
+        "dock": {
+          "bottom": {
+            "collapsed": false,
+            "panels": [],
+            "size": 240
+          },
+          "left": {
+            "collapsed": false,
+            "panels": [],
+            "size": 240
+          },
+          "right": {
+            "collapsed": false,
+            "panels": [],
+            "size": 240
+          },
+          "top": {
+            "collapsed": false,
+            "panels": [
+              {
+                "content": {
+                  "slot": "topbar.left",
+                  "type": "slot"
+                },
+                "id": "lume.topbar.left"
+              },
+              {
+                "content": {
+                  "slot": "topbar.center",
+                  "type": "slot"
+                },
+                "id": "lume.topbar.center"
+              },
+              {
+                "content": {
+                  "slot": "topbar.right",
+                  "type": "slot"
+                },
+                "id": "lume.topbar.right"
+              }
+            ],
+            "size": 240
+          }
+        },
+        "floating": [],
+        "focus": "p2",
+        "history": [
+          "p2",
+          "p8"
+        ],
+        "id": "w1"
+      }
+    ]
+  },
+  "name": "tab-groups",
+  "start": {
+    "focused_window": null,
+    "id": "00000000000000a1",
+    "name": "test",
+    "next_id": 1,
+    "scratch": null,
+    "windows": []
+  },
+  "steps": [
+    {
+      "changes": [
+        {
+          "type": "window_opened",
+          "window": {
+            "bounds": null,
+            "centre": {
+              "active": "t3",
+              "tabs": [
+                {
+                  "id": "t3",
+                  "last_focus": "p2",
+                  "root": {
+                    "content": {
+                      "backend": null,
+                      "cwd": null,
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": null,
+                      "type": "terminal"
+                    },
+                    "id": "p2",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  "title": null,
+                  "zoomed": null
+                }
+              ]
+            },
+            "dock": {
+              "bottom": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "left": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "right": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "top": {
+                "collapsed": false,
+                "panels": [
+                  {
+                    "content": {
+                      "slot": "topbar.left",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.left"
+                  },
+                  {
+                    "content": {
+                      "slot": "topbar.center",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.center"
+                  },
+                  {
+                    "content": {
+                      "slot": "topbar.right",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.right"
+                  }
+                ],
+                "size": 240
+              }
+            },
+            "floating": [],
+            "focus": "p2",
+            "history": [
+              "p2"
+            ],
+            "id": "w1"
+          }
+        },
+        {
+          "type": "window_focused",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p2",
+        "tab": "t3",
+        "window": "w1"
+      },
+      "intent": {
+        "bounds": null,
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "type": "window_new"
+      }
+    },
+    {
+      "changes": [
+        {
+          "index": 1,
+          "tab": {
+            "id": "t5",
+            "last_focus": "p4",
+            "root": {
+              "content": {
+                "backend": "local",
+                "cwd": "/work",
+                "env": [],
+                "launcher": null,
+                "profile": null,
+                "session": "0000000000000002",
+                "type": "terminal"
+              },
+              "id": "p4",
+              "title": null,
+              "type": "pane"
+            },
+            "title": null,
+            "zoomed": null
+          },
+          "type": "tab_added",
+          "window": "w1"
+        },
+        {
+          "active": "t5",
+          "order": [
+            "t3",
+            "t5"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p4",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p4",
+        "tab": "t5",
+        "window": null
+      },
+      "intent": {
+        "activate": true,
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "index": null,
+        "type": "tab_new",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "index": 2,
+          "tab": {
+            "id": "t7",
+            "last_focus": "p6",
+            "root": {
+              "content": {
+                "backend": "local",
+                "cwd": "/work",
+                "env": [],
+                "launcher": null,
+                "profile": null,
+                "session": "0000000000000003",
+                "type": "terminal"
+              },
+              "id": "p6",
+              "title": null,
+              "type": "pane"
+            },
+            "title": null,
+            "zoomed": null
+          },
+          "type": "tab_added",
+          "window": "w1"
+        },
+        {
+          "active": "t7",
+          "order": [
+            "t3",
+            "t5",
+            "t7"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p6",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p6",
+        "tab": "t7",
+        "window": null
+      },
+      "intent": {
+        "activate": true,
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "index": null,
+        "type": "tab_new",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "index": 3,
+          "tab": {
+            "id": "t9",
+            "last_focus": "p8",
+            "root": {
+              "content": {
+                "backend": "local",
+                "cwd": "/work",
+                "env": [],
+                "launcher": null,
+                "profile": null,
+                "session": "0000000000000004",
+                "type": "terminal"
+              },
+              "id": "p8",
+              "title": null,
+              "type": "pane"
+            },
+            "title": null,
+            "zoomed": null
+          },
+          "type": "tab_added",
+          "window": "w1"
+        },
+        {
+          "active": "t9",
+          "order": [
+            "t3",
+            "t5",
+            "t7",
+            "t9"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p8",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p8",
+        "tab": "t9",
+        "window": null
+      },
+      "intent": {
+        "activate": true,
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "index": null,
+        "type": "tab_new",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "color": "teal",
+          "group": null,
+          "locked": false,
+          "tab": "t3",
+          "type": "tab_state"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "color": "teal",
+        "tab": "t3",
+        "type": "tab_color"
+      }
+    },
+    {
+      "changes": [
+        {
+          "color": null,
+          "group": "g10",
+          "locked": false,
+          "tab": "t5",
+          "type": "tab_state"
+        },
+        {
+          "groups": [
+            {
+              "color": "blue",
+              "id": "g10"
+            }
+          ],
+          "type": "groups",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "group": "g10",
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "tab": "t5",
+        "type": "group_new"
+      }
+    },
+    {
+      "changes": [
+        {
+          "color": null,
+          "group": "g10",
+          "locked": false,
+          "tab": "t7",
+          "type": "tab_state"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "group": "g10",
+        "index": 2,
+        "tab": "t7",
+        "type": "tab_place"
+      }
+    },
+    {
+      "changes": [
+        {
+          "groups": [
+            {
+              "color": "blue",
+              "icon": "bug",
+              "id": "g10",
+              "kept": true,
+              "name": "Billing"
+            }
+          ],
+          "type": "groups",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "group": "g10",
+        "icon": "bug",
+        "kept": true,
+        "name": "Billing",
+        "type": "group_set"
+      }
+    },
+    {
+      "changes": [
+        {
+          "color": null,
+          "group": null,
+          "locked": true,
+          "tab": "t9",
+          "type": "tab_state"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "on": true,
+        "tab": "t9",
+        "type": "tab_lock"
+      }
+    },
+    {
+      "intent": {
+        "tab": "t9",
+        "type": "tab_close"
+      },
+      "refused": "locked"
+    },
+    {
+      "changes": [
+        {
+          "active": "t5",
+          "order": [
+            "t3",
+            "t5",
+            "t7",
+            "t9"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p4",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "target": {
+          "tab": "t5",
+          "type": "id"
+        },
+        "type": "tab_activate"
+      }
+    },
+    {
+      "changes": [
+        {
+          "groups": [
+            {
+              "collapsed": true,
+              "color": "blue",
+              "icon": "bug",
+              "id": "g10",
+              "kept": true,
+              "name": "Billing"
+            }
+          ],
+          "type": "groups",
+          "window": "w1"
+        },
+        {
+          "active": "t9",
+          "order": [
+            "t3",
+            "t5",
+            "t7",
+            "t9"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p8",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "collapsed": true,
+        "group": "g10",
+        "type": "group_set"
+      }
+    },
+    {
+      "changes": [
+        {
+          "active": "t9",
+          "order": [
+            "t5",
+            "t7",
+            "t3",
+            "t9"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "index": 2,
+        "tab": "t3",
+        "type": "tab_move"
+      }
+    },
+    {
+      "changes": [
+        {
+          "active": "t9",
+          "order": [
+            "t3",
+            "t9",
+            "t5",
+            "t7"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "group": "g10",
+        "index": 2,
+        "type": "group_move"
+      }
+    },
+    {
+      "changes": [
+        {
+          "tab": "t3",
+          "type": "tab_removed"
+        },
+        {
+          "root": {
+            "axis": "row",
+            "children": [
+              {
+                "content": {
+                  "backend": "local",
+                  "cwd": "/work",
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": "0000000000000004",
+                  "type": "terminal"
+                },
+                "id": "p8",
+                "title": null,
+                "type": "pane"
+              },
+              {
+                "content": {
+                  "backend": null,
+                  "cwd": null,
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": null,
+                  "type": "terminal"
+                },
+                "id": "p2",
+                "title": null,
+                "type": "pane"
+              }
+            ],
+            "id": "s11",
+            "ratios": [
+              500000,
+              500000
+            ],
+            "type": "split"
+          },
+          "tab": "t9",
+          "type": "tab_tree",
+          "zoomed": null
+        },
+        {
+          "active": "t9",
+          "order": [
+            "t9",
+            "t5",
+            "t7"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p2",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "into": "t9",
+        "tab": "t3",
+        "type": "tab_merge"
+      }
+    },
+    {
+      "changes": [
+        {
+          "tab": "t5",
+          "type": "tab_removed"
+        },
+        {
+          "tab": "t7",
+          "type": "tab_removed"
+        },
+        {
+          "groups": [],
+          "type": "groups",
+          "window": "w1"
+        },
+        {
+          "active": "t9",
+          "order": [
+            "t9"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "shelf": [
+            {
+              "group": {
+                "color": "blue",
+                "icon": "bug",
+                "id": "g10",
+                "kept": true,
+                "name": "Billing"
+              },
+              "tabs": [
+                {
+                  "group": "g10",
+                  "id": "t5",
+                  "last_focus": "p4",
+                  "root": {
+                    "content": {
+                      "backend": "local",
+                      "cwd": "/work",
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": null,
+                      "type": "terminal"
+                    },
+                    "id": "p4",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  "title": null,
+                  "zoomed": null
+                },
+                {
+                  "group": "g10",
+                  "id": "t7",
+                  "last_focus": "p6",
+                  "root": {
+                    "content": {
+                      "backend": "local",
+                      "cwd": "/work",
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": null,
+                      "type": "terminal"
+                    },
+                    "id": "p6",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  "title": null,
+                  "zoomed": null
+                }
+              ]
+            }
+          ],
+          "type": "shelf"
+        },
+        {
+          "content": {
+            "backend": "local",
+            "cwd": "/work",
+            "env": [],
+            "launcher": null,
+            "profile": null,
+            "session": "0000000000000002",
+            "type": "terminal"
+          },
+          "pane": "p4",
+          "type": "pane_closed"
+        },
+        {
+          "content": {
+            "backend": "local",
+            "cwd": "/work",
+            "env": [],
+            "launcher": null,
+            "profile": null,
+            "session": "0000000000000003",
+            "type": "terminal"
+          },
+          "pane": "p6",
+          "type": "pane_closed"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "group": "g10",
+        "type": "group_close"
+      }
+    },
+    {
+      "changes": [
+        {
+          "index": 1,
+          "tab": {
+            "group": "g10",
+            "id": "t5",
+            "last_focus": "p4",
+            "root": {
+              "content": {
+                "backend": "local",
+                "cwd": "/work",
+                "env": [],
+                "launcher": null,
+                "profile": null,
+                "session": null,
+                "type": "terminal"
+              },
+              "id": "p4",
+              "title": null,
+              "type": "pane"
+            },
+            "title": null,
+            "zoomed": null
+          },
+          "type": "tab_added",
+          "window": "w1"
+        },
+        {
+          "index": 2,
+          "tab": {
+            "group": "g10",
+            "id": "t7",
+            "last_focus": "p6",
+            "root": {
+              "content": {
+                "backend": "local",
+                "cwd": "/work",
+                "env": [],
+                "launcher": null,
+                "profile": null,
+                "session": null,
+                "type": "terminal"
+              },
+              "id": "p6",
+              "title": null,
+              "type": "pane"
+            },
+            "title": null,
+            "zoomed": null
+          },
+          "type": "tab_added",
+          "window": "w1"
+        },
+        {
+          "groups": [
+            {
+              "color": "blue",
+              "icon": "bug",
+              "id": "g10",
+              "kept": true,
+              "name": "Billing"
+            }
+          ],
+          "type": "groups",
+          "window": "w1"
+        },
+        {
+          "active": "t5",
+          "order": [
+            "t9",
+            "t5",
+            "t7"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p4",
+          "type": "focus",
+          "window": "w1"
+        },
+        {
+          "shelf": [],
+          "type": "shelf"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "group": "g10",
+        "type": "group_reopen",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "color": null,
+          "group": null,
+          "locked": false,
+          "tab": "t5",
+          "type": "tab_state"
+        },
+        {
+          "color": null,
+          "group": null,
+          "locked": false,
+          "tab": "t7",
+          "type": "tab_state"
+        },
+        {
+          "groups": [],
+          "type": "groups",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "group": "g10",
+        "type": "group_ungroup"
+      }
+    },
+    {
+      "changes": [
+        {
+          "tab": "t5",
+          "type": "tab_removed"
+        },
+        {
+          "tab": "t7",
+          "type": "tab_removed"
+        },
+        {
+          "active": "t9",
+          "order": [
+            "t9"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p2",
+          "type": "focus",
+          "window": "w1"
+        },
+        {
+          "content": {
+            "backend": "local",
+            "cwd": "/work",
+            "env": [],
+            "launcher": null,
+            "profile": null,
+            "session": null,
+            "type": "terminal"
+          },
+          "pane": "p4",
+          "type": "pane_closed"
+        },
+        {
+          "content": {
+            "backend": "local",
+            "cwd": "/work",
+            "env": [],
+            "launcher": null,
+            "profile": null,
+            "session": null,
+            "type": "terminal"
+          },
+          "pane": "p6",
+          "type": "pane_closed"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "tabs": [
+          "t5",
+          "t7",
+          "t9"
+        ],
+        "type": "tabs_close"
+      }
+    },
+    {
+      "changes": [
+        {
+          "color": null,
+          "group": null,
+          "locked": false,
+          "tab": "t9",
+          "type": "tab_state"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "on": false,
+        "tab": "t9",
+        "type": "tab_lock"
+      }
+    }
+  ]
+}

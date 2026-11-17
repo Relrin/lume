@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
-import { closingText } from "./shell/closing.ts";
+import { closingText, closingTitle } from "./shell/closing.ts";
 import type { Prompt, PromptStore } from "./terminal/prompts.ts";
 
 export function Prompts({ store }: { store: PromptStore }) {
@@ -54,9 +54,9 @@ function describe(prompt: Prompt): Described {
       };
     case "close":
       return {
-        title: `Close this ${prompt.closing.what}?`,
+        title: closingTitle(prompt.closing),
         body: <p>{closingText(prompt.closing)}</p>,
-        proceed: "Close",
+        proceed: prompt.closing.what === "moved-group" ? "Move" : "Close",
         dismiss: "Cancel",
       };
     case "notice":

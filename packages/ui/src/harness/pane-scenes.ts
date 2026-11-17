@@ -225,7 +225,8 @@ export const PANE_SCENES: readonly Scene[] = [
     check: (page) => {
       const tabs = [...page.querySelectorAll<HTMLElement>(".tab-label")];
       const activity = tabs.map((tab) => tab.dataset["activity"] ?? "");
-      const stacked = tabs[2]?.querySelectorAll(".tab-icons-one").length ?? 0;
+      // The tab's own pictures, not the bright copy the moving mark lights up.
+      const stacked = tabs[2]?.querySelectorAll(":scope > .tab-icons > .tab-icons-one").length ?? 0;
       const problems: string[] = [];
       if (activity.join(" ") !== "attention output attention-error") {
         problems.push(`the tabs gathered ${activity.join(", ")}`);

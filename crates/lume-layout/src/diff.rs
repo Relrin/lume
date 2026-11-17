@@ -62,6 +62,11 @@ pub(crate) fn diff(before: &Workspace, after: &Workspace) -> Vec<LayoutChange> {
             name: after.name.clone(),
         });
     }
+    if before.shelf != after.shelf {
+        changes.push(LayoutChange::Shelf {
+            shelf: after.shelf.clone(),
+        });
+    }
 
     // Last, the panes that are gone, for whoever kept something for them.
     let left: HashSet<PaneId> = after.panes().into_iter().map(|pane| pane.id).collect();
@@ -110,6 +115,12 @@ fn diff_window(old: &Window, new: &Window, changes: &mut Vec<LayoutChange>) {
             }),
             Some(was) => diff_tab(was, tab, changes),
         }
+    }
+    if old.centre.groups != new.centre.groups {
+        changes.push(LayoutChange::Groups {
+            window,
+            groups: new.centre.groups.clone(),
+        });
     }
     let order =
         |window: &Window| -> Vec<TabId> { window.centre.tabs.iter().map(|tab| tab.id).collect() };
@@ -162,6 +173,14 @@ fn diff_tab(old: &Tab, new: &Tab, changes: &mut Vec<LayoutChange>) {
         changes.push(LayoutChange::TabTitle {
             tab: new.id,
             title: new.title.clone(),
+        });
+    }
+    if (old.color, old.locked, old.group) != (new.color, new.locked, new.group) {
+        changes.push(LayoutChange::TabState {
+            tab: new.id,
+            color: new.color,
+            locked: new.locked,
+            group: new.group,
         });
     }
     if old.zoomed != new.zoomed || !old.root.same_shape(&new.root) {

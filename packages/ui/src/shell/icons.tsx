@@ -9,8 +9,37 @@
 import type { CSSProperties } from "react";
 
 import { BrandMark, Glyph } from "../icons/Glyph.tsx";
+import type { LineGlyphName } from "../icons/glyphs.generated.ts";
 import { tileOf, type TileId } from "../icons/tiles.ts";
+import type { GroupIcon } from "../layout/types.ts";
 import { TILE_SIZES, type TilePlace } from "../tuning.ts";
+
+/** The pictures a group of tabs can show, by what the layout calls them. */
+const GROUP_GLYPHS: Readonly<Record<GroupIcon, LineGlyphName>> = {
+  bug: "bug",
+  flame: "flame",
+  rocket: "rocket",
+  flask: "flask-conical",
+  wrench: "wrench",
+  layers: "layers",
+  server: "server",
+  book: "book-open",
+};
+
+/** A group's picture. */
+export function GroupGlyph({ icon, size = 12 }: { icon: GroupIcon; size?: number }) {
+  return <Glyph name={GROUP_GLYPHS[icon]} size={size} weight={2.3} />;
+}
+
+/** A line drawing for a menu's row, at the size menus draw them. */
+export function MenuGlyph({ name, size = 14 }: { name: LineGlyphName; size?: number }) {
+  return <Glyph name={name} size={size} weight={1.9} />;
+}
+
+/** A padlock: a tab that is not closed by asking. */
+export function LockIcon({ size = 12 }: { size?: number }) {
+  return <Glyph name="lock" size={size} weight={1.9} />;
+}
 
 /** A shell's prompt: what a terminal is. */
 export function TerminalIcon({ size = 13 }: { size?: number }) {

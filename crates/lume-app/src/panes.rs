@@ -527,7 +527,16 @@ impl Panes {
 
     /// Tells every page something, or keeps it for the first page if there is none yet.
     pub fn notice(&self, level: &str, message: impl Into<String>) {
-        let notice = json!({ "type": "notice", "level": level, "message": message.into() });
+        self.notice_with(level, message, None);
+    }
+
+    /// Tells every page something, with a command the page offers to run from the
+    /// notice: `{ label, command, args }`.
+    pub fn notice_with(&self, level: &str, message: impl Into<String>, action: Option<Value>) {
+        let mut notice = json!({ "type": "notice", "level": level, "message": message.into() });
+        if let Some(action) = action {
+            notice["action"] = action;
+        }
         let links = self.state.upgrade().map(|state| state.links());
         match links {
             Some(links) if !links.is_empty() => {
@@ -1973,6 +1982,7 @@ mod tests {
                 content: NewContent::Terminal(SpawnRequest::default()),
                 index: None,
                 activate: true,
+                group: None,
             })
             .await
             .unwrap();
@@ -2135,6 +2145,115 @@ mod tests {
         assert_eq!(active, WORKSPACE_NAME);
         let names: Vec<&str> = workspaces.iter().map(|entry| entry.name.as_str()).collect();
         assert_eq!(names, vec![WORKSPACE_NAME, "play"]);
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_group_moves_to_another_workspace_and_is_brought_back() {
+        let dir = TempDir::new("move-group");
+        plain_shell(&dir, "");
+        let app = running_in(dir).await;
+        let (carrier, _id) = page(&app).await;
+        // Another workspace to move to, written to its file.
+        app.panes.switch("play", Find::New).await.unwrap();
+        app.panes
+            .switch(WORKSPACE_NAME, Find::Existing)
+            .await
+            .unwrap();
+        let window = app.panes.focused_window().unwrap();
+        let tab = app
+            .panes
+            .apply(Intent::TabNew {
+                window,
+                content: NewContent::Terminal(SpawnRequest::default()),
+                index: None,
+                activate: true,
+                group: None,
+            })
+            .await
+            .unwrap()
+            .created
+            .tab
+            .unwrap();
+        let group = app
+            .panes
+            .apply(Intent::GroupNew { tab })
+            .await
+            .unwrap()
+            .created
+            .group
+            .unwrap();
+        app.panes
+            .apply(Intent::GroupSet {
+                group,
+                name: Some(Some("Billing".to_owned())),
+                color: None,
+                icon: None,
+                collapsed: None,
+                kept: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            app.panes
+                .move_group(group, "Default")
+                .await
+                .unwrap_err()
+                .code,
+            "bad_request"
+        );
+        assert_eq!(
+            app.panes
+                .move_group(group, "nowhere")
+                .await
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
+        app.panes.move_group(group, "play").await.unwrap();
+        let here = app.panes.workspace();
+        assert!(here.tab(tab).is_none());
+        assert!(here.windows[0].centre.groups.is_empty());
+        let lume_layout::Loaded::Workspace(play) = app.panes.store.load("play", 0).unwrap() else {
+            panic!("the other workspace was not written");
+        };
+        let moved = &play.windows[0].centre.groups;
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].name.as_deref(), Some("Billing"));
+        assert_eq!(play.windows[0].centre.tabs.len(), 2);
+
+        // The page is told, with a way back.
+        let mut action = None;
+        until("the page to be told where the group went", || {
+            action = notices(&carrier, "notice")
+                .into_iter()
+                .find(|notice| notice["message"] == "Moved Billing to play")
+                .map(|notice| notice["action"].clone());
+            action.is_some()
+        })
+        .await;
+        let action = action.unwrap();
+        assert_eq!(action["command"], "lume.group.bring-back");
+        assert_eq!(action["args"]["workspace"], "play");
+        let there: lume_layout::GroupId =
+            action["args"]["group"].as_str().unwrap().parse().unwrap();
+        assert_eq!(there, moved[0].id);
+
+        app.panes
+            .bring_group_back("play", there, window)
+            .await
+            .unwrap();
+        let here = app.panes.workspace();
+        let back = &here.windows[0].centre.groups;
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].name.as_deref(), Some("Billing"));
+        assert_eq!(here.windows[0].centre.tabs.len(), 2);
+        let lume_layout::Loaded::Workspace(play) = app.panes.store.load("play", 0).unwrap() else {
+            panic!("the other workspace was not written");
+        };
+        assert!(play.windows[0].centre.groups.is_empty());
+        assert_eq!(play.windows[0].centre.tabs.len(), 1);
         app.state.shutdown().await;
     }
 

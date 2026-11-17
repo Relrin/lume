@@ -59,8 +59,11 @@ pub const TITLE_MAX_CHARS: usize = 256;
 /// given the whole layout instead.
 pub const CHANGE_BACKLOG: usize = 256;
 
+/// The most kept groups a workspace keeps put away.
+pub const SHELF_MAX: usize = 32;
+
 /// The version of the file a workspace is saved in.
-pub const WORKSPACE_FILE_VERSION: u32 = 1;
+pub const WORKSPACE_FILE_VERSION: u32 = 2;
 
 /// How many files that could not be read are kept beside a workspace's file.
 pub const CORRUPT_KEPT: usize = 3;

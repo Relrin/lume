@@ -7,12 +7,13 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::ids::PaneId;
+use crate::ids::{GroupId, PaneId};
 use crate::model::{Area, Node, PanelContent, Tab, Window, Workspace};
 use crate::normalise::contain;
 use crate::tuning::{
     DOCK_PANELS_MAX, DOCK_SIZE_MAX, DOCK_SIZE_MIN, FLOATING_MAX, FOCUS_HISTORY_MAX, SHARE_MIN,
-    SPLIT_CHILDREN_MAX, TAB_PANES_MAX, TABS_MAX, TREE_DEPTH_MAX, UNITS, WINDOWS_MAX,
+    SHELF_MAX, SPLIT_CHILDREN_MAX, TAB_PANES_MAX, TABS_MAX, TITLE_MAX_CHARS, TREE_DEPTH_MAX, UNITS,
+    WINDOWS_MAX,
 };
 
 /// One thing that is wrong with a workspace.
@@ -68,10 +69,33 @@ pub fn validate(workspace: &Workspace) -> Result<(), Vec<Violation>> {
                 claim(&mut report, split.id.get(), format!("split {}", split.id));
             }
         }
+        for group in &window.centre.groups {
+            claim(&mut report, group.id.get(), format!("group {}", group.id));
+        }
         for pane in window.panes() {
             claim(&mut report, pane.id.get(), format!("pane {}", pane.id));
         }
         check_window(&mut report, window);
+    }
+    report.check(workspace.shelf.len() <= SHELF_MAX, || {
+        "the workspace keeps too many groups put away".to_owned()
+    });
+    for shelved in &workspace.shelf {
+        let group = shelved.group.id;
+        claim(&mut report, group.get(), format!("group {group}"));
+        report.check(!shelved.tabs.is_empty(), || {
+            format!("group {group} was put away with no tabs")
+        });
+        for tab in &shelved.tabs {
+            claim(&mut report, tab.id.get(), format!("tab {}", tab.id));
+            for split in tab.root.splits() {
+                claim(&mut report, split.id.get(), format!("split {}", split.id));
+            }
+            for pane in tab.root.panes() {
+                claim(&mut report, pane.id.get(), format!("pane {}", pane.id));
+            }
+            check_tab(&mut report, tab);
+        }
     }
     if let Some(parked) = workspace.parked() {
         claim(
@@ -125,6 +149,7 @@ fn check_window(report: &mut Report, window: &Window) {
     for tab in &window.centre.tabs {
         check_tab(report, tab);
     }
+    check_groups(report, window);
     match window.centre.active {
         Some(tab) => report.check(window.centre.index_of(tab).is_some(), || {
             format!("window {id} shows tab {tab}, which it does not have")
@@ -195,6 +220,48 @@ fn check_window(report: &mut Report, window: &Window) {
                 format!("window {id} has panel {} in the wrong dock area", panel.id)
             });
         }
+    }
+}
+
+fn check_groups(report: &mut Report, window: &Window) {
+    let id = window.id;
+    let centre = &window.centre;
+    let mut seen: Vec<GroupId> = Vec::new();
+    let mut previous: Option<GroupId> = None;
+    for tab in &centre.tabs {
+        if let Some(group) = tab.group {
+            report.check(centre.group(group).is_some(), || {
+                format!(
+                    "tab {} is in group {group}, which window {id} does not have",
+                    tab.id
+                )
+            });
+            if previous != Some(group) {
+                report.check(!seen.contains(&group), || {
+                    format!("the tabs of group {group} do not stand together")
+                });
+                seen.push(group);
+            }
+        }
+        previous = tab.group;
+    }
+    let listed: Vec<GroupId> = centre.groups.iter().map(|group| group.id).collect();
+    report.check(listed == seen, || {
+        format!("window {id}'s groups are not those of its tabs, in their order")
+    });
+    for group in &centre.groups {
+        report.check(
+            group
+                .name
+                .as_ref()
+                .is_none_or(|name| !name.is_empty() && name.chars().count() <= TITLE_MAX_CHARS),
+            || format!("group {}'s name is empty or too long", group.id),
+        );
+    }
+    if let Some(tab) = centre.active_tab() {
+        report.check(!centre.folded(tab), || {
+            format!("window {id} shows tab {}, which is folded away", tab.id)
+        });
     }
 }
 

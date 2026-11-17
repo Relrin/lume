@@ -8,6 +8,7 @@
  * shown as text.
  */
 
+import type { NoticeAction } from "../core/types.ts";
 import { NOTICE_INFO_MS, NOTICE_PROBLEM_MS, NOTICES_MAX } from "../tuning.ts";
 
 /** How much a notice matters. */
@@ -19,6 +20,8 @@ export interface ShownNotice {
   readonly id: number;
   readonly level: NoticeLevel;
   readonly message: string;
+  /** What the user may do about it, as a button beside the message. */
+  readonly action?: NoticeAction;
 }
 
 /**
@@ -52,13 +55,16 @@ export class NoticeStore {
    * Shows a notice. One that says what a notice on show already says only renews
    * that notice's time, so a fault that repeats does not fill the window.
    */
-  push(level: NoticeLevel, message: string): void {
+  push(level: NoticeLevel, message: string, action?: NoticeAction): void {
     const same = this.#shown.find((held) => held.level === level && held.message === message);
-    if (same) {
+    if (same && same.action?.command === action?.command) {
       this.#arm(same);
       return;
     }
-    const notice: ShownNotice = { id: this.#next++, level, message };
+    const notice: ShownNotice =
+      action === undefined
+        ? { id: this.#next++, level, message }
+        : { id: this.#next++, level, message, action };
     const kept = this.#shown.slice(-(NOTICES_MAX - 1));
     for (const dropped of this.#shown) {
       if (!kept.includes(dropped)) this.#disarm(dropped.id);

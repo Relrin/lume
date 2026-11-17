@@ -53,12 +53,24 @@ export interface KeyBinding {
   readonly source: unknown;
 }
 
+/** How the mark of the tab on show moves from one tab to another. */
+export type TabHighlight = "instant" | "glide" | "stretch" | "spring" | "glow";
+
+/** What a notice offers to do about what it says: a command, run when its button is pressed. */
+export interface NoticeAction {
+  readonly label: string;
+  readonly command: string;
+  readonly args?: unknown;
+}
+
 /** The settings a page reads itself. Everything else reaches it as tokens. */
 export interface ConfigSettings {
   readonly appearance: {
     readonly "pane-header": "always" | "auto" | "never";
     /** Which program tiles are drawn in colour. A core that does not say means all of them. */
     readonly "tile-color"?: "always" | "active-pane" | "active-tab" | "never";
+    /** How the mark of the tab on show moves to another. A core that does not say means glow. */
+    readonly "tab-highlight"?: TabHighlight;
     readonly [key: string]: unknown;
   };
   readonly terminal: {
@@ -279,6 +291,8 @@ export type Notice =
       readonly type: "notice";
       readonly level: "info" | "warning" | "error";
       readonly message: string;
+      /** What the user may do about it, as a button beside the message. */
+      readonly action?: NoticeAction;
     };
 
 /**

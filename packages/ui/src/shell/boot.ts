@@ -54,6 +54,7 @@ import { closeRequested, mayRun } from "./closing.ts";
 import { describeTabNow, paneFacts } from "./describing.ts";
 import { focusBar } from "./focus-bar.ts";
 import { NoticeStore, sentence } from "./notices.ts";
+import { createTabUiStore, type TabUiStore } from "./tab-ui.ts";
 
 /** The page's prompts. Created with the module so a component can show them at once. */
 export const prompts = new PromptStore();
@@ -93,6 +94,8 @@ export interface ShellApp {
   readonly panelDrag: PanelDragStore;
   /** The searches of the window's panes. */
   readonly search: SearchController;
+  /** What the user is doing with the tabs: renaming one, a menu, a drag. */
+  readonly tabUi: TabUiStore;
   /**
    * How many renderers of each kind are alive and what their glyphs take, and how much
    * memory the terminals of the window hold between them.
@@ -323,6 +326,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     clearTimer: (timer) => window.clearTimeout(timer),
     now: () => performance.now(),
   });
+  const tabUi = createTabUiStore();
   const commands = new Commands({
     store: commandStore,
     client,
@@ -332,6 +336,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     search,
     mayRun: (id, args) => mayRun({ layout, config, views, prompts, client, notices }, id, args),
     focusBar: () => focusBar(),
+    renameTab: (tab) => tabUi.getState().startRename(tab ?? selectActiveTab(layout.getState())),
     failed: (message) => notices.push("error", sentence(message)),
   });
   const cardDrag = new CardDrag({
@@ -404,7 +409,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         if (profiles.getState().set(notice)) views.restyle();
         break;
       case "notice":
-        notices.push(notice.level, notice.message);
+        notices.push(notice.level, notice.message, notice.action);
         break;
     }
   };
@@ -618,6 +623,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     cardDrag,
     panelDrag,
     search,
+    tabUi,
     stats: () => ({ ...host.stats(), wasmBytes: vt.memoryBytes }),
     dispose: () => {
       window.removeEventListener("focus", onWindowFocus);

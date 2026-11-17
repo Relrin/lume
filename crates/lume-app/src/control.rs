@@ -471,6 +471,7 @@ impl Control {
                         content,
                         index: None,
                         activate: true,
+                        group: None,
                     },
                     SpawnPlace::Split { dir } => Intent::Split {
                         pane: self.place(None, None).await?.pane,

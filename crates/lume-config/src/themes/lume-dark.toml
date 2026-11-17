@@ -32,6 +32,17 @@ success = "#8fd694"
 warning = "#f0b35a"
 danger = "#ff8b82"
 
+# The colours a tab or a group of tabs can be given.
+[color.tab]
+red = "#ff7b72"
+orange = "#f0b35a"
+yellow = "#e5c07b"
+green = "#8fd694"
+teal = "#7fdbca"
+blue = "#7aa7ff"
+purple = "#c792ea"
+pink = "#f48fb1"
+
 [terminal]
 fg = "#d7dadd"
 bg = "#171a1e"

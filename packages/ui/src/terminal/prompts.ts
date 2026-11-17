@@ -11,8 +11,11 @@ import type { PastePreview } from "./clipboard.ts";
 
 /** Something about to be closed that still has programs running in it. */
 export interface Closing {
-  /** What is being closed. */
-  readonly what: "pane" | "tab" | "window";
+  /**
+   * What is being closed: a pane, a tab, several tabs, a group of tabs, or a window;
+   * or a group that is moving to another workspace, which ends its programs too.
+   */
+  readonly what: "pane" | "tab" | "tabs" | "group" | "moved-group" | "window";
   /** How many of its panes have a program that has not ended. At least one. */
   readonly running: number;
 }

@@ -11,9 +11,9 @@ mod common;
 
 use common::*;
 use lume_layout::{
-    Area, Bounds, Created, Dir, FocusTarget, Intent, IntentError, LayoutChange, Node, PaneId,
-    PanelContent, PanelId, Place, SplitId, TabId, TabTarget, UNITS, UnitRect, WindowId, Workspace,
-    apply, needs, tab_rects,
+    Area, Bounds, Created, Dir, FocusTarget, GroupId, Intent, IntentError, LayoutChange, Node,
+    PaneId, PanelContent, PanelId, Place, SplitId, TabColor, TabId, TabTarget, UNITS, UnitRect,
+    WindowId, Workspace, apply, group_step, needs, tab_rects, tab_step,
 };
 use lume_proto::SessionId;
 use proptest::prelude::*;
@@ -95,6 +95,60 @@ enum Op {
     TabRename {
         tab: usize,
         named: bool,
+    },
+    TabPlace {
+        tab: usize,
+        index: u32,
+        group: Option<usize>,
+    },
+    TabColor {
+        tab: usize,
+        color: Option<usize>,
+    },
+    TabLock {
+        tab: usize,
+        on: bool,
+    },
+    TabsClose {
+        tabs: Vec<usize>,
+    },
+    TabMerge {
+        tab: usize,
+        into: usize,
+    },
+    TabStep {
+        tab: usize,
+        forward: bool,
+    },
+    GroupNew {
+        tab: usize,
+    },
+    GroupSet {
+        group: usize,
+        named: Option<bool>,
+        collapsed: Option<bool>,
+        kept: Option<bool>,
+    },
+    GroupMove {
+        group: usize,
+        index: u32,
+    },
+    GroupStep {
+        group: usize,
+        forward: bool,
+    },
+    GroupUngroup {
+        group: usize,
+    },
+    GroupClose {
+        group: usize,
+    },
+    GroupReopen {
+        group: usize,
+        window: usize,
+    },
+    GroupForget {
+        group: usize,
     },
     TabActivate {
         window: usize,
@@ -195,11 +249,39 @@ fn ops() -> impl Strategy<Value = Vec<Op>> {
         4 => (position.clone(), 0u32..4).prop_map(|(tab, index)| Op::TabMove { tab, index }),
         1 => (position.clone(), any::<bool>())
             .prop_map(|(tab, named)| Op::TabRename { tab, named }),
+        4 => (position.clone(), 0u32..5, proptest::option::of(position.clone()))
+            .prop_map(|(tab, index, group)| Op::TabPlace { tab, index, group }),
+        1 => (position.clone(), proptest::option::of(0usize..8))
+            .prop_map(|(tab, color)| Op::TabColor { tab, color }),
+        2 => (position.clone(), any::<bool>()).prop_map(|(tab, on)| Op::TabLock { tab, on }),
+        1 => proptest::collection::vec(position.clone(), 0..4)
+            .prop_map(|tabs| Op::TabsClose { tabs }),
+        4 => (position.clone(), position.clone())
+            .prop_map(|(tab, into)| Op::TabMerge { tab, into }),
+        4 => (position.clone(), any::<bool>())
+            .prop_map(|(tab, forward)| Op::TabStep { tab, forward }),
+        6 => position.clone().prop_map(|tab| Op::GroupNew { tab }),
+        8 => (
+            position.clone(),
+            proptest::option::of(any::<bool>()),
+            proptest::option::of(any::<bool>()),
+            // Kept more often than not, so that groups are put away and opened again.
+            prop_oneof![Just(None), Just(Some(true)), Just(Some(true)), Just(Some(false))]
+        )
+            .prop_map(|(group, named, collapsed, kept)| Op::GroupSet { group, named, collapsed, kept }),
+        2 => (position.clone(), 0u32..5).prop_map(|(group, index)| Op::GroupMove { group, index }),
+        6 => (position.clone(), any::<bool>())
+            .prop_map(|(group, forward)| Op::GroupStep { group, forward }),
+        3 => position.clone().prop_map(|group| Op::GroupUngroup { group }),
+        6 => position.clone().prop_map(|group| Op::GroupClose { group }),
+        6 => (position.clone(), position.clone())
+            .prop_map(|(group, window)| Op::GroupReopen { group, window }),
+        6 => position.clone().prop_map(|group| Op::GroupForget { group }),
         4 => (position.clone(), 0usize..4, 0u32..4)
             .prop_map(|(window, how, index)| Op::TabActivate { window, how, index }),
-        4 => (position.clone(), proptest::option::of(0usize..4), 0u32..3)
+        6 => (position.clone(), proptest::option::of(0usize..4), 0u32..3)
             .prop_map(|(window, area, index)| Op::PanelSet { window, area, index }),
-        5 => (position.clone(), 0usize..4, 0u32..2)
+        7 => (position.clone(), 0usize..4, 0u32..2)
             .prop_map(|(window, area, index)| Op::PanelMove { window, area, index }),
         1 => (
             position.clone(),
@@ -221,7 +303,7 @@ fn ops() -> impl Strategy<Value = Vec<Op>> {
         1 => position.clone().prop_map(|name| Op::WorkspaceRename { name }),
         4 => (position, any::<bool>()).prop_map(|(pane, on)| Op::Minimise { pane, on }),
     ];
-    proptest::collection::vec(op, 1..70)
+    proptest::collection::vec(op, 1..90)
 }
 
 /// The item at a position, counted round and round. One position in each round names
@@ -235,6 +317,19 @@ const NO_PANE: PaneId = PaneId::new(900_001);
 const NO_TAB: TabId = TabId::new(900_002);
 const NO_SPLIT: SplitId = SplitId::new(900_003);
 const NO_WINDOW: WindowId = WindowId::new(900_004);
+const NO_GROUP: GroupId = GroupId::new(900_005);
+
+/// The groups of every window, then those put away.
+fn group_ids(workspace: &Workspace) -> Vec<GroupId> {
+    let mut ids: Vec<GroupId> = workspace
+        .windows
+        .iter()
+        .flat_map(|window| &window.centre.groups)
+        .map(|group| group.id)
+        .collect();
+    ids.extend(workspace.shelf.iter().map(|shelved| shelved.group.id));
+    ids
+}
 
 fn panes(workspace: &Workspace) -> Vec<PaneId> {
     workspace.panes().into_iter().map(|pane| pane.id).collect()
@@ -298,6 +393,38 @@ fn resolve(workspace: &Workspace, op: &Op) -> Intent {
     let pane = |position: &usize| pick(&panes(workspace), *position, NO_PANE);
     let window = |position: &usize| pick(&windows(workspace), *position, NO_WINDOW);
     let tab = |position: &usize| pick(&tabs(workspace), *position, NO_TAB);
+    let group = |position: &usize| pick(&group_ids(workspace), *position, NO_GROUP);
+    let window_of_tab = |id: TabId| {
+        workspace
+            .windows
+            .iter()
+            .find(|window| window.centre.tab(id).is_some())
+    };
+    let window_of_group = |id: GroupId| {
+        workspace
+            .windows
+            .iter()
+            .find(|window| window.centre.group(id).is_some())
+    };
+    let shelved: Vec<GroupId> = workspace
+        .shelf
+        .iter()
+        .map(|shelved| shelved.group.id)
+        .collect();
+    // Something put away is rare, so these pick what is there whenever there is any.
+    let put_away = |position: &usize| {
+        shelved
+            .get(position % shelved.len().max(1))
+            .copied()
+            .unwrap_or(NO_GROUP)
+    };
+    let any_window = |position: &usize| {
+        workspace
+            .windows
+            .get(position % workspace.windows.len().max(1))
+            .map_or(NO_WINDOW, |window| window.id)
+    };
+    let nothing = Intent::TabClose { tab: NO_TAB };
     let name = |named: &bool| named.then(|| "a name".to_owned());
     match op {
         Op::Split {
@@ -435,6 +562,7 @@ fn resolve(workspace: &Workspace, op: &Op) -> Intent {
             content: terminal(),
             index: *index,
             activate: *activate,
+            group: None,
         },
         Op::TabClose { tab: position } => Intent::TabClose { tab: tab(position) },
         Op::TabMove {
@@ -450,6 +578,106 @@ fn resolve(workspace: &Workspace, op: &Op) -> Intent {
         } => Intent::TabRename {
             tab: tab(position),
             title: name(named),
+        },
+        Op::TabPlace {
+            tab: position,
+            index,
+            group: grouped,
+        } => Intent::TabPlace {
+            tab: tab(position),
+            index: *index,
+            group: grouped.as_ref().map(group),
+        },
+        Op::TabColor {
+            tab: position,
+            color,
+        } => Intent::TabColor {
+            tab: tab(position),
+            color: color.map(|color| TabColor::FOR_GROUPS[color % 8]),
+        },
+        Op::TabLock { tab: position, on } => Intent::TabLock {
+            tab: tab(position),
+            on: *on,
+        },
+        Op::TabsClose { tabs: positions } => Intent::TabsClose {
+            tabs: positions.iter().map(tab).collect(),
+        },
+        Op::TabMerge {
+            tab: position,
+            into,
+        } => {
+            // Mostly another tab of the same window.
+            let id = tab(position);
+            let others: Vec<TabId> = window_of_tab(id)
+                .map(|window| {
+                    window
+                        .centre
+                        .tabs
+                        .iter()
+                        .map(|other| other.id)
+                        .filter(|other| *other != id)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Intent::TabMerge {
+                tab: id,
+                into: pick(&others, *into, tab(into)),
+            }
+        }
+        Op::TabStep {
+            tab: position,
+            forward,
+        } => {
+            let id = tab(position);
+            window_of_tab(id)
+                .and_then(|window| tab_step(window, id, *forward))
+                .unwrap_or(nothing)
+        }
+        Op::GroupNew { tab: position } => Intent::GroupNew { tab: tab(position) },
+        Op::GroupSet {
+            group: position,
+            named,
+            collapsed,
+            kept,
+        } => Intent::GroupSet {
+            group: group(position),
+            name: named.map(|named| named.then(|| "a group".to_owned())),
+            color: None,
+            icon: None,
+            collapsed: *collapsed,
+            kept: *kept,
+        },
+        Op::GroupMove {
+            group: position,
+            index,
+        } => Intent::GroupMove {
+            group: group(position),
+            index: *index,
+        },
+        Op::GroupStep {
+            group: position,
+            forward,
+        } => {
+            let id = group(position);
+            window_of_group(id)
+                .and_then(|window| group_step(window, id, *forward))
+                .unwrap_or(nothing)
+        }
+        Op::GroupUngroup { group: position } => Intent::GroupUngroup {
+            group: group(position),
+        },
+        Op::GroupClose { group: position } => Intent::GroupClose {
+            group: group(position),
+        },
+        Op::GroupReopen {
+            group: position,
+            window: place,
+        } => Intent::GroupReopen {
+            group: put_away(position),
+            window: any_window(place),
+        },
+        Op::GroupForget { group: position } => Intent::GroupForget {
+            group: put_away(position),
         },
         Op::TabActivate {
             window: position,
@@ -563,13 +791,37 @@ fn resolve(workspace: &Workspace, op: &Op) -> Intent {
     }
 }
 
+/// The workspace a sequence starts from: one pane, and a kept group that was closed,
+/// since few sequences would put one away by themselves.
+fn start() -> Workspace {
+    let (mut workspace, window, ..) = one_pane();
+    let (tab, _) = open_tab(&mut workspace, window);
+    let group = must(&mut workspace, Intent::GroupNew { tab })
+        .1
+        .group
+        .unwrap();
+    must(
+        &mut workspace,
+        Intent::GroupSet {
+            group,
+            name: None,
+            color: None,
+            icon: None,
+            collapsed: None,
+            kept: Some(true),
+        },
+    );
+    must(&mut workspace, Intent::GroupClose { group });
+    workspace
+}
+
 /// What applying one intent gave.
 type Outcome = Result<(Vec<LayoutChange>, Created), IntentError>;
 
 /// Applies a sequence of operations to a workspace that starts with one pane, with
 /// every check after each, and returns the workspace and what each intent gave.
 fn run(ops: &[Op]) -> (Workspace, Vec<(Intent, Outcome)>) {
-    let (mut workspace, ..) = one_pane();
+    let mut workspace = start();
     let mut outcomes = Vec::new();
     for (turn, op) in ops.iter().enumerate() {
         let intent = resolve(&workspace, op);
@@ -659,6 +911,9 @@ proptest! {
 /// The sequences above reach the parts of the layout they are meant to: this is a
 /// check on the test, not on the layout. A generator that only ever made refused
 /// intents would pass everything.
+/// How many sequences the count of intents is taken over.
+const SEQUENCES: usize = 500;
+
 #[test]
 fn the_sequences_exercise_every_kind_of_intent() {
     use proptest::strategy::ValueTree;
@@ -667,7 +922,7 @@ fn the_sequences_exercise_every_kind_of_intent() {
     let mut runner = TestRunner::deterministic();
     let mut accepted = std::collections::HashMap::<String, usize>::new();
     let mut deepest = 0;
-    for _ in 0..300 {
+    for _ in 0..SEQUENCES {
         let ops = ops().new_tree(&mut runner).unwrap().current();
         let (workspace, outcomes) = run(&ops);
         for (intent, outcome) in outcomes {
@@ -716,11 +971,29 @@ fn the_sequences_exercise_every_kind_of_intent() {
         "window_focus",
         "workspace_rename",
         "minimise",
+        "tab_place",
+        "tab_color",
+        "tab_lock",
+        "tabs_close",
+        "tab_merge",
+        "group_new",
+        "group_set",
+        "group_move",
+        "group_ungroup",
+        "group_close",
     ] {
         assert!(
             accepted.get(kind).copied().unwrap_or(0) >= 5,
-            "`{kind}` changed the layout {} times in 300 sequences",
+            "`{kind}` changed the layout {} times in {SEQUENCES} sequences: {accepted:?}",
             accepted.get(kind).copied().unwrap_or(0)
+        );
+    }
+    // These need a kept group to have been closed first, which few sequences do; the
+    // tests of groups try them directly.
+    for kind in ["group_reopen", "group_forget"] {
+        assert!(
+            accepted.get(kind).copied().unwrap_or(0) >= 1,
+            "`{kind}` never changed the layout in {SEQUENCES} sequences"
         );
     }
     assert!(deepest >= 3, "no tree nested deeper than {deepest}");

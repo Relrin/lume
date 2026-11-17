@@ -45,6 +45,8 @@ export interface CommandServices {
   mayRun(id: string, args: unknown): Promise<boolean>;
   /** Moves the keyboard to the window's bar. */
   focusBar(): void;
+  /** Opens the field that renames a tab in place: the one named, or the tab on show. */
+  renameTab(tab: string | null): void;
   /** Tells the user that a command they ran could not be carried out. */
   failed(message: string): void;
 }
@@ -52,6 +54,11 @@ export interface CommandServices {
 function paneOf(args: unknown): PaneId | undefined {
   if (typeof args !== "object" || args === null || !("pane" in args)) return undefined;
   return typeof args.pane === "string" ? args.pane : undefined;
+}
+
+function tabOf(args: unknown): string | undefined {
+  if (typeof args !== "object" || args === null || !("tab" in args)) return undefined;
+  return typeof args.tab === "string" ? args.tab : undefined;
 }
 
 function queryOf(args: unknown): string | undefined {
@@ -172,6 +179,9 @@ export class Commands {
       }
       case "lume.window.focus-bar":
         this.#services.focusBar();
+        return;
+      case "lume.tab.rename-start":
+        this.#services.renameTab(tabOf(args) ?? null);
         return;
       default:
         throw new CommandError("not_found", `the page has no command called ${id}`);

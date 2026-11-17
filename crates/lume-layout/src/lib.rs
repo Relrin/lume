@@ -29,6 +29,7 @@ mod model;
 mod normalise;
 mod persist;
 mod projection;
+mod steps;
 pub mod tuning;
 mod validate;
 
@@ -37,13 +38,15 @@ pub use authority::{ChangeSource, ChangeStream, LayoutAuthority, LocalLayout, Sp
 pub use change::{Applied, Created, LayoutChange, LayoutEvent, LayoutSnapshot};
 pub use error::{IntentError, LayoutError, SpawnFailure};
 pub use geometry::{neighbour, tab_rects};
-pub use ids::{PaneId, PanelId, SplitId, TabId, WindowId, WorkspaceId};
+pub use ids::{GroupId, PaneId, PanelId, SplitId, TabId, WindowId, WorkspaceId};
 pub use intent::{Dir, FocusTarget, Intent, NewContent, Place, SpawnRequest, TabTarget};
 pub use model::{
-    Area, Axis, Bounds, DockArea, DockAreas, Floating, Minimised, Node, Pane, PaneContent, Panel,
-    PanelContent, Scratch, Slot, Split, Tab, TabGroup, TerminalPane, UnitRect, Window, Workspace,
+    Area, Axis, Bounds, DockArea, DockAreas, Floating, Group, GroupIcon, Minimised, Node, Pane,
+    PaneContent, Panel, PanelContent, Scratch, Shelved, Slot, Split, Tab, TabColor, TabGroup,
+    TerminalPane, UnitRect, Window, Workspace,
 };
 pub use persist::{Loaded, Store, StoreError, WorkspaceFile, valid_name};
 pub use projection::Projection;
+pub use steps::{group_add, group_remove, group_step, tab_step, tabs_beside};
 pub use tuning::UNITS;
 pub use validate::{Violation, is_normalised, validate};

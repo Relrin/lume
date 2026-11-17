@@ -1,6 +1,6 @@
 //! Why an intent was refused, and why an authority could not carry one out.
 
-use crate::ids::{PaneId, PanelId, SplitId, TabId, WindowId};
+use crate::ids::{GroupId, PaneId, PanelId, SplitId, TabId, WindowId};
 
 /// Why an intent was refused. A refused intent changes nothing.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -13,6 +13,16 @@ pub enum IntentError {
     NoSuchSplit(SplitId),
     #[error("there is no window {0}")]
     NoSuchWindow(WindowId),
+    #[error("there is no group {0}")]
+    NoSuchGroup(GroupId),
+    #[error("tab {0} is locked")]
+    Locked(TabId),
+    #[error("an intent about two tabs was given tab {0} twice")]
+    SameTab(TabId),
+    #[error("a group cannot be put among the tabs of another")]
+    InsideGroup,
+    #[error("every tab of the window is in the group, so there would be none to show")]
+    NothingElseToShow,
     #[error("window {window} has no panel {panel}")]
     NoSuchPanel { window: WindowId, panel: PanelId },
     #[error("the ratios do not fit the split: {0}")]
@@ -55,7 +65,9 @@ impl IntentError {
             | IntentError::NoSuchTab(_)
             | IntentError::NoSuchSplit(_)
             | IntentError::NoSuchWindow(_)
+            | IntentError::NoSuchGroup(_)
             | IntentError::NoSuchPanel { .. } => "not_found",
+            IntentError::Locked(_) => "locked",
             IntentError::TooSmall => "too_small",
             IntentError::TooMany(_) => "limit_exceeded",
             IntentError::CrossWindow => "unsupported",
@@ -70,6 +82,9 @@ impl IntentError {
             | IntentError::BadRect
             | IntentError::BadName(_)
             | IntentError::BadIndex { .. }
+            | IntentError::SameTab(_)
+            | IntentError::InsideGroup
+            | IntentError::NothingElseToShow
             | IntentError::SessionUnused => "invalid_intent",
         }
     }

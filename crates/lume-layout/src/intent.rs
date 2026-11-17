@@ -6,10 +6,10 @@
 //! sends it and whenever it arrives.
 
 use lume_proto::{BackendId, Launcher, SessionId, TermSize};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::ids::{PaneId, PanelId, SplitId, TabId, WindowId};
-use crate::model::{Area, Bounds, PanelContent, UnitRect};
+use crate::ids::{GroupId, PaneId, PanelId, SplitId, TabId, WindowId};
+use crate::model::{Area, Bounds, GroupIcon, PanelContent, Shelved, TabColor, UnitRect};
 
 /// A direction on the screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -79,7 +79,8 @@ pub enum Intent {
         #[serde(default)]
         title: Option<String>,
     },
-    /// Opens a tab with one pane. Without an index it goes after the last tab.
+    /// Opens a tab with one pane. Without an index it goes after the last tab; in a
+    /// group, it goes after the group's last tab and the index is not looked at.
     TabNew {
         window: WindowId,
         content: NewContent,
@@ -88,19 +89,84 @@ pub enum Intent {
         /// Whether the new tab is shown at once. A window's first tab always is.
         #[serde(default = "yes")]
         activate: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<GroupId>,
     },
-    /// Removes a tab and every pane in it.
+    /// Removes a tab and every pane in it. A locked tab is not removed.
     TabClose { tab: TabId },
-    /// Moves a tab to another place among its window's tabs.
+    /// Removes several tabs of a window at once, passing over those that are locked.
+    TabsClose { tabs: Vec<TabId> },
+    /// Moves a tab to another place among its window's tabs. Put between two tabs of a
+    /// group, it joins the group; put at the edge of its own group, it stays in it;
+    /// anywhere else it is in no group.
     TabMove { tab: TabId, index: u32 },
+    /// Moves a tab to a place among its window's tabs and puts it in a group, or in
+    /// none. The tab ends up among the group's tabs whatever the place.
+    TabPlace {
+        tab: TabId,
+        index: u32,
+        #[serde(default)]
+        group: Option<GroupId>,
+    },
+    /// Gives a tab a colour, or takes it away.
+    TabColor {
+        tab: TabId,
+        #[serde(default)]
+        color: Option<TabColor>,
+    },
+    /// Locks a tab against being closed, or unlocks it.
+    TabLock { tab: TabId, on: bool },
+    /// Moves the panes of a tab into another tab of its window, beside that tab's
+    /// panes, and closes the tab.
+    TabMerge { tab: TabId, into: TabId },
     /// Names a tab, or takes its name away.
     TabRename {
         tab: TabId,
         #[serde(default)]
         title: Option<String>,
     },
-    /// Shows a tab.
+    /// Shows a tab. A folded group it is in is opened.
     TabActivate { target: TabTarget },
+    /// Gathers a tab into a new group of its own, taking it out of any other.
+    GroupNew { tab: TabId },
+    /// Changes what a group is called and how it looks, folds or opens it, or sets
+    /// whether it is kept. What is left out stays as it is; a name or an icon given as
+    /// null is taken away. Folding the group that holds the tab on show first shows
+    /// the nearest tab outside it.
+    GroupSet {
+        group: GroupId,
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        name: Option<Option<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<TabColor>,
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        icon: Option<Option<GroupIcon>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collapsed: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kept: Option<bool>,
+    },
+    /// Moves a group's tabs together to another place among the window's tabs:
+    /// `index` is where its first tab goes among the tabs that are not in it. A group
+    /// is not put inside another.
+    GroupMove { group: GroupId, index: u32 },
+    /// Ends a group. Its tabs stay where they are.
+    GroupUngroup { group: GroupId },
+    /// Closes a group's tabs. Locked tabs stay, out of the group. A kept group is put
+    /// away with its tabs, to be opened again.
+    GroupClose { group: GroupId },
+    /// Opens a group that was put away again, after the last tab of a window.
+    GroupReopen { group: GroupId, window: WindowId },
+    /// Forgets a group that was put away.
+    GroupForget { group: GroupId },
     /// Moves a panel to a place in a dock area of its window.
     PanelMove {
         window: WindowId,
@@ -167,10 +233,28 @@ pub enum Intent {
     /// Gives the workspace another name. The file it is kept in is the application's
     /// to rename.
     WorkspaceRename { name: String },
+    /// Takes a group out of its window with all its tabs, locked or not, as one that
+    /// moves to another workspace.
+    GroupTake { group: GroupId },
+    /// Puts a group from another workspace after the last tab of a window. Its parts
+    /// are numbered anew here and its panes start without sessions.
+    GroupGraft {
+        window: WindowId,
+        group: Box<Shelved>,
+    },
 }
 
 fn yes() -> bool {
     true
+}
+
+/// A field that is there, even as null, as opposed to left out.
+fn given<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 impl Intent {
@@ -183,6 +267,8 @@ impl Intent {
                 | Intent::WindowBounds { .. }
                 | Intent::WindowFocus { .. }
                 | Intent::WorkspaceRename { .. }
+                | Intent::GroupTake { .. }
+                | Intent::GroupGraft { .. }
         )
     }
 }

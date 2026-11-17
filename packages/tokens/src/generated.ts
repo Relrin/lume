@@ -38,6 +38,14 @@ export const TOKEN_KINDS = {
   "color.status.success": "color",
   "color.status.warning": "color",
   "color.status.danger": "color",
+  "color.tab.red": "color",
+  "color.tab.orange": "color",
+  "color.tab.yellow": "color",
+  "color.tab.green": "color",
+  "color.tab.teal": "color",
+  "color.tab.blue": "color",
+  "color.tab.purple": "color",
+  "color.tab.pink": "color",
   "terminal.fg": "color",
   "terminal.bg": "color",
   "terminal.cursor": "color",
@@ -118,6 +126,14 @@ export const CSS_VARIABLES: Readonly<Record<TokenName, string>> = {
   "color.status.success": "--lume-color-status-success",
   "color.status.warning": "--lume-color-status-warning",
   "color.status.danger": "--lume-color-status-danger",
+  "color.tab.red": "--lume-color-tab-red",
+  "color.tab.orange": "--lume-color-tab-orange",
+  "color.tab.yellow": "--lume-color-tab-yellow",
+  "color.tab.green": "--lume-color-tab-green",
+  "color.tab.teal": "--lume-color-tab-teal",
+  "color.tab.blue": "--lume-color-tab-blue",
+  "color.tab.purple": "--lume-color-tab-purple",
+  "color.tab.pink": "--lume-color-tab-pink",
   "terminal.fg": "--lume-terminal-fg",
   "terminal.bg": "--lume-terminal-bg",
   "terminal.cursor": "--lume-terminal-cursor",
@@ -212,6 +228,22 @@ export interface Tokens {
   readonly "color.status.warning": string;
   /** Something that went wrong. */
   readonly "color.status.danger": string;
+  /** A tab or a group of tabs given red. */
+  readonly "color.tab.red": string;
+  /** A tab or a group of tabs given orange. */
+  readonly "color.tab.orange": string;
+  /** A tab or a group of tabs given yellow. */
+  readonly "color.tab.yellow": string;
+  /** A tab or a group of tabs given green. */
+  readonly "color.tab.green": string;
+  /** A tab or a group of tabs given teal. */
+  readonly "color.tab.teal": string;
+  /** A tab or a group of tabs given blue. */
+  readonly "color.tab.blue": string;
+  /** A tab or a group of tabs given purple. */
+  readonly "color.tab.purple": string;
+  /** A tab or a group of tabs given pink. */
+  readonly "color.tab.pink": string;
   /** Terminal text. */
   readonly "terminal.fg": string;
   /** The terminal's background. */
@@ -336,6 +368,14 @@ export const DEFAULT_TOKENS: Tokens = {
   "color.status.success": "#8fd694",
   "color.status.warning": "#f0b35a",
   "color.status.danger": "#ff8b82",
+  "color.tab.red": "#ff7b72",
+  "color.tab.orange": "#f0b35a",
+  "color.tab.yellow": "#e5c07b",
+  "color.tab.green": "#8fd694",
+  "color.tab.teal": "#7fdbca",
+  "color.tab.blue": "#7aa7ff",
+  "color.tab.purple": "#c792ea",
+  "color.tab.pink": "#f48fb1",
   "terminal.fg": "#d7dadd",
   "terminal.bg": "#171a1e",
   "terminal.cursor": "#7fe3b8",
@@ -410,6 +450,14 @@ export const LIGHT_TOKENS: Tokens = {
   "color.status.success": "#1f8a4c",
   "color.status.warning": "#a36a00",
   "color.status.danger": "#c2392f",
+  "color.tab.red": "#c2392f",
+  "color.tab.orange": "#b35c00",
+  "color.tab.yellow": "#8f6a00",
+  "color.tab.green": "#1f8a4c",
+  "color.tab.teal": "#0f8a8f",
+  "color.tab.blue": "#2f6fd0",
+  "color.tab.purple": "#8a4fc7",
+  "color.tab.pink": "#c2407e",
   "terminal.fg": "#1c1f2a",
   "terminal.bg": "#ffffff",
   "terminal.cursor": "#1c1f2a",

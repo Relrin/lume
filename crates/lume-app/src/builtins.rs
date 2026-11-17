@@ -10,8 +10,9 @@
 //! the font size of a window) are listed here and carried out there.
 
 use lume_layout::{
-    Area, Dir, FocusTarget, Intent, NewContent, PaneId, Place, SpawnRequest, TabId, TabTarget,
-    UNITS, WindowId,
+    Area, Dir, FocusTarget, GroupIcon, GroupId, Intent, NewContent, PaneId, Place, SpawnRequest,
+    TabColor, TabId, TabTarget, UNITS, Window, WindowId, group_add, group_remove, group_step,
+    tab_step, tabs_beside,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -90,6 +91,135 @@ const COMMANDS: &[Row] = &[
     ("lume.tab.activate", "Go to Tab", "Tab", Runs::Core, false),
     ("lume.tab.rename", "Rename Tab", "Tab", Runs::Core, false),
     ("lume.tab.move", "Move Tab", "Tab", Runs::Core, false),
+    (
+        "lume.tab.rename-start",
+        "Rename Tab…",
+        "Tab",
+        Runs::Page,
+        true,
+    ),
+    (
+        "lume.tab.move-left",
+        "Move Tab Left",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.tab.move-right",
+        "Move Tab Right",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.tab.close-left",
+        "Close Tabs to the Left",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.tab.close-right",
+        "Close Tabs to the Right",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    ("lume.tab.color", "Set Tab Colour", "Tab", Runs::Core, false),
+    (
+        "lume.tab.lock",
+        "Lock or Unlock Tab",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.tab.merge",
+        "Move Tab into Another Tab",
+        "Tab",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.group.new",
+        "Add Tab to New Group",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.group.add",
+        "Add Tab to Group",
+        "Tab",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.group.remove",
+        "Remove Tab from Group",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    ("lume.group.set", "Change Group", "Tab", Runs::Core, false),
+    (
+        "lume.group.toggle",
+        "Collapse or Expand Group",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.group.move-left",
+        "Move Group Left",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.group.move-right",
+        "Move Group Right",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.group.ungroup",
+        "Ungroup Tabs",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    ("lume.group.close", "Close Group", "Tab", Runs::Core, true),
+    (
+        "lume.group.reopen",
+        "Reopen Group",
+        "Tab",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.group.forget",
+        "Forget Closed Group",
+        "Tab",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.group.move-to-workspace",
+        "Move Group to Workspace…",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.group.bring-back",
+        "Bring Group Back",
+        "Tab",
+        Runs::Core,
+        false,
+    ),
     ("lume.pane.close", "Close Pane", "Pane", Runs::Core, true),
     (
         "lume.pane.split-right",
@@ -417,9 +547,86 @@ fn arguments(id: &str) -> Option<Value> {
         "type": "string",
         "description": "A profile's id; the default profile if left out.",
     });
+    let group = json!({
+        "type": "string",
+        "description": "A group's id; the group of the tab on show if left out.",
+    });
+    let colors = json!([
+        "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"
+    ]);
+    let workspace = json!({
+        "type": "string",
+        "description": "The workspace to move it to",
+        "x-lume-choices": "workspaces",
+    });
     let object = |properties: Value, required: &[&str]| json!({ "type": "object", "properties": properties, "required": required });
     match id {
-        "lume.tab.new" | "lume.window.new" => Some(object(json!({ "profile": profile }), &[])),
+        "lume.window.new" => Some(object(json!({ "profile": profile }), &[])),
+        "lume.tab.new" => Some(object(
+            json!({
+                "profile": profile,
+                "group": { "type": "string", "description": "A group to open it in, after its last tab." },
+            }),
+            &[],
+        )),
+        "lume.tab.rename-start"
+        | "lume.tab.move-left"
+        | "lume.tab.move-right"
+        | "lume.tab.close-left"
+        | "lume.tab.close-right"
+        | "lume.group.new"
+        | "lume.group.remove" => Some(object(json!({ "tab": tab }), &[])),
+        "lume.tab.color" => Some(object(
+            json!({ "tab": tab, "color": {
+                "type": ["string", "null"],
+                "enum": ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink", null],
+                "description": "The tab's colour; none if left out.",
+            } }),
+            &[],
+        )),
+        "lume.tab.lock" => Some(object(
+            json!({ "tab": tab, "on": { "type": "boolean", "description": "Locked or not; the other way round if left out." } }),
+            &[],
+        )),
+        "lume.tab.merge" => Some(object(
+            json!({ "tab": tab, "into": { "type": "string", "description": "The tab whose panes it joins." } }),
+            &["into"],
+        )),
+        "lume.group.add" => Some(object(
+            json!({ "tab": tab, "group": { "type": "string", "description": "The group to put it in." } }),
+            &["group"],
+        )),
+        "lume.group.set" => Some(object(
+            json!({
+                "group": group,
+                "name": { "type": ["string", "null"] },
+                "color": { "type": "string", "enum": colors },
+                "icon": { "type": ["string", "null"], "enum": ["bug", "flame", "rocket", "flask", "wrench", "layers", "server", "book", null] },
+                "collapsed": { "type": "boolean" },
+                "kept": { "type": "boolean" },
+            }),
+            &[],
+        )),
+        "lume.group.toggle"
+        | "lume.group.move-left"
+        | "lume.group.move-right"
+        | "lume.group.ungroup"
+        | "lume.group.close" => Some(object(json!({ "group": group }), &[])),
+        "lume.group.reopen" | "lume.group.forget" => Some(object(
+            json!({ "group": { "type": "string", "description": "A closed group's id." } }),
+            &["group"],
+        )),
+        "lume.group.move-to-workspace" => Some(object(
+            json!({ "group": group, "workspace": workspace }),
+            &["workspace"],
+        )),
+        "lume.group.bring-back" => Some(object(
+            json!({
+                "workspace": { "type": "string", "description": "The workspace the group is in" },
+                "group": { "type": "string", "description": "The group's id there." },
+            }),
+            &["workspace", "group"],
+        )),
         "lume.terminal.new-with-profile" => Some(object(
             json!({ "profile": {
                 "type": "string",
@@ -596,12 +803,52 @@ impl Context<'_> {
             .ok_or_else(|| CommandError::not_found("there is no tab to act on"))
     }
 
+    /// The window the command was run in, as it is now.
+    fn window_now(&self) -> Result<Window, CommandError> {
+        self.panes
+            .workspace()
+            .window(self.window)
+            .cloned()
+            .ok_or_else(|| CommandError::not_found("the window is gone"))
+    }
+
+    /// The group a command acts on: the one its arguments name, or that of the tab on
+    /// show.
+    fn group(&self, args: &Value) -> Result<GroupId, CommandError> {
+        if let Some(group) = argument(args, "group")? {
+            return Ok(group);
+        }
+        let window = self.window_now()?;
+        window
+            .centre
+            .active_tab()
+            .and_then(|tab| tab.group)
+            .ok_or_else(|| CommandError::not_found("the tab on show is in no group"))
+    }
+
     fn tab_count(&self) -> usize {
         self.panes
             .workspace()
             .window(self.window)
             .map_or(0, |window| window.centre.tabs.len())
     }
+}
+
+/// An argument that may be given as null to take something away: left out it is
+/// `None`, null is `Some(None)`.
+fn given<T: DeserializeOwned>(args: &Value, name: &str) -> Result<Option<Option<T>>, CommandError> {
+    match args.get(name) {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(|value| Some(Some(value)))
+            .map_err(|error| CommandError::bad_request(format!("the argument `{name}`: {error}"))),
+    }
+}
+
+/// The group a command about a closed group names.
+fn required_group(args: &Value) -> Result<GroupId, CommandError> {
+    argument(args, "group")?.ok_or_else(|| CommandError::bad_request("which group: `group`"))
 }
 
 /// The workspace's name a command was given.
@@ -735,6 +982,7 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
             .await,
             index: None,
             activate: true,
+            group: argument(args, "group")?,
         },
         "lume.terminal.new-with-profile" => {
             let named = profile(context, args)
@@ -745,6 +993,7 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
                 content: terminal_with(context, Some(named), panes.focused_pane(window)).await,
                 index: None,
                 activate: true,
+                group: None,
             }
         }
         "lume.profile.refresh" => {
@@ -784,6 +1033,113 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
             index: argument(args, "index")?
                 .ok_or_else(|| CommandError::bad_request("where to: `index`"))?,
         },
+        "lume.tab.move-left" | "lume.tab.move-right" => {
+            let tab = context.tab(args)?;
+            let forward = id == "lume.tab.move-right";
+            // A tab at the end has nowhere to go, and a key held there does nothing.
+            match tab_step(&context.window_now()?, tab, forward) {
+                Some(intent) => intent,
+                None => return Ok(()),
+            }
+        }
+        "lume.tab.close-left" | "lume.tab.close-right" => Intent::TabsClose {
+            tabs: tabs_beside(
+                &context.window_now()?,
+                context.tab(args)?,
+                id == "lume.tab.close-right",
+            ),
+        },
+        "lume.tab.color" => Intent::TabColor {
+            tab: context.tab(args)?,
+            color: argument::<TabColor>(args, "color")?,
+        },
+        "lume.tab.lock" => {
+            let tab = context.tab(args)?;
+            let locked = panes.workspace().tab(tab).is_some_and(|found| found.locked);
+            Intent::TabLock {
+                tab,
+                on: argument(args, "on")?.unwrap_or(!locked),
+            }
+        }
+        "lume.tab.merge" => Intent::TabMerge {
+            tab: context.tab(args)?,
+            into: argument(args, "into")?
+                .ok_or_else(|| CommandError::bad_request("which tab: `into`"))?,
+        },
+        "lume.group.new" => Intent::GroupNew {
+            tab: context.tab(args)?,
+        },
+        "lume.group.add" => {
+            let tab = context.tab(args)?;
+            let group: GroupId = argument(args, "group")?
+                .ok_or_else(|| CommandError::bad_request("which group: `group`"))?;
+            group_add(&context.window_now()?, tab, group).ok_or_else(|| {
+                CommandError::not_found(format!("this window has no group {group}"))
+            })?
+        }
+        "lume.group.remove" => {
+            let tab = context.tab(args)?;
+            match group_remove(&context.window_now()?, tab) {
+                Some(intent) => intent,
+                None => return Ok(()),
+            }
+        }
+        "lume.group.set" => Intent::GroupSet {
+            group: context.group(args)?,
+            name: given(args, "name")?,
+            color: argument(args, "color")?,
+            icon: given::<GroupIcon>(args, "icon")?,
+            collapsed: argument(args, "collapsed")?,
+            kept: argument(args, "kept")?,
+        },
+        "lume.group.toggle" => {
+            let group = context.group(args)?;
+            let collapsed = context
+                .window_now()?
+                .centre
+                .group(group)
+                .is_some_and(|found| found.collapsed);
+            Intent::GroupSet {
+                group,
+                name: None,
+                color: None,
+                icon: None,
+                collapsed: Some(!collapsed),
+                kept: None,
+            }
+        }
+        "lume.group.move-left" | "lume.group.move-right" => {
+            let group = context.group(args)?;
+            match group_step(&context.window_now()?, group, id == "lume.group.move-right") {
+                Some(intent) => intent,
+                None => return Ok(()),
+            }
+        }
+        "lume.group.ungroup" => Intent::GroupUngroup {
+            group: context.group(args)?,
+        },
+        "lume.group.close" => Intent::GroupClose {
+            group: context.group(args)?,
+        },
+        "lume.group.reopen" => Intent::GroupReopen {
+            group: required_group(args)?,
+            window,
+        },
+        "lume.group.forget" => Intent::GroupForget {
+            group: required_group(args)?,
+        },
+        "lume.group.move-to-workspace" => {
+            let to: String = argument(args, "workspace")?
+                .ok_or_else(|| CommandError::bad_request("which workspace: `workspace`"))?;
+            return panes.move_group(context.group(args)?, to.trim()).await;
+        }
+        "lume.group.bring-back" => {
+            let from: String = argument(args, "workspace")?
+                .ok_or_else(|| CommandError::bad_request("which workspace: `workspace`"))?;
+            return panes
+                .bring_group_back(from.trim(), required_group(args)?, window)
+                .await;
+        }
         "lume.pane.close" => Intent::Close {
             pane: context.pane(args)?,
         },

@@ -655,6 +655,7 @@ fn tabs_are_opened_shown_moved_and_closed() {
         content: terminal(),
         index: Some(0),
         activate: false,
+        group: None,
     };
     let second = must(&mut workspace, behind).1.tab.unwrap();
     assert_eq!(order(&workspace), vec![second, first]);
@@ -666,6 +667,7 @@ fn tabs_are_opened_shown_moved_and_closed() {
         content: terminal(),
         index: Some(5),
         activate: true,
+        group: None,
     };
     assert_eq!(
         refused(&mut workspace, too_far),
@@ -1099,6 +1101,7 @@ fn a_new_terminal_pane_takes_the_session_that_was_started_for_it() {
         content: NewContent::Terminal(request),
         index: None,
         activate: true,
+        group: None,
     };
     let (_, created) = must_with(&mut workspace, intent, Some(started(7)));
     let terminal = terminal_of(&workspace, created.pane.unwrap());
@@ -1400,6 +1403,7 @@ fn an_intent_is_read_from_json_with_what_may_be_left_out_left_out() {
             content: terminal(),
             index: None,
             activate: true,
+            group: None,
         }
     );
 

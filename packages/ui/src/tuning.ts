@@ -203,3 +203,21 @@ export const SEARCH_MATCHES_MAX = 10_000;
  * there is scrolled to the middle of the pane, as one outside the viewport is.
  */
 export const SEARCH_CLEAR_ROWS = 2;
+
+/**
+ * How long after the pointer pressed something among the tabs a change of them is
+ * taken to be its doing, and moves. Changes made from the keyboard jump.
+ */
+export const TAB_POINTER_RECENT_MS = 1_000;
+
+/** How long the mark of the tab on show keeps up with tabs the style sheet is moving. */
+export const TAB_FOLLOW_LAYOUT_MS = 280;
+
+/** How long an element that has faded out waits, hidden, for the row of tabs to change. */
+export const TAB_EXIT_HELD_MS = 800;
+
+/** How long after a new group's label has grown in its editor opens. */
+export const GROUP_EDITOR_DELAY_MS = 180;
+
+/** How long a group's name rests after a key before it is written. */
+export const GROUP_NAME_WRITE_MS = 300;

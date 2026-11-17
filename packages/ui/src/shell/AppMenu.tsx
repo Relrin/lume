@@ -13,7 +13,8 @@
  *
  * Below "New tab" stands "New tab with", whose own menu opens a tab with a profile
  * other than the default: the default first, then the others, then the way to the
- * palette that finds any of them.
+ * palette that finds any of them. Below that, while there are groups of tabs that were
+ * kept when they were closed, "Groups" lists them to open again.
  */
 
 import { useRef, useState } from "react";
@@ -24,10 +25,14 @@ import { KindIcon } from "../connect/icons.tsx";
 import { kindOf } from "../connect/model.ts";
 import { NEW_TAB_MENU_MAX } from "../connect/tuning.ts";
 import type { ProfileList } from "../core/types.ts";
+import { selectShelf } from "../layout/selectors.ts";
+import type { Shelved } from "../layout/types.ts";
 import { profileGroup } from "../palette/choices.ts";
 import { useShell } from "./context.ts";
-import { MenuIcon } from "./icons.tsx";
+import { menuKey } from "./hints.ts";
+import { GroupGlyph, MenuIcon } from "./icons.tsx";
 import { Menu, type MenuItem } from "./Menu.tsx";
+import { tabColorValue, tabCount, UNNAMED_GROUP } from "./tab-looks.ts";
 
 /** One of the application's menus. */
 type Which = "lume" | "view" | "help";
@@ -87,16 +92,6 @@ const CONTENTS: Readonly<Record<Which, readonly (readonly (Row | readonly Row[])
   ],
 };
 
-/**
- * A key as a menu writes it: the keys of a chord set apart by spaces, as in
- * `Ctrl Shift N`. Where chords are written without anything between their keys, as on
- * a Mac, there is nothing to change.
- */
-function menuKey(label: string | undefined): string | undefined {
-  // A `+` after a key's name joins; one after another `+` is the key itself.
-  return label?.replace(/(?<=[^+\s])\+(?=.)/g, " ");
-}
-
 function isRow(place: Row | readonly Row[]): place is Row {
   return typeof place[0] === "string";
 }
@@ -148,12 +143,32 @@ export function newTabWithItems(
   return items;
 }
 
+/** The menu of "Groups": each kept group that was closed, the most recent first. */
+export function shelfItems(shelf: readonly Shelved[], reopen: (group: string) => void): MenuItem[] {
+  return [...shelf].reverse().map(({ group, tabs }) => ({
+    key: `group:${group.id}`,
+    label: group.name ?? UNNAMED_GROUP,
+    hint: tabCount(tabs.length),
+    icon: (
+      <span className="menu-group-icon" style={{ color: tabColorValue(group.color) }}>
+        {group.icon === undefined ? (
+          <span className="menu-dot" style={{ background: tabColorValue(group.color) }} />
+        ) : (
+          <GroupGlyph icon={group.icon} size={12} />
+        )}
+      </span>
+    ),
+    choose: () => reopen(group.id),
+  }));
+}
+
 /** The button that opens the application's menu, and the menu. */
 export function AppMenu() {
   const app = useShell();
   const known = useStore(app.commandStore, (state) => state.byId);
   const config = useStore(app.config, (state) => state.view);
   const profiles = useStore(app.profiles, (state) => state.list);
+  const shelf = useStore(app.layout, selectShelf);
   const [open, setOpen] = useState<Which | null>(null);
   const button = useRef<HTMLButtonElement>(null);
 
@@ -198,6 +213,14 @@ export function AppMenu() {
             ),
             choose: () => undefined,
           });
+          if (shelf.length > 0) {
+            items.push({
+              key: "groups",
+              label: "Groups",
+              items: shelfItems(shelf, (group) => app.commands.run("lume.group.reopen", { group })),
+              choose: () => undefined,
+            });
+          }
         }
       }
     }

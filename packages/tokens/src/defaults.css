@@ -26,6 +26,14 @@
   --lume-color-status-success: #8fd694;
   --lume-color-status-warning: #f0b35a;
   --lume-color-status-danger: #ff8b82;
+  --lume-color-tab-red: #ff7b72;
+  --lume-color-tab-orange: #f0b35a;
+  --lume-color-tab-yellow: #e5c07b;
+  --lume-color-tab-green: #8fd694;
+  --lume-color-tab-teal: #7fdbca;
+  --lume-color-tab-blue: #7aa7ff;
+  --lume-color-tab-purple: #c792ea;
+  --lume-color-tab-pink: #f48fb1;
   --lume-terminal-fg: #d7dadd;
   --lume-terminal-bg: #171a1e;
   --lume-terminal-cursor: #7fe3b8;

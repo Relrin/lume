@@ -99,6 +99,12 @@ impl From<LayoutError> for CommandError {
     }
 }
 
+impl From<lume_layout::IntentError> for CommandError {
+    fn from(error: lume_layout::IntentError) -> Self {
+        Self::new(error.code(), error.to_string())
+    }
+}
+
 impl From<ConfigError> for CommandError {
     fn from(error: ConfigError) -> Self {
         Self::new("config", error.to_string())

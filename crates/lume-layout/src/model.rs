@@ -8,7 +8,7 @@
 use lume_proto::{BackendId, Launcher, SessionId};
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{PaneId, PanelId, SplitId, TabId, WindowId, WorkspaceId};
+use crate::ids::{GroupId, PaneId, PanelId, SplitId, TabId, WindowId, WorkspaceId};
 use crate::tuning::{DOCK_SIZE_DEFAULT, UNITS};
 
 /// A named arrangement of windows that can be saved and brought back.
@@ -22,9 +22,12 @@ pub struct Workspace {
     pub focused_window: Option<WindowId>,
     /// The workspace's scratch terminal, if it has been opened.
     pub scratch: Option<Scratch>,
-    /// The number the next pane, tab, split or window is given. It only goes up, so no
-    /// number names two things in a workspace's life.
+    /// The number the next pane, tab, split, group or window is given. It only goes
+    /// up, so no number names two things in a workspace's life.
     pub next_id: u32,
+    /// The kept groups that were closed, the most recently closed last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shelf: Vec<Shelved>,
 }
 
 /// The scratch terminal: one floating pane a workspace keeps at hand. It is shown over
@@ -215,6 +218,10 @@ pub struct TabGroup {
     pub tabs: Vec<Tab>,
     /// The tab on show. There is one whenever there are tabs.
     pub active: Option<TabId>,
+    /// The groups the tabs are gathered in, in the order their first tabs come. The
+    /// tabs of a group stand together, and a group has at least one tab.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<Group>,
 }
 
 /// One tab: a tree of splits and panes.
@@ -231,6 +238,92 @@ pub struct Tab {
     /// The pane of this tab that last had the keyboard, which gets it again when the
     /// tab is shown.
     pub last_focus: Option<PaneId>,
+    /// The colour the user gave the tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<TabColor>,
+    /// A locked tab is not closed by asking to close it, nor by closing the tabs
+    /// beside it or its group. Its panes still close on their own.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub locked: bool,
+    /// The group of the window's tabs this tab is in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<GroupId>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// The colours a tab or a group can be given. A page draws each from its theme.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TabColor {
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Teal,
+    Blue,
+    Purple,
+    Pink,
+}
+
+impl TabColor {
+    /// The order a window's new groups take their colours in, each the first one no
+    /// other group of the window has.
+    pub const FOR_GROUPS: [TabColor; 8] = [
+        TabColor::Blue,
+        TabColor::Pink,
+        TabColor::Yellow,
+        TabColor::Purple,
+        TabColor::Teal,
+        TabColor::Red,
+        TabColor::Green,
+        TabColor::Orange,
+    ];
+}
+
+/// The pictures a group's label can show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroupIcon {
+    Bug,
+    Flame,
+    Rocket,
+    Flask,
+    Wrench,
+    Layers,
+    Server,
+    Book,
+}
+
+/// Tabs of a window gathered under one name and colour.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Group {
+    pub id: GroupId,
+    /// The name the user gave the group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub color: TabColor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<GroupIcon>,
+    /// A folded group shows only its label. The tab on show is never in one.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub collapsed: bool,
+    /// A kept group is put away when it is closed, to be opened again later, instead
+    /// of being forgotten.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub kept: bool,
+}
+
+/// A kept group that was closed, with its tabs as they were. Its panes have no
+/// sessions: they are started anew when the group is opened again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Shelved {
+    pub group: Group,
+    pub tabs: Vec<Tab>,
 }
 
 /// A node of a tab's tree.
@@ -522,6 +615,31 @@ impl TabGroup {
     pub fn active_tab_mut(&mut self) -> Option<&mut Tab> {
         self.tab_mut(self.active?)
     }
+
+    pub fn group(&self, id: GroupId) -> Option<&Group> {
+        self.groups.iter().find(|group| group.id == id)
+    }
+
+    pub fn group_mut(&mut self, id: GroupId) -> Option<&mut Group> {
+        self.groups.iter_mut().find(|group| group.id == id)
+    }
+
+    /// The indices of a group's tabs, in order.
+    pub fn members(&self, id: GroupId) -> Vec<usize> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| tab.group == Some(id))
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// Whether a tab is hidden in a folded group.
+    pub fn folded(&self, tab: &Tab) -> bool {
+        tab.group
+            .and_then(|group| self.group(group))
+            .is_some_and(|group| group.collapsed)
+    }
 }
 
 impl Window {
@@ -597,10 +715,11 @@ impl Workspace {
             focused_window: None,
             scratch: None,
             next_id: 1,
+            shelf: Vec::new(),
         }
     }
 
-    /// Takes the next number for a pane, tab, split or window.
+    /// Takes the next number for a pane, tab, split, group or window.
     pub(crate) fn fresh(&mut self) -> u32 {
         let number = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
@@ -679,6 +798,13 @@ impl Workspace {
             }
             Location::Parked => None,
         }
+    }
+
+    /// The window a group of tabs is in, by index.
+    pub(crate) fn locate_group(&self, group: GroupId) -> Option<usize> {
+        self.windows
+            .iter()
+            .position(|window| window.centre.group(group).is_some())
     }
 
     /// The window and the tab a tab id names.

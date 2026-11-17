@@ -66,6 +66,9 @@
 # Which program tiles are drawn in colour: "always", "active-pane", "active-tab" or
 # "never". The others are drawn in the theme's muted ink.
 # tile-color = "always"
+# How the highlight moves when another tab is shown: "glow", "glide", "stretch",
+# "spring" or "instant". It moves at once for the keyboard and with reduced motion.
+# tab-highlight = "glow"
 #
 # Any design token can be set over the theme's, in a table named after its group:
 #

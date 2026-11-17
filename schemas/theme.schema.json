@@ -112,6 +112,52 @@
           "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
           "type": "string"
         },
+        "tab": {
+          "additionalProperties": false,
+          "properties": {
+            "blue": {
+              "description": "A tab or a group of tabs given blue.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            },
+            "green": {
+              "description": "A tab or a group of tabs given green.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            },
+            "orange": {
+              "description": "A tab or a group of tabs given orange.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            },
+            "pink": {
+              "description": "A tab or a group of tabs given pink.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            },
+            "purple": {
+              "description": "A tab or a group of tabs given purple.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            },
+            "red": {
+              "description": "A tab or a group of tabs given red.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            },
+            "teal": {
+              "description": "A tab or a group of tabs given teal.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            },
+            "yellow": {
+              "description": "A tab or a group of tabs given yellow.",
+              "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "text": {
           "description": "Text.",
           "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",

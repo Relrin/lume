@@ -10,24 +10,26 @@
 //! checked against the limits, compared with the original to find what changed, and
 //! then takes the original's place.
 
+use std::collections::HashMap;
+
 use lume_proto::{BackendId, SessionId};
 
 use crate::change::{Created, LayoutChange};
 use crate::diff::diff;
 use crate::error::IntentError;
 use crate::geometry::{neighbour, tab_rects};
-use crate::ids::{PaneId, SplitId, TabId, WindowId};
+use crate::ids::{GroupId, PaneId, SplitId, TabId, WindowId};
 use crate::intent::{Dir, FocusTarget, Intent, NewContent, Place, SpawnRequest, TabTarget};
 use crate::model::{
-    Area, Axis, Floating, Location, Minimised, Node, Pane, PaneContent, Panel, PanelContent,
-    Scratch, Split, Tab, TerminalPane, UnitRect, Window, Workspace,
+    Area, Axis, Floating, Group, Location, Minimised, Node, Pane, PaneContent, Panel, PanelContent,
+    Scratch, Shelved, Split, Tab, TabColor, TerminalPane, UnitRect, Window, Workspace,
 };
 use crate::normalise::{contain, fit, mend, release, tidy_trees};
 use crate::persist::valid_name;
 use crate::tuning::{
     DOCK_PANELS_MAX, DOCK_SIZE_MAX, DOCK_SIZE_MIN, FLOAT_CASCADE, FLOAT_DEFAULT, FLOATING_MAX,
-    RATIO_TOLERANCE, SHARE_MIN, SPLIT_CHILDREN_MAX, TAB_PANES_MAX, TABS_MAX, TITLE_MAX_CHARS,
-    TREE_DEPTH_MAX, UNITS, WINDOWS_MAX,
+    RATIO_TOLERANCE, SHARE_MIN, SHELF_MAX, SPLIT_CHILDREN_MAX, TAB_PANES_MAX, TABS_MAX,
+    TITLE_MAX_CHARS, TREE_DEPTH_MAX, UNITS, WINDOWS_MAX,
 };
 
 /// A session that was started for a pane an intent is about to make.
@@ -259,17 +261,108 @@ fn show_tab(window: &mut Window, index: usize) {
 }
 
 /// Takes a tab out of a window. If it was the one shown, the tab after it is shown,
-/// or the one before it when it was the last.
+/// or the one before it when it was the last; a tab in a folded group is passed over
+/// while there is another.
 fn remove_tab(window: &mut Window, index: usize) -> Tab {
     let tab = window.centre.tabs.remove(index);
     if window.centre.active == Some(tab.id) {
-        let tabs = &window.centre.tabs;
-        window.centre.active = tabs
-            .get(index)
+        let centre = &window.centre;
+        let tabs = &centre.tabs;
+        let open = |found: &&Tab| !centre.folded(found);
+        window.centre.active = tabs[index.min(tabs.len())..]
+            .iter()
+            .find(open)
+            .or_else(|| tabs[..index.min(tabs.len())].iter().rev().find(open))
+            .or_else(|| tabs.get(index))
             .or_else(|| tabs.last())
             .map(|neighbour| neighbour.id);
     }
     tab
+}
+
+/// The group a tab put at `index` among `tabs`, the window's tabs without it, is in.
+/// Between two tabs of a group it joins that group. Beside a tab of its own group, or
+/// when it was the only tab of its group, it stays in its own. Anywhere else it is in
+/// none.
+fn group_at(tabs: &[Tab], index: usize, own: Option<GroupId>) -> Option<GroupId> {
+    let before = index
+        .checked_sub(1)
+        .and_then(|before| tabs.get(before))
+        .and_then(|tab| tab.group);
+    let after = tabs.get(index).and_then(|tab| tab.group);
+    if before.is_some() && before == after {
+        return before;
+    }
+    let own = own?;
+    let alone = tabs.iter().all(|tab| tab.group != Some(own));
+    (alone || before == Some(own) || after == Some(own)).then_some(own)
+}
+
+fn group_window(workspace: &Workspace, group: GroupId) -> Result<usize, IntentError> {
+    workspace
+        .locate_group(group)
+        .ok_or(IntentError::NoSuchGroup(group))
+}
+
+fn tab_index(workspace: &Workspace, tab: TabId) -> Result<(usize, usize), IntentError> {
+    workspace.locate_tab(tab).ok_or(IntentError::NoSuchTab(tab))
+}
+
+/// Leaves the panes under a node without sessions.
+fn forget_sessions(node: &mut Node) {
+    match node {
+        Node::Pane(pane) => {
+            if let PaneContent::Terminal(terminal) = &mut pane.content {
+                terminal.session = None;
+            }
+        }
+        Node::Split(split) => split.children.iter_mut().for_each(forget_sessions),
+    }
+}
+
+/// Gives the splits and panes under a node new numbers from a workspace's counter,
+/// noting what each pane was numbered before.
+fn renumber(node: &mut Node, workspace: &mut Workspace, panes: &mut HashMap<PaneId, PaneId>) {
+    match node {
+        Node::Pane(pane) => {
+            let id = PaneId::new(workspace.fresh());
+            panes.insert(pane.id, id);
+            pane.id = id;
+        }
+        Node::Split(split) => {
+            split.id = SplitId::new(workspace.fresh());
+            for child in &mut split.children {
+                renumber(child, workspace, panes);
+            }
+        }
+    }
+}
+
+/// Puts tabs after the last tab of a window, in a group, and shows the first of them.
+fn put_group(window: &mut Window, group: Group, tabs: Vec<Tab>) {
+    let first = window.centre.tabs.len();
+    let id = group.id;
+    window.centre.groups.push(group);
+    window.centre.tabs.extend(tabs.into_iter().map(|mut tab| {
+        tab.group = Some(id);
+        tab
+    }));
+    if first < window.centre.tabs.len() {
+        show_tab(window, first);
+    }
+}
+
+/// Removes the tabs at these indices of a window, from the last to the first, so that
+/// the tab shown afterwards is the one beside where they were.
+fn remove_tabs(window: &mut Window, mut indices: Vec<usize>) -> Vec<Tab> {
+    indices.sort_unstable();
+    let mut removed: Vec<Tab> = indices
+        .into_iter()
+        .rev()
+        .map(|index| remove_tab(window, index))
+        .collect();
+    removed.reverse();
+    removed
 }
 
 /// Takes a pane out of the split it is a child of, somewhere under `node`, and gives
@@ -420,6 +513,9 @@ fn open_tab(
             root: Node::Pane(pane),
             zoomed: None,
             last_focus: Some(pane_id),
+            color: None,
+            locked: false,
+            group: None,
         },
     );
     if activate || window.centre.active.is_none() {
@@ -761,22 +857,53 @@ fn change(
             content,
             index,
             activate,
+            group,
         } => {
             let window = window_index(workspace, window)?;
+            let index = match group {
+                Some(group) => {
+                    let centre = &workspace.windows[window].centre;
+                    if centre.group(group).is_none() {
+                        return Err(IntentError::NoSuchGroup(group));
+                    }
+                    centre.members(group).last().map(|last| *last as u32 + 1)
+                }
+                None => index,
+            };
             let pane = new_pane(workspace, content, started);
             created.pane = Some(pane.id);
-            created.tab = Some(open_tab(workspace, window, pane, index, activate)?);
+            let tab = open_tab(workspace, window, pane, index, activate)?;
+            created.tab = Some(tab);
+            if let Some(found) = workspace.windows[window].centre.tab_mut(tab) {
+                found.group = group;
+            }
         }
         Intent::TabClose { tab } => {
-            let (window, index) = workspace
-                .locate_tab(tab)
-                .ok_or(IntentError::NoSuchTab(tab))?;
+            let (window, index) = tab_index(workspace, tab)?;
+            if workspace.windows[window].centre.tabs[index].locked {
+                return Err(IntentError::Locked(tab));
+            }
             remove_tab(&mut workspace.windows[window], index);
         }
+        Intent::TabsClose { tabs } => {
+            let mut by_window: Vec<(usize, Vec<usize>)> = Vec::new();
+            for tab in tabs {
+                let (window, index) = tab_index(workspace, tab)?;
+                if workspace.windows[window].centre.tabs[index].locked {
+                    continue;
+                }
+                match by_window.iter_mut().find(|(found, _)| *found == window) {
+                    Some((_, indices)) if !indices.contains(&index) => indices.push(index),
+                    Some(_) => {}
+                    None => by_window.push((window, vec![index])),
+                }
+            }
+            for (window, indices) in by_window {
+                remove_tabs(&mut workspace.windows[window], indices);
+            }
+        }
         Intent::TabMove { tab, index } => {
-            let (window, from) = workspace
-                .locate_tab(tab)
-                .ok_or(IntentError::NoSuchTab(tab))?;
+            let (window, from) = tab_index(workspace, tab)?;
             let tabs = &mut workspace.windows[window].centre.tabs;
             if index as usize >= tabs.len() {
                 return Err(IntentError::BadIndex {
@@ -784,8 +911,64 @@ fn change(
                     len: tabs.len(),
                 });
             }
-            let moved = tabs.remove(from);
+            let mut moved = tabs.remove(from);
+            moved.group = group_at(tabs, index as usize, moved.group);
             tabs.insert(index as usize, moved);
+        }
+        Intent::TabPlace { tab, index, group } => {
+            let (window, from) = tab_index(workspace, tab)?;
+            let centre = &mut workspace.windows[window].centre;
+            if let Some(group) = group
+                && centre.group(group).is_none()
+            {
+                return Err(IntentError::NoSuchGroup(group));
+            }
+            if index as usize >= centre.tabs.len() {
+                return Err(IntentError::BadIndex {
+                    index,
+                    len: centre.tabs.len(),
+                });
+            }
+            let mut moved = centre.tabs.remove(from);
+            moved.group = group;
+            centre.tabs.insert(index as usize, moved);
+        }
+        Intent::TabColor { tab, color } => {
+            let (window, index) = tab_index(workspace, tab)?;
+            workspace.windows[window].centre.tabs[index].color = color;
+        }
+        Intent::TabLock { tab, on } => {
+            let (window, index) = tab_index(workspace, tab)?;
+            workspace.windows[window].centre.tabs[index].locked = on;
+        }
+        Intent::TabMerge { tab, into } => {
+            if tab == into {
+                return Err(IntentError::SameTab(tab));
+            }
+            let (window, from) = tab_index(workspace, tab)?;
+            if tab_index(workspace, into)?.0 != window {
+                return Err(IntentError::CrossWindow);
+            }
+            let id = SplitId::new(workspace.fresh());
+            let window = &mut workspace.windows[window];
+            let moved = remove_tab(window, from);
+            let pane = moved
+                .last_focus
+                .filter(|pane| moved.contains(*pane))
+                .unwrap_or_else(|| moved.first_pane());
+            let target = window
+                .centre
+                .tab_mut(into)
+                .ok_or(IntentError::NoSuchTab(into))?;
+            let existing = std::mem::replace(&mut target.root, Node::Split(placeholder()));
+            target.root = Node::Split(Split {
+                id,
+                axis: Axis::Row,
+                ratios: vec![UNITS / 2, UNITS - UNITS / 2],
+                children: vec![existing, moved.root],
+            });
+            target.zoomed = None;
+            focus(window, pane);
         }
         Intent::TabRename { tab, title } => {
             let (window, index) = workspace
@@ -824,6 +1007,160 @@ fn change(
                 }
             };
             show_tab(&mut workspace.windows[window], index);
+        }
+        Intent::GroupNew { tab } => {
+            let (window, index) = tab_index(workspace, tab)?;
+            let id = GroupId::new(workspace.fresh());
+            let centre = &mut workspace.windows[window].centre;
+            let color = TabColor::FOR_GROUPS
+                .into_iter()
+                .find(|color| centre.groups.iter().all(|group| group.color != *color))
+                .unwrap_or(TabColor::FOR_GROUPS[0]);
+            centre.groups.push(Group {
+                id,
+                name: None,
+                color,
+                icon: None,
+                collapsed: false,
+                kept: false,
+            });
+            centre.tabs[index].group = Some(id);
+            created.group = Some(id);
+        }
+        Intent::GroupSet {
+            group,
+            name: new_name,
+            color,
+            icon,
+            collapsed,
+            kept,
+        } => {
+            let window = group_window(workspace, group)?;
+            let window = &mut workspace.windows[window];
+            if collapsed == Some(true) {
+                let centre = &window.centre;
+                let members = centre.members(group);
+                let active_inside = centre
+                    .active_tab()
+                    .is_some_and(|tab| tab.group == Some(group));
+                if active_inside
+                    && let (Some(first), Some(last)) = (members.first(), members.last())
+                {
+                    let open = |index: &usize| {
+                        let tab = &centre.tabs[*index];
+                        tab.group != Some(group) && !centre.folded(tab)
+                    };
+                    let nearest = (last + 1..centre.tabs.len())
+                        .find(open)
+                        .or_else(|| (0..*first).rev().find(open))
+                        .ok_or(IntentError::NothingElseToShow)?;
+                    show_tab(window, nearest);
+                }
+            }
+            let found = window
+                .centre
+                .group_mut(group)
+                .ok_or(IntentError::NoSuchGroup(group))?;
+            if let Some(new_name) = new_name {
+                found.name = name(new_name);
+            }
+            if let Some(color) = color {
+                found.color = color;
+            }
+            if let Some(icon) = icon {
+                found.icon = icon;
+            }
+            if let Some(collapsed) = collapsed {
+                found.collapsed = collapsed;
+            }
+            if let Some(kept) = kept {
+                found.kept = kept;
+            }
+        }
+        Intent::GroupMove { group, index } => {
+            let window = group_window(workspace, group)?;
+            let centre = &mut workspace.windows[window].centre;
+            let (block, mut rest): (Vec<Tab>, Vec<Tab>) = std::mem::take(&mut centre.tabs)
+                .into_iter()
+                .partition(|tab| tab.group == Some(group));
+            let at = index as usize;
+            let inside = at > 0
+                && rest
+                    .get(at - 1)
+                    .and_then(|tab| tab.group)
+                    .is_some_and(|before| rest.get(at).and_then(|tab| tab.group) == Some(before));
+            if at > rest.len() || inside {
+                let len = rest.len();
+                // Put back as it was: the copy is dropped on refusal, but say why.
+                return Err(if inside {
+                    IntentError::InsideGroup
+                } else {
+                    IntentError::BadIndex { index, len }
+                });
+            }
+            rest.splice(at..at, block);
+            centre.tabs = rest;
+        }
+        Intent::GroupUngroup { group } => {
+            let window = group_window(workspace, group)?;
+            let centre = &mut workspace.windows[window].centre;
+            centre.groups.retain(|found| found.id != group);
+            for tab in &mut centre.tabs {
+                if tab.group == Some(group) {
+                    tab.group = None;
+                }
+            }
+        }
+        Intent::GroupClose { group } => {
+            let window = group_window(workspace, group)?;
+            let here = &mut workspace.windows[window];
+            let mut found = here
+                .centre
+                .group(group)
+                .cloned()
+                .ok_or(IntentError::NoSuchGroup(group))?;
+            here.centre.groups.retain(|other| other.id != group);
+            let mut closing = Vec::new();
+            for (index, tab) in here.centre.tabs.iter_mut().enumerate() {
+                if tab.group != Some(group) {
+                    continue;
+                }
+                if tab.locked {
+                    tab.group = None;
+                } else {
+                    closing.push(index);
+                }
+            }
+            let mut tabs = remove_tabs(here, closing);
+            if found.kept && !tabs.is_empty() {
+                for tab in &mut tabs {
+                    forget_sessions(&mut tab.root);
+                    tab.group = Some(group);
+                }
+                found.collapsed = false;
+                workspace.shelf.push(Shelved { group: found, tabs });
+                // The oldest is forgotten once more are kept than a workspace keeps.
+                let over = workspace.shelf.len().saturating_sub(SHELF_MAX);
+                workspace.shelf.drain(..over);
+            }
+        }
+        Intent::GroupReopen { group, window } => {
+            let window = window_index(workspace, window)?;
+            let at = workspace
+                .shelf
+                .iter()
+                .position(|shelved| shelved.group.id == group)
+                .ok_or(IntentError::NoSuchGroup(group))?;
+            let Shelved { group, tabs } = workspace.shelf.remove(at);
+            put_group(&mut workspace.windows[window], group, tabs);
+        }
+        Intent::GroupForget { group } => {
+            let at = workspace
+                .shelf
+                .iter()
+                .position(|shelved| shelved.group.id == group)
+                .ok_or(IntentError::NoSuchGroup(group))?;
+            workspace.shelf.remove(at);
         }
         Intent::PanelMove {
             window,
@@ -996,8 +1333,42 @@ fn change(
             }
             workspace.name = name;
         }
+        Intent::GroupTake { group } => {
+            let window = group_window(workspace, group)?;
+            let here = &mut workspace.windows[window];
+            here.centre.groups.retain(|other| other.id != group);
+            let members = here.centre.members(group);
+            remove_tabs(here, members);
+        }
+        Intent::GroupGraft { window, group } => {
+            let window = window_index(workspace, window)?;
+            let Shelved { mut group, tabs } = *group;
+            group.id = GroupId::new(workspace.fresh());
+            group.collapsed = false;
+            let mut grafted = Vec::with_capacity(tabs.len());
+            for mut tab in tabs {
+                tab.id = TabId::new(workspace.fresh());
+                let mut panes = HashMap::new();
+                renumber(&mut tab.root, workspace, &mut panes);
+                forget_sessions(&mut tab.root);
+                tab.zoomed = tab.zoomed.and_then(|pane| panes.get(&pane).copied());
+                tab.last_focus = tab.last_focus.and_then(|pane| panes.get(&pane).copied());
+                grafted.push(tab);
+            }
+            created.group = Some(group.id);
+            put_group(&mut workspace.windows[window], group, grafted);
+        }
     }
     Ok(created)
+}
+
+fn placeholder() -> Split {
+    Split {
+        id: SplitId::new(0),
+        axis: Axis::Row,
+        ratios: Vec::new(),
+        children: Vec::new(),
+    }
 }
 
 /// Puts each of two panes where the other is, wherever under `node` either is. Each

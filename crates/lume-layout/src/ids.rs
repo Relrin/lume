@@ -1,9 +1,9 @@
 //! The names of the parts of a layout.
 //!
-//! Panes, tabs, splits and windows are numbered from one counter that the workspace
+//! Panes, tabs, splits, groups and windows are numbered from one counter that the workspace
 //! keeps, so a number is used once in a workspace's life and applying the same intents
 //! to the same workspace always gives the same ids. In JSON an id is a letter for its
-//! kind and the number: `"p12"`, `"t3"`, `"s7"`, `"w1"`.
+//! kind and the number: `"p12"`, `"t3"`, `"s7"`, `"g4"`, `"w1"`.
 
 use std::fmt;
 use std::num::NonZeroU64;
@@ -90,6 +90,12 @@ counted_id!(
     SplitId,
     "s",
     "a split id is `s` followed by a number"
+);
+counted_id!(
+    /// Names a group of tabs in a window's tab strip.
+    GroupId,
+    "g",
+    "a group id is `g` followed by a number"
 );
 counted_id!(
     /// Names a window of a workspace.

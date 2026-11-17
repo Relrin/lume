@@ -15,6 +15,7 @@ import { ShellContext } from "./context.ts";
 import { DockArea, DockDropPreview } from "./DockArea.tsx";
 import { Notices } from "./Notices.tsx";
 import { TabArea } from "./TabArea.tsx";
+import { TabPopups } from "./TabPopups.tsx";
 import { TopBar } from "./TopBar.tsx";
 
 /** The whole of a terminal window. `app` is what was started for the page. */
@@ -24,9 +25,14 @@ export function Shell({ app }: { app: ShellApp }) {
     app.config,
     (state) => state.view?.config.appearance["tile-color"] ?? "always",
   );
+  // How the mark of the tab on show moves: the style sheet and the row of tabs read it.
+  const tabHighlight = useStore(
+    app.config,
+    (state) => state.view?.config.appearance["tab-highlight"] ?? "glow",
+  );
   return (
     <ShellContext value={app}>
-      <div className="shell" data-tile-color={tileColor}>
+      <div className="shell" data-tile-color={tileColor} data-tab-highlight={tabHighlight}>
         <Background />
         <TopBar />
         <div className="shell-body">
@@ -38,9 +44,10 @@ export function Shell({ app }: { app: ShellApp }) {
           <DockArea area="right" />
           <DockDropPreview />
         </div>
+        <TabPopups />
         <Palette />
         <ConnectPalette />
-        <Notices store={app.notices} />
+        <Notices store={app.notices} run={(command, args) => app.commands.run(command, args)} />
         <Prompts store={app.prompts} />
       </div>
     </ShellContext>

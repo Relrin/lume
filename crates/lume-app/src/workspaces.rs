@@ -18,11 +18,12 @@ use std::sync::Arc;
 
 use lume_config::{Dirs, LayerInput, LayerKind, resolve_layers};
 use lume_layout::{
-    Intent, Loaded, NewContent, SpawnRequest, Store, StoreError, Workspace, WorkspaceId, apply,
-    valid_name,
+    GroupId, Intent, Loaded, NewContent, Shelved, SpawnRequest, Store, StoreError, Workspace,
+    WorkspaceId, apply, check, valid_name,
 };
 use lume_proto::app::WorkspaceEntry;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::carrier::SessionKey;
 use crate::error::CommandError;
@@ -205,7 +206,149 @@ pub enum Find {
     Either,
 }
 
+/// A group of a workspace and its tabs, as it is moved to another.
+fn group_of(workspace: &Workspace, group: GroupId) -> Option<Shelved> {
+    let window = workspace
+        .windows
+        .iter()
+        .find(|window| window.centre.group(group).is_some())?;
+    Some(Shelved {
+        group: window.centre.group(group)?.clone(),
+        tabs: window
+            .centre
+            .tabs
+            .iter()
+            .filter(|tab| tab.group == Some(group))
+            .cloned()
+            .collect(),
+    })
+}
+
+/// What a group is called where the user reads it.
+fn shown_name(shelved: &Shelved) -> String {
+    shelved
+        .group
+        .name
+        .clone()
+        .unwrap_or_else(|| "Unnamed group".to_owned())
+}
+
+/// Puts a group at the end of the window of a workspace the user last worked in, and
+/// says what it is called there.
+fn graft(workspace: &mut Workspace, shelved: Shelved) -> Result<GroupId, CommandError> {
+    let window = workspace
+        .focused_window
+        .or_else(|| workspace.windows.first().map(|window| window.id))
+        .ok_or_else(|| CommandError::bad_request("that workspace has no window to put it in"))?;
+    let (_, created) = apply(
+        workspace,
+        Intent::GroupGraft {
+            window,
+            group: Box::new(shelved),
+        },
+        None,
+    )?;
+    created
+        .group
+        .ok_or_else(|| CommandError::internal("the group was put in and has no id"))
+}
+
 impl Panes {
+    /// Reads a workspace that is not on show, to change it in its file.
+    async fn read_put_away(&self, name: &str) -> Result<Workspace, CommandError> {
+        let store = Arc::clone(&self.store);
+        let wanted = name.to_owned();
+        let loaded = tokio::task::spawn_blocking(move || store.load(&wanted, now_unix_ms()))
+            .await
+            .map_err(|error| CommandError::internal(error.to_string()))?
+            .map_err(store_error)?;
+        match loaded {
+            Loaded::Workspace(workspace) => Ok(*workspace),
+            Loaded::Missing => Err(CommandError::not_found(format!(
+                "there is no workspace called `{name}`"
+            ))),
+            Loaded::SetAside { reason, .. } => Err(CommandError::internal(format!(
+                "the workspace `{name}` could not be read ({reason})"
+            ))),
+        }
+    }
+
+    /// Writes a workspace that is not on show to its file.
+    async fn write_put_away(&self, workspace: Workspace) -> Result<(), CommandError> {
+        let store = Arc::clone(&self.store);
+        tokio::task::spawn_blocking(move || {
+            store.save(&workspace, env!("CARGO_PKG_VERSION"), now_unix_ms())
+        })
+        .await
+        .map_err(|error| CommandError::internal(error.to_string()))?
+        .map_err(store_error)
+    }
+
+    /// Moves a group of the workspace on show, with all its tabs, to the end of another
+    /// workspace's window. Its sessions end here; its panes start anew there. A notice
+    /// offers to bring it back.
+    pub async fn move_group(&self, group: GroupId, to: &str) -> Result<(), CommandError> {
+        check_name(to)?;
+        let _one_at_a_time = self.switching.lock().await;
+        let here = self.workspace();
+        if here.name.eq_ignore_ascii_case(to) {
+            return Err(CommandError::bad_request(format!(
+                "the group is in `{to}` already"
+            )));
+        }
+        let shelved = group_of(&here, group)
+            .ok_or_else(|| CommandError::not_found(format!("there is no group {group}")))?;
+        let take = Intent::GroupTake { group };
+        check(&here, &take)?;
+
+        let mut there = self.read_put_away(to).await?;
+        let name = shown_name(&shelved);
+        let moved = graft(&mut there, shelved)?;
+        let to = there.name.clone();
+        self.write_put_away(there).await?;
+        self.apply_core(take).await?;
+        self.notice_with(
+            "info",
+            format!("Moved {name} to {to}"),
+            Some(json!({
+                "label": "Undo",
+                "command": "lume.group.bring-back",
+                "args": { "workspace": to, "group": moved.to_string() },
+            })),
+        );
+        Ok(())
+    }
+
+    /// Takes a group out of a workspace that is not on show and puts it at the end of
+    /// a window of the one on show.
+    pub async fn bring_group_back(
+        &self,
+        from: &str,
+        group: GroupId,
+        window: lume_layout::WindowId,
+    ) -> Result<(), CommandError> {
+        check_name(from)?;
+        let _one_at_a_time = self.switching.lock().await;
+        let here = self.workspace();
+        if here.name.eq_ignore_ascii_case(from) {
+            return Err(CommandError::bad_request(format!(
+                "`{from}` is the workspace on show"
+            )));
+        }
+        let mut there = self.read_put_away(from).await?;
+        let shelved = group_of(&there, group)
+            .ok_or_else(|| CommandError::not_found(format!("`{from}` has no group {group}")))?;
+        let put = Intent::GroupGraft {
+            window,
+            group: Box::new(shelved),
+        };
+        check(&here, &put)?;
+        apply(&mut there, Intent::GroupTake { group }, None)?;
+        self.write_put_away(there).await?;
+        self.apply_core(put).await?;
+        Ok(())
+    }
+
     /// The workspaces there are, in alphabetical order, each with its folder.
     pub fn workspaces(&self) -> Result<(String, Vec<WorkspaceEntry>), CommandError> {
         let active = self.workspace().name;

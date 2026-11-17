@@ -353,6 +353,36 @@ pub struct AppearanceConfig {
             ("never", "Never"),
         ])))]
     pub tile_color: TileColor,
+    /// How the mark on the tab on show moves to another tab.
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Tabs", 10, "Tab highlight")
+        .help("How the highlight moves when another tab is shown")
+        .options(&[
+            ("glow", "Glow"),
+            ("glide", "Glide"),
+            ("stretch", "Stretch"),
+            ("spring", "Spring"),
+            ("instant", "Instant"),
+        ])))]
+    pub tab_highlight: TabHighlight,
+}
+
+/// How the mark on the tab on show moves to another tab. Each moves at once when the
+/// keyboard changes the tab, and when the system asks for less motion.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum TabHighlight {
+    /// A lit pill in the tab's colour that stretches towards the tab and settles,
+    /// glowing more the faster it goes.
+    #[default]
+    Glow,
+    /// A plain pill that slides.
+    Glide,
+    /// A line under the tab that stretches towards the next one.
+    Stretch,
+    /// A plain pill that springs into place.
+    Spring,
+    /// No motion: the mark is simply on the other tab.
+    Instant,
 }
 
 /// Which program tiles are drawn in their colours.
@@ -708,6 +738,7 @@ impl Default for AppearanceConfig {
             tokens: BTreeMap::new(),
             program_icons: BTreeMap::new(),
             tile_color: TileColor::Always,
+            tab_highlight: TabHighlight::Glow,
         }
     }
 }

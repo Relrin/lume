@@ -15,8 +15,9 @@ use std::path::PathBuf;
 
 use common::*;
 use lume_layout::{
-    Area, Bounds, Dir, FocusTarget, Intent, PaneId, PanelContent, PanelId, Place, Projection,
-    SplitId, TabId, TabTarget, UNITS, UnitRect, WindowId, Workspace, apply, needs,
+    Area, Bounds, Dir, FocusTarget, GroupIcon, GroupId, Intent, PaneId, PanelContent, PanelId,
+    Place, Projection, SplitId, TabColor, TabId, TabTarget, UNITS, UnitRect, WindowId, Workspace,
+    apply, needs,
 };
 use serde_json::{Value, json};
 
@@ -169,6 +170,7 @@ fn splits_and_tabs() {
                 content: plugin_view(),
                 index: Some(0),
                 activate: false,
+                group: None,
             },
             Intent::TabRename {
                 tab: TabId::new(10),
@@ -328,6 +330,80 @@ fn panels_and_windows() {
             },
             Intent::WindowClose { window: w },
             Intent::WindowClose { window: window(4) },
+        ],
+    );
+}
+
+#[test]
+fn tab_groups() {
+    let w = window(1);
+    let tab = TabId::new;
+    let group = GroupId::new(10);
+    let set = |name: Option<&str>, collapsed: Option<bool>| Intent::GroupSet {
+        group,
+        name: name.map(|name| Some(name.to_owned())),
+        color: None,
+        icon: name.map(|_| Some(GroupIcon::Bug)),
+        collapsed,
+        kept: name.map(|_| true),
+    };
+    let new_tab = || Intent::TabNew {
+        window: w,
+        content: terminal(),
+        index: None,
+        activate: true,
+        group: None,
+    };
+    golden(
+        "tab-groups",
+        vec![
+            // Tabs t3, t5, t7 and t9, and then group g10.
+            open(),
+            new_tab(),
+            new_tab(),
+            new_tab(),
+            Intent::TabColor {
+                tab: tab(3),
+                color: Some(TabColor::Teal),
+            },
+            Intent::GroupNew { tab: tab(5) },
+            Intent::TabPlace {
+                tab: tab(7),
+                index: 2,
+                group: Some(group),
+            },
+            set(Some("Billing"), None),
+            Intent::TabLock {
+                tab: tab(9),
+                on: true,
+            },
+            // Refused: it is locked.
+            Intent::TabClose { tab: tab(9) },
+            Intent::TabActivate {
+                target: TabTarget::Id { tab: tab(5) },
+            },
+            // Folded, it gives way to the tab after it.
+            set(None, Some(true)),
+            Intent::TabMove {
+                tab: tab(3),
+                index: 2,
+            },
+            Intent::GroupMove { group, index: 2 },
+            Intent::TabMerge {
+                tab: tab(3),
+                into: tab(9),
+            },
+            // Kept, it is put away and comes back.
+            Intent::GroupClose { group },
+            Intent::GroupReopen { group, window: w },
+            Intent::GroupUngroup { group },
+            Intent::TabsClose {
+                tabs: vec![tab(5), tab(7), tab(9)],
+            },
+            Intent::TabLock {
+                tab: tab(9),
+                on: false,
+            },
         ],
     );
 }

@@ -602,10 +602,14 @@
   }
 
   .tab-list {
+    position: relative;
     display: flex;
     align-items: center;
     min-width: 0;
     gap: 2px;
+    /* Room inside the scrolling list for the line under a group and the mark's glow. */
+    padding: 6px;
+    margin: -6px;
     overflow-x: auto;
     scrollbar-width: none;
   }
@@ -809,6 +813,819 @@
     width: 28px;
     height: 28px;
     border-radius: var(--lume-radius-control);
+  }
+
+  /*
+   * The colours of tabs and groups, from the theme. A tab takes its own colour, else
+   * its group's, else the accent, as the tint the mark of the tab on show is drawn in.
+   */
+  [data-group-color="red"] {
+    --group-color: var(--lume-color-tab-red);
+  }
+  [data-group-color="orange"] {
+    --group-color: var(--lume-color-tab-orange);
+  }
+  [data-group-color="yellow"] {
+    --group-color: var(--lume-color-tab-yellow);
+  }
+  [data-group-color="green"] {
+    --group-color: var(--lume-color-tab-green);
+  }
+  [data-group-color="teal"] {
+    --group-color: var(--lume-color-tab-teal);
+  }
+  [data-group-color="blue"] {
+    --group-color: var(--lume-color-tab-blue);
+  }
+  [data-group-color="purple"] {
+    --group-color: var(--lume-color-tab-purple);
+  }
+  [data-group-color="pink"] {
+    --group-color: var(--lume-color-tab-pink);
+  }
+
+  .tab {
+    --tab-tint: var(--lume-color-accent);
+  }
+
+  .tab[data-group-color] {
+    --tab-tint: var(--group-color);
+  }
+
+  .tab[data-color="red"] {
+    --tab-tint: var(--lume-color-tab-red);
+  }
+  .tab[data-color="orange"] {
+    --tab-tint: var(--lume-color-tab-orange);
+  }
+  .tab[data-color="yellow"] {
+    --tab-tint: var(--lume-color-tab-yellow);
+  }
+  .tab[data-color="green"] {
+    --tab-tint: var(--lume-color-tab-green);
+  }
+  .tab[data-color="teal"] {
+    --tab-tint: var(--lume-color-tab-teal);
+  }
+  .tab[data-color="blue"] {
+    --tab-tint: var(--lume-color-tab-blue);
+  }
+  .tab[data-color="purple"] {
+    --tab-tint: var(--lume-color-tab-purple);
+  }
+  .tab[data-color="pink"] {
+    --tab-tint: var(--lume-color-tab-pink);
+  }
+
+  /* A tab with a colour of its own is washed in it, a little more while it is on show. */
+  .tab[data-color] {
+    @apply text-ink;
+    background-color: color-mix(in srgb, var(--tab-tint) 13%, transparent);
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--tab-tint) 28%, transparent);
+  }
+
+  .tab[data-color][data-active="true"] {
+    background-color: color-mix(in srgb, var(--tab-tint) 24%, transparent);
+    box-shadow:
+      inset 0 0 0 var(--lume-size-border) color-mix(in srgb, var(--tab-tint) 50%, transparent),
+      0 0 14px color-mix(in srgb, var(--tab-tint) 22%, transparent);
+  }
+
+  .tab-label {
+    position: relative;
+  }
+
+  /* A locked tab shows a lock where its close button would be. */
+  .tab-lock {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+    padding: 0 9px 0 2px;
+  }
+
+  /*
+   * Folding a group: its tabs narrow to nothing and fade, and the label turns solid and
+   * shows how many tabs it holds.
+   */
+  .tab {
+    transition:
+      background-color 120ms ease,
+      scale 140ms cubic-bezier(0.23, 1, 0.32, 1),
+      max-width 220ms cubic-bezier(0.23, 1, 0.32, 1),
+      min-width 220ms cubic-bezier(0.23, 1, 0.32, 1),
+      opacity 180ms cubic-bezier(0.23, 1, 0.32, 1),
+      margin 160ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .tab[data-folded="true"] {
+    max-width: 0;
+    min-width: 0;
+    margin-left: -2px;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition-duration: 140ms, 140ms, 220ms, 220ms, 120ms, 160ms;
+  }
+
+  /* The line in a group's colour under its label and its tabs. */
+  .tab-group-line {
+    position: absolute;
+    left: 0;
+    right: -2px;
+    bottom: -4px;
+    height: 2px;
+    background-color: var(--group-color);
+    pointer-events: none;
+    transition:
+      opacity 150ms ease,
+      height 150ms ease,
+      bottom 150ms ease;
+  }
+
+  .tab[data-group-last] > .tab-group-line {
+    right: 6px;
+    border-radius: 0 2px 2px 0;
+  }
+
+  [data-joining] > .tab-group-line {
+    height: 3px;
+    bottom: -5px;
+  }
+
+  .tab-group-label {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    height: 22px;
+    padding: 0 8px;
+    margin: 0 3px 0 4px;
+    border-radius: min(7px, var(--lume-radius-control));
+    background-color: color-mix(in srgb, var(--group-color) 18%, transparent);
+    color: var(--group-color);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    user-select: none;
+    touch-action: pan-y;
+    cursor: pointer;
+    transition:
+      background-color 150ms ease,
+      color 150ms ease,
+      scale 120ms cubic-bezier(0.23, 1, 0.32, 1),
+      margin 160ms cubic-bezier(0.23, 1, 0.32, 1),
+      box-shadow 150ms ease,
+      opacity 150ms ease;
+  }
+
+  .tab-group-label:hover {
+    background-color: color-mix(in srgb, var(--group-color) 27%, transparent);
+  }
+
+  .tab-group-label:active {
+    scale: 0.96;
+  }
+
+  .tab-group-label:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--group-color) 70%, transparent);
+    outline-offset: 2px;
+  }
+
+  .tab-group-label > .tab-group-line {
+    bottom: -8px;
+    border-radius: 2px 0 0 2px;
+  }
+
+  .tab-group-label[data-joining] > .tab-group-line {
+    bottom: -9px;
+  }
+
+  .tab-group-label[data-joining] {
+    box-shadow: 0 0 0 1.5px var(--group-color);
+  }
+
+  .tab-group-label[data-collapsed] {
+    background-color: var(--group-color);
+    color: var(--lume-color-text-inverse);
+  }
+
+  .tab-group-label[data-collapsed] > .tab-group-line {
+    opacity: 0;
+  }
+
+  /* A group with neither a name nor a picture is a small mark in its colour. */
+  .tab-group-label[data-empty] {
+    min-width: 14px;
+    height: 16px;
+    padding: 0;
+    border-radius: 8px;
+    background-color: var(--group-color);
+    color: var(--lume-color-text-inverse);
+  }
+
+  .tab-group-icon {
+    display: flex;
+  }
+
+  .tab-group-icon + .tab-group-name {
+    margin-left: 5px;
+  }
+
+  .tab-group-count {
+    display: grid;
+    grid-template-columns: 0fr;
+    transition: grid-template-columns 220ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .tab-group-label[data-collapsed] .tab-group-count {
+    grid-template-columns: 1fr;
+  }
+
+  .tab-group-count > span {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+    padding-left: 6px;
+  }
+
+  .tab-group-label[data-empty] .tab-group-count > span {
+    padding: 0 5px;
+  }
+
+  .tab-group-label:not([data-collapsed]) .tab-group-count > span {
+    padding: 0;
+  }
+
+  /* The label's own font and size, so the count stands on the name's baseline; figures
+     of one width, so a count that changes keeps its place. */
+  .tab-group-number {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+
+  .tab-group-waiting {
+    display: none;
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: var(--lume-color-status-warning);
+    box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--lume-color-surface) 80%, transparent);
+  }
+
+  .tab-group-label[data-collapsed][data-waiting="true"] .tab-group-waiting {
+    display: block;
+  }
+
+  /* What is being dragged, and where it would land: a line, and a gap opening for it. */
+  .tab[data-dragging],
+  .tab-group-label[data-dragging] {
+    opacity: var(--lume-opacity-disabled);
+  }
+
+  .tab[data-drop-side]::after,
+  .tab-group-label[data-drop-side]::after {
+    content: "";
+    position: absolute;
+    top: 5px;
+    bottom: 5px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--lume-color-accent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--lume-color-accent) 60%, transparent);
+    pointer-events: none;
+  }
+
+  .tab-group-label[data-drop-side]::after {
+    top: -1px;
+    bottom: -1px;
+  }
+
+  .tab[data-drop-side="before"],
+  .tab-group-label[data-drop-side="before"] {
+    margin-left: 36px;
+  }
+
+  .tab[data-drop-side="after"],
+  .tab-group-label[data-drop-side="after"] {
+    margin-right: 36px;
+  }
+
+  .tab[data-drop-side="before"]::after,
+  .tab-group-label[data-drop-side="before"]::after {
+    left: -20px;
+  }
+
+  .tab[data-drop-side="after"]::after,
+  .tab-group-label[data-drop-side="after"]::after {
+    right: -20px;
+  }
+
+  /* In a column the gap opens above or below, and the line runs across. */
+  .tab-column .tab[data-folded="true"] {
+    display: none;
+  }
+
+  .tab-column .tab-group-label {
+    align-self: flex-start;
+    margin: 6px 0 2px 6px;
+  }
+
+  .tab-column .tab-group-line {
+    top: 4px;
+    bottom: 4px;
+    left: 0;
+    right: auto;
+    width: 2px;
+    height: auto;
+    border-radius: 2px;
+  }
+
+  .tab-column .tab-group-label > .tab-group-line {
+    display: none;
+  }
+
+  .tab-column [data-drop-side="before"] {
+    margin: 18px 0 0;
+  }
+
+  .tab-column [data-drop-side="after"] {
+    margin: 0 0 18px;
+  }
+
+  .tab-column [data-drop-side]::after {
+    left: 6px;
+    right: 6px;
+    width: auto;
+    height: 2px;
+  }
+
+  .tab-column [data-drop-side="before"]::after {
+    top: -10px;
+    bottom: auto;
+  }
+
+  .tab-column [data-drop-side="after"]::after {
+    top: auto;
+    bottom: -10px;
+  }
+
+  /*
+   * The mark of the tab on show, for the styles that move it. While it is there the tab
+   * on show draws no box of its own, and its label shows bright where the mark is.
+   */
+  .tab-mark {
+    --mark-rgb: 128 128 128;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: var(--lume-size-tab);
+    border-radius: var(--lume-radius-control);
+    pointer-events: none;
+    will-change: transform;
+    transition: --mark-press 140ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .tab-list:not([data-moving]) .tab-mark {
+    display: none;
+  }
+
+  .tab-mark.pressed {
+    --mark-press: 0.97;
+  }
+
+  .tab-list[data-moving] .tab[data-active="true"] {
+    background-color: transparent;
+    box-shadow: none;
+  }
+
+  .tab-list[data-moving] .tab[data-active="true"] .tab-label {
+    @apply text-ink-muted;
+  }
+
+  .tab-list[data-moving] .tab:has(> .tab-label:active) {
+    scale: 0.97;
+  }
+
+  .tab-lit {
+    display: none;
+  }
+
+  .tab-list[data-moving] .tab-lit {
+    @apply text-ink;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: inherit;
+    clip-path: inset(0 100% 0 0);
+    pointer-events: none;
+  }
+
+  .tab-lit .tab-title {
+    min-width: 0;
+  }
+
+  .shell[data-tab-highlight="glide"] .tab-mark,
+  .shell[data-tab-highlight="spring"] .tab-mark {
+    @apply bg-control-active;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .shell[data-tab-highlight="spring"] .tab-mark {
+    box-shadow:
+      inset 0 0 0 var(--lume-size-border) var(--lume-color-border),
+      0 1px 2px color-mix(in srgb, black 35%, transparent);
+  }
+
+  .shell[data-tab-highlight="glide"] .tab-mark.tinted,
+  .shell[data-tab-highlight="spring"] .tab-mark.tinted {
+    background: rgb(var(--mark-rgb) / 0.14);
+    box-shadow: inset 0 0 0 var(--lume-size-border) rgb(var(--mark-rgb) / 0.42);
+  }
+
+  /* Glow: one lit pill in the tab's colour, brighter and wider while it travels fast. */
+  .shell[data-tab-highlight="glow"] .tab-mark {
+    background: linear-gradient(
+      180deg,
+      rgb(var(--mark-rgb) / calc(0.17 + 0.09 * var(--mark-speed))),
+      rgb(var(--mark-rgb) / calc(0.085 + 0.07 * var(--mark-speed)))
+    );
+    box-shadow:
+      inset 0 0 0 1px rgb(var(--mark-rgb) / calc(0.24 + 0.22 * var(--mark-speed))),
+      inset 0 1px 0 color-mix(in srgb, white 7%, transparent),
+      0 0 6px rgb(var(--mark-rgb) / calc(0.1 + 0.18 * var(--mark-speed))),
+      0 0 calc(18px + 18px * var(--mark-speed)) calc(3px * var(--mark-speed))
+        rgb(var(--mark-rgb) / calc(0.12 + 0.24 * var(--mark-speed)));
+  }
+
+  .shell[data-tab-highlight="glow"] .tab-list[data-moving] .tab-lit {
+    color: color-mix(in srgb, var(--tab-tint) 14%, var(--lume-color-text));
+  }
+
+  /* Stretch: an underline, one pixel wide and scaled to its tab. */
+  .shell[data-tab-highlight="stretch"] .tab-mark {
+    width: 1px;
+    height: 12px;
+    border-radius: 0;
+    transform-origin: 0 50%;
+    background: linear-gradient(
+      to bottom,
+      transparent 0,
+      rgb(var(--mark-rgb) / 0.16) 30%,
+      rgb(var(--mark-rgb)) 41.7%,
+      rgb(var(--mark-rgb)) 58.3%,
+      rgb(var(--mark-rgb) / 0.16) 70%,
+      transparent 100%
+    );
+  }
+
+  /* The stretch style keeps the box of the tab on show; only the underline travels. */
+  .shell[data-tab-highlight="stretch"] .tab-list[data-moving] .tab[data-active="true"] {
+    @apply bg-control-active;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tab,
+    .tab[data-folded="true"] {
+      transition-property: opacity;
+    }
+
+    .tab-group-count,
+    .tab-group-label {
+      transition: none;
+    }
+
+    .tab-list[data-moving] .tab:has(> .tab-label:active),
+    .tab-group-label:active {
+      scale: none;
+    }
+  }
+
+  /* A menu or an editor opened from a tab or a label, under it. */
+  .anchored {
+    position: fixed;
+    z-index: 45;
+    width: 0;
+    height: 0;
+  }
+
+  .anchored > .menu,
+  .anchored > .group-editor {
+    top: 6px;
+    left: 0;
+    width: var(--anchored-width);
+    min-width: 0;
+    max-width: none;
+    max-height: var(--anchored-room);
+    transform-origin: var(--anchored-origin);
+    animation: menu-in 200ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .anchored > .menu,
+    .anchored > .group-editor {
+      animation: none;
+    }
+  }
+
+  .menu-heading {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 10px;
+    font-size: 11.5px;
+  }
+
+  .menu-note {
+    @apply text-ink-muted;
+    margin: 6px 10px 4px;
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+
+  .menu-swatches {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 34px;
+    padding: 0 10px;
+  }
+
+  .menu-swatches > .menu-label {
+    flex: none;
+  }
+
+  .menu-swatch-row {
+    display: flex;
+    gap: 5px;
+    margin-left: auto;
+  }
+
+  .menu-swatch {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: scale 120ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .menu-swatch:active {
+    scale: 0.9;
+  }
+
+  .menu-swatch[data-none] {
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    background: linear-gradient(
+      to top right,
+      transparent calc(50% - 0.75px),
+      var(--lume-color-text-muted) calc(50% - 0.75px),
+      var(--lume-color-text-muted) calc(50% + 0.75px),
+      transparent calc(50% + 0.75px)
+    );
+  }
+
+  .menu-swatch[aria-checked="true"] {
+    box-shadow:
+      0 0 0 2px var(--lume-color-popover),
+      0 0 0 3.5px var(--lume-color-text);
+  }
+
+  .menu-swatch:focus-visible {
+    outline: 2px solid var(--lume-color-border-focus);
+    outline-offset: 3px;
+  }
+
+  .menu-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+  }
+
+  .menu-dot[data-none] {
+    background: var(--lume-color-text-muted);
+    opacity: 0.6;
+  }
+
+  .menu-group-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .menu-item[data-danger],
+  .menu-item[data-danger] .menu-icon {
+    color: var(--lume-color-status-danger);
+  }
+
+  /* The editor of a group of tabs. */
+  .group-editor {
+    @apply bg-popover;
+    position: absolute;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    overflow-y: auto;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 2px));
+    box-shadow: var(--lume-shadow-popover);
+  }
+
+  .group-editor-top {
+    display: flex;
+    gap: 6px;
+  }
+
+  .group-editor-picture {
+    @apply bg-control;
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    color: var(--group-color);
+    cursor: pointer;
+    transition:
+      border-color 150ms ease,
+      scale 120ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .group-editor-picture:active {
+    scale: 0.95;
+  }
+
+  .group-editor-picture[aria-expanded="true"] {
+    border-color: color-mix(in srgb, var(--group-color) 60%, var(--lume-color-border));
+  }
+
+  .group-editor-name {
+    @apply bg-control text-ink;
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    padding: 0 10px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    font-size: 13px;
+    outline: none;
+    user-select: text;
+  }
+
+  .group-editor-name:focus {
+    border-color: color-mix(in srgb, var(--group-color) 70%, var(--lume-color-border));
+  }
+
+  .group-editor-name::placeholder {
+    color: var(--lume-color-text-muted);
+  }
+
+  .group-editor-dot {
+    display: block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--group-color);
+  }
+
+  .group-editor-dot[data-small] {
+    width: 8px;
+    height: 8px;
+  }
+
+  .group-editor-icons,
+  .group-editor-workspaces {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .group-editor-icons[data-open="true"],
+  .group-editor-workspaces[data-open="true"] {
+    grid-template-rows: 1fr;
+  }
+
+  .group-editor-icons {
+    margin-top: -10px;
+  }
+
+  .group-editor-icons[data-open="true"] {
+    margin-top: -2px;
+  }
+
+  .group-editor-icons > div,
+  .group-editor-workspaces > div {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .group-editor-icons > div {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    gap: 3px;
+  }
+
+  .group-editor-icons button {
+    @apply text-ink-muted;
+    height: 26px;
+  }
+
+  .group-editor-icons button[aria-pressed="true"] {
+    background-color: color-mix(in srgb, var(--group-color) 18%, transparent);
+    color: var(--group-color);
+  }
+
+  .group-editor-colors {
+    display: flex;
+    gap: 8px;
+    padding: 0 2px;
+  }
+
+  .group-editor-color {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: scale 120ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .group-editor-color:active {
+    scale: 0.9;
+  }
+
+  .group-editor-color[aria-checked="true"] {
+    box-shadow:
+      0 0 0 2px var(--lume-color-popover),
+      0 0 0 4px var(--group-color);
+  }
+
+  .group-editor-color:focus-visible {
+    outline: 2px solid var(--lume-color-border-focus);
+    outline-offset: 3px;
+  }
+
+  .group-editor-rows {
+    display: flex;
+    flex-direction: column;
+    margin: 0 -5px -5px;
+    padding-top: 4px;
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+  }
+
+  .group-editor-row {
+    height: 30px;
+    font-size: 12.5px;
+  }
+
+  .group-editor-workspaces .group-editor-row {
+    padding-left: 34px;
+  }
+
+  .group-editor-row[aria-pressed="true"] .menu-icon {
+    color: var(--group-color);
+  }
+
+  .group-editor-chevron {
+    transition: rotate 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .group-editor-row[aria-expanded="true"] .group-editor-chevron {
+    rotate: 90deg;
+  }
+
+  .group-editor-rows .menu-separator {
+    margin: 4px 5px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .group-editor-icons,
+    .group-editor-workspaces,
+    .group-editor-chevron {
+      transition: none;
+    }
+  }
+
+  .notice-action {
+    @apply text-accent;
+    flex-shrink: 0;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: var(--lume-radius-control);
+    font-size: 12.5px;
+    font-weight: 600;
   }
 
   /* Where a card that is being dragged can be let go to get a tab of its own. */
@@ -1043,6 +1860,8 @@
   .tab-column .tab-list {
     flex-direction: column;
     align-items: stretch;
+    padding: 0;
+    margin: 0;
     overflow: visible;
   }
 
@@ -3220,4 +4039,17 @@
       transition: none;
     }
   }
+}
+
+/* The numbers the mark of the tab on show moves by, registered so they can be eased. */
+@property --mark-press {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+@property --mark-speed {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
 }

@@ -20,33 +20,53 @@ export interface BrandGlyph {
 
 export type LineGlyphName =
   | "activity"
+  | "book-open"
+  | "bookmark"
   | "box"
+  | "bug"
   | "check"
   | "chevron-down"
+  | "chevron-first"
+  | "chevron-last"
+  | "chevron-left"
   | "chevron-right"
   | "columns-2"
   | "contrast"
   | "copy"
   | "file"
   | "file-text"
+  | "flame"
+  | "flask-conical"
+  | "fold-horizontal"
   | "folder"
+  | "folder-input"
   | "git-branch"
   | "globe"
   | "layers"
+  | "lock"
   | "maximize-2"
   | "menu"
   | "minus"
+  | "palette"
   | "panel-left"
+  | "pencil"
   | "plus"
   | "refresh-cw"
+  | "rocket"
   | "rotate-cw"
   | "rows-2"
   | "search"
+  | "server"
   | "settings"
   | "sparkles"
   | "square"
+  | "square-plus"
+  | "square-x"
   | "terminal"
   | "triangle-exclamation-point"
+  | "unfold-horizontal"
+  | "ungroup"
+  | "wrench"
   | "x";
 
 export type BrandGlyphName =
@@ -205,16 +225,47 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
   "activity": [
     ["path", {"d":"M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"}],
   ],
+  "book-open": [
+    ["path", {"d":"M12 5v16"}],
+    ["path", {"d":"M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"}],
+  ],
+  "bookmark": [
+    ["path", {"d":"M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"}],
+  ],
   "box": [
     ["path", {"d":"M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"}],
     ["path", {"d":"m3.3 7 8.7 5 8.7-5"}],
     ["path", {"d":"M12 22V12"}],
+  ],
+  "bug": [
+    ["path", {"d":"M12 20v-9"}],
+    ["path", {"d":"M14 7a4 4 0 0 1 4 4v3a6 6 0 0 1-12 0v-3a4 4 0 0 1 4-4z"}],
+    ["path", {"d":"M14.12 3.88 16 2"}],
+    ["path", {"d":"M21 21a4 4 0 0 0-3.81-4"}],
+    ["path", {"d":"M21 5a4 4 0 0 1-3.55 3.97"}],
+    ["path", {"d":"M22 13h-4"}],
+    ["path", {"d":"M3 21a4 4 0 0 1 3.81-4"}],
+    ["path", {"d":"M3 5a4 4 0 0 0 3.55 3.97"}],
+    ["path", {"d":"M6 13H2"}],
+    ["path", {"d":"m8 2 1.88 1.88"}],
+    ["path", {"d":"M9 7.13V6a3 3 0 1 1 6 0v1.13"}],
   ],
   "check": [
     ["path", {"d":"M20 6 9 17l-5-5"}],
   ],
   "chevron-down": [
     ["path", {"d":"m6 9 6 6 6-6"}],
+  ],
+  "chevron-first": [
+    ["path", {"d":"m17 18-6-6 6-6"}],
+    ["path", {"d":"M7 6v12"}],
+  ],
+  "chevron-last": [
+    ["path", {"d":"m7 18 6-6-6-6"}],
+    ["path", {"d":"M17 6v12"}],
+  ],
+  "chevron-left": [
+    ["path", {"d":"m15 18-6-6 6-6"}],
   ],
   "chevron-right": [
     ["path", {"d":"m9 18 6-6-6-6"}],
@@ -242,8 +293,31 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["path", {"d":"M16 13H8"}],
     ["path", {"d":"M16 17H8"}],
   ],
+  "flame": [
+    ["path", {"d":"M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"}],
+  ],
+  "flask-conical": [
+    ["path", {"d":"M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"}],
+    ["path", {"d":"M6.453 15h11.094"}],
+    ["path", {"d":"M8.5 2h7"}],
+  ],
+  "fold-horizontal": [
+    ["path", {"d":"M2 12h6"}],
+    ["path", {"d":"M22 12h-6"}],
+    ["path", {"d":"M12 2v2"}],
+    ["path", {"d":"M12 8v2"}],
+    ["path", {"d":"M12 14v2"}],
+    ["path", {"d":"M12 20v2"}],
+    ["path", {"d":"m19 9-3 3 3 3"}],
+    ["path", {"d":"m5 15 3-3-3-3"}],
+  ],
   "folder": [
     ["path", {"d":"M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"}],
+  ],
+  "folder-input": [
+    ["path", {"d":"M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1"}],
+    ["path", {"d":"M2 13h10"}],
+    ["path", {"d":"m9 16 3-3-3-3"}],
   ],
   "git-branch": [
     ["path", {"d":"M15 6a9 9 0 0 0-9 9V3"}],
@@ -260,6 +334,10 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["path", {"d":"M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"}],
     ["path", {"d":"M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"}],
   ],
+  "lock": [
+    ["rect", {"width":"18","height":"11","x":"3","y":"11","rx":"2","ry":"2"}],
+    ["path", {"d":"M7 11V7a5 5 0 0 1 10 0v4"}],
+  ],
   "maximize-2": [
     ["path", {"d":"M15 3h6v6"}],
     ["path", {"d":"m21 3-7 7"}],
@@ -274,9 +352,20 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
   "minus": [
     ["path", {"d":"M5 12h14"}],
   ],
+  "palette": [
+    ["path", {"d":"M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"}],
+    ["circle", {"cx":"13.5","cy":"6.5","r":".5","fill":"currentColor"}],
+    ["circle", {"cx":"17.5","cy":"10.5","r":".5","fill":"currentColor"}],
+    ["circle", {"cx":"6.5","cy":"12.5","r":".5","fill":"currentColor"}],
+    ["circle", {"cx":"8.5","cy":"7.5","r":".5","fill":"currentColor"}],
+  ],
   "panel-left": [
     ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
     ["path", {"d":"M9 3v18"}],
+  ],
+  "pencil": [
+    ["path", {"d":"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"}],
+    ["path", {"d":"m15 5 4 4"}],
   ],
   "plus": [
     ["path", {"d":"M5 12h14"}],
@@ -287,6 +376,12 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["path", {"d":"M21 3v5h-5"}],
     ["path", {"d":"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"}],
     ["path", {"d":"M8 16H3v5"}],
+  ],
+  "rocket": [
+    ["path", {"d":"M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"}],
+    ["path", {"d":"M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09"}],
+    ["path", {"d":"M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z"}],
+    ["path", {"d":"M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05"}],
   ],
   "rotate-cw": [
     ["path", {"d":"M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"}],
@@ -299,6 +394,12 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
   "search": [
     ["path", {"d":"m21 21-4.34-4.34"}],
     ["circle", {"cx":"11","cy":"11","r":"8"}],
+  ],
+  "server": [
+    ["rect", {"width":"20","height":"8","x":"2","y":"2","rx":"2","ry":"2"}],
+    ["rect", {"width":"20","height":"8","x":"2","y":"14","rx":"2","ry":"2"}],
+    ["line", {"x1":"6","x2":"6.01","y1":"6","y2":"6"}],
+    ["line", {"x1":"6","x2":"6.01","y1":"18","y2":"18"}],
   ],
   "settings": [
     ["path", {"d":"M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"}],
@@ -313,6 +414,16 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
   "square": [
     ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
   ],
+  "square-plus": [
+    ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
+    ["path", {"d":"M8 12h8"}],
+    ["path", {"d":"M12 8v8"}],
+  ],
+  "square-x": [
+    ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2","ry":"2"}],
+    ["path", {"d":"m15 9-6 6"}],
+    ["path", {"d":"m9 9 6 6"}],
+  ],
   "terminal": [
     ["path", {"d":"M12 19h8"}],
     ["path", {"d":"m4 17 6-6-6-6"}],
@@ -321,6 +432,23 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["path", {"d":"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"}],
     ["path", {"d":"M12 9v4"}],
     ["path", {"d":"M12 17h.01"}],
+  ],
+  "unfold-horizontal": [
+    ["path", {"d":"M16 12h6"}],
+    ["path", {"d":"M8 12H2"}],
+    ["path", {"d":"M12 2v2"}],
+    ["path", {"d":"M12 8v2"}],
+    ["path", {"d":"M12 14v2"}],
+    ["path", {"d":"M12 20v2"}],
+    ["path", {"d":"m19 15 3-3-3-3"}],
+    ["path", {"d":"m5 9-3 3 3 3"}],
+  ],
+  "ungroup": [
+    ["rect", {"x":"11","y":"14","width":"10","height":"7","rx":"2"}],
+    ["rect", {"x":"3","y":"3","width":"10","height":"7","rx":"2"}],
+  ],
+  "wrench": [
+    ["path", {"d":"M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"}],
   ],
   "x": [
     ["path", {"d":"M18 6 6 18"}],

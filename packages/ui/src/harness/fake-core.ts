@@ -32,13 +32,17 @@ import type {
   Area,
   DockArea,
   Floating,
+  Group,
+  GroupId,
   Intent,
   LayoutChange,
   Node,
   PaneId,
   PaneNode,
+  Shelved,
   SplitId,
   Tab,
+  TabColor,
   TabId,
   Workspace,
 } from "../layout/types.ts";
@@ -148,8 +152,29 @@ export const FIXTURE_SESSIONS: Readonly<Record<PaneId, string>> = {
 /** The fixture's tabs: the first holds two panes side by side, the second one pane. */
 export const FIXTURE_TABS = { first: "t1", second: "t2" } as const;
 
+/** A group of a fixture's tabs: which tabs, by their places, and how it looks. */
+export interface FixtureGroup extends Omit<Group, "id"> {
+  /** The places of its tabs among the fixture's tabs, counted from nought. */
+  readonly tabs: readonly number[];
+}
+
+/** How one of a fixture's tabs looks: its name, its colour, whether it is locked. */
+export interface FixtureTabLook {
+  readonly title?: string;
+  readonly color?: TabColor;
+  readonly locked?: boolean;
+}
+
 /** What a test may ask of the window it is given. Everything may be left out. */
 export interface FakeCoreOptions {
+  /** The groups the tabs are in. Left out, none. */
+  readonly groups?: readonly FixtureGroup[];
+  /** How some of the tabs look, by tab. */
+  readonly tabLooks?: Readonly<Record<TabId, FixtureTabLook>>;
+  /** The kept groups that were closed. Left out, none. */
+  readonly shelf?: readonly Shelved[];
+  /** The tab on show. Left out, the first. */
+  readonly activeTab?: TabId;
   /**
    * How many panes each tab has, from one to four: alone, two side by side, one beside
    * two stacked, or four in a square. Left out, two tabs of two panes and one.
@@ -333,6 +358,25 @@ const PROFILES: ProfileList = {
 /** The fixed-width fonts a fixture's machine has. */
 const FONTS: readonly string[] = ["Cascadia Mono", "Consolas", "JetBrains Mono"];
 
+/** What the fake core keeps of a tab besides its tree. */
+interface TabFacts {
+  title: string | null;
+  color: TabColor | null;
+  locked: boolean;
+  group: GroupId | null;
+}
+
+/** The number the fixture's groups are counted from: past whatever else it numbers. */
+const GROUP_IDS_FROM = 101;
+
+/** What the layout of the fake core's tabs is, to compare one moment with another. */
+interface TabsNow {
+  readonly order: readonly TabId[];
+  readonly active: TabId;
+  readonly facts: ReadonlyMap<TabId, TabFacts>;
+  readonly groups: readonly Group[];
+}
+
 /** A core that is only a layout, a configuration and whatever a test sends through it. */
 export class FakeCore implements Carrier {
   readonly #options: FakeCoreOptions;
@@ -354,6 +398,13 @@ export class FakeCore implements Carrier {
   readonly #ended = new Set<PaneId>();
   /** Commands the page called that this core has no answer for. */
   readonly unanswered: string[] = [];
+  /** The order of the tabs, what each is besides its tree, and the groups. */
+  #order: TabId[];
+  readonly #facts = new Map<TabId, TabFacts>();
+  #groups: Group[] = [];
+  #nextGroup = GROUP_IDS_FROM;
+  /** The commands the page ran, with their arguments, in order. */
+  readonly ran: { readonly id: string; readonly args: unknown }[] = [];
 
   constructor(options: FakeCoreOptions = {}) {
     this.#options = options;
@@ -363,6 +414,32 @@ export class FakeCore implements Carrier {
     this.#focus = first?.panes[0] ?? "p1";
     this.#scheme = options.scheme ?? "dark";
     this.#profiles = options.profiles ?? PROFILES;
+    this.#order = this.#fixture.tabs.map((tab) => tab.id);
+    for (const tab of this.#order) {
+      const look = options.tabLooks?.[tab];
+      this.#facts.set(tab, {
+        title: look?.title ?? null,
+        color: look?.color ?? null,
+        locked: look?.locked ?? false,
+        group: null,
+      });
+    }
+    for (const { tabs, ...look } of options.groups ?? []) {
+      const id = `g${this.#nextGroup++}`;
+      this.#groups.push({ ...look, id });
+      for (const at of tabs) {
+        const facts = this.#facts.get(this.#order[at] ?? "");
+        if (facts) facts.group = id;
+      }
+    }
+    if (options.activeTab !== undefined) {
+      const shown = this.#fixture.tabs.find((tab) => tab.id === options.activeTab);
+      if (shown) {
+        this.#active = shown.id;
+        this.#focus = shown.panes[0] ?? this.#focus;
+      }
+    }
+    this.#tidy();
   }
 
   /** The pane that shows a session of the fixture. */
@@ -383,7 +460,12 @@ export class FakeCore implements Carrier {
 
   /** The tabs of the fixture, in order. */
   get tabs(): readonly TabId[] {
-    return this.#fixture.tabs.map((tab) => tab.id);
+    return this.#order;
+  }
+
+  /** The groups of the fixture's tabs, in order. */
+  get groups(): readonly Group[] {
+    return this.#groups;
   }
 
   /** The session a pane of the fixture shows. */
@@ -410,13 +492,23 @@ export class FakeCore implements Carrier {
   /** The workspace as it is now. */
   #workspace(): Workspace {
     const shares = (split: SplitId): readonly number[] => this.#shares.get(split) ?? [HALF, HALF];
-    const tabs: Tab[] = this.#fixture.tabs.map((tab) => ({
-      id: tab.id,
-      title: null,
-      root: tab.root(shares),
-      zoomed: null,
-      last_focus: tab.panes[0] ?? null,
-    }));
+    const tabs: Tab[] = this.#order.flatMap((id): Tab[] => {
+      const tab = this.#fixture.tabs.find((found) => found.id === id);
+      if (!tab) return [];
+      const facts = this.#facts.get(id);
+      return [
+        {
+          id: tab.id,
+          title: facts?.title ?? null,
+          root: tab.root(shares),
+          zoomed: null,
+          last_focus: tab.panes[0] ?? null,
+          ...(facts?.color ? { color: facts.color } : {}),
+          ...(facts?.locked ? { locked: true } : {}),
+          ...(facts?.group ? { group: facts.group } : {}),
+        },
+      ];
+    });
     const floats: Floating[] = [];
     const float = (pane: PaneId | null, minimised: Floating["minimised"]): void => {
       if (pane === null) return;
@@ -441,7 +533,11 @@ export class FakeCore implements Carrier {
             right: this.#dock("right"),
             bottom: this.#dock("bottom"),
           },
-          centre: { tabs, active: this.#active },
+          centre: {
+            tabs,
+            active: this.#active,
+            ...(this.#groups.length > 0 ? { groups: this.#groups } : {}),
+          },
           floating: floats,
           focus: this.#focus,
           history: [this.#focus],
@@ -450,6 +546,9 @@ export class FakeCore implements Carrier {
       focused_window: WINDOW,
       scratch: null,
       next_id: this.#fixture.nextId,
+      ...(this.#options.shelf && this.#options.shelf.length > 0
+        ? { shelf: this.#options.shelf }
+        : {}),
     };
   }
 
@@ -563,6 +662,9 @@ export class FakeCore implements Carrier {
       case "background_image":
         return answer(new ArrayBuffer(0));
       case "command_run":
+        this.ran.push({ id: String(args["id"]), args: args["args"] ?? null });
+        this.#command(String(args["id"]), args["args"]);
+        return answer(null);
       case "page_reply":
       case "clipboard_write":
       case "window_drag":
@@ -601,9 +703,195 @@ export class FakeCore implements Carrier {
           { type: "dock_size", window: WINDOW, area: intent.area, size: intent.size },
         ]);
         break;
+      case "tab_activate":
+        if (intent.target.type === "id") this.activate(intent.target.tab);
+        break;
+      case "tab_place":
+        this.#tabs(() => {
+          const facts = this.#facts.get(intent.tab);
+          if (!facts) return;
+          this.#order = this.#order.filter((tab) => tab !== intent.tab);
+          this.#order.splice(Math.min(intent.index, this.#order.length), 0, intent.tab);
+          facts.group = intent.group ?? null;
+        });
+        break;
+      case "group_move":
+        this.#tabs(() => {
+          const block = this.#order.filter((tab) => this.#facts.get(tab)?.group === intent.group);
+          const rest = this.#order.filter((tab) => this.#facts.get(tab)?.group !== intent.group);
+          rest.splice(Math.min(intent.index, rest.length), 0, ...block);
+          this.#order = rest;
+        });
+        break;
       default:
         break;
     }
+  }
+
+  /** The tab a command acts on: the one it names, or the one on show. */
+  #tabOf(args: unknown): TabId {
+    const named = (args as { tab?: unknown } | null)?.tab;
+    return typeof named === "string" ? named : this.#active;
+  }
+
+  /** The group a command acts on: the one it names, or the group of the tab on show. */
+  #groupOf(args: unknown): GroupId | null {
+    const named = (args as { group?: unknown } | null)?.group;
+    return typeof named === "string" ? named : (this.#facts.get(this.#active)?.group ?? null);
+  }
+
+  /** Does the little of a command about tabs and groups the scenes need done. */
+  #command(id: string, args: unknown): void {
+    const given = (args ?? {}) as Record<string, unknown>;
+    const tab = this.#tabOf(args);
+    const facts = this.#facts.get(tab);
+    const group = this.#groupOf(args);
+    const editGroup = (edit: (found: Group) => Group) => {
+      this.#groups = this.#groups.map((found) => (found.id === group ? edit(found) : found));
+    };
+    switch (id) {
+      case "lume.tab.color":
+        this.#tabs(() => {
+          if (facts) facts.color = (given["color"] as TabColor | null) ?? null;
+        });
+        return;
+      case "lume.tab.lock":
+        this.#tabs(() => {
+          if (facts) facts.locked = typeof given["on"] === "boolean" ? given["on"] : !facts.locked;
+        });
+        return;
+      case "lume.tab.rename":
+        this.#tabs(() => {
+          if (facts) facts.title = typeof given["title"] === "string" ? given["title"] : null;
+        });
+        return;
+      case "lume.group.new":
+        this.#tabs(() => {
+          if (!facts) return;
+          const used = new Set(this.#groups.map((found) => found.color));
+          const order: readonly TabColor[] = [
+            "blue",
+            "pink",
+            "yellow",
+            "purple",
+            "teal",
+            "red",
+            "green",
+            "orange",
+          ];
+          const id = `g${this.#nextGroup++}`;
+          this.#groups.push({ id, color: order.find((color) => !used.has(color)) ?? "blue" });
+          facts.group = id;
+        });
+        return;
+      case "lume.group.add":
+        this.#tabs(() => {
+          if (facts && typeof given["group"] === "string") facts.group = given["group"];
+        });
+        return;
+      case "lume.group.remove":
+        this.#tabs(() => {
+          if (facts) facts.group = null;
+        });
+        return;
+      case "lume.group.set":
+        this.#tabs(() =>
+          editGroup((found) => {
+            const next: Record<string, unknown> = { ...found };
+            for (const key of ["name", "color", "icon", "collapsed", "kept"]) {
+              if (!(key in given)) continue;
+              if (given[key] === null) delete next[key];
+              else next[key] = given[key];
+            }
+            return next as unknown as Group;
+          }),
+        );
+        return;
+      case "lume.group.toggle":
+        this.#tabs(() => editGroup((found) => ({ ...found, collapsed: !found.collapsed })));
+        return;
+      case "lume.group.ungroup":
+        this.#tabs(() => {
+          for (const each of this.#facts.values()) if (each.group === group) each.group = null;
+        });
+        return;
+      default:
+        return;
+    }
+  }
+
+  /** What the tabs are now, to compare with what they are after a change. */
+  #tabsNow(): TabsNow {
+    return {
+      order: [...this.#order],
+      active: this.#active,
+      facts: new Map([...this.#facts].map(([tab, facts]) => [tab, { ...facts }])),
+      groups: this.#groups.map((group) => ({ ...group })),
+    };
+  }
+
+  /**
+   * Keeps the tabs in their one form, as the core does: a group's tabs stand together
+   * where its first tab is, a group without tabs is gone, the groups are listed in the
+   * order of their tabs, and the tab on show is never folded away.
+   */
+  #tidy(): void {
+    const known = new Set(this.#groups.map((group) => group.id));
+    for (const facts of this.#facts.values()) {
+      if (facts.group !== null && !known.has(facts.group)) facts.group = null;
+    }
+    const seen = new Set<GroupId>();
+    const order: TabId[] = [];
+    for (const tab of this.#order) {
+      const group = this.#facts.get(tab)?.group ?? null;
+      if (group === null) {
+        order.push(tab);
+        continue;
+      }
+      if (seen.has(group)) continue;
+      seen.add(group);
+      order.push(...this.#order.filter((other) => this.#facts.get(other)?.group === group));
+    }
+    this.#order = order;
+    this.#groups = [...seen].flatMap((id) => this.#groups.filter((group) => group.id === id));
+    const shown = this.#facts.get(this.#active)?.group ?? null;
+    this.#groups = this.#groups.map((group) => {
+      if (group.id !== shown || !group.collapsed) return group;
+      const open: Record<string, unknown> = { ...group };
+      delete open["collapsed"];
+      return open as unknown as Group;
+    });
+  }
+
+  /** Changes the tabs, and tells the page what changed, as the core would. */
+  #tabs(change: () => void): void {
+    const before = this.#tabsNow();
+    change();
+    this.#tidy();
+    const after = this.#tabsNow();
+    const changes: LayoutChange[] = [];
+    for (const tab of after.order) {
+      const was = before.facts.get(tab);
+      const is = after.facts.get(tab);
+      if (!was || !is) continue;
+      if (was.title !== is.title) changes.push({ type: "tab_title", tab, title: is.title });
+      if (was.color !== is.color || was.locked !== is.locked || was.group !== is.group) {
+        changes.push({
+          type: "tab_state",
+          tab,
+          color: is.color,
+          locked: is.locked,
+          group: is.group,
+        });
+      }
+    }
+    if (JSON.stringify(before.groups) !== JSON.stringify(after.groups)) {
+      changes.push({ type: "groups", window: WINDOW, groups: after.groups });
+    }
+    if (before.order.join() !== after.order.join() || before.active !== after.active) {
+      changes.push({ type: "tabs", window: WINDOW, order: after.order, active: after.active });
+    }
+    if (changes.length > 0) this.#changed(changes);
   }
 
   /** Whether the page has attached to the session of every pane. */
@@ -669,9 +957,15 @@ export class FakeCore implements Carrier {
   activate(tab: TabId): void {
     const focus = this.#fixture.tabs.find((found) => found.id === tab)?.panes[0];
     if (focus === undefined) return;
+    const groups = JSON.stringify(this.#groups);
     this.#active = tab;
     this.#focus = focus;
+    // A folded group opens when one of its tabs is shown.
+    this.#tidy();
     this.#changed([
+      ...(JSON.stringify(this.#groups) === groups
+        ? []
+        : [{ type: "groups" as const, window: WINDOW, groups: this.#groups }]),
       { type: "tabs", window: WINDOW, order: this.tabs, active: tab },
       { type: "focus", window: WINDOW, pane: focus },
     ]);

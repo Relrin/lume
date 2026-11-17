@@ -32,6 +32,9 @@ impl Projection {
         let mut workspace = workspace.clone();
         workspace.next_id = 0;
         workspace.windows.iter_mut().for_each(view_of_window);
+        for shelved in &mut workspace.shelf {
+            shelved.tabs.iter_mut().for_each(view_of_tab);
+        }
         Self { workspace }
     }
 
@@ -91,6 +94,23 @@ impl Projection {
                     tab.title = title.clone();
                 }
             }
+            LayoutChange::TabState {
+                tab,
+                color,
+                locked,
+                group,
+            } => {
+                if let Some(tab) = tab_mut(workspace, *tab) {
+                    tab.color = *color;
+                    tab.locked = *locked;
+                    tab.group = *group;
+                }
+            }
+            LayoutChange::Groups { window, groups } => {
+                if let Some(window) = workspace.window_mut(*window) {
+                    window.centre.groups = groups.clone();
+                }
+            }
             LayoutChange::TabTree { tab, root, zoomed } => {
                 if let Some(tab) = tab_mut(workspace, *tab) {
                     tab.root = root.clone();
@@ -148,6 +168,13 @@ impl Projection {
             LayoutChange::Scratch { scratch } => workspace.scratch = scratch.clone(),
             LayoutChange::WindowFocused { window } => workspace.focused_window = *window,
             LayoutChange::WorkspaceName { name } => workspace.name.clone_from(name),
+            LayoutChange::Shelf { shelf } => {
+                let mut shelf = shelf.clone();
+                for shelved in &mut shelf {
+                    shelved.tabs.iter_mut().for_each(view_of_tab);
+                }
+                workspace.shelf = shelf;
+            }
             // The changes before it have already taken the pane out.
             LayoutChange::PaneClosed { .. } => {}
         }

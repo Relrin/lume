@@ -36,6 +36,7 @@ import { FIXTURE_BINDINGS, FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import { readReference, saveFile, type HarnessInfo } from "./host.ts";
 import { CONNECT_SCENES } from "./connect-scenes.ts";
 import { PANE_SCENES } from "./pane-scenes.ts";
+import { TAB_SCENES } from "./tab-scenes.ts";
 import type { Scene } from "./scene.ts";
 import { describePage, differences, plainColor, recordText, type Part } from "./structure.ts";
 import {
@@ -167,6 +168,7 @@ const SCENES: readonly Scene[] = [
   },
   ...PANE_SCENES,
   ...CONNECT_SCENES,
+  ...TAB_SCENES,
 ];
 
 /** One state of the settings window to write down. */

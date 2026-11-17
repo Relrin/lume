@@ -307,8 +307,8 @@ pub fn pages() -> [Page; 3] {
             label: "Appearance",
             icon: "appearance",
             group: APPLICATION,
-            blurb: "Theme, type and panes.",
-            groups: &["Theme", "Type", "Panes", "Background"],
+            blurb: "Theme, type, panes and tabs.",
+            groups: &["Theme", "Type", "Panes", "Tabs", "Background"],
         },
         Page {
             id: "terminal",

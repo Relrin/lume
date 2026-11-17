@@ -11,10 +11,13 @@ import type { LayoutState, SplitEntry, TabEntry, TreeNode, WindowEntry } from ".
 import type {
   Area,
   DockArea,
+  Group,
+  GroupId,
   Pane,
   PaneId,
   Panel,
   PanelId,
+  Shelved,
   SplitId,
   TabId,
   UnitRect,
@@ -23,6 +26,9 @@ import type {
 
 /** No ids: one list for every window that has none, so a selector's answer stays the same. */
 const NO_IDS: readonly string[] = [];
+
+/** No groups: one list for every window whose tabs are in none. */
+const NO_GROUPS: readonly Group[] = [];
 
 /** No panels: one list for every area that has none. */
 const NO_PANELS: readonly Panel[] = [];
@@ -246,4 +252,93 @@ export function tabTitle(
   const pane = selectTitlePane(state, tab);
   if (pane === undefined) return UNTITLED_TAB;
   return state.panes[pane]?.title || paneTitles.get(pane) || UNTITLED_TAB;
+}
+
+/** The groups of a window's tabs, in the order their first tabs come. */
+export function selectGroups(state: LayoutState, window?: WindowId): readonly Group[] {
+  return selectWindow(state, window)?.groups ?? NO_GROUPS;
+}
+
+/** One group of a window's tabs. */
+export function selectGroup(
+  state: LayoutState,
+  group: GroupId,
+  window?: WindowId,
+): Group | undefined {
+  return selectGroups(state, window).find((found) => found.id === group);
+}
+
+/** The tabs of a group, in order. Builds a list. */
+export function selectGroupTabs(state: LayoutState, group: GroupId, window?: WindowId): TabId[] {
+  return selectTabOrder(state, window).filter((tab) => state.tabs[tab]?.group === group);
+}
+
+/** The kept groups that were closed, the most recently closed last. */
+export function selectShelf(state: LayoutState): readonly Shelved[] {
+  return state.shelf;
+}
+
+/** One thing along a window's row of tabs: the label of a group, or a tab. */
+export type StripItem =
+  | {
+      readonly kind: "group";
+      readonly group: Group;
+      /** The group's tabs, in order. */
+      readonly tabs: readonly TabId[];
+    }
+  | {
+      readonly kind: "tab";
+      readonly tab: TabId;
+      /** The tab's place among the window's tabs. */
+      readonly index: number;
+      /** The group the tab is in. */
+      readonly group: Group | null;
+      /** Whether its group is folded, which hides it. */
+      readonly folded: boolean;
+      /** Whether it is the last tab of its group: its group's line ends with it. */
+      readonly last: boolean;
+    };
+
+/**
+ * A window's row of tabs as it is laid out: each group's label in front of its first
+ * tab, then its tabs. Builds a list; a component selects {@link selectStripKey} and
+ * builds this when that changes.
+ */
+export function stripItems(state: LayoutState, window?: WindowId): StripItem[] {
+  const order = selectTabOrder(state, window);
+  const groups = selectGroups(state, window);
+  const items: StripItem[] = [];
+  order.forEach((tab, index) => {
+    const id = state.tabs[tab]?.group ?? null;
+    const group = id === null ? null : (groups.find((found) => found.id === id) ?? null);
+    const before = index > 0 ? state.tabs[order[index - 1] ?? ""]?.group : undefined;
+    const after = state.tabs[order[index + 1] ?? ""]?.group;
+    if (group && before !== group.id) {
+      items.push({
+        kind: "group",
+        group,
+        tabs: order.filter((other) => state.tabs[other]?.group === group.id),
+      });
+    }
+    items.push({
+      kind: "tab",
+      tab,
+      index,
+      group,
+      folded: group?.collapsed === true,
+      last: group !== null && after !== group.id,
+    });
+  });
+  return items;
+}
+
+/**
+ * Says what {@link stripItems} would build, as text: the same text until the row of
+ * tabs changes.
+ */
+export function selectStripKey(state: LayoutState, window?: WindowId): string {
+  const order = selectTabOrder(state, window);
+  const groups = selectGroups(state, window);
+  const tabs = order.map((tab) => `${tab}:${state.tabs[tab]?.group ?? ""}`).join(" ");
+  return groups.length === 0 ? tabs : `${tabs}|${JSON.stringify(groups)}`;
 }

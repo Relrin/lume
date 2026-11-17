@@ -131,8 +131,30 @@ function nameOf(node: AuditNode, role: string | null): string | undefined {
   const label = (node.getAttribute("aria-label") ?? "").trim();
   if (label !== "") return label.slice(0, NAME_MAX_CHARS);
   if (role === null || !NAMED_BY_CONTENT.has(role)) return undefined;
-  const text = (node.textContent ?? "").replace(/\s+/g, " ").trim();
+  const text = shownText(node).replace(/\s+/g, " ").trim();
   return text === "" ? undefined : text.slice(0, NAME_MAX_CHARS);
+}
+
+/**
+ * An element's text without what is hidden from a screen reader inside it, which is
+ * no part of its name. Only elements are visited, so the hidden text is taken out of
+ * the whole from its last place on, where a copy laid over the rest sits.
+ */
+function shownText(node: AuditNode): string {
+  let text = node.textContent ?? "";
+  const hidden = (part: AuditNode): void => {
+    for (const child of Array.from(part.children)) {
+      if (child.getAttribute("aria-hidden") === "true") {
+        const gone = child.textContent ?? "";
+        const at = gone === "" ? -1 : text.lastIndexOf(gone);
+        if (at >= 0) text = text.slice(0, at) + text.slice(at + gone.length);
+      } else {
+        hidden(child);
+      }
+    }
+  };
+  hidden(node);
+  return text;
 }
 
 /**

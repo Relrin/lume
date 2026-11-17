@@ -7,10 +7,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{PaneId, SplitId, TabId, WindowId};
+use crate::ids::{GroupId, PaneId, SplitId, TabId, WindowId};
 use crate::model::{
-    Area, Bounds, DockArea, Floating, Node, Pane, PaneContent, Scratch, Tab, UnitRect, Window,
-    Workspace,
+    Area, Bounds, DockArea, Floating, Group, Node, Pane, PaneContent, Scratch, Shelved, Tab,
+    TabColor, UnitRect, Window, Workspace,
 };
 
 /// One difference between a layout before an intent and after it.
@@ -38,6 +38,19 @@ pub enum LayoutChange {
     },
     /// A tab was named, or lost its name.
     TabTitle { tab: TabId, title: Option<String> },
+    /// A tab's colour, its lock, or the group it is in changed.
+    TabState {
+        tab: TabId,
+        color: Option<TabColor>,
+        locked: bool,
+        group: Option<GroupId>,
+    },
+    /// The groups of a window's tabs changed: which there are, their order, or how
+    /// one looks.
+    Groups {
+        window: WindowId,
+        groups: Vec<Group>,
+    },
     /// The splits and panes of a tab changed, or which pane fills it.
     TabTree {
         tab: TabId,
@@ -81,6 +94,8 @@ pub enum LayoutChange {
     WindowFocused { window: Option<WindowId> },
     /// The workspace was given another name.
     WorkspaceName { name: String },
+    /// The groups that were put away changed.
+    Shelf { shelf: Vec<Shelved> },
     /// A pane is gone from the workspace. What it showed is given, so whoever kept
     /// something for the pane, such as its session, can let go of it. The changes
     /// before this one have already taken the pane out of wherever it was.
@@ -131,4 +146,6 @@ pub struct Created {
     pub pane: Option<PaneId>,
     pub tab: Option<TabId>,
     pub window: Option<WindowId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<GroupId>,
 }

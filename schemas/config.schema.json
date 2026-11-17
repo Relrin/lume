@@ -41,6 +41,7 @@
       "default": {
         "pane-header": "always",
         "program-icons": {},
+        "tab-highlight": "glow",
         "theme-dark": "lume-dark",
         "theme-light": "lume-light",
         "tile-color": "always",
@@ -1027,6 +1028,67 @@
           "default": {},
           "description": "The tile a pane's header and its tab show for a program, by the program's name\nwithout its folder or `.exe`, such as `nvim = \"editor\"`. These come before the\ntiles the application knows.",
           "type": "object"
+        },
+        "tab-highlight": {
+          "default": "glow",
+          "description": "How the mark on the tab on show moves to another tab.",
+          "oneOf": [
+            {
+              "const": "glow",
+              "description": "A lit pill in the tab's colour that stretches towards the tab and settles,\nglowing more the faster it goes.",
+              "type": "string"
+            },
+            {
+              "const": "glide",
+              "description": "A plain pill that slides.",
+              "type": "string"
+            },
+            {
+              "const": "stretch",
+              "description": "A line under the tab that stretches towards the next one.",
+              "type": "string"
+            },
+            {
+              "const": "spring",
+              "description": "A plain pill that springs into place.",
+              "type": "string"
+            },
+            {
+              "const": "instant",
+              "description": "No motion: the mark is simply on the other tab.",
+              "type": "string"
+            }
+          ],
+          "x-lume-settings": {
+            "control": "select",
+            "group": "Tabs",
+            "help": "How the highlight moves when another tab is shown",
+            "label": "Tab highlight",
+            "options": [
+              {
+                "label": "Glow",
+                "value": "glow"
+              },
+              {
+                "label": "Glide",
+                "value": "glide"
+              },
+              {
+                "label": "Stretch",
+                "value": "stretch"
+              },
+              {
+                "label": "Spring",
+                "value": "spring"
+              },
+              {
+                "label": "Instant",
+                "value": "instant"
+              }
+            ],
+            "order": 10,
+            "page": "appearance"
+          }
         },
         "theme": {
           "description": "The theme to use whatever the system's colour scheme is. Left out, the theme\nfollows the system: `theme-light` or `theme-dark`.",
@@ -2329,12 +2391,13 @@
       "label": "General"
     },
     {
-      "blurb": "Theme, type and panes.",
+      "blurb": "Theme, type, panes and tabs.",
       "group": "Application",
       "groups": [
         "Theme",
         "Type",
         "Panes",
+        "Tabs",
         "Background"
       ],
       "icon": "appearance",

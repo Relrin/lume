@@ -93,6 +93,7 @@ impl Services {
                 content: NewContent::Terminal(request),
                 index: None,
                 activate: true,
+                group: None,
             })
             .await?;
         Ok(applied.created.pane)

@@ -20,14 +20,18 @@ import type {
   Bounds,
   DockAreas,
   Floating,
+  Group,
+  GroupId,
   LayoutChange,
   Minimised,
   Node,
   Pane,
   PaneId,
   Scratch,
+  Shelved,
   SplitId,
   Tab,
+  TabColor,
   TabId,
   UnitRect,
   Window,
@@ -54,6 +58,8 @@ export interface WindowEntry {
   readonly tabs: readonly TabId[];
   /** The tab on show. */
   readonly active: TabId | null;
+  /** The groups of the window's tabs, in the order their first tabs come. */
+  readonly groups: readonly Group[];
   /** The floating panes, from the one at the back to the one in front. */
   readonly floating: readonly PaneId[];
   /** Those of the floating panes that are put away at the window's corner, in the same order. */
@@ -71,6 +77,12 @@ export interface TabEntry {
   readonly root: TreeNode;
   /** The pane that fills the tab for now, hiding the others. */
   readonly zoomed: PaneId | null;
+  /** The colour the user gave the tab. */
+  readonly color: TabColor | null;
+  /** Whether the tab is locked against being closed. */
+  readonly locked: boolean;
+  /** The group the tab is in. */
+  readonly group: GroupId | null;
 }
 
 /** One split's direction and its children's shares. */
@@ -99,6 +111,12 @@ interface FloatingIds {
 /** No ids: one list for every window that has none, so an entry's list stays the same. */
 const NO_IDS: readonly PaneId[] = [];
 
+/** No groups: one list for every window that has none. */
+const NO_GROUPS: readonly Group[] = [];
+
+/** Nothing put away: one list for every workspace that keeps none. */
+const NO_SHELF: readonly Shelved[] = [];
+
 /** What following a set of changes came to. */
 export type Followed =
   /** The changes were the next ones, and the copy has them. */
@@ -122,6 +140,8 @@ export interface LayoutState {
   /** The window the user last worked in. */
   readonly focusedWindow: WindowId | null;
   readonly scratch: Scratch | null;
+  /** The kept groups that were closed, the most recently closed last. */
+  readonly shelf: readonly Shelved[];
   /** The workspace's windows in order. */
   readonly windowOrder: readonly WindowId[];
   readonly windows: Readonly<Record<WindowId, WindowEntry>>;
@@ -159,6 +179,7 @@ const EMPTY: Data = {
   name: "",
   focusedWindow: null,
   scratch: null,
+  shelf: NO_SHELF,
   windowOrder: [],
   windows: {},
   tabs: {},
@@ -292,11 +313,20 @@ function dropTree(draft: Draft, tab: TabId, old: TreeNode, kept: TreeNode | unde
   }
 }
 
+/** What a tab entry holds besides its name and its tree. */
+type TabFacts = Pick<TabEntry, "color" | "locked" | "group">;
+
+/** A tab's facts, with what the core leaves out when it says nothing of it. */
+function factsOf(tab: Pick<Tab, "color" | "locked" | "group">): TabFacts {
+  return { color: tab.color ?? null, locked: tab.locked ?? false, group: tab.group ?? null };
+}
+
 /** Puts a tab's tree in place of the one it had, if it had one. */
 function setTree(
   draft: Draft,
   window: WindowId,
   tab: Pick<Tab, "id" | "title" | "root" | "zoomed">,
+  facts: TabFacts,
 ): void {
   const before = draft.data.tabs[tab.id];
   const taken = takeTree(draft, tab.id, tab.root);
@@ -307,13 +337,26 @@ function setTree(
     before.window === window &&
     before.title === tab.title &&
     before.zoomed === tab.zoomed &&
+    before.color === facts.color &&
+    before.locked === facts.locked &&
+    before.group === facts.group &&
     before.root === root;
-  if (!same)
-    draft.set("tabs", tab.id, { id: tab.id, window, title: tab.title, root, zoomed: tab.zoomed });
+  if (!same) {
+    draft.set("tabs", tab.id, {
+      id: tab.id,
+      window,
+      title: tab.title,
+      root,
+      zoomed: tab.zoomed,
+      color: facts.color,
+      locked: facts.locked,
+      group: facts.group,
+    });
+  }
 }
 
 function takeTab(draft: Draft, window: WindowId, tab: Tab): void {
-  setTree(draft, window, tab);
+  setTree(draft, window, tab, factsOf(tab));
   if (tab.last_focus !== null) draft.set("lastFocus", tab.id, tab.last_focus);
 }
 
@@ -355,6 +398,11 @@ function setFloating(draft: Draft, window: WindowId, floating: readonly Floating
   };
 }
 
+/** A window's groups as its entry keeps them: the one empty list when there are none. */
+function groupsOf(groups: readonly Group[] | undefined): readonly Group[] {
+  return groups === undefined || groups.length === 0 ? NO_GROUPS : groups;
+}
+
 function takeWindow(draft: Draft, window: Window): void {
   dropWindow(draft, window.id);
   for (const tab of window.centre.tabs) takeTab(draft, window.id, tab);
@@ -365,6 +413,7 @@ function takeWindow(draft: Draft, window: Window): void {
     dock: window.dock,
     tabs: window.centre.tabs.map((tab) => tab.id),
     active: window.centre.active,
+    groups: groupsOf(window.centre.groups),
     floating,
     minimised,
     focus: window.focus,
@@ -447,15 +496,35 @@ function follow(draft: Draft, change: LayoutChange): void {
       if (tab) draft.set("tabs", tab.id, { ...tab, title: change.title });
       return;
     }
+    case "tab_state": {
+      const tab = draft.data.tabs[change.tab];
+      if (!tab) return;
+      const same =
+        tab.color === change.color && tab.locked === change.locked && tab.group === change.group;
+      if (!same) {
+        draft.set("tabs", tab.id, {
+          ...tab,
+          color: change.color,
+          locked: change.locked,
+          group: change.group,
+        });
+      }
+      return;
+    }
+    case "groups":
+      editWindow(draft, change.window, (entry) =>
+        alike(entry.groups, change.groups) ? entry : { ...entry, groups: groupsOf(change.groups) },
+      );
+      return;
     case "tab_tree": {
       const tab = draft.data.tabs[change.tab];
       if (!tab) return;
-      setTree(draft, tab.window, {
-        id: tab.id,
-        title: tab.title,
-        root: change.root,
-        zoomed: change.zoomed,
-      });
+      setTree(
+        draft,
+        tab.window,
+        { id: tab.id, title: tab.title, root: change.root, zoomed: change.zoomed },
+        tab,
+      );
       return;
     }
     case "ratios": {
@@ -517,6 +586,9 @@ function follow(draft: Draft, change: LayoutChange): void {
     case "workspace_name":
       draft.put("name", change.name);
       return;
+    case "shelf":
+      draft.put("shelf", change.shelf.length === 0 ? NO_SHELF : change.shelf);
+      return;
     case "pane_closed":
       // The changes before it have already taken the pane out.
       return;
@@ -535,6 +607,8 @@ function dataOf(view: LayoutView): Data {
   draft.put("name", workspace.name);
   draft.put("focusedWindow", workspace.focused_window);
   draft.put("scratch", workspace.scratch);
+  const shelf = workspace.shelf ?? NO_SHELF;
+  draft.put("shelf", shelf.length === 0 ? NO_SHELF : shelf);
   return draft.data;
 }
 
@@ -594,6 +668,10 @@ export function toWorkspace(state: LayoutState): Workspace {
           root: nodeOf(state, tab.root),
           zoomed: tab.zoomed,
           last_focus: null,
+          // Left out when they say nothing, as the core writes a tab.
+          ...(tab.color === null ? {} : { color: tab.color }),
+          ...(tab.locked ? { locked: true } : {}),
+          ...(tab.group === null ? {} : { group: tab.group }),
         },
       ];
     });
@@ -607,7 +685,11 @@ export function toWorkspace(state: LayoutState): Workspace {
         id: window.id,
         bounds: window.bounds,
         dock: window.dock,
-        centre: { tabs, active: window.active },
+        centre: {
+          tabs,
+          active: window.active,
+          ...(window.groups.length === 0 ? {} : { groups: window.groups }),
+        },
         floating,
         focus: window.focus,
         history: [],
@@ -621,5 +703,13 @@ export function toWorkspace(state: LayoutState): Workspace {
     focused_window: state.focusedWindow,
     scratch: state.scratch,
     next_id: 0,
+    ...(state.shelf.length === 0
+      ? {}
+      : {
+          shelf: state.shelf.map((shelved) => ({
+            ...shelved,
+            tabs: shelved.tabs.map((tab) => ({ ...tab, last_focus: null })),
+          })),
+        }),
   };
 }
