@@ -7,6 +7,7 @@ mod bench;
 mod dist;
 mod fetch;
 mod generate;
+mod latency;
 mod paths;
 mod run;
 mod smoke;
@@ -37,6 +38,13 @@ Commands:
   bench [--profile <name>]
                Build for release, measure, and hold the numbers to the limits in
                tests/bench/budgets.toml (profile `reference` unless another is named)
+  latency [--label <name>] [--samples <n>] [--wait <seconds>]
+               Time keys from the desktop to the screen in whichever terminal has the
+               focus after the wait (Windows, and Linux under X11): run `cat` or
+               `cmd.exe /d` there with the cursor's blink off. The report is kept in
+               target/bench/latency/<name>.json
+  latency --table
+               Set the kept latency reports side by side
   dist [--installers]
                Build for release and pack the application and the console command
                into a portable archive in target/dist; with --installers, make the
@@ -70,6 +78,7 @@ fn main() -> Result<()> {
         ["dist", "--installers"] => dist::run(true),
         ["bench"] => bench("reference"),
         ["bench", "--profile", profile] => bench(profile),
+        ["latency", rest @ ..] => latency::run(rest),
         ["schema"] => generate::write(GeneratedKind::Schema, "schema"),
         ["tokens"] => generate::write(GeneratedKind::Tokens, "tokens"),
         ["lint"] => lint(),

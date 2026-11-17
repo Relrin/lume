@@ -49,6 +49,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 ureq = "3"
 url = "2"
 windows-sys = "0.61"
+x11rb = { version = "0.13", default-features = false }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

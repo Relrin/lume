@@ -5893,6 +5893,8 @@ dependencies = [
  "sha2 0.11.1",
  "toml 1.2.1+spec-1.1.0",
  "ureq",
+ "windows-sys 0.61.2",
+ "x11rb",
 ]
 
 [[package]]
