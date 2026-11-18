@@ -128,6 +128,8 @@ export class RenderPool<Canvas> {
   readonly #limits: TierLimits;
   /** The backends that have not been disposed. */
   readonly #alive = new Set<TrackedBackend>();
+  /** The room of each tier held by what is not a pane, such as the cursor's effects. */
+  readonly #held: Record<Tier, number> = { webgpu: 0, webgl2: 0, canvas2d: 0 };
 
   /**
    * `order` is the tiers a renderer tries, first to last. `makers` makes each tier's
@@ -171,6 +173,23 @@ export class RenderPool<Canvas> {
     return themeMetrics(this.#fonts, theme, dpr);
   }
 
+  /**
+   * Hold the room of one backend of `tier` for something drawn beside the panes, so
+   * that panes and it together stay within the tier's limit. Returns what gives the
+   * room back, or nothing when the tier is full.
+   */
+  reserve(tier: Tier): (() => void) | undefined {
+    const limit = this.#limits[tier];
+    if (limit !== undefined && this.#working(tier) >= limit) return undefined;
+    this.#held[tier]++;
+    let given = false;
+    return () => {
+      if (given) return;
+      given = true;
+      this.#held[tier]--;
+    };
+  }
+
   /** What the renderers made here hold now. */
   stats(): RenderStats {
     const renderers: Record<Tier, number> = { webgpu: 0, webgl2: 0, canvas2d: 0 };
@@ -195,9 +214,9 @@ export class RenderPool<Canvas> {
     };
   }
 
-  /** How many backends of a tier are alive and can still draw. */
+  /** How many backends of a tier are alive and can still draw, with the room held. */
   #working(tier: Tier): number {
-    let count = 0;
+    let count = this.#held[tier];
     for (const backend of this.#alive) {
       if (backend.tier === tier && backend.working) count++;
     }

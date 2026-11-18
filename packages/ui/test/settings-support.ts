@@ -169,6 +169,22 @@ export const SCHEMA = {
     appearance: {
       type: "object",
       properties: {
+        accent: {
+          type: ["string", "null"],
+          "x-lume-format": "accent",
+          "x-lume-settings": {
+            page: "appearance",
+            group: "Theme",
+            order: 40,
+            label: "Accent colour",
+            control: "swatch",
+            unset: "Theme\u2019s",
+            swatches: [
+              { value: "mint", label: "Mint", dark: "#7fe3b8", light: "#147a55" },
+              { value: "blue", label: "Blue", dark: "#7aa7ff", light: "#2f6fd0" },
+            ],
+          },
+        },
         "background-image": {
           type: ["string", "null"],
           "x-lume-settings": {

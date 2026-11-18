@@ -120,6 +120,15 @@
             }
           },
           {
+            "role": "combobox"
+          },
+          {
+            "role": "combobox"
+          },
+          {
+            "role": "spinbutton"
+          },
+          {
             "role": "heading",
             "name": "Buffer"
           },

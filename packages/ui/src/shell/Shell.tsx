@@ -10,6 +10,7 @@ import { ConnectPalette } from "../connect/ConnectPalette.tsx";
 import { Palette } from "../palette/Palette.tsx";
 import { Prompts } from "../Prompts.tsx";
 import { Background } from "./Background.tsx";
+import { CursorFxLayer } from "./CursorFxLayer.tsx";
 import type { ShellApp } from "./boot.ts";
 import { ShellContext } from "./context.ts";
 import { DockArea, DockDropPreview } from "./DockArea.tsx";
@@ -44,6 +45,7 @@ export function Shell({ app }: { app: ShellApp }) {
           <DockArea area="right" />
           <DockDropPreview />
         </div>
+        <CursorFxLayer />
         <TabPopups />
         <Palette />
         <ConnectPalette />

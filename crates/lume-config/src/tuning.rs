@@ -99,3 +99,58 @@ pub const IMPORT_SELECTION_MIX: f64 = 0.3;
 
 /// How opaque the mark of where a dragged thing would land is, out of 255.
 pub const IMPORT_DROP_PREVIEW_ALPHA: u8 = 0x40;
+
+/// The accent colours offered beside the theme's own: the name written in the settings,
+/// what it is called, and its colour on a dark theme and on a light one. The light
+/// colours are deeper, so that a focus border or a selected tab still stands out
+/// against a light pane.
+pub const ACCENT_PRESETS: [AccentPreset; 6] = [
+    AccentPreset::new("mint", "Mint", "#7fe3b8", "#147a55"),
+    AccentPreset::new("blue", "Blue", "#7aa7ff", "#2f6fd0"),
+    AccentPreset::new("lilac", "Lilac", "#c9a6f5", "#7a4fc0"),
+    AccentPreset::new("amber", "Amber", "#f0b35a", "#a8650b"),
+    AccentPreset::new("coral", "Coral", "#ef8f8f", "#c2453d"),
+    AccentPreset::new("graphite", "Graphite", "#9aa3ab", "#59636c"),
+];
+
+/// One accent colour offered beside the theme's own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccentPreset {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub dark: &'static str,
+    pub light: &'static str,
+}
+
+impl AccentPreset {
+    const fn new(
+        name: &'static str,
+        label: &'static str,
+        dark: &'static str,
+        light: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            label,
+            dark,
+            light,
+        }
+    }
+}
+
+/// How far from the terminal's background towards a chosen accent the background of
+/// selected text is, on a dark theme and on a light one.
+pub const SELECTION_ACCENT_MIX_DARK: f64 = 0.22;
+pub const SELECTION_ACCENT_MIX_LIGHT: f64 = 0.3;
+
+/// The text drawn on a chosen accent: whichever of the two reads better on it.
+pub const ACCENT_TEXT_DARK: &str = "#0f1113";
+pub const ACCENT_TEXT_LIGHT: &str = "#ffffff";
+
+/// How much shorter or longer than its own the cursor's effects may be made to last: a
+/// quarter as long at the least, three times as long at the most.
+pub const CURSOR_EFFECT_LENGTH_MIN: f64 = 0.25;
+pub const CURSOR_EFFECT_LENGTH_MAX: f64 = 3.0;
+
+/// How far the arrow keys move the length of the cursor's effects, in hundredths.
+pub const SETTINGS_STEP_EFFECT_LENGTH: f64 = 5.0;

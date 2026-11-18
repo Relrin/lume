@@ -56,6 +56,12 @@ export interface KeyBinding {
 /** How the mark of the tab on show moves from one tab to another. */
 export type TabHighlight = "instant" | "glide" | "stretch" | "spring" | "glow";
 
+/** What the cursor leaves behind when it jumps a distance or moves to another pane. */
+export type CursorTrail = "none" | "warp" | "sweep" | "comet";
+
+/** What the cursor gives off when it changes shape or moves to another pane. */
+export type CursorPulse = "none" | "burst" | "ripple" | "box-burst" | "box-ripple";
+
 /** What a notice offers to do about what it says: a command, run when its button is pressed. */
 export interface NoticeAction {
   readonly label: string;
@@ -77,6 +83,12 @@ export interface ConfigSettings {
     readonly "scrollback-lines": number;
     readonly "cursor-style": "block" | "bar" | "underline";
     readonly "cursor-blink": boolean;
+    /** What the cursor leaves behind when it jumps. A core that does not say means none. */
+    readonly "cursor-trail"?: CursorTrail;
+    /** What the cursor gives off when it changes shape. A core that does not say means none. */
+    readonly "cursor-pulse"?: CursorPulse;
+    /** How long both last against their own length. A core that does not say means 1. */
+    readonly "cursor-effect-length"?: number;
     readonly [key: string]: unknown;
   };
   readonly layout: {

@@ -373,6 +373,39 @@ describe("the frame loop", () => {
     expect(dirty.frames.length).toBe(1);
   });
 
+  it("draws a view added to come after the others in the frame the others ask for it", () => {
+    const { env, pending, tick } = environment();
+    const loop = new FrameLoop(env);
+    const order: string[] = [];
+    const effect = {
+      wanted: false,
+      needsFrame: () => effect.wanted,
+      frame: () => {
+        order.push("effect");
+        effect.wanted = false;
+      },
+    };
+    // Added first, but still drawn after the pane, which is what gives it its work.
+    loop.add(effect, { after: true });
+    const pane = {
+      needsFrame: () => true,
+      frame: () => {
+        order.push("pane");
+        effect.wanted = true;
+        pane.needsFrame = () => false;
+      },
+    };
+    loop.add(pane);
+    tick();
+    expect(order).toEqual(["pane", "effect"]);
+    expect(pending.size).toBe(0);
+    loop.remove(effect);
+    effect.wanted = true;
+    loop.requestFrame();
+    tick();
+    expect(order).toEqual(["pane", "effect"]);
+  });
+
   it("keeps going while a view stays dirty", () => {
     const { env, pending, tick } = environment();
     const loop = new FrameLoop(env);

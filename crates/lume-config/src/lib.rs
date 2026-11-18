@@ -23,6 +23,7 @@
 //! when they change. Nothing here needs the application to be running: the command
 //! line uses the same code to check a file or list the keys.
 
+pub mod accent;
 pub mod error;
 pub mod generate;
 pub mod import;

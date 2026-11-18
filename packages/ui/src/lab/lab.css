@@ -99,3 +99,35 @@ th {
   color: #9097ab;
   font-weight: 500;
 }
+
+/* The cursor's effects, one stage for each way of drawing them. */
+.fx {
+  margin-top: 24px;
+}
+
+.fx-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.fx-stage {
+  position: relative;
+  background:
+    repeating-linear-gradient(0deg, #ffffff08 0 1px, transparent 1px 18px),
+    repeating-linear-gradient(90deg, #ffffff05 0 1px, transparent 1px 9px), #171a1e;
+}
+
+.fx-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.fx-label {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  color: #9aa3ab;
+  font-size: 11px;
+}

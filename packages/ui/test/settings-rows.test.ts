@@ -33,6 +33,35 @@ function labelId(html: string): string {
 }
 
 describe("a setting drawn as a row", () => {
+  it("draws a colour as swatches to choose from, the theme's own and one's own", () => {
+    const accent = (value: string | null) =>
+      markup(
+        row({
+          path: "appearance.accent",
+          label: "Accent colour",
+          control: "swatch",
+          choices: [{ value: null, label: "Theme’s" }],
+          unsetLabel: "Theme’s",
+          swatches: [
+            { value: "mint", label: "Mint", color: "#7fe3b8" },
+            { value: "blue", label: "Blue", color: "#7aa7ff" },
+          ],
+          value,
+          effective: value,
+        }),
+      );
+    const unset = accent(null);
+    expect(unset).toContain(`role="radiogroup" aria-labelledby="${labelId(unset)}"`);
+    // The theme's own is chosen, and it is the one stop for the Tab key.
+    expect(unset).toMatch(/aria-checked="true" tabindex="0"[^>]*>Theme</);
+    expect(unset).toContain('aria-label="Mint"');
+    expect(unset).toContain('aria-label="Your own colour"');
+    expect(accent("blue")).toMatch(/aria-checked="true" aria-label="Blue"/);
+    const own = accent("#336699");
+    expect(own).toMatch(/data-own="true" aria-checked="true"/);
+    expect(own).toContain('value="#336699"');
+  });
+
   it("names its control after the row, and says what is said of the setting", () => {
     const html = markup(
       row({ control: "switch", label: "Blinking cursor", help: "Until a program says otherwise." }),

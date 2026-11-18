@@ -90,6 +90,71 @@
             "role": "combobox"
           },
           {
+            "role": "radiogroup",
+            "parts": [
+              {
+                "role": "radio",
+                "name": "Theme",
+                "state": {
+                  "checked": "true"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Mint",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Blue",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Lilac",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Amber",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Coral",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Graphite",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Your own colour",
+                "state": {
+                  "checked": "false"
+                }
+              }
+            ]
+          },
+          {
+            "role": "textbox",
+            "name": "Accent colour, as #rrggbb"
+          },
+          {
             "role": "heading",
             "name": "Type"
           },

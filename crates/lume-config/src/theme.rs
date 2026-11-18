@@ -17,6 +17,7 @@ use std::sync::Arc;
 use lume_proto::ColorScheme;
 use serde_json::{Map, Value, json};
 
+use crate::accent::{accent_color, apply_accent};
 use crate::layers::parse_document;
 use crate::schema::Config;
 use crate::source::{Problem, ProblemKind, Source, join_path};
@@ -591,6 +592,15 @@ pub fn resolve_tokens(
         );
     }
 
+    // The accent comes before the tokens set one by one, so that those still win.
+    if let Some(accent) = appearance
+        .accent
+        .as_deref()
+        .and_then(|accent| accent_color(accent, scheme))
+    {
+        apply_accent(&mut values, accent, scheme);
+    }
+
     let overrides: Map<String, Value> = appearance.tokens.clone().into_iter().collect();
     let set = read_tokens(&overrides, false, &mut |path, kind, message, suggestion| {
         let mut whole = vec!["appearance".to_owned(), "tokens".to_owned()];
@@ -879,6 +889,49 @@ background-blur = 10\nbackground-opacity = 0.5\n\
         assert_eq!(tokens.get("font.size"), Some(&TokenValue::Length(16.0)));
         assert_eq!(tokens.get("font.weight"), Some(&TokenValue::Number(500.0)));
         assert_eq!(tokens.get("space.padding"), Some(&TokenValue::Length(9.0)));
+    }
+
+    #[test]
+    fn the_accent_setting_follows_the_scheme_and_a_token_set_by_hand_still_wins() {
+        let (dark, problems) = resolve(
+            "[appearance]\naccent = \"amber\"\n",
+            &Themes::builtin(),
+            ColorScheme::Dark,
+        );
+        assert_eq!(problems, vec![]);
+        assert_eq!(color(&dark, "color.accent"), "#f0b35a");
+        assert_eq!(color(&dark, "terminal.cursor"), "#f0b35a");
+        let (light, _) = resolve(
+            "[appearance]\naccent = \"amber\"\n",
+            &Themes::builtin(),
+            ColorScheme::Light,
+        );
+        assert_eq!(color(&light, "color.accent"), "#a8650b");
+        assert_eq!(color(&light, "color.accent-text"), "#ffffff");
+
+        let text = "[appearance]\naccent = \"#336699\"\n\
+[appearance.tokens.terminal]\ncursor = \"#ffffff\"\n";
+        let (own, _) = resolve(text, &Themes::builtin(), ColorScheme::Dark);
+        assert_eq!(color(&own, "color.accent"), "#336699");
+        assert_eq!(color(&own, "color.border-focus"), "#33669999");
+        assert_eq!(color(&own, "terminal.cursor"), "#ffffff");
+    }
+
+    #[test]
+    fn an_accent_that_is_no_colour_is_reported_and_the_themes_is_kept() {
+        let layered = resolve_layers(&[LayerInput {
+            kind: LayerKind::User,
+            file: PathBuf::from("config.toml"),
+            text: "[appearance]\naccent = \"teal\"\n".to_owned(),
+        }]);
+        assert_eq!(layered.problems.len(), 1, "{:?}", layered.problems);
+        assert_eq!(layered.problems[0].line, 2);
+        assert!(
+            layered.problems[0].message.contains("`#rrggbb`"),
+            "{}",
+            layered.problems[0].message
+        );
+        assert_eq!(layered.config.appearance.accent, None);
     }
 
     #[test]

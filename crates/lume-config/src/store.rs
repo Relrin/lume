@@ -362,6 +362,19 @@ mod tests {
     use crate::testing::TempDir;
 
     #[test]
+    fn an_accent_is_a_preset_or_a_colour_and_anything_else_is_refused() {
+        let path = |key: &str| vec!["appearance".to_owned(), key.to_owned()];
+        assert!(check_setting(&path("accent"), &json!("lilac")).is_ok());
+        assert!(check_setting(&path("accent"), &json!("#a0b1c2")).is_ok());
+        let refused = check_setting(&path("accent"), &json!("#a0b1c2ff")).unwrap_err();
+        assert!(
+            refused.to_string().contains("`appearance.accent`"),
+            "{refused}"
+        );
+        assert!(refused.to_string().contains("`mint`"), "{refused}");
+    }
+
+    #[test]
     fn with_no_files_the_configuration_is_the_defaults_and_nothing_is_written() {
         let dir = TempDir::new("store-empty");
         let store = ConfigStore::load(dir.dirs(), Some("work"));

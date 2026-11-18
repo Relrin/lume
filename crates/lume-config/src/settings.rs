@@ -13,6 +13,8 @@
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::tuning::AccentPreset;
+
 /// The schema keyword under which a setting says how it is shown.
 pub const SETTINGS_KEY: &str = "x-lume-settings";
 
@@ -50,6 +52,18 @@ pub enum Control {
     /// A number that is typed, held between the least and the greatest the setting
     /// takes.
     Number,
+    /// A colour: one of a row of swatches, or one of the user's own.
+    Swatch,
+}
+
+/// A colour offered as a swatch: the value written, what it is called, and how it looks
+/// on a dark theme and on a light one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Swatch {
+    pub value: &'static str,
+    pub label: &'static str,
+    pub dark: &'static str,
+    pub light: &'static str,
 }
 
 /// One thing a setting can be set to, and what that is called.
@@ -90,6 +104,9 @@ pub struct Shown {
     /// `workspaces`. They follow the fixed ones.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub list: Option<&'static str>,
+    /// The colours a swatch control offers.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub swatches: Vec<Swatch>,
     /// What the choice that takes the setting out of the file is called. A setting
     /// without one is always written.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -132,6 +149,7 @@ impl Shown {
             control,
             options: Vec::new(),
             list: None,
+            swatches: Vec::new(),
             unset: None,
             token: None,
             unit: None,
@@ -188,6 +206,28 @@ impl Shown {
         Self {
             step: Some(step),
             ..Self::new(page, group, order, label, Control::Number)
+        }
+    }
+
+    /// A colour, chosen from `presets` or picked.
+    pub fn swatch(
+        page: &'static str,
+        group: &'static str,
+        order: u32,
+        label: &'static str,
+        presets: &[AccentPreset],
+    ) -> Self {
+        Self {
+            swatches: presets
+                .iter()
+                .map(|preset| Swatch {
+                    value: preset.name,
+                    label: preset.label,
+                    dark: preset.dark,
+                    light: preset.light,
+                })
+                .collect(),
+            ..Self::new(page, group, order, label, Control::Swatch)
         }
     }
 
@@ -330,7 +370,7 @@ mod tests {
     use super::*;
     use crate::schema::config_schema;
     use crate::store::check_setting;
-    use crate::tokens::token_def;
+    use crate::tokens::{Color, token_def};
 
     /// Every setting that says how it is shown: its path, its schema and what it says.
     fn shown() -> Vec<(Vec<String>, &'static Value, &'static Value)> {
@@ -464,6 +504,22 @@ mod tests {
                 "select" => assert!(fixed > 0 || listed, "{path:?} offers nothing"),
                 "segmented" => assert!((2..=3).contains(&fixed) && !listed, "{path:?}"),
                 "text" => assert!(fixed == 0 && !listed, "{path:?}"),
+                "swatch" => {
+                    assert!(fixed == 0 && !listed, "{path:?}");
+                    let swatches = says["swatches"].as_array().expect("swatches");
+                    assert!(!swatches.is_empty(), "{path:?} offers no colours");
+                    for swatch in swatches {
+                        let taken = check_setting(&path, &swatch["value"]);
+                        assert!(taken.is_ok(), "{path:?} = {}: {taken:?}", swatch["value"]);
+                        for look in ["dark", "light"] {
+                            let color = swatch[look].as_str().unwrap();
+                            assert!(Color::parse(color).is_some(), "{path:?}: {color}");
+                        }
+                    }
+                    // A colour of the user's own is taken too.
+                    assert!(check_setting(&path, &json!("#123456")).is_ok(), "{path:?}");
+                    assert!(check_setting(&path, &json!("#12345")).is_err(), "{path:?}");
+                }
                 "number" => {
                     assert!(fixed == 0 && !listed, "{path:?}");
                     // A setting that may be left out is a number or nothing.

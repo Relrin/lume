@@ -17,6 +17,7 @@ use serde_json::{Map, Value};
 use toml::Spanned;
 use toml::de::{DeTable, DeValue};
 
+use crate::accent::{ACCENT_FORMAT, FORMAT_KEY, check_accent};
 use crate::profiles::ProfileEntry;
 use crate::schema::{
     Config, NOT_IN_A_WORKSPACE, OnSwitch, PROFILES_KEY, WORKSPACE_PROFILE_KEY, WORKSPACE_ROOT_KEY,
@@ -338,6 +339,11 @@ pub(crate) fn check(value: &Value, schema: &Value) -> Result<(), String> {
         && only != value
     {
         return Err(format!("expected {}", quoted(only)));
+    }
+    if let (Some(format), Value::String(text)) = (schema.get(FORMAT_KEY), value)
+        && format == ACCENT_FORMAT
+    {
+        check_accent(text)?;
     }
     if let Some(number) = value.as_f64() {
         if let Some(minimum) = schema.get("minimum").and_then(Value::as_f64)

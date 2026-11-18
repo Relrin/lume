@@ -15,7 +15,7 @@
  * never held up and the screen is there the moment the tab is shown again.
  */
 
-import type { CellRenderer, FrameView, RenderHost } from "@lume/renderer";
+import type { CellRenderer, FrameView, FxRect, RenderHost } from "@lume/renderer";
 import {
   clearSelection,
   encodeColorScheme,
@@ -81,6 +81,7 @@ import {
   ProgramClipboard,
   type ClipboardService,
 } from "./clipboard.ts";
+import type { CursorWatch } from "./cursor-fx.ts";
 import {
   isModifierKey,
   mapKey,
@@ -143,6 +144,8 @@ export interface ViewSettings {
 export interface ViewServices {
   readonly vt: Vt;
   readonly host: RenderHost;
+  /** What the cursor's effects follow. Left out, a view says nothing of its cursor. */
+  readonly cursor?: CursorWatch;
   readonly keys: KeyEncoder;
   readonly platform: Platform;
   readonly layout: KeyLayout;
@@ -296,6 +299,13 @@ export class TerminalView implements FrameView {
 
   #blinkTimer: number | undefined;
   #blinkOn = true;
+  /** The grid the cursor was last told of in, to tell a move from a reflow. */
+  #cursorGrid = "";
+  /** The view was measured since the cursor was last told of: the grid may follow. */
+  #remeasured = true;
+  /** The cursor's own colour in the look the view has, and that look. */
+  #cursorColor = 0;
+  #cursorLook: Appearance | undefined;
 
   /** Keys whose press was sent, so their release is sent too and no other. */
   readonly #pressed = new Set<string>();
@@ -397,6 +407,8 @@ export class TerminalView implements FrameView {
   unmount(): void {
     if (!this.#elements) return;
     this.#services.host.loop.remove(this);
+    this.#services.cursor?.forget(this);
+    this.#remeasured = true;
     for (const stop of this.#stopListening) stop();
     this.#stopListening = [];
     this.#stopBlink();
@@ -589,6 +601,7 @@ export class TerminalView implements FrameView {
     // The picture follows the element at once. The grid follows when the session has
     // answered, so until then the old grid is drawn in the new space.
     renderer.resize(size, this.#dpr);
+    this.#remeasured = true;
     // Another grid fits now: the window or the font changed, and that is the newer wish.
     if (this.#pin && !sameSize(this.#fitted(), this.#pin.fitted)) this.#pin = undefined;
     this.#updateGeometry();
@@ -896,7 +909,7 @@ export class TerminalView implements FrameView {
     return this.#dirty && this.#renderer !== undefined && this.#session !== undefined;
   }
 
-  frame(): void {
+  frame(now: number = performance.now()): void {
     const renderer = this.#renderer;
     const session = this.#session;
     if (!renderer || !session) return;
@@ -913,7 +926,59 @@ export class TerminalView implements FrameView {
     session.state.markDrawn();
     this.#placeInput(frame.cursor);
     this.#updateScrollbar();
+    this.#tellCursor(frame.cursor, `${frame.cols}x${frame.rows}`, now);
     if (searched) this.#services.searched();
+  }
+
+  /**
+   * Where a cell of the screen is now, in CSS pixels of the window, or nothing when the
+   * view is not on show. It reads the page's layout, so it is asked only when the
+   * cursor's effects play.
+   */
+  cellRect(col: number, row: number): FxRect | undefined {
+    const elements = this.#elements;
+    const renderer = this.#renderer;
+    if (!elements || !renderer) return undefined;
+    const box = elements.root.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) return undefined;
+    const m = renderer.metrics;
+    return {
+      x: box.left + (m.padding + col * m.cellWidth) / this.#dpr,
+      y: box.top + (m.padding + row * m.cellHeight) / this.#dpr,
+      width: m.cellWidth / this.#dpr,
+      height: m.cellHeight / this.#dpr,
+    };
+  }
+
+  /** Tells the cursor's effects where the cursor was drawn, while any effect is on. */
+  #tellCursor(cursor: FrameCursor, grid: string, now: number): void {
+    const watch = this.#services.cursor;
+    if (!watch?.watching) return;
+    const terminal = this.#session?.terminal;
+    // A screen scrolled back shows an older part of the output: the cursor is not on it.
+    const bar = terminal?.scrollbar();
+    const atBottom = bar === undefined || bar.offset + bar.length >= bar.total;
+    const reflowed = this.#remeasured || grid !== this.#cursorGrid;
+    this.#remeasured = false;
+    this.#cursorGrid = grid;
+    if (this.#cursorLook !== this.#appearance) {
+      this.#cursorLook = this.#appearance;
+      this.#cursorColor = rendererTheme(this.#appearance, this.#fontSizePx).cursor;
+    }
+    watch.report(
+      this,
+      {
+        // The second half of a wide character is drawn from its first.
+        col: cursor.wideTail ? Math.max(0, cursor.x - 1) : cursor.x,
+        row: cursor.y,
+        shape: cursor.shape,
+        visible: cursor.visible && atBottom,
+        focused: this.#focused,
+        reflowed,
+        color: cursor.hasColor ? cursor.color : this.#cursorColor,
+      },
+      now,
+    );
   }
 
   // Searching.

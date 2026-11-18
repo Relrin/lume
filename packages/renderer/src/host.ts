@@ -13,6 +13,10 @@
 import { canvasFonts } from "./atlas/raster.ts";
 import { Canvas2dBackend } from "./canvas2d/backend.ts";
 import { TIER_ORDER } from "./constants.ts";
+import { Canvas2dFx } from "./fx/canvas2d.ts";
+import { CursorEffects, type FxSurface } from "./fx/effects.ts";
+import type { FxBackend } from "./fx/shape.ts";
+import { FxUnavailableError, WebGl2Fx } from "./fx/webgl2.ts";
 import { FrameLoop } from "./loop.ts";
 import { RenderPool, type RenderStats } from "./pool.ts";
 import { TierUnavailableError, type RendererOptions, type Surface } from "./select.ts";
@@ -46,6 +50,32 @@ function domSurface(container: HTMLElement): Surface<HTMLCanvasElement> {
     setCssSize(canvas, size: Size) {
       canvas.style.width = `${size.width}px`;
       canvas.style.height = `${size.height}px`;
+    },
+  };
+}
+
+/** The place in the page for the cursor's effects: a canvas over the whole window. */
+function fxSurface(container: HTMLElement): FxSurface<HTMLCanvasElement> {
+  return {
+    createCanvas() {
+      const canvas = document.createElement("canvas");
+      canvas.style.display = "block";
+      canvas.style.pointerEvents = "none";
+      return canvas;
+    },
+    show(canvas) {
+      container.replaceChildren(canvas);
+    },
+    remove(canvas) {
+      canvas.remove();
+    },
+    setCssSize(canvas, size: Size) {
+      canvas.style.width = `${size.width}px`;
+      canvas.style.height = `${size.height}px`;
+    },
+    setVisible(canvas, visible) {
+      // Hidden, not taken out of the layout: showing it again lays nothing out.
+      canvas.style.visibility = visible ? "visible" : "hidden";
     },
   };
 }
@@ -121,6 +151,43 @@ export class RenderHost {
    */
   measureCells(theme: TerminalTheme, dpr: number): CellMetrics {
     return this.#pool.measureCells(theme, dpr);
+  }
+
+  /**
+   * Make the window's cursor effects, drawn on a canvas of their own inside
+   * `container`, which should cover the window and hold nothing else. They are drawn by
+   * the window's frame loop after the panes. While they draw with WebGL2 their context
+   * counts against the window's limit, so panes and effects together stay within it;
+   * with no room left, or where this window may not use WebGL2, they use Canvas 2D.
+   */
+  createCursorEffects(container: HTMLElement): CursorEffects<HTMLCanvasElement> {
+    if (this.#disposed) throw new Error("this render host has been disposed");
+    const webgl2 = this.#order.includes("webgl2")
+      ? (canvas: HTMLCanvasElement): FxBackend => {
+          const release = this.#pool.reserve("webgl2");
+          if (!release) throw new FxUnavailableError("the window has no WebGL2 context to spare");
+          try {
+            const backend = new WebGl2Fx(canvas);
+            const dispose = backend.dispose.bind(backend);
+            backend.dispose = () => {
+              dispose();
+              release();
+            };
+            return backend;
+          } catch (error) {
+            release();
+            throw error;
+          }
+        }
+      : undefined;
+    const effects: CursorEffects<HTMLCanvasElement> = new CursorEffects(
+      fxSurface(container),
+      { webgl2, canvas2d: (canvas) => new Canvas2dFx(canvas) },
+      () => this.loop.requestFrame(),
+      (): void => this.loop.remove(effects),
+    );
+    this.loop.add(effects, { after: true });
+    return effects;
   }
 
   /** What the renderers made here hold now: how many there are, and their glyph pages. */

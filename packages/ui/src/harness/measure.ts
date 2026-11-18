@@ -6,8 +6,9 @@
  * many panes at once on each renderer tier, with what they cost in memory; a divider
  * dragged while its panes print; how long a tab takes to be drawn again after its
  * panes gave up their renderers; and how long a search of a long scrollback takes, and
- * the longest it keeps the page from anything else. The numbers are held to the
- * benchmarks' budgets.
+ * the longest it keeps the page from anything else; and what the cursor's effects cost
+ * a window whose cursor jumps about and whose keyboard goes from pane to pane. The
+ * numbers are held to the benchmarks' budgets.
  */
 
 import type { Tier } from "@lume/renderer";
@@ -15,10 +16,13 @@ import type { Tier } from "@lume/renderer";
 import type { PaneId } from "../layout/types.ts";
 import { mountWindow, type Mounted } from "./chrome.ts";
 import { FIXTURE_COMMANDS } from "./fixture-commands.ts";
-import { nextFrame, sleep } from "./timing.ts";
+import { nextFrame, sleep, timing, type Timing } from "./timing.ts";
 import {
   CHROME_FLOOD_CHUNK_BYTES,
   CHROME_SETTLE_MS,
+  CURSOR_FX_FOCUS_MS,
+  CURSOR_FX_JUMP_MS,
+  CURSOR_FX_MS,
   DRAG_MOVED_MIN_PX,
   DRAG_MS,
   DRAG_PERIOD_MS,
@@ -92,7 +96,25 @@ export interface MeasureReport {
     /** The longest the search kept the page from doing anything else. */
     readonly maxSliceMs?: number;
   };
+  /**
+   * Two panes whose cursor jumps about while the keyboard goes from one to the other,
+   * with a comet and a ripple on, and with every effect off for comparison.
+   */
+  readonly cursorJumps: {
+    readonly on?: CursorFxRun;
+    readonly off?: CursorFxRun;
+  };
   readonly problems: readonly string[];
+}
+
+/** One run of the cursor's effects in a window. */
+export interface CursorFxRun {
+  readonly framesPerSecond: number;
+  /** The time between one frame and the next. */
+  readonly frameInterval: Timing;
+  /** How many trails and pulses played. */
+  readonly trails: number;
+  readonly pulses: number;
 }
 
 function round(value: number, places: number): number {
@@ -360,6 +382,93 @@ async function searchScrollback(problems: string[]): Promise<MeasureReport["sear
 }
 
 /** Runs the measurements. `progress` is told what is being done. */
+/** The bytes that put a terminal's cursor at a cell, counted from 1. */
+function cursorTo(row: number, col: number): Uint8Array {
+  return new TextEncoder().encode(`\x1b[${row};${col}H`);
+}
+
+/**
+ * Two panes side by side, the cursor of the one with the keyboard sent across its
+ * pane every little while and the keyboard moved to the other pane now and then,
+ * every frame timed. `effects` says whether a comet and a ripple are on.
+ */
+async function cursorEffects(effects: boolean, problems: string[]): Promise<CursorFxRun> {
+  const mounted = await mountWindow({
+    tabs: [2],
+    settings: {
+      terminal: effects
+        ? { "cursor-trail": "comet", "cursor-pulse": "ripple" }
+        : { "cursor-trail": "none", "cursor-pulse": "none" },
+    },
+  });
+  try {
+    const panes = mounted.core.panes;
+    let focused = 0;
+    let jumps = 0;
+    let lastJump = -Infinity;
+    let lastFocus = 0;
+    const inputOf = (pane: string | undefined) =>
+      pane === undefined
+        ? null
+        : mounted.container.querySelector<HTMLElement>(
+            `.pane-card[data-pane="${pane}"] .terminal-input`,
+          );
+    const focus = (index: number) => {
+      const pane = panes[index];
+      if (pane === undefined) return;
+      const before = panes[focused === index ? (index + 1) % panes.length : focused];
+      void mounted.app.client.layoutApply({ type: "focus", target: { type: "pane", pane } });
+      // The window running the suite need not have the system's focus, and without it a
+      // terminal hears of no focus and draws no effects: the views are told what the
+      // system would tell them.
+      inputOf(before)?.dispatchEvent(new FocusEvent("blur"));
+      inputOf(pane)?.dispatchEvent(new FocusEvent("focus"));
+    };
+    focus(focused);
+    await sleep(CHROME_SETTLE_MS);
+    const before = mounted.app.cursorFx.played();
+    const frames: number[] = [];
+    const started = performance.now();
+    for (;;) {
+      const now = performance.now();
+      const elapsed = now - started;
+      if (elapsed >= CURSOR_FX_MS) break;
+      if (elapsed - lastJump >= CURSOR_FX_JUMP_MS) {
+        lastJump = elapsed;
+        jumps++;
+        // From corner to corner of the pane, and back.
+        const far = jumps % 2 === 0;
+        const pane = panes[focused];
+        if (pane !== undefined) mounted.core.output(pane, cursorTo(far ? 20 : 1, far ? 60 : 1));
+      }
+      if (elapsed - lastFocus >= CURSOR_FX_FOCUS_MS) {
+        lastFocus = elapsed;
+        const next = (focused + 1) % panes.length;
+        focus(next);
+        focused = next;
+      }
+      await nextFrame();
+      frames.push(performance.now());
+    }
+    const played = mounted.app.cursorFx.played();
+    const trails = played.trails - before.trails;
+    const pulses = played.pulses - before.pulses;
+    if (effects && (trails === 0 || pulses === 0)) {
+      problems.push(`the cursor's effects played ${trails} trails and ${pulses} pulses`);
+    }
+    const intervals = frames.slice(1).map((at, index) => at - (frames[index] ?? at));
+    const span = (frames[frames.length - 1] ?? 0) - (frames[0] ?? 0);
+    return {
+      framesPerSecond: span > 0 ? round(((frames.length - 1) / span) * 1000, 1) : 0,
+      frameInterval: timing(intervals),
+      trails,
+      pulses,
+    };
+  } finally {
+    mounted.unmount();
+  }
+}
+
 export async function runMeasure(progress: (text: string) => void): Promise<MeasureReport> {
   const problems: string[] = [];
   const panes16: Partial<Record<Tier, ManyPanes>> = {};
@@ -381,5 +490,15 @@ export async function runMeasure(progress: (text: string) => void): Promise<Meas
   progress("searching a long scrollback");
   const search = await searchScrollback(problems);
 
-  return { ok: problems.length === 0, panes16, drag, tabSwitch, search, problems };
+  progress("the cursor jumping about between two panes, with and without its effects");
+  const cursorJumps: { on?: CursorFxRun; off?: CursorFxRun } = {};
+  for (const effects of [true, false]) {
+    try {
+      cursorJumps[effects ? "on" : "off"] = await cursorEffects(effects, problems);
+    } catch (error) {
+      problems.push(`cursor effects: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return { ok: problems.length === 0, panes16, drag, tabSwitch, search, cursorJumps, problems };
 }

@@ -9,8 +9,8 @@
 //! Rex client, and the reports it keeps can be set side by side.
 //!
 //! The terminal to measure must have the keyboard focus, run a program that echoes what
-//! is typed (`cat` on Linux, `cmd.exe /d` on Windows) and have its cursor's blink turned
-//! off. The tool types `x` and Backspace in turn, so the line ends as it started. It stops
+//! is typed (`cat` on Linux, `cmd.exe /d` on Windows) and have its cursor's blink and any
+//! cursor effects turned off. The tool types `x` and Backspace in turn, so the line ends as it started. It stops
 //! as soon as the focus moves to another window, so that nothing is typed there.
 //!
 //! The numbers are recorded, not held to a limit: they depend on the display's refresh
@@ -489,7 +489,8 @@ pub fn run(args: &[&str]) -> Result<()> {
 
     println!(
         "latency: bring the terminal to measure to the front now. It should run `cat` (or \
-         `cmd.exe /d` on Windows), with the cursor's blink off. Timing starts in {} seconds.",
+         `cmd.exe /d` on Windows), with the cursor's blink and effects off. Timing starts \
+         in {} seconds.",
         options.wait.as_secs()
     );
     std::thread::sleep(options.wait);

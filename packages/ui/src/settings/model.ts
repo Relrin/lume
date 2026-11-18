@@ -22,7 +22,7 @@ import { profileChoices } from "../palette/choices.ts";
 export type SettingValue = string | number | boolean;
 
 /** The kinds of control a row has. */
-export type SettingControl = "switch" | "select" | "segmented" | "text" | "number";
+export type SettingControl = "switch" | "select" | "segmented" | "text" | "number" | "swatch";
 
 /** The lists a setting's choices may be taken from. */
 export type SettingList = "themes" | "fonts" | "shells" | "workspaces" | "profiles";
@@ -50,6 +50,23 @@ export interface SettingAnnotation {
   readonly when?: { readonly path: string; readonly is: "unset" | "set" };
   /** The only platform the row is shown on. */
   readonly platform?: string;
+  /** The colours a swatch row offers, as the schema says them. */
+  readonly swatches?: readonly SwatchAnnotation[];
+}
+
+/** A colour a swatch row offers: its value, its name and how it looks on each scheme. */
+export interface SwatchAnnotation {
+  readonly value: string;
+  readonly label: string;
+  readonly dark: string;
+  readonly light: string;
+}
+
+/** A colour a swatch row offers, as it looks on the theme in use. */
+export interface SettingSwatch {
+  readonly value: string;
+  readonly label: string;
+  readonly color: string;
 }
 
 /** What a typed number may be, as it is shown: from `min` to `max`, in `unit`. */
@@ -96,6 +113,8 @@ export interface SettingRow {
   readonly choices: readonly SettingChoice[];
   /** What a typed number may be. Given only for a number. */
   readonly number?: NumberShape;
+  /** The colours offered. Given only for a swatch row. */
+  readonly swatches?: readonly SettingSwatch[];
   /** What it is set to, or `null` while it is left out. */
   readonly value: SettingValue | null;
   /** What it comes to: its value, or what stands in while it is left out. */
@@ -190,7 +209,14 @@ function finite(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-const CONTROLS: readonly SettingControl[] = ["switch", "select", "segmented", "text", "number"];
+const CONTROLS: readonly SettingControl[] = [
+  "switch",
+  "select",
+  "segmented",
+  "text",
+  "number",
+  "swatch",
+];
 const LISTS: readonly SettingList[] = ["themes", "fonts", "shells", "workspaces", "profiles"];
 
 /** What the schema says of a setting, if it says it in the form this reads. */
@@ -205,6 +231,24 @@ function annotationOf(raw: unknown): SettingAnnotation | undefined {
     ? raw["options"].flatMap((option: unknown) =>
         isObject(option) && isValue(option["value"]) && typeof option["label"] === "string"
           ? [{ value: option["value"], label: option["label"] }]
+          : [],
+      )
+    : undefined;
+  const swatches = Array.isArray(raw["swatches"])
+    ? raw["swatches"].flatMap((swatch: unknown) =>
+        isObject(swatch) &&
+        typeof swatch["value"] === "string" &&
+        typeof swatch["label"] === "string" &&
+        typeof swatch["dark"] === "string" &&
+        typeof swatch["light"] === "string"
+          ? [
+              {
+                value: swatch["value"],
+                label: swatch["label"],
+                dark: swatch["dark"],
+                light: swatch["light"],
+              },
+            ]
           : [],
       )
     : undefined;
@@ -231,6 +275,7 @@ function annotationOf(raw: unknown): SettingAnnotation | undefined {
     ...(step === undefined ? {} : { step }),
     ...(scale === undefined ? {} : { scale }),
     ...(platform === undefined ? {} : { platform }),
+    ...(swatches === undefined ? {} : { swatches }),
     ...(isObject(when) &&
     typeof when["path"] === "string" &&
     (when["is"] === "unset" || when["is"] === "set")
@@ -401,6 +446,14 @@ function rowOf(found: Found, view: ConfigView, lists: SettingsLists): SettingRow
     (when === undefined || (valueAt(view.config, when.path) === null) === (when.is === "unset")) &&
     (annotation.platform === undefined || annotation.platform === view.platform);
   const number = annotation.control === "number" ? numberShape(schema, annotation) : undefined;
+  const swatches =
+    annotation.control === "swatch"
+      ? (annotation.swatches ?? []).map((swatch) => ({
+          value: swatch.value,
+          label: swatch.label,
+          color: view.theme.scheme === "light" ? swatch.light : swatch.dark,
+        }))
+      : undefined;
 
   return {
     path,
@@ -409,6 +462,7 @@ function rowOf(found: Found, view: ConfigView, lists: SettingsLists): SettingRow
     control: annotation.control,
     choices,
     ...(number === undefined ? {} : { number }),
+    ...(swatches === undefined ? {} : { swatches }),
     value,
     effective,
     ...(unsetLabel === undefined ? {} : { unsetLabel }),
@@ -545,6 +599,20 @@ export function writeSwitch(row: SettingRow, on: boolean): SettingWrite {
 export function writeText(row: SettingRow, typed: string): SettingWrite {
   const value = typed.trim();
   return value === "" ? { op: "unset", path: row.path } : { op: "set", path: row.path, value };
+}
+
+/**
+ * A colour typed for a swatch row, written as the file takes it: `#rrggbb` in small
+ * letters. The `#` may be left off. `null` when it is no such colour.
+ */
+export function typedColor(typed: string): string | null {
+  const plain = typed.trim().replace(/^#/, "");
+  return /^[0-9a-f]{6}$/i.test(plain) ? `#${plain.toLowerCase()}` : null;
+}
+
+/** The change choosing a colour of a swatch row asks for: `null` leaves it out. */
+export function writeSwatch(row: SettingRow, value: string | null): SettingWrite {
+  return value === null ? { op: "unset", path: row.path } : { op: "set", path: row.path, value };
 }
 
 /** How many decimal places a number is kept to, so 0.1 added three times is 0.3. */

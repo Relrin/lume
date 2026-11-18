@@ -49,6 +49,62 @@
       },
       "description": "How things look: the theme and what overrides it.",
       "properties": {
+        "accent": {
+          "description": "The colour focus, the selected tab, selected text and the window's glow are\ndrawn in: `mint`, `blue`, `lilac`, `amber`, `coral` or `graphite`, each of which\nsuits both dark and light themes, or a colour of your own written `#rrggbb`.\nLeft out, the theme's.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-lume-format": "accent",
+          "x-lume-settings": {
+            "control": "swatch",
+            "group": "Theme",
+            "help": "Focus, selection, the tab highlight and the window's glow",
+            "label": "Accent colour",
+            "order": 40,
+            "page": "appearance",
+            "swatches": [
+              {
+                "dark": "#7fe3b8",
+                "label": "Mint",
+                "light": "#147a55",
+                "value": "mint"
+              },
+              {
+                "dark": "#7aa7ff",
+                "label": "Blue",
+                "light": "#2f6fd0",
+                "value": "blue"
+              },
+              {
+                "dark": "#c9a6f5",
+                "label": "Lilac",
+                "light": "#7a4fc0",
+                "value": "lilac"
+              },
+              {
+                "dark": "#f0b35a",
+                "label": "Amber",
+                "light": "#a8650b",
+                "value": "amber"
+              },
+              {
+                "dark": "#ef8f8f",
+                "label": "Coral",
+                "light": "#c2453d",
+                "value": "coral"
+              },
+              {
+                "dark": "#9aa3ab",
+                "label": "Graphite",
+                "light": "#59636c",
+                "value": "graphite"
+              }
+            ],
+            "token": "color.accent",
+            "unset": "Theme's"
+          }
+        },
         "background-blur": {
           "description": "How much the picture is blurred, in pixels. Left out, the theme's.",
           "format": "double",
@@ -1952,7 +2008,10 @@
         "close-on-exit": "clean",
         "confirm-close": "never",
         "cursor-blink": true,
+        "cursor-effect-length": 1.0,
+        "cursor-pulse": "none",
         "cursor-style": "block",
+        "cursor-trail": "none",
         "long-command-seconds": 10,
         "notify-long-command": false,
         "scrollback-lines": 10000,
@@ -2049,6 +2108,86 @@
             "page": "terminal"
           }
         },
+        "cursor-effect-length": {
+          "default": 1.0,
+          "description": "How long the cursor's trail and pulse last, as a share of each effect's own\nlength: 1 is as designed, 2 twice as long.",
+          "format": "double",
+          "maximum": 3.0,
+          "minimum": 0.25,
+          "type": "number",
+          "x-lume-settings": {
+            "control": "number",
+            "group": "Cursor",
+            "help": "How long the trail and the pulse last, against their own length",
+            "label": "Effect length",
+            "order": 50,
+            "page": "terminal",
+            "scale": 100.0,
+            "step": 5.0,
+            "unit": "%"
+          }
+        },
+        "cursor-pulse": {
+          "default": "none",
+          "description": "What the cursor gives off when it changes shape or moves to another pane. Off\nwhile the system asks for less motion.",
+          "oneOf": [
+            {
+              "const": "none",
+              "description": "Nothing.",
+              "type": "string"
+            },
+            {
+              "const": "burst",
+              "description": "A disc that grows from the cursor and fades.",
+              "type": "string"
+            },
+            {
+              "const": "ripple",
+              "description": "A ring that grows from the cursor and fades.",
+              "type": "string"
+            },
+            {
+              "const": "box-burst",
+              "description": "A box that grows from the cursor's shape and fades.",
+              "type": "string"
+            },
+            {
+              "const": "box-ripple",
+              "description": "An outline that grows from the cursor's shape and fades.",
+              "type": "string"
+            }
+          ],
+          "x-lume-settings": {
+            "control": "select",
+            "group": "Cursor",
+            "help": "Drawn when the cursor changes shape, or moves to another pane",
+            "label": "Cursor pulse",
+            "options": [
+              {
+                "label": "None",
+                "value": "none"
+              },
+              {
+                "label": "Burst",
+                "value": "burst"
+              },
+              {
+                "label": "Ripple",
+                "value": "ripple"
+              },
+              {
+                "label": "Box burst",
+                "value": "box-burst"
+              },
+              {
+                "label": "Box ripple",
+                "value": "box-ripple"
+              }
+            ],
+            "order": 40,
+            "page": "terminal"
+          }
+        },
         "cursor-style": {
           "default": "block",
           "description": "The cursor's shape, until a program chooses another.",
@@ -2088,6 +2227,58 @@
               }
             ],
             "order": 10,
+            "page": "terminal"
+          }
+        },
+        "cursor-trail": {
+          "default": "none",
+          "description": "What the cursor leaves behind when it jumps a distance, or moves to another\npane. Off while the system asks for less motion.",
+          "oneOf": [
+            {
+              "const": "none",
+              "description": "Nothing: the cursor is simply in its new place.",
+              "type": "string"
+            },
+            {
+              "const": "warp",
+              "description": "The cursor smears towards its new place, its leading edge first.",
+              "type": "string"
+            },
+            {
+              "const": "sweep",
+              "description": "A band from the old place shrinks into the new one.",
+              "type": "string"
+            },
+            {
+              "const": "comet",
+              "description": "A glowing comet flies to the new place, its tail following.",
+              "type": "string"
+            }
+          ],
+          "x-lume-settings": {
+            "control": "select",
+            "group": "Cursor",
+            "help": "Drawn when the cursor jumps, or moves to another pane",
+            "label": "Cursor trail",
+            "options": [
+              {
+                "label": "None",
+                "value": "none"
+              },
+              {
+                "label": "Warp",
+                "value": "warp"
+              },
+              {
+                "label": "Sweep",
+                "value": "sweep"
+              },
+              {
+                "label": "Comet",
+                "value": "comet"
+              }
+            ],
+            "order": 30,
             "page": "terminal"
           }
         },

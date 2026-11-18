@@ -108,6 +108,18 @@
   }
 
   /*
+   * The cursor's effects: over the panes and the bar, so a trail can cross from one
+   * pane to another, and under menus, palettes and notices. Its canvas is hidden while
+   * nothing plays.
+   */
+  .cursor-fx {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  /*
    * The bar along the top. Its menus drop over the panes, so it lies above the rest of
    * the window. When the window is narrow the tabs give way first: they shrink and
    * then scroll, and the parts at either end stay whole.
@@ -3418,6 +3430,85 @@
     background: var(--settings-pressed);
   }
 
+  /* A colour: the theme's own, a row of swatches, one of the user's own, and the field
+     it can be typed in. The swatch chosen has a ring of its own colour. */
+  .settings-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    max-width: 100%;
+  }
+
+  .settings-swatch-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .settings-swatch-theme {
+    @apply text-ink-muted;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 11px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+
+  .settings-swatch-theme[aria-checked="true"] {
+    @apply text-ink;
+    background: var(--settings-pressed);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-accent);
+  }
+
+  .settings-swatch {
+    --swatch: transparent;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--swatch);
+    cursor: pointer;
+    transition: scale 120ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  /* The user's own colour before one is chosen: a ring of the hues it may be. */
+  .settings-swatch[data-own="true"]:not([aria-checked="true"]) {
+    background: conic-gradient(#ef8f8f, #f0b35a, #e5c07b, #7fe3b8, #7aa7ff, #c9a6f5, #ef8f8f);
+  }
+
+  .settings-swatch:active {
+    scale: 0.9;
+  }
+
+  .settings-swatch[aria-checked="true"] {
+    box-shadow:
+      0 0 0 2px var(--lume-color-card),
+      0 0 0 4px var(--swatch);
+  }
+
+  /* The theme's own colour, beside its name, while it is the one in use. */
+  .settings-swatch-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--swatch);
+  }
+
+  .settings-swatch-picker {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
   .settings-text {
     @apply text-ink;
     flex: 0 1 260px;
@@ -3433,6 +3524,12 @@
 
   .settings-text::placeholder {
     @apply text-ink-muted;
+  }
+
+  /* The colour typed for a swatch row: just wide enough for #rrggbb. */
+  .settings-swatch-field {
+    flex: 0 0 84px;
+    font-family: var(--lume-font-family);
   }
 
   /* A typed number: the digits at the right, the unit after them, and before the field
@@ -3549,6 +3646,8 @@
   .settings-switch:focus-visible,
   .settings-select > select:focus-visible,
   .settings-segmented > button:focus-visible,
+  .settings-swatch-theme:focus-visible,
+  .settings-swatch:focus-visible,
   .settings-text:focus-visible,
   .settings-button:focus-visible,
   .settings-nav-item:focus-visible {

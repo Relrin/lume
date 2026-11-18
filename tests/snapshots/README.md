@@ -29,6 +29,11 @@ Not every frame has a reference:
 The frames are drawn with `tests/fonts/JetBrainsMono-Regular.ttf` at a device pixel ratio of
 1, whatever the display's is.
 
+The cursor's effects are kept too, as `fx-<effect>.png`: each effect frozen 60 ms after it
+started, drawn with WebGL2. Canvas 2D draws a glow its own way, so its picture is not held
+to the reference; it is only checked to draw something and to leave the cursor's own cell
+clear.
+
 ## How a picture is compared with its reference
 
 In blocks of four by four pixels. A block differs when the mean of a colour channel over it

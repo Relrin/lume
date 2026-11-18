@@ -63,6 +63,28 @@
 "search.completeMs" = { max = 600.0, unit = "ms" }
 "search.maxSliceMs" = { max = 12.0, unit = "ms" }
 
+# The cursor's effects drawn over a window-sized canvas, each on its own, until the
+# GPU has finished a frame of it. Canvas 2D is the fallback where WebGL2 is not had.
+"cursorFx.webgl2.warp.finish.p95" = { max = 2.0, unit = "ms", optional = true }
+"cursorFx.webgl2.sweep.finish.p95" = { max = 2.0, unit = "ms", optional = true }
+"cursorFx.webgl2.comet.finish.p95" = { max = 2.0, unit = "ms", optional = true }
+"cursorFx.webgl2.burst.finish.p95" = { max = 2.0, unit = "ms", optional = true }
+"cursorFx.webgl2.ripple.finish.p95" = { max = 2.0, unit = "ms", optional = true }
+"cursorFx.webgl2.box-burst.finish.p95" = { max = 2.0, unit = "ms", optional = true }
+"cursorFx.webgl2.box-ripple.finish.p95" = { max = 2.0, unit = "ms", optional = true }
+"cursorFx.canvas2d.warp.finish.p95" = { max = 4.0, unit = "ms" }
+"cursorFx.canvas2d.sweep.finish.p95" = { max = 4.0, unit = "ms" }
+"cursorFx.canvas2d.comet.finish.p95" = { max = 4.0, unit = "ms" }
+"cursorFx.canvas2d.burst.finish.p95" = { max = 4.0, unit = "ms" }
+"cursorFx.canvas2d.ripple.finish.p95" = { max = 4.0, unit = "ms" }
+"cursorFx.canvas2d.box-burst.finish.p95" = { max = 4.0, unit = "ms" }
+"cursorFx.canvas2d.box-ripple.finish.p95" = { max = 4.0, unit = "ms" }
+
+# Two panes whose cursor jumps every 50 ms while the keyboard moves between them every
+# 300 ms, with a comet and a ripple playing: the frames the page is given.
+"cursorJumps.on.framesPerSecond" = { min = 60.0, unit = "frames/s" }
+"cursorJumps.on.frameInterval.p99" = { max = 20.0, unit = "ms" }
+
 # Shared CI runners: no GPU, a virtual display, and neighbours. These limits catch a
 # change that makes something several times slower, and nothing finer than that.
 [ci]
@@ -85,3 +107,19 @@
 "tabSwitch.webgl2Ms" = { max = 500.0, unit = "ms", optional = true }
 "search.completeMs" = { max = 15000.0, unit = "ms" }
 "search.maxSliceMs" = { max = 120.0, unit = "ms" }
+"cursorFx.webgl2.warp.finish.p95" = { max = 20.0, unit = "ms", optional = true }
+"cursorFx.webgl2.sweep.finish.p95" = { max = 20.0, unit = "ms", optional = true }
+"cursorFx.webgl2.comet.finish.p95" = { max = 20.0, unit = "ms", optional = true }
+"cursorFx.webgl2.burst.finish.p95" = { max = 20.0, unit = "ms", optional = true }
+"cursorFx.webgl2.ripple.finish.p95" = { max = 20.0, unit = "ms", optional = true }
+"cursorFx.webgl2.box-burst.finish.p95" = { max = 20.0, unit = "ms", optional = true }
+"cursorFx.webgl2.box-ripple.finish.p95" = { max = 20.0, unit = "ms", optional = true }
+"cursorFx.canvas2d.warp.finish.p95" = { max = 40.0, unit = "ms" }
+"cursorFx.canvas2d.sweep.finish.p95" = { max = 40.0, unit = "ms" }
+"cursorFx.canvas2d.comet.finish.p95" = { max = 40.0, unit = "ms" }
+"cursorFx.canvas2d.burst.finish.p95" = { max = 40.0, unit = "ms" }
+"cursorFx.canvas2d.ripple.finish.p95" = { max = 40.0, unit = "ms" }
+"cursorFx.canvas2d.box-burst.finish.p95" = { max = 40.0, unit = "ms" }
+"cursorFx.canvas2d.box-ripple.finish.p95" = { max = 40.0, unit = "ms" }
+"cursorJumps.on.framesPerSecond" = { min = 10.0, unit = "frames/s" }
+"cursorJumps.on.frameInterval.p99" = { max = 200.0, unit = "ms" }

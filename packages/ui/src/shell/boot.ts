@@ -41,6 +41,7 @@ import { PaneViews } from "../panes/views.ts";
 import { createProfilesStore, findProfile, type ProfilesStore } from "../profiles/store.ts";
 import { SearchController } from "../search/controller.ts";
 import { createStatusStore, type StatusStore } from "../status/registry.ts";
+import { CursorFx, cursorFxSettings } from "../terminal/cursor-fx.ts";
 import { currentPlatform, KeyLayout } from "../terminal/keyboard.ts";
 import { PromptStore } from "../terminal/prompts.ts";
 import { answerRequest, type PaneRef, type RemoteTarget } from "../terminal/remote.ts";
@@ -96,6 +97,8 @@ export interface ShellApp {
   readonly search: SearchController;
   /** What the user is doing with the tabs: renaming one, a menu, a drag. */
   readonly tabUi: TabUiStore;
+  /** The cursor's effects, drawn over the whole window. */
+  readonly cursorFx: CursorFx;
   /**
    * How many renderers of each kind are alive and what their glyphs take, and how much
    * memory the terminals of the window hold between them.
@@ -270,10 +273,27 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   );
   shortcuts.setBindings(configView.keymap.bindings);
 
+  // The cursor's effects are drawn over the whole window, so that a trail can go from
+  // one pane to another; the page gives them their element when it is rendered.
+  const lessMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const cursorFx = new CursorFx((container) => host.createCursorEffects(container), lessMotion);
+  cursorFx.configure(cursorFxSettings(configView));
+  const onLessMotion = () => cursorFx.configure();
+  lessMotion.addEventListener("change", onLessMotion);
+  const sizeCursorFx = () =>
+    cursorFx.resize(
+      { width: window.innerWidth, height: window.innerHeight },
+      window.devicePixelRatio,
+    );
+  sizeCursorFx();
+  // A move to a display of another pixel ratio resizes the window's page too.
+  window.addEventListener("resize", sizeCursorFx);
+
   const views = new PaneViews({
     shared: {
       vt,
       host,
+      cursor: cursorFx,
       keys: new KeyEncoder(vt),
       platform,
       layout: keyLayout,
@@ -378,6 +398,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         if (!config.getState().set(notice.view)) break;
         look = appearance();
         applyConfig(notice.view);
+        cursorFx.configure(cursorFxSettings(notice.view));
         shortcuts.setBindings(notice.view.keymap.bindings);
         {
           // The terminals are set up again once the font the configuration now names
@@ -624,6 +645,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     panelDrag,
     search,
     tabUi,
+    cursorFx,
     stats: () => ({ ...host.stats(), wasmBytes: vt.memoryBytes }),
     dispose: () => {
       window.removeEventListener("focus", onWindowFocus);
@@ -633,6 +655,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       search.reset();
       turns.port1.close();
       views.dispose();
+      lessMotion.removeEventListener("change", onLessMotion);
+      window.removeEventListener("resize", sizeCursorFx);
+      cursorFx.detach();
       host.dispose();
     },
   };

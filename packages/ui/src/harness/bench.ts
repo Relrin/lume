@@ -19,6 +19,7 @@ import { DEFAULT_APPEARANCE, factsPalette } from "../theme.ts";
 import { TauriCarrier } from "../transport/carrier.ts";
 import { TransportClient, type Attachment } from "../transport/client.ts";
 import type { ClientFacts, Launcher } from "../transport/types.ts";
+import { timeCursorFx, type FxBench } from "./fx-bench.ts";
 import { canvasOf, createPane, drawWhole, fit, loadTestFont, TIERS } from "./panes.ts";
 import { nextFrame, sleep, timing, type Timing } from "./timing.ts";
 import {
@@ -82,6 +83,8 @@ export interface BenchReport {
   readonly redraw: Record<string, RedrawTiming>;
   /** Tiers the webview does not offer, and why. */
   readonly unavailable: Record<string, string>;
+  /** The cursor's effects drawn over a window-sized canvas, each on its own. */
+  readonly cursorFx: FxBench;
   /** The terminal's side of a full redraw: taking the output in, reading the screen out. */
   readonly terminal: { readonly write: Timing; readonly read: Timing } | null;
   /** A flood from the core to this page, with nothing done to the bytes. */
@@ -459,6 +462,7 @@ export async function runBench(vt: Vt, progress: (text: string) => void): Promis
   const parent = stage();
   const drawing = await measure("timing full redraws", () => timeRedraws(parent));
   const terminal = await measure("timing the terminal", () => timeTerminal(vt));
+  const cursorFx = await measure("timing the cursor's effects", () => timeCursorFx(parent));
 
   const client = await measure("opening the carrier", () =>
     TransportClient.open(new TauriCarrier()),
@@ -513,6 +517,7 @@ export async function runBench(vt: Vt, progress: (text: string) => void): Promis
     hidden,
     redraw: drawing?.redraw ?? {},
     unavailable: drawing?.unavailable ?? {},
+    cursorFx: cursorFx ?? {},
     terminal,
     transport,
     intoTerminal,

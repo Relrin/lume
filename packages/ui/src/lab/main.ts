@@ -29,6 +29,7 @@ import { compare, readPixels, toPng, type Difference } from "../harness/pixels.t
 import { nextFrame, timing, type Timing } from "../harness/timing.ts";
 import { COMPARE_TOLERANCE, REDRAW_FRAMES, REDRAW_WARMUP_FRAMES } from "../harness/tuning.ts";
 import { fullRedrawOutput, terminalFrames, type TerminalFrame } from "../harness/workloads.ts";
+import { mountFxStrip, type LabEffect } from "./fx.ts";
 import "./lab.css";
 
 /** A pane of the lab: a renderer and the elements around it. */
@@ -70,6 +71,8 @@ declare global {
       lose(): string;
       /** What a pane last drew, as a PNG. */
       capture(kind: string): Promise<Blob | undefined>;
+      /** Plays a cursor effect, with one backend or both; says what drew it. */
+      fx(effect: LabEffect, backend?: "webgl2" | "canvas2d"): string;
       frames: string[];
     };
   }
@@ -320,7 +323,8 @@ async function main(): Promise<void> {
     status.textContent = lose();
   });
 
-  window.__lab = { results, show, time, lose, capture, frames: names };
+  const fx = mountFxStrip(document.getElementById("lab") ?? document.body);
+  window.__lab = { results, show, time, lose, capture, fx, frames: names };
   show(names[0]!);
   results.ready = true;
 }
@@ -335,6 +339,7 @@ main().catch((error: unknown) => {
     time: () => Promise.resolve(),
     lose: () => "the lab failed to start",
     capture: () => Promise.resolve(undefined),
+    fx: () => "the lab failed to start",
     frames: [],
   };
   console.error(error);

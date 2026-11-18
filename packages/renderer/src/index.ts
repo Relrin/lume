@@ -27,7 +27,22 @@ export {
   type RenderFrame,
 } from "./frame.ts";
 export { RenderHost, type RenderHostOptions } from "./host.ts";
-export { FrameLoop, type FrameLoopEnvironment, type FrameView } from "./loop.ts";
+export {
+  CursorEffects,
+  type CursorEffectSettings,
+  type FxMakers,
+  type FxSurface,
+} from "./fx/effects.ts";
+export type { FxRect, PulseKind, TrailKind } from "./fx/geometry.ts";
+export { Canvas2dFx } from "./fx/canvas2d.ts";
+export { FxShape, ShapeKind, type FxBackend } from "./fx/shape.ts";
+export { WebGl2Fx } from "./fx/webgl2.ts";
+export {
+  FrameLoop,
+  type FrameLoopEnvironment,
+  type FrameView,
+  type FrameViewOptions,
+} from "./loop.ts";
 export { cellMetrics, gridSize } from "./metrics.ts";
 export type { RenderStats } from "./pool.ts";
 export { TierUnavailableError, type RendererOptions } from "./select.ts";

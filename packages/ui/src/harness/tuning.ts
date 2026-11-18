@@ -134,3 +134,32 @@ export const SEARCH_MATCH_EVERY = 100;
 
 /** How long the search of that scrollback may take before the measurement gives up. */
 export const SEARCH_TIMEOUT_MS = 60_000;
+
+/**
+ * The cursor's effects drawn alone: how many frames of each are timed, after how many
+ * to warm up, how many frames one effect lasts from start to end, and how large the
+ * window they are drawn over is, in CSS pixels.
+ */
+export const FX_FRAMES = 240;
+export const FX_WARMUP_FRAMES = 12;
+export const FX_FRAMES_PER_EFFECT = 12;
+/** How far into each effect those frames reach: less than the shortest lasts. */
+export const FX_EFFECT_SPAN_MS = 140;
+export const FX_SURFACE_WIDTH_PX = 1720;
+export const FX_SURFACE_HEIGHT_PX = 1080;
+
+/**
+ * The cursor's effects in a window of two panes: for how long, how often the cursor
+ * jumps across its pane, and how often the keyboard goes to the other pane.
+ */
+export const CURSOR_FX_MS = 4000;
+
+/**
+ * The cursor's effects in the snapshot suite: how large the canvas they are drawn on is,
+ * in CSS pixels, and the moment each is frozen at, part way through the shortest.
+ */
+export const FX_SNAPSHOT_WIDTH_PX = 360;
+export const FX_SNAPSHOT_HEIGHT_PX = 180;
+export const FX_SNAPSHOT_MS = 60;
+export const CURSOR_FX_JUMP_MS = 50;
+export const CURSOR_FX_FOCUS_MS = 300;

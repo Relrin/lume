@@ -9,8 +9,10 @@ import {
   settingsPages,
   shownNumber,
   stepNumber,
+  typedColor,
   writeChoice,
   writeNumber,
+  writeSwatch,
   writeSwitch,
   writeText,
   type SettingRow,
@@ -39,6 +41,7 @@ describe("the settings as pages of rows", () => {
       "appearance.theme",
       "appearance.theme-dark",
       "font.family",
+      "appearance.accent",
     ]);
     expect(appearance.groups[1]!.rows.map((held) => held.path)).toEqual([
       "appearance.card-radius",
@@ -90,6 +93,43 @@ describe("the settings as pages of rows", () => {
       path: "appearance.card-radius",
       value: 6,
     });
+  });
+
+  it("offers a colour's swatches as they look on the theme in use, and the theme's own", () => {
+    const dark = row(settingsPages(SCHEMA, view(), LISTS), "appearance.accent");
+    expect(dark.control).toBe("swatch");
+    expect(dark.value).toBeNull();
+    expect(dark.swatches).toEqual([
+      { value: "mint", label: "Mint", color: "#7fe3b8" },
+      { value: "blue", label: "Blue", color: "#7aa7ff" },
+    ]);
+    // Leaving it out is a choice like the swatches.
+    expect(dark.choices).toEqual([{ value: null, label: "Theme’s" }]);
+    const light = row(
+      settingsPages(SCHEMA, view({ theme: { id: "lume-light", scheme: "light" } }), LISTS),
+      "appearance.accent",
+    );
+    expect(light.swatches?.map((swatch) => swatch.color)).toEqual(["#147a55", "#2f6fd0"]);
+    const own = row(
+      settingsPages(SCHEMA, view({}, { accent: "#336699" }), LISTS),
+      "appearance.accent",
+    );
+    expect(own.value).toBe("#336699");
+  });
+
+  it("writes a colour chosen, or one typed as a person writes it", () => {
+    const accent = row(settingsPages(SCHEMA, view(), LISTS), "appearance.accent");
+    expect(writeSwatch(accent, "blue")).toEqual({
+      op: "set",
+      path: "appearance.accent",
+      value: "blue",
+    });
+    expect(writeSwatch(accent, null)).toEqual({ op: "unset", path: "appearance.accent" });
+    expect(typedColor(" #A0b1C2 ")).toBe("#a0b1c2");
+    expect(typedColor("a0b1c2")).toBe("#a0b1c2");
+    for (const wrong of ["", "#abc", "#a0b1c2ff", "teal", "#ggg000"]) {
+      expect(typedColor(wrong), wrong).toBeNull();
+    }
   });
 
   it("holds a typed number to its bounds and reads it as a person writes it", () => {
@@ -399,6 +439,9 @@ describe("the configuration's own schema", () => {
           }
           if (held.control === "switch") {
             expect(typeof held.effective, held.path).toBe("boolean");
+          }
+          if (held.control === "swatch") {
+            expect(held.swatches?.length, held.path).toBeGreaterThan(0);
           }
           if (held.control === "number") {
             expect(held.number, held.path).toBeDefined();

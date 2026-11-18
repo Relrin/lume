@@ -35,7 +35,7 @@ const PROMPT_SETTLED: Duration = Duration::from_millis(200);
 
 /// What the suite that times the window's page reports, each under the name it has
 /// in the one report.
-const PAGE_NUMBERS: [&str; 4] = ["panes16", "drag", "tabSwitch", "search"];
+const PAGE_NUMBERS: [&str; 5] = ["panes16", "drag", "tabSwitch", "search", "cursorJumps"];
 
 /// What is taken from the report of the suite that checks the window's page.
 const PAGE_CHECKS: [&str; 3] = ["outputCommits", "outputBytes", "switchCommits"];

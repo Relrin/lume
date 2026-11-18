@@ -18,12 +18,16 @@
  * compared with one another. The same goes for the full screens drawn for timing, whose
  * pictures are large and show nothing the smaller frames do not. An engine nobody has made references for reports that, and
  * leaves its pictures where they can be collected and looked at.
+ *
+ * The cursor's effects are drawn too, each frozen at one moment, and held to references
+ * of their own.
  */
 
 import { GLYPH_CLUSTER_TAG, type Highlights, type RenderFrame } from "@lume/renderer";
 import { FIXED_FRAMES } from "@lume/renderer/testing";
 import type { Vt } from "@lume/vt";
 
+import { drawCursorFx } from "./fx-snapshots.ts";
 import { type HarnessInfo, readReference, saveFile } from "./host.ts";
 import {
   canvasOf,
@@ -164,6 +168,43 @@ export async function runSnapshots(
   const engine = engineDirectory(info);
   const update = info?.update ?? false;
   const frames: FrameResult[] = [];
+
+  /**
+   * Holds `picture`, and the others drawn of the same thing, to the reference kept for
+   * `subject`, or writes it as the reference when asked to.
+   */
+  const againstReference = async (
+    subject: string,
+    picture: ImageData,
+    pictures: ReadonlyMap<string, ImageData>,
+    problems: string[],
+  ): Promise<ReferenceVerdict> => {
+    if (!engine) return "not-kept";
+    const name = `${engine}/${fileName(subject)}`;
+    if (update) {
+      await saveFile("references", name, await toPng(picture));
+      return "written";
+    }
+    const stored = await readReference(name);
+    if (!stored) {
+      // Kept where it can be collected: this is what a reference would be made from.
+      await saveFile("out", `references/${name}`, await toPng(picture)).catch(() => undefined);
+      return "unreferenced";
+    }
+    const wanted = await fromPng(stored);
+    let verdict: ReferenceVerdict = "matched";
+    for (const [tier, drawn] of pictures) {
+      const share = differingBlocks(drawn, wanted);
+      if (share <= REFERENCE_MAX_DIFFERENT) continue;
+      verdict = "differs";
+      problems.push(
+        share === 1 && (drawn.width !== wanted.width || drawn.height !== wanted.height)
+          ? `${tier} drew ${drawn.width}x${drawn.height}, the reference is ${wanted.width}x${wanted.height}`
+          : `${tier} differs from the reference in ${(share * 100).toFixed(2)}% of its blocks`,
+      );
+    }
+    return verdict;
+  };
   for (const subject of subjects(vt)) {
     progress(`drawing ${subject.name}`);
     const problems: string[] = [];
@@ -197,32 +238,10 @@ export async function runSnapshots(
       }
     }
 
-    let reference: ReferenceVerdict = "not-kept";
-    if (kept && first && engine) {
-      const name = `${engine}/${fileName(subject.name)}`;
-      const stored = update ? null : await readReference(name);
-      if (update) {
-        await saveFile("references", name, await toPng(first[1]));
-        reference = "written";
-      } else if (!stored) {
-        reference = "unreferenced";
-        // Kept where it can be collected: this is what a reference would be made from.
-        await saveFile("out", `references/${name}`, await toPng(first[1])).catch(() => undefined);
-      } else {
-        const wanted = await fromPng(stored);
-        reference = "matched";
-        for (const [tier, picture] of pictures) {
-          const share = differingBlocks(picture, wanted);
-          if (share <= REFERENCE_MAX_DIFFERENT) continue;
-          reference = "differs";
-          problems.push(
-            share === 1 && (picture.width !== wanted.width || picture.height !== wanted.height)
-              ? `${tier} drew ${picture.width}x${picture.height}, the reference is ${wanted.width}x${wanted.height}`
-              : `${tier} differs from the reference in ${(share * 100).toFixed(2)}% of its blocks`,
-          );
-        }
-      }
-    }
+    const reference: ReferenceVerdict =
+      kept && first
+        ? await againstReference(subject.name, first[1], pictures, problems)
+        : "not-kept";
 
     if (problems.length > 0) {
       // What was drawn, for whoever looks into it.
@@ -239,6 +258,24 @@ export async function runSnapshots(
     pane.host.dispose();
   }
   stage.remove();
+
+  progress("drawing the cursor's effects");
+  for (const effect of drawCursorFx(SNAPSHOT_PIXEL_RATIO)) {
+    const problems = [...effect.problems];
+    // The WebGL2 picture is the one a reference is kept of; Canvas 2D draws its glow
+    // otherwise, and is held only to the checks made as it was drawn.
+    const webgl2 = effect.pictures.get("webgl2");
+    const reference = webgl2
+      ? await againstReference(effect.name, webgl2, new Map([["webgl2", webgl2]]), problems)
+      : "not-kept";
+    if (problems.length > 0) {
+      for (const [kind, picture] of effect.pictures) {
+        const name = `failed/${kind}/${fileName(effect.name)}`;
+        await saveFile("out", name, await toPng(picture)).catch(() => undefined);
+      }
+    }
+    frames.push({ name: effect.name, tiers: {}, reference, problems });
+  }
 
   const drew = panes.length > 0;
   return {

@@ -108,6 +108,15 @@
             "state": {
               "checked": "false"
             }
+          },
+          {
+            "role": "combobox"
+          },
+          {
+            "role": "combobox"
+          },
+          {
+            "role": "spinbutton"
           }
         ]
       }

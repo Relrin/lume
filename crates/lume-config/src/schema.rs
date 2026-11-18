@@ -20,9 +20,10 @@ use crate::paths::Platform;
 use crate::profiles::ProfileEntry;
 use crate::settings::{PAGES_KEY, Shown, pages};
 use crate::tuning::{
-    BACKGROUND_BLUR_MAX, FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN,
-    LONG_COMMAND_SECONDS_DEFAULT, LONG_COMMAND_SECONDS_MAX, LONG_COMMAND_SECONDS_MIN,
-    PANE_LENGTH_MAX, SCROLLBACK_LINES_MAX, SETTINGS_STEP_LENGTH, SETTINGS_STEP_LINE_HEIGHT,
+    ACCENT_PRESETS, BACKGROUND_BLUR_MAX, CURSOR_EFFECT_LENGTH_MAX, CURSOR_EFFECT_LENGTH_MIN,
+    FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN, LONG_COMMAND_SECONDS_DEFAULT,
+    LONG_COMMAND_SECONDS_MAX, LONG_COMMAND_SECONDS_MIN, PANE_LENGTH_MAX, SCROLLBACK_LINES_MAX,
+    SETTINGS_STEP_EFFECT_LENGTH, SETTINGS_STEP_LENGTH, SETTINGS_STEP_LINE_HEIGHT,
     SETTINGS_STEP_LINES, SETTINGS_STEP_PERCENT, SETTINGS_STEP_SECONDS, UI_FONT_SIZE_MAX,
     UI_FONT_SIZE_MIN,
 };
@@ -270,6 +271,17 @@ pub struct AppearanceConfig {
         .list("themes")
         .when_unset("appearance.theme")))]
     pub theme_dark: String,
+    /// The colour focus, the selected tab, selected text and the window's glow are
+    /// drawn in: `mint`, `blue`, `lilac`, `amber`, `coral` or `graphite`, each of which
+    /// suits both dark and light themes, or a colour of your own written `#rrggbb`.
+    /// Left out, the theme's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("x-lume-format" = "accent"))]
+    #[schemars(extend("x-lume-settings" = Shown::swatch("appearance", "Theme", 40, "Accent colour", &ACCENT_PRESETS)
+        .help("Focus, selection, the tab highlight and the window's glow")
+        .unset("Theme's")
+        .token("color.accent")))]
+    pub accent: Option<String>,
     /// The radius of a pane's corners, in pixels. Menus and palettes follow it. Left
     /// out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -727,6 +739,7 @@ impl Default for AppearanceConfig {
             theme: None,
             theme_light: "lume-light".to_owned(),
             theme_dark: "lume-dark".to_owned(),
+            accent: None,
             card_radius: None,
             control_radius: None,
             gap: None,
@@ -814,6 +827,38 @@ pub enum CursorStyle {
     Underline,
 }
 
+/// What the cursor leaves behind when it jumps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum CursorTrail {
+    /// Nothing: the cursor is simply in its new place.
+    #[default]
+    None,
+    /// The cursor smears towards its new place, its leading edge first.
+    Warp,
+    /// A band from the old place shrinks into the new one.
+    Sweep,
+    /// A glowing comet flies to the new place, its tail following.
+    Comet,
+}
+
+/// What the cursor gives off when it changes shape or lands in another pane.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum CursorPulse {
+    /// Nothing.
+    #[default]
+    None,
+    /// A disc that grows from the cursor and fades.
+    Burst,
+    /// A ring that grows from the cursor and fades.
+    Ripple,
+    /// A box that grows from the cursor's shape and fades.
+    BoxBurst,
+    /// An outline that grows from the cursor's shape and fades.
+    BoxRipple,
+}
+
 /// What happens to a pane when its program ends.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -849,6 +894,36 @@ pub struct TerminalConfig {
     /// Whether the cursor blinks, until a program says otherwise.
     #[schemars(extend("x-lume-settings" = Shown::switch("terminal", "Cursor", 20, "Blinking cursor")))]
     pub cursor_blink: bool,
+    /// What the cursor leaves behind when it jumps a distance, or moves to another
+    /// pane. Off while the system asks for less motion.
+    #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Cursor", 30, "Cursor trail")
+        .help("Drawn when the cursor jumps, or moves to another pane")
+        .options(&[
+            ("none", "None"),
+            ("warp", "Warp"),
+            ("sweep", "Sweep"),
+            ("comet", "Comet"),
+        ])))]
+    pub cursor_trail: CursorTrail,
+    /// What the cursor gives off when it changes shape or moves to another pane. Off
+    /// while the system asks for less motion.
+    #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Cursor", 40, "Cursor pulse")
+        .help("Drawn when the cursor changes shape, or moves to another pane")
+        .options(&[
+            ("none", "None"),
+            ("burst", "Burst"),
+            ("ripple", "Ripple"),
+            ("box-burst", "Box burst"),
+            ("box-ripple", "Box ripple"),
+        ])))]
+    pub cursor_pulse: CursorPulse,
+    /// How long the cursor's trail and pulse last, as a share of each effect's own
+    /// length: 1 is as designed, 2 twice as long.
+    #[schemars(range(min = CURSOR_EFFECT_LENGTH_MIN, max = CURSOR_EFFECT_LENGTH_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("terminal", "Cursor", 50, "Effect length", SETTINGS_STEP_EFFECT_LENGTH)
+        .help("How long the trail and the pulse last, against their own length")
+        .percent()))]
+    pub cursor_effect_length: f64,
     /// The space between a pane's edge and its text, in pixels. Left out, the theme's.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 0.0, max = PANE_LENGTH_MAX))]
@@ -892,6 +967,9 @@ impl Default for TerminalConfig {
             scrollback_lines: 10_000,
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
+            cursor_trail: CursorTrail::None,
+            cursor_pulse: CursorPulse::None,
+            cursor_effect_length: 1.0,
             padding: None,
             close_on_exit: CloseOnExit::Clean,
             confirm_close: Confirm::Never,

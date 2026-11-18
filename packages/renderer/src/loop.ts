@@ -15,6 +15,16 @@ export interface FrameView {
   frame(now: number): void;
 }
 
+/** How a view is drawn among the others. */
+export interface FrameViewOptions {
+  /**
+   * Draw after every other view, in the same frame. A view that shows what the others
+   * found while they drew, such as an effect that follows a cursor across panes, is
+   * drawn in the frame that found it rather than the next.
+   */
+  after?: boolean;
+}
+
 /** What the loop needs from its surroundings. The defaults are the browser's. */
 export interface FrameLoopEnvironment {
   requestFrame(callback: (now: number) => void): number;
@@ -43,6 +53,8 @@ function browserEnvironment(): FrameLoopEnvironment {
 export class FrameLoop {
   readonly #env: FrameLoopEnvironment;
   readonly #views = new Set<FrameView>();
+  /** The views drawn after the others. */
+  readonly #after = new Set<FrameView>();
   readonly #stopListening: () => void;
   /** The pending animation frame, if one has been asked for. */
   #handle: number | undefined;
@@ -58,14 +70,15 @@ export class FrameLoop {
   }
 
   /** Start drawing a view. */
-  add(view: FrameView): void {
-    this.#views.add(view);
+  add(view: FrameView, options: FrameViewOptions = {}): void {
+    (options.after === true ? this.#after : this.#views).add(view);
     this.requestFrame();
   }
 
   /** Stop drawing a view. */
   remove(view: FrameView): void {
     this.#views.delete(view);
+    this.#after.delete(view);
   }
 
   /**
@@ -87,21 +100,26 @@ export class FrameLoop {
     this.#handle = undefined;
     this.#stopListening();
     this.#views.clear();
+    this.#after.clear();
   }
 
   #tick(now: number): void {
     this.#handle = undefined;
-    for (const view of [...this.#views]) {
-      try {
-        if (view.needsFrame()) view.frame(now);
-      } catch (error) {
-        // One terminal failing to draw must not stop the others.
-        this.#env.onError(error, view);
+    // The views drawn after the others are asked only once those have drawn, so that
+    // what the others did in this frame is seen in it.
+    for (const views of [this.#views, this.#after]) {
+      for (const view of [...views]) {
+        try {
+          if (view.needsFrame()) view.frame(now);
+        } catch (error) {
+          // One view failing to draw must not stop the others.
+          this.#env.onError(error, view);
+        }
       }
     }
     // A view that still has something to draw, such as one that is animating, keeps the
     // loop going. Otherwise it rests until the next request.
-    for (const view of this.#views) {
+    for (const view of [...this.#views, ...this.#after]) {
       try {
         if (view.needsFrame()) {
           this.requestFrame();
