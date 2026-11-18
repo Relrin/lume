@@ -7,9 +7,9 @@
 //!
 //! Names are dotted and lower case. The application's begin with `lume.` and an area
 //! from a short list, as in `lume.pane.split-right`. A plugin's begin with the plugin's
-//! id. The areas are kept from plugins, at any depth, so a command that looks like the
-//! application's is the application's; everything else under `lume.` is free, which
-//! leaves room for plugins the project itself ships.
+//! id. No plugin may be called `lume` or have a name under it, so a command whose name
+//! begins with `lume.` is always the application's, and no plugin can pass for part of
+//! it.
 
 use std::collections::BTreeMap;
 use std::sync::{PoisonError, RwLock};
@@ -23,8 +23,7 @@ const ID_MAX_LEN: usize = 96;
 /// The first part of every id of the application's own commands.
 const OWN_PREFIX: &str = "lume";
 
-/// The areas the application's own commands are in. No plugin's id may be
-/// `lume.<area>` or begin with it.
+/// The areas the application's own commands are in.
 pub const AREAS: [&str; 17] = [
     "app",
     "host",
@@ -118,14 +117,9 @@ fn well_formed(id: &str) -> bool {
 }
 
 /// Whether an id is one a plugin may not have: the application's prefix alone, or
-/// anything inside one of its areas.
+/// anything under it.
 fn reserved(plugin: &str) -> bool {
-    let mut parts = plugin.split('.');
-    match (parts.next(), parts.next()) {
-        (Some(OWN_PREFIX), None) => true,
-        (Some(OWN_PREFIX), Some(area)) => AREAS.contains(&area),
-        _ => false,
-    }
+    plugin.split('.').next() == Some(OWN_PREFIX)
 }
 
 /// The commands there are, by id.
@@ -238,9 +232,6 @@ mod tests {
     fn a_plugins_commands_begin_with_its_own_id() {
         let registry = Registry::new();
         registry
-            .register(Owner::Plugin("lume.metrics"), spec("lume.metrics.show"))
-            .unwrap();
-        registry
             .register(Owner::Plugin("acme.tools"), spec("acme.tools.deploy.now"))
             .unwrap();
         for id in ["acme.toolsx.run", "acme.tools", "lume.pane.close", "run"] {
@@ -255,18 +246,25 @@ mod tests {
     }
 
     #[test]
-    fn a_plugin_cannot_take_the_applications_name_or_one_of_its_areas() {
+    fn a_plugin_cannot_take_the_applications_name_or_any_under_it() {
         let registry = Registry::new();
-        for plugin in ["lume", "lume.pane", "lume.terminal", "lume.pane.extras"] {
+        for plugin in [
+            "lume",
+            "lume.pane",
+            "lume.terminal",
+            "lume.pane.extras",
+            "lume.metrics",
+            "lume.panes",
+        ] {
             assert_eq!(
                 registry.register(Owner::Plugin(plugin), spec(&format!("{plugin}.run"))),
                 Err(RegistryError::Reserved(plugin.to_owned())),
                 "{plugin}"
             );
         }
-        // Other names under the prefix are free.
+        // A name that only begins with the same letters is another name.
         registry
-            .register(Owner::Plugin("lume.panes"), spec("lume.panes.run"))
+            .register(Owner::Plugin("lumen.tools"), spec("lumen.tools.run"))
             .unwrap();
     }
 

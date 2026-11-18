@@ -55,7 +55,8 @@ Commands:
                Build the session host as it was at a tag, branch or commit (or the
                newest release whose host runs on its own), and run this tree's backend
                against it
-  schema       Write the JSON Schemas of the settings and of themes into schemas/
+  schema       Write the JSON Schemas of the settings, of themes and of plugin
+               manifests into schemas/
   tokens       Write the design tokens' TypeScript module and stylesheet into
                packages/tokens/src/
   lint         Run format, clippy, licence and JS lint checks

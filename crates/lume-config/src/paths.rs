@@ -196,6 +196,13 @@ impl Dirs {
     pub fn state_workspace_file(&self, name: &str) -> PathBuf {
         self.state_workspaces_dir().join(format!("{name}.json"))
     }
+
+    /// Where plugins are installed, with what they keep for themselves. It is the
+    /// application's to write, so it is in the state directory: what a plugin may do
+    /// is decided when it is installed, not by editing a file.
+    pub fn plugins_dir(&self) -> PathBuf {
+        self.state.join("plugins")
+    }
 }
 
 /// Whether a path is absolute by the rules of `platform`, which need not be the one
@@ -422,6 +429,7 @@ mod tests {
             dirs.state_workspace_file("work"),
             Path::new("state").join("workspaces").join("work.json")
         );
+        assert_eq!(dirs.plugins_dir(), Path::new("state").join("plugins"));
     }
 
     #[test]

@@ -15,6 +15,7 @@ usage: lume [--endpoint <name>] [--workspace <name>] [-e <program> [<arg>...]]
        lume theme import <file> [--name <name>]
        lume shell-integration bash|zsh|fish|powershell
        lume host [--endpoint <name>] status | start | stop [--end-sessions]
+       lume plugin <command> [--json]
        lume --help | --version
 
 Without a command, lume starts the application, or brings its window to the front if
@@ -98,6 +99,29 @@ and keeps them running after the application closes:
 --endpoint names the application's control endpoint, as for ctl; the host it uses is
 the one meant.
 
+Commands of lume plugin, on the plugins that are installed, which need no application
+running:
+  install <folder | archive.tar.gz> [--as <id>] [--name <name>] [--yes]
+                                 install a plugin: shows what it may do and asks first
+                                 (--yes agrees ahead); --as installs it under another
+                                 id, beside a plugin of the same id; --name names it.
+                                 The same plugin at another version replaces itself,
+                                 asking only about what it newly needs
+  list                           what is installed, in the order it loads in, and
+                                 whether each can be used
+  remove <id> [--purge]          remove a plugin; --purge removes its data and log too
+  enable <id> | disable <id>     turn a plugin on or off
+  rename <id> <name> | --reset   call a plugin something else, or what it calls itself
+  bind <id> <dependency>=<id>    have a plugin use another install for one it depends
+                                 on, such as a fork installed with --as; <dependency>=
+                                 undoes it
+  order <id> --first | --last | --before <id> | --after <id>
+                                 move a plugin in the order, where its dependencies
+                                 leave the choice
+  audit <id>                     what the plugin was allowed and refused
+  logs <id> [--lines <n>]        the end of what the plugin's code logged
+--json prints one JSON object instead.
+
 Exit status: 0 done, 1 refused or failed (for config check: something is wrong), 2
 arguments not understood, 3 a wait ran out of time, 4 the application is not running.";
 
@@ -123,6 +147,8 @@ pub enum Command {
     Offline(Offline),
     /// Ask the session host something, or start or stop it.
     Host(HostCommand),
+    /// Install plugins or change what is installed.
+    Plugin(crate::plugin::PluginCommand),
 }
 
 /// A command for the session host.
@@ -752,6 +778,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
                 return Ok(Command::Ctl(ctl));
             }
             "host" => return host(&mut words, endpoint).map(Command::Host),
+            "plugin" => return crate::plugin::parse(words).map(Command::Plugin),
             "config" => return config(&mut words).map(Command::Offline),
             "keymap" => return keymap(&mut words).map(Command::Offline),
             "theme" => return theme(&mut words).map(Command::Offline),

@@ -12,6 +12,7 @@ build = "build.rs"
 [dependencies]
 lume-config.workspace = true
 lume-ipc.workspace = true
+lume-plugin.workspace = true
 lume-proto.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

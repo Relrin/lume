@@ -1,0 +1,1254 @@
+{
+  "$defs": {
+    "ApiVersion": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      ],
+      "description": "The API version as written: a string of digits, or a number."
+    },
+    "Choice": {
+      "additionalProperties": false,
+      "description": "One of the values a setting may have, and what it is called.",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "type": "object"
+    },
+    "Command": {
+      "additionalProperties": false,
+      "description": "A command: something the user can run from the palette, a key or a menu, carried out\nby the plugin's code.",
+      "properties": {
+        "category": {
+          "default": null,
+          "description": "The heading the palette lists it under; the plugin's name if not given.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "palette": {
+          "default": true,
+          "description": "Whether the palette offers it.",
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
+    "Contributes": {
+      "additionalProperties": false,
+      "description": "Everything the plugin adds.",
+      "properties": {
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/Command"
+          },
+          "type": "array"
+        },
+        "keybindings": {
+          "items": {
+            "$ref": "#/$defs/Keybinding"
+          },
+          "type": "array"
+        },
+        "menus": {
+          "items": {
+            "$ref": "#/$defs/MenuItem"
+          },
+          "type": "array"
+        },
+        "panels": {
+          "items": {
+            "$ref": "#/$defs/Panel"
+          },
+          "type": "array"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/Section"
+          },
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/$defs/Service"
+          },
+          "type": "array"
+        },
+        "setting-groups": {
+          "items": {
+            "$ref": "#/$defs/SettingGroup"
+          },
+          "type": "array"
+        },
+        "settings": {
+          "items": {
+            "$ref": "#/$defs/Setting"
+          },
+          "type": "array"
+        },
+        "status": {
+          "items": {
+            "$ref": "#/$defs/StatusItem"
+          },
+          "type": "array"
+        },
+        "themes": {
+          "items": {
+            "$ref": "#/$defs/Theme"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Dependency": {
+      "anyOf": [
+        {
+          "description": "`\"acme.core\" = \"^1.2\"`",
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/DependencyTable",
+          "description": "`\"acme.core\" = { version = \"^1.2\", optional = true }`"
+        }
+      ],
+      "description": "A plugin another depends on: the versions that will do, and whether it can go\nwithout."
+    },
+    "DependencyTable": {
+      "additionalProperties": false,
+      "properties": {
+        "optional": {
+          "default": false,
+          "type": "boolean"
+        },
+        "version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Keybinding": {
+      "additionalProperties": false,
+      "description": "A key that runs a command.",
+      "properties": {
+        "args": {
+          "default": null
+        },
+        "command": {
+          "description": "The plugin's own command, or one of the application's.",
+          "type": "string"
+        },
+        "key": {
+          "description": "The keys, as in `ctrl+shift+m`, or a sequence of chords.",
+          "type": "string"
+        },
+        "macos": {
+          "default": null,
+          "description": "The keys on a Mac, where they differ.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "when": {
+          "default": null,
+          "description": "When the key holds, as in the configuration's keybindings.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "command"
+      ],
+      "type": "object"
+    },
+    "Limits": {
+      "additionalProperties": false,
+      "properties": {
+        "memory": {
+          "default": null,
+          "description": "The memory the plugin's code may use, in MiB: 16 to 256, 64 if not given.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Load": {
+      "additionalProperties": false,
+      "description": "Where the plugin goes in the order plugins load in, beyond its dependencies.",
+      "properties": {
+        "before": {
+          "default": [],
+          "description": "Plugins this one loads before, when they are installed.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "MenuItem": {
+      "additionalProperties": false,
+      "description": "An item of a menu, or a submenu.",
+      "properties": {
+        "after": {
+          "default": null,
+          "description": "The neighbour it goes right after.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "args": {
+          "default": null
+        },
+        "before": {
+          "default": null,
+          "description": "The neighbour it goes right before.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "default": null,
+          "description": "The command it runs. A submenu runs none.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "location": {
+          "description": "The menu it is in: one of the application's menus.",
+          "type": "string"
+        },
+        "order": {
+          "default": null,
+          "description": "Where it goes where no neighbour is named, or the one named is not there: lower\ncomes first.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "parent": {
+          "default": null,
+          "description": "The submenu it is in, instead of the menu itself.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "section": {
+          "default": null,
+          "description": "The section of that menu it is in: one of the application's (`lume:<name>`), one\nof the plugin's own, or one of a plugin it depends on.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "submenu": {
+          "default": false,
+          "description": "Whether it opens a menu of its own.",
+          "type": "boolean"
+        },
+        "title": {
+          "default": null,
+          "description": "What it is called; the command's title if not given. An item that runs one of the\napplication's commands is always called what the command is.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "when": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "location"
+      ],
+      "type": "object"
+    },
+    "Panel": {
+      "additionalProperties": false,
+      "description": "A panel in a dock area of the window, drawn by Lume from rows the plugin gives.",
+      "properties": {
+        "after": {
+          "default": null,
+          "description": "The neighbour it goes right after.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "area": {
+          "description": "The dock area it opens in the first time: `left`, `right` or `bottom`.",
+          "type": "string"
+        },
+        "before": {
+          "default": null,
+          "description": "The neighbour it goes right before.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "description": "How it is drawn: `list`.",
+          "type": "string"
+        },
+        "order": {
+          "default": null,
+          "description": "Where it goes where no neighbour is named, or the one named is not there: lower\ncomes first.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "kind",
+        "area"
+      ],
+      "type": "object"
+    },
+    "Section": {
+      "additionalProperties": false,
+      "description": "A section of a menu: items a line sets apart, with a heading if it has a title.",
+      "properties": {
+        "after": {
+          "default": null,
+          "description": "The neighbour it goes right after.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "before": {
+          "default": null,
+          "description": "The neighbour it goes right before.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "order": {
+          "default": null,
+          "description": "Where it goes where no neighbour is named, or the one named is not there: lower\ncomes first.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "title": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "location"
+      ],
+      "type": "object"
+    },
+    "Service": {
+      "additionalProperties": false,
+      "description": "A function other plugins may call.",
+      "properties": {
+        "description": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Setting": {
+      "additionalProperties": false,
+      "description": "One of the plugin's settings, under `[plugins.\"<id>\"]` in the configuration.",
+      "properties": {
+        "after": {
+          "default": null,
+          "description": "The neighbour it goes right after.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "before": {
+          "default": null,
+          "description": "The neighbour it goes right before.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "choices": {
+          "description": "The values it may have, for a setting that is one of a few.",
+          "items": {
+            "$ref": "#/$defs/Choice"
+          },
+          "type": "array"
+        },
+        "control": {
+          "default": null,
+          "description": "`switch`, `select`, `segmented`, `text` or `number`; from the type if not given.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default": true,
+        "group": {
+          "default": null,
+          "description": "The group of that page it is in: one of the plugin's own, or `lume:<group>`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "help": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "description": "The setting's name inside the plugin's table.",
+          "type": "string"
+        },
+        "label": {
+          "default": null,
+          "description": "What the settings window calls it. A setting without one is only in the file.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maximum": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "minimum": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "order": {
+          "default": null,
+          "description": "Where it goes where no neighbour is named, or the one named is not there: lower\ncomes first.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "page": {
+          "default": null,
+          "description": "`self` for the plugin's own page, or the id of one of the application's pages.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "shown-when": {
+          "default": null,
+          "description": "Another of the plugin's settings that must be on for this one to be shown.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "step": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "`boolean`, `integer`, `number` or `string`.",
+          "type": "string"
+        },
+        "unit": {
+          "default": null,
+          "description": "What the value is counted in, as `px` or `s`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "type",
+        "default"
+      ],
+      "type": "object"
+    },
+    "SettingGroup": {
+      "additionalProperties": false,
+      "description": "A group of settings on a page, with a heading.",
+      "properties": {
+        "after": {
+          "default": null,
+          "description": "The neighbour it goes right after.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "before": {
+          "default": null,
+          "description": "The neighbour it goes right before.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "order": {
+          "default": null,
+          "description": "Where it goes where no neighbour is named, or the one named is not there: lower\ncomes first.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "page": {
+          "default": null,
+          "description": "`self`, or the id of one of the application's pages.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
+    "StatusItem": {
+      "additionalProperties": false,
+      "description": "A status item: a small piece of information, or a button, in a bar.",
+      "properties": {
+        "after": {
+          "default": null,
+          "description": "The neighbour it goes right after.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "before": {
+          "default": null,
+          "description": "The neighbour it goes right before.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "default": null,
+          "description": "A command the item runs when clicked, which makes it a button.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "description": "`text`, `icon`, `meter`, `sparkline` or `badge`.",
+          "type": "string"
+        },
+        "label": {
+          "default": null,
+          "description": "What the item stands for, read out and shown until the plugin says more.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "menu": {
+          "default": null,
+          "description": "A submenu of the plugin's own the item opens when clicked.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "order": {
+          "default": null,
+          "description": "Where it goes where no neighbour is named, or the one named is not there: lower\ncomes first.",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "slot": {
+          "description": "`topbar.left`, `topbar.center`, `topbar.right` or `pane.header`.",
+          "type": "string"
+        },
+        "tooltip": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "when": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "slot",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "Theme": {
+      "additionalProperties": false,
+      "description": "A theme file in the package.",
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "file"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "plugin.toml at the root of a plugin's package",
+  "properties": {
+    "activation": {
+      "default": [],
+      "description": "The events that start the plugin's code: `onStartup`, `onCommand:<name>`,\n`onView:<name>`, `onSessionEvent:<kind>`, `onService:<name>`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "api": {
+      "$ref": "#/$defs/ApiVersion",
+      "description": "The major version of the plugin API the plugin is written for, as in `\"1\"`."
+    },
+    "contributes": {
+      "$ref": "#/$defs/Contributes"
+    },
+    "dependencies": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Dependency"
+      },
+      "description": "Other plugins this one uses, by id, with the versions it works with.",
+      "type": "object"
+    },
+    "description": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "icon": {
+      "default": null,
+      "description": "An SVG file in the package.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "description": "The plugin's id: dotted lower-case words, as in `acme.metrics`.",
+      "type": "string"
+    },
+    "license": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limits": {
+      "$ref": "#/$defs/Limits"
+    },
+    "load": {
+      "$ref": "#/$defs/Load"
+    },
+    "main": {
+      "default": null,
+      "description": "The plugin's code: a JavaScript file in the package. A plugin that only adds\nthemes, keys or menus of the application's commands needs none.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "What the plugin is called.",
+      "type": "string"
+    },
+    "permissions": {
+      "additionalProperties": false,
+      "default": {},
+      "description": "What the plugin may do; see the documentation of permissions.",
+      "properties": {
+        "clipboard.read": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "clipboard.write": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "fs.read": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                },
+                "scope": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "scope"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "fs.write": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                },
+                "scope": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "scope"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "layout.write": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "net": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                },
+                "scope": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "scope"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "optional": {
+          "additionalProperties": false,
+          "description": "Kinds the plugin may ask for while it runs",
+          "properties": {
+            "clipboard.read": {
+              "const": true
+            },
+            "clipboard.write": {
+              "const": true
+            },
+            "fs.read": {
+              "anyOf": [
+                {
+                  "const": true
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              ]
+            },
+            "fs.write": {
+              "anyOf": [
+                {
+                  "const": true
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              ]
+            },
+            "layout.write": {
+              "const": true
+            },
+            "net": {
+              "anyOf": [
+                {
+                  "const": true
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              ]
+            },
+            "panes.read": {
+              "const": true
+            },
+            "panes.write": {
+              "const": true
+            },
+            "process.run": {
+              "anyOf": [
+                {
+                  "const": true
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              ]
+            },
+            "services.use": {
+              "anyOf": [
+                {
+                  "const": true
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              ]
+            },
+            "sessions.spawn": {
+              "const": true
+            },
+            "system.metrics": {
+              "const": true
+            },
+            "workspace.read": {
+              "const": true
+            }
+          },
+          "type": "object"
+        },
+        "panes.read": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "panes.write": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "process.run": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                },
+                "scope": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "scope"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "services.use": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                },
+                "scope": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "scope"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "sessions.spawn": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "system.metrics": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "workspace.read": {
+          "anyOf": [
+            {
+              "const": true
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "repository": {
+      "default": null,
+      "description": "Where the plugin's source is. Two packages with the same id and repository are one\nplugin at two versions.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schema": {
+      "description": "The version of this file's format: 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "version": {
+      "description": "The plugin's version, as semver: `1.2.0`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "name",
+    "version",
+    "api"
+  ],
+  "title": "Lume plugin manifest",
+  "type": "object"
+}

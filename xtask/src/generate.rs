@@ -1,10 +1,11 @@
 //! `cargo xtask schema` and `cargo xtask tokens`: write the files that are generated
 //! from the configuration's definitions.
 //!
-//! The settings' JSON Schema, the theme schema and the page's token module are kept in
-//! the repository, because editors and the page's build read them as files. What goes
-//! in them is decided by the configuration crate; this only puts it on disk. A test in
-//! that crate fails when a file here is not what the crate would generate.
+//! The settings' JSON Schema, the theme schema, the plugin manifest's schema and the
+//! page's token module are kept in the repository, because editors and the page's build
+//! read them as files. What goes in them is decided by the configuration and plugin
+//! crates; this only puts it on disk. A test in each crate fails when a file here is not
+//! what the crate would generate.
 
 use std::fs;
 
@@ -19,6 +20,7 @@ pub fn write(kind: GeneratedKind, command: &str) -> Result<()> {
     let root = paths::root();
     for file in generated_files()
         .into_iter()
+        .chain(lume_plugin::manifest::generated_files())
         .filter(|file| file.kind == kind)
     {
         let path = root.join(file.path);
