@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 
 use lume_proto::tuning::MAX_PAYLOAD;
 use lume_proto::{
-    Body, CellPx, ClientKind, CommandState, ErrorCode, ExitStatus, HydrateMode, Message,
-    Notification, PROTO_VERSION, ProgramState, ProtoError, RequestBody, Responder, ResponseBody,
-    SessionEvent, SessionId,
+    Body, CellPx, ClientKind, CommandState, ErrorCode, ExitStatus, HydrateMode, HydratePayload,
+    Message, Notification, PROTO_VERSION, ProgramState, ProtoError, RequestBody, Responder,
+    ResponseBody, SessionEvent, SessionId,
 };
 
 use crate::support::{self, Harness, MARK_OUTPUT, PRINT_MARK, PRINT_SIZE, STEP, size};
@@ -27,7 +27,12 @@ macro_rules! host_suite {
             a_client_with_no_common_version_is_refused,
             spawn_then_list,
             a_missing_program_is_an_invalid_spec,
-            output_before_attach_arrives_intact_and_only_against_credit,
+            output_before_attach_is_on_the_screen_a_client_starts_from,
+            a_client_of_another_engine_starts_from_replayed_output,
+            a_session_with_no_client_runs_on,
+            the_screen_answers_the_programs_questions,
+            the_screen_can_be_read_and_waited_on,
+            a_client_can_start_again_from_the_screen_in_the_middle_of_the_flow,
             input_is_echoed,
             resize_is_marked_in_the_output_and_reaches_the_shell,
             detach_keeps_the_session_and_a_new_stream_continues,
@@ -77,7 +82,7 @@ pub async fn hello_must_come_first<H: Harness>() {
     let hello = RequestBody::Hello {
         proto: PROTO_VERSION,
         proto_min: PROTO_VERSION,
-        vt_version: Some("1.0.1".to_owned()),
+        vt_version: Some(lume_host::vt_version().to_owned()),
         client_kind: ClientKind::Test,
     };
     match client.request(hello.clone()).await {
@@ -92,11 +97,11 @@ pub async fn hello_must_come_first<H: Harness>() {
             assert_eq!(proto, PROTO_VERSION);
             assert_eq!(max_payload as usize, MAX_PAYLOAD);
             assert_ne!(pid, 0);
-            // The host keeps no terminal state of its own.
-            assert_eq!(vt_version, None);
-            assert_eq!(caps.responder, Responder::Client);
+            // The host keeps every session's screen, and that screen answers.
+            assert_eq!(vt_version.as_deref(), Some(lume_host::vt_version()));
+            assert_eq!(caps.responder, Responder::Backend);
             assert!(!caps.persistent && !caps.multi_client && !caps.server_layout);
-            assert!(!caps.hydrate.snapshot && !caps.hydrate.vt_replay);
+            assert!(caps.hydrate.snapshot && caps.hydrate.vt_replay);
         }
         other => panic!("hello was answered with {other:?}"),
     }
@@ -173,7 +178,7 @@ pub async fn a_missing_program_is_an_invalid_spec<H: Harness>() {
     host.shutdown().await;
 }
 
-pub async fn output_before_attach_arrives_intact_and_only_against_credit<H: Harness>() {
+pub async fn output_before_attach_is_on_the_screen_a_client_starts_from<H: Harness>() {
     let mut host = H::start().await;
     let client = &mut host.client;
     client.hello().await;
@@ -195,7 +200,8 @@ pub async fn output_before_attach_arrives_intact_and_only_against_credit<H: Harn
             resize_pulls_scrollback,
         }) => {
             assert_eq!(attached, size(80, 24));
-            assert_eq!(hydrate, HydrateMode::None);
+            // The client runs the host's own engine, so it gets a snapshot.
+            assert_eq!(hydrate, HydrateMode::Snapshot);
             // A pseudoconsole keeps its own copy of the screen; a Unix terminal does not.
             assert_eq!(resize_pulls_scrollback, cfg!(unix));
         }
@@ -207,11 +213,182 @@ pub async fn output_before_attach_arrives_intact_and_only_against_credit<H: Harn
         })
         .await;
 
-    // A new stream has no credit, so nothing is sent yet.
-    assert_eq!(client.data(1, Duration::from_millis(400)).await, None);
+    // What the program printed is on the screen the client starts from; the output
+    // that follows starts after it.
+    let screen = client.hydrated_text(1);
+    assert!(screen.contains("printed-before-attach"), "{screen:?}");
+    assert!(matches!(
+        client.hydrated(1),
+        Some(HydratePayload::Snapshot { vt_version, .. }) if vt_version == lume_host::vt_version()
+    ));
 
+    // Credit brings no copy of what is already on that screen.
     client.credit(1, 1024 * 1024).await;
-    client.read_until(1, "printed-before-attach").await;
+    let mut printed = String::new();
+    while let Some(bytes) = client.data(1, Duration::from_millis(500)).await {
+        printed.push_str(&String::from_utf8_lossy(&bytes));
+    }
+    assert!(
+        !printed.contains("printed-before-attach"),
+        "output on the screen came again: {printed:?}"
+    );
+    host.shutdown().await;
+}
+
+pub async fn a_client_can_start_again_from_the_screen_in_the_middle_of_the_flow<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::shell()).await;
+    client.attach_with_credit(session, 1).await;
+    client.type_line(1, PRINT_MARK).await;
+    client.read_until(1, MARK_OUTPUT).await;
+    client.discard_output(1).await;
+
+    client.send(Message::new(1, Body::Rehydrate)).await;
+    let is_hydrate =
+        |message: &Message| message.stream == 1 && matches!(message.body, Body::Hydrate(_));
+    let Body::Hydrate(payload) = client
+        .expect("the copy of the screen", is_hydrate)
+        .await
+        .body
+    else {
+        unreachable!("matched as a hydrate");
+    };
+    let HydratePayload::Snapshot { bytes, .. } = payload else {
+        panic!("a client of the host's own engine is sent a snapshot");
+    };
+    let screen = lume_vt::Terminal::from_snapshot(&bytes)
+        .unwrap()
+        .screen_text()
+        .unwrap()
+        .join("\n");
+    assert!(screen.contains(MARK_OUTPUT), "{screen:?}");
+
+    // The flow goes on behind it.
+    client.type_line(1, "echo after-the-copy").await;
+    client.read_until(1, "after-the-copy").await;
+    host.shutdown().await;
+}
+
+pub async fn a_client_of_another_engine_starts_from_replayed_output<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello_as(Some("0.0.0-another".to_owned())).await;
+
+    let session = client
+        .spawn(support::prints_then_waits("printed-before-attach"))
+        .await;
+    client
+        .list_until("the program printed nothing", |sessions| {
+            sessions[0].stats.read_bytes > 0
+        })
+        .await;
+    match client.attach(session, 1).await {
+        Ok(ResponseBody::Attached { hydrate, .. }) => assert_eq!(hydrate, HydrateMode::VtReplay),
+        other => panic!("attach was answered with {other:?}"),
+    }
+    let screen = client.hydrated_text(1);
+    assert!(screen.contains("printed-before-attach"), "{screen:?}");
+    host.shutdown().await;
+}
+
+pub async fn a_session_with_no_client_runs_on<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    // A program that prints far more than any buffer holds and then waits.
+    let session = client.spawn(support::prints_lines_then_waits(6_000)).await;
+    let wanted = support::line_number(6_000);
+    client
+        .request(RequestBody::WaitText {
+            session,
+            text: wanted.clone(),
+            timeout_ms: STEP.as_millis() as u64,
+        })
+        .await
+        .expect("the program ran to its end with nobody attached");
+
+    client.attach_with_credit(session, 1).await;
+    let screen = client.hydrated_text(1);
+    assert!(screen.contains(&wanted), "{screen:?}");
+    host.shutdown().await;
+}
+
+pub async fn the_screen_answers_the_programs_questions<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    // Nobody is attached: the question is answered all the same, once, and the
+    // program prints the answer it read.
+    let session = client.spawn(support::asks_for_the_cursor()).await;
+    client
+        .request(RequestBody::WaitText {
+            session,
+            text: support::CURSOR_ANSWERED.to_owned(),
+            timeout_ms: STEP.as_millis() as u64,
+        })
+        .await
+        .expect("the program got an answer");
+    host.shutdown().await;
+}
+
+pub async fn the_screen_can_be_read_and_waited_on<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client
+        .spawn(support::prints_then_waits("on-the-screen"))
+        .await;
+    let matched = client
+        .request(RequestBody::WaitText {
+            session,
+            text: "on-the-screen".to_owned(),
+            timeout_ms: STEP.as_millis() as u64,
+        })
+        .await;
+    let Ok(ResponseBody::Matched { row, line }) = matched else {
+        panic!("wait was answered with {matched:?}");
+    };
+    assert!(line.contains("on-the-screen"), "{line:?}");
+
+    match client.request(RequestBody::Screen { session }).await {
+        Ok(ResponseBody::Screen {
+            size: shown,
+            lines,
+            alternate,
+            ..
+        }) => {
+            assert_eq!(shown, size(80, 24));
+            assert_eq!(lines.len(), 24);
+            assert!(!alternate);
+            assert_eq!(lines[usize::from(row)], line);
+        }
+        other => panic!("screen was answered with {other:?}"),
+    }
+
+    let missing = client
+        .request(RequestBody::WaitText {
+            session,
+            text: "never-printed".to_owned(),
+            timeout_ms: 300,
+        })
+        .await;
+    assert_eq!(code(missing), Some(ErrorCode::Timeout));
+    assert_eq!(
+        code(
+            client
+                .request(RequestBody::Screen {
+                    session: not_a_session()
+                })
+                .await
+        ),
+        Some(ErrorCode::NotFound)
+    );
     host.shutdown().await;
 }
 
@@ -368,8 +545,9 @@ pub async fn output_then_exit_arrive_in_order<H: Harness>() {
     assert_eq!(info.exit, Some(ExitStatus::Code(4)));
 
     client.attach_with_credit(session, 1).await;
-    // Everything on the stream, in the order it arrives, up to the exit.
-    let mut printed = String::new();
+    // The screen it ended on, then everything on the stream in the order it arrives,
+    // up to the exit.
+    let mut printed = client.hydrated_text(1);
     loop {
         let message = client
             .expect("the rest of the stream", |message| message.stream == 1)
@@ -552,9 +730,9 @@ async fn reading_stops(client: &mut support::Client) -> u64 {
 
 pub async fn a_flood_with_no_credit_leaves_memory_flat<H: Harness>() {
     const KIB: u64 = 1024;
-    /// What a session may hold: its buffer for output before the first attach, and one
-    /// read that was already under way when the buffer filled.
-    const HELD_MAX: u64 = (256 + 64) * KIB;
+    /// What a session may hold for a client that grants nothing: one send, and one
+    /// read that was already under way when it filled.
+    const HELD_MAX: u64 = (64 + 64) * KIB;
 
     let mut host = H::start().await;
     let client = &mut host.client;

@@ -69,6 +69,8 @@ class FakeCarrier implements Carrier {
   attachGate: Promise<void> | undefined;
   /** When set, sends are refused with this. */
   refusal: unknown;
+  /** What an attach is answered with. */
+  attached: object = ATTACHED;
   #waiting: (() => void)[] = [];
 
   open(receive: (frames: Uint8Array) => void): Promise<CarrierOpened> {
@@ -99,7 +101,7 @@ class FakeCarrier implements Carrier {
     this.commands.push({ name, args });
     if (name === "session_attach") {
       await this.attachGate;
-      return ATTACHED as T;
+      return this.attached as T;
     }
     if (name === "session_spawn") return "0123456789abcdef" as T;
     if (name === "session_list") return [] as T;
@@ -175,6 +177,41 @@ describe("the transport client", () => {
     expect(got.map((frame) => frame.kind)).toEqual(["resized", "exit"]);
     expect(attachment.size).toEqual({ cols: 80, rows: 24 });
     expect(attachment.caps.responder).toBe("client");
+  });
+
+  it("hands over the state to start from apart from the flow, whenever it arrives", async () => {
+    const replay = (stream: number, bytes: string) =>
+      rawFrame(stream, Kind.Hydrate, [2, ...text(bytes)]);
+    const { carrier, client } = await opened();
+    carrier.attached = { ...ATTACHED, hydrate: "vt_replay" };
+
+    // Before the answer to the attach.
+    let open!: () => void;
+    carrier.attachGate = new Promise((resolve) => (open = resolve));
+    const attaching = client.attach("local", "0123456789abcdef", FACTS);
+    await settle();
+    carrier.deliver(replay(1, "early"));
+    carrier.deliver(data(1, text("after")));
+    open();
+    const early = await attaching;
+    const first = await early.hydrated();
+    expect(first?.form).toBe("vt_replay");
+    expect(new TextDecoder().decode(first?.bytes)).toBe("early");
+    const got: StreamFrame[] = [];
+    early.start((frame) => got.push(frame));
+    expect(got.map((frame) => frame.kind)).toEqual(["data"]);
+
+    // After it.
+    carrier.attachGate = undefined;
+    const late = await client.attach("local", "0123456789abcdef", FACTS);
+    const waiting = late.hydrated();
+    carrier.deliver(replay(2, "late"));
+    expect(new TextDecoder().decode((await waiting)?.bytes)).toBe("late");
+
+    // An attachment that starts from nothing says so at once.
+    carrier.attached = ATTACHED;
+    const blank = await client.attach("local", "0123456789abcdef", FACTS);
+    expect(await blank.hydrated()).toBeUndefined();
   });
 
   it("grants the first window only when the view starts", async () => {

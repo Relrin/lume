@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { Vt, type ClipboardLocation } from "@lume/vt";
+import { formatText, Vt, type ClipboardLocation } from "@lume/vt";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -10,6 +10,7 @@ import {
 } from "../src/limits.ts";
 import { TerminalSession, type SessionHooks } from "../src/terminal/session.ts";
 import { DEFAULT_APPEARANCE, terminalColors } from "../src/theme.ts";
+import type { HydrateFrame } from "../src/transport/client.ts";
 import type { CellPx, ClientFacts, ExitStatus, Responder } from "../src/transport/types.ts";
 import { FakeAttachment } from "./fake-attachment.ts";
 
@@ -242,14 +243,177 @@ describe("a terminal session", () => {
     expect(most).toBeLessThan(SCROLLBACK_MAX_LINES * 1.2);
   });
 
-  it("replays output it is given to start from", () => {
+  it("starts again from output to replay sent in the middle of the flow", () => {
     const { session, attachment, events } = open();
+    attachment.data("before");
     attachment.deliver({ stream: 1, kind: "hydrate", form: "vt_replay", bytes: utf8("restored") });
     expect(session.terminal.rowText(0)).toBe("restored");
-    expect(events).toEqual(["changed"]);
+    expect(events).toEqual(["changed", "changed"]);
     // That is not output the session is waiting to hear was taken.
-    expect(attachment.consumedBytes).toBe(0);
+    expect(attachment.consumedBytes).toBe("before".length);
     session.dispose();
+  });
+
+  describe("with older lines kept by the backend", () => {
+    // 3000 numbered lines in a 40×5 terminal, saved by the native build.
+    const history = () =>
+      new Uint8Array(readFileSync(new URL("../../../tests/hydrate/history.bin", import.meta.url)));
+    const historyLines = (session: TerminalSession) =>
+      formatText(session.terminal, { format: "plain" })
+        .split("\n")
+        .filter((line) => line.startsWith("history-"));
+
+    function paging(windowLines = 200): {
+      session: TerminalSession;
+      attachment: FakeAttachment;
+      events: string[];
+    } {
+      const attachment = new FakeAttachment("backend", true);
+      const events: string[] = [];
+      const session = new TerminalSession(vt, attachment, {
+        colors: terminalColors(DEFAULT_APPEARANCE),
+        scheme: "dark",
+        cellPx: CELL,
+        scrollbackLines: 10_000,
+        windowLines,
+        start: {
+          stream: 1,
+          kind: "hydrate",
+          form: "snapshot",
+          vtVersion: vt.version,
+          bytes: history(),
+        },
+        hooks: {
+          replaced: () => events.push("replaced"),
+          changed: () => events.push("changed"),
+        },
+      });
+      session.start();
+      return { session, attachment, events };
+    }
+
+    it("starts with only the newest lines and fetches the rest when asked", () => {
+      const { session, attachment, events } = paging();
+      expect(session.fetchesHistory).toBe(true);
+      expect(session.holdsAllHistory).toBe(false);
+      const newest = historyLines(session);
+      expect(newest.length).toBeLessThan(1500);
+      expect(newest.at(-1)).toBe("history-3000");
+      expect(session.historyCut).toBe(true);
+
+      session.fetchHistory();
+      session.fetchHistory();
+      // Asked once, however often it is asked while the lines are on their way.
+      expect(attachment.calls.filter((call) => call === "rehydrate")).toHaveLength(1);
+      const before = session.terminal;
+      attachment.deliver({
+        stream: 1,
+        kind: "hydrate",
+        form: "snapshot",
+        vtVersion: vt.version,
+        bytes: history(),
+      });
+      expect(session.terminal).not.toBe(before);
+      expect(events).toContain("replaced");
+      expect(session.holdsAllHistory).toBe(true);
+      const all = historyLines(session);
+      expect(all[0]).toBe("history-0001");
+      expect(all.at(-1)).toBe("history-3000");
+
+      // Letting them go keeps the newest again.
+      session.releaseHistory();
+      expect(session.holdsAllHistory).toBe(false);
+      expect(historyLines(session).length).toBeLessThan(1500);
+      session.dispose();
+    });
+
+    it("keeps the lines the view showed on show when the older ones arrive", () => {
+      const { session, attachment } = paging();
+      session.terminal.scrollToTop();
+      const shown = session.terminal.scrollbar();
+      const fromEnd = shown.total - shown.offset - shown.length;
+      session.fetchHistory();
+      attachment.deliver({
+        stream: 1,
+        kind: "hydrate",
+        form: "snapshot",
+        vtVersion: vt.version,
+        bytes: history(),
+      });
+      const now = session.terminal.scrollbar();
+      expect(now.total).toBeGreaterThan(shown.total);
+      expect(now.total - now.offset - now.length).toBe(fromEnd);
+      session.dispose();
+    });
+
+    it("keeps everything itself when the backend cannot send its screen", () => {
+      const attachment = new FakeAttachment("backend", false);
+      const session = new TerminalSession(vt, attachment, {
+        colors: terminalColors(DEFAULT_APPEARANCE),
+        scheme: "dark",
+        cellPx: CELL,
+        windowLines: 200,
+      });
+      expect(session.fetchesHistory).toBe(false);
+      expect(session.holdsAllHistory).toBe(true);
+      session.fetchHistory();
+      expect(attachment.calls).not.toContain("rehydrate");
+      session.dispose();
+    });
+  });
+
+  describe("brought up to date when it attaches", () => {
+    function startingFrom(start: HydrateFrame): TerminalSession {
+      const attachment = new FakeAttachment("backend");
+      return new TerminalSession(vt, attachment, {
+        colors: terminalColors(DEFAULT_APPEARANCE),
+        scheme: "dark",
+        cellPx: CELL,
+        start,
+      });
+    }
+
+    it("loads a saved terminal of its own engine's version", () => {
+      // Saved by the native build at the end of a recording.
+      const snapshot = new Uint8Array(
+        readFileSync(new URL("../../../tests/corpus/07-input-modes/snapshot.bin", import.meta.url)),
+      );
+      const session = startingFrom({
+        stream: 1,
+        kind: "hydrate",
+        form: "snapshot",
+        vtVersion: vt.version,
+        bytes: snapshot,
+      });
+      // The size is the session's, which the output that follows is drawn for.
+      expect([session.terminal.cols, session.terminal.rows]).toEqual([80, 24]);
+      expect(session.terminal.rowText(0)).toBe("modes a full-screen program turns on");
+      expect(session.terminal.mode(2004)).toBe(true);
+      session.dispose();
+    });
+
+    it("starts blank from a terminal saved by another version", () => {
+      const session = startingFrom({
+        stream: 1,
+        kind: "hydrate",
+        form: "snapshot",
+        vtVersion: "0.0.0-another",
+        bytes: new Uint8Array([1, 2, 3]),
+      });
+      expect(session.terminal.rowText(0)).toBe("");
+      session.dispose();
+    });
+
+    it("replays output that rebuilds the screen", () => {
+      const session = startingFrom({
+        stream: 1,
+        kind: "hydrate",
+        form: "vt_replay",
+        bytes: utf8("replayed"),
+      });
+      expect(session.terminal.rowText(0)).toBe("replayed");
+      session.dispose();
+    });
   });
 
   describe("once its program has ended", () => {

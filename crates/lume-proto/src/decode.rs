@@ -246,8 +246,12 @@ fn decode_body(kind: Kind, bytes: Vec<u8>) -> Result<Body, DecodeError> {
         Kind::Facts => Body::Facts(payload::decode_facts(&bytes)?),
         Kind::Credit => Body::Credit(payload::decode_credit(&bytes)?),
         Kind::Detach => {
-            payload::decode_detach(&bytes)?;
+            payload::decode_empty(Kind::Detach, &bytes)?;
             Body::Detach
+        }
+        Kind::Rehydrate => {
+            payload::decode_empty(Kind::Rehydrate, &bytes)?;
+            Body::Rehydrate
         }
     })
 }

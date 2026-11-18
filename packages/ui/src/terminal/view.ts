@@ -130,12 +130,25 @@ export interface CursorDefault {
   readonly blink: boolean;
 }
 
+/** How a view keeps a session's scrollback when older lines are fetched as needed. */
+export interface HistorySettings {
+  /** How many of the newest lines the view keeps itself. */
+  readonly windowLines: number;
+  /** How long fetched lines stay once the view is back at the newest output. */
+  readonly releaseMs: number;
+}
+
 /** How a view is set up, and may be set up again while it runs. */
 export interface ViewSettings {
   readonly appearance: Appearance;
   readonly cursor: CursorDefault;
   /** How many lines that scrolled off the top a terminal keeps. */
   readonly scrollbackLines: number;
+  /**
+   * Keep only the newest lines of a session in the view and fetch older ones from its
+   * backend as they are wanted. Left out, the view keeps all of them.
+   */
+  readonly history?: HistorySettings;
   /** How much larger than the look's own the text is, in CSS pixels; negative for smaller. */
   readonly zoomPx: number;
 }
@@ -288,6 +301,9 @@ export class TerminalView implements FrameView {
   #appearance: Appearance;
   #cursor: CursorDefault;
   #scrollbackLines: number;
+  #history: HistorySettings | undefined;
+  /** Lets fetched lines go once the view has stayed at the newest output long enough. */
+  #releaseTimer: number | undefined;
   #zoomPx: number;
   #dirty = false;
   #focused = false;
@@ -330,6 +346,7 @@ export class TerminalView implements FrameView {
     this.#appearance = settings.appearance;
     this.#cursor = settings.cursor;
     this.#scrollbackLines = settings.scrollbackLines;
+    this.#history = settings.history;
     this.#zoomPx = settings.zoomPx;
     this.#fontSizePx = this.#fontSize();
     this.#mouse = new MouseEncoder(services.vt);
@@ -484,6 +501,7 @@ export class TerminalView implements FrameView {
     const before = this.#appearance;
     this.#appearance = settings.appearance;
     this.#scrollbackLines = settings.scrollbackLines;
+    this.#history = settings.history;
     this.#zoomPx = settings.zoomPx;
     this.#fontSizePx = this.#fontSize();
 
@@ -496,7 +514,8 @@ export class TerminalView implements FrameView {
       if (settings.appearance !== before) terminal.setColors(terminalColors(settings.appearance));
       if (settings.appearance.scheme !== before.scheme) {
         terminal.setColorScheme(settings.appearance.scheme);
-        if (terminal.mode(Mode.ColorSchemeReport)) {
+        // Where the backend answers, it reports the change from the facts it is sent.
+        if (session.answersQueries && terminal.mode(Mode.ColorSchemeReport)) {
           session.send(encodeColorScheme(this.#services.vt, settings.appearance.scheme));
         }
       }
@@ -708,6 +727,8 @@ export class TerminalView implements FrameView {
     const pin = size ? { size, fitted: this.#fitted() } : undefined;
     const facts = { ...this.facts(), ...(size ? { size } : {}) };
     const attachment = await client.attach(backend, session, facts);
+    // The screen as the session has it now, taken before any output.
+    const start = await attachment.hydrated();
     this.#dropSession();
     // Before the session starts, which hands over at once what it reported so far.
     this.#services.attached({
@@ -728,6 +749,8 @@ export class TerminalView implements FrameView {
       cellPx: facts.cellPx,
       scrollbackLines: this.#scrollbackLines,
       cursor: this.#cursor,
+      ...(start ? { start } : {}),
+      ...(this.#history ? { windowLines: this.#history.windowLines } : {}),
       hooks: {
         changed: () => {
           // What was under the pointer may have moved. It is looked for again when
@@ -751,6 +774,7 @@ export class TerminalView implements FrameView {
         // say them to a view that attaches later; the terminal's own are not used.
         reported: (event) => this.#services.reported(event),
         clipboardWrite: (text, location) => this.#onProgramClipboard(text, location),
+        replaced: () => this.#onReplaced(),
       },
     });
     this.#session = opened;
@@ -788,6 +812,7 @@ export class TerminalView implements FrameView {
 
   #dropSession(): void {
     const showed = this.#shown !== undefined;
+    this.#stopRelease();
     this.#gesture?.free();
     this.#gesture = undefined;
     this.#endSearch();
@@ -927,7 +952,54 @@ export class TerminalView implements FrameView {
     this.#placeInput(frame.cursor);
     this.#updateScrollbar();
     this.#tellCursor(frame.cursor, `${frame.cols}x${frame.rows}`, now);
+    this.#watchHistory(session);
     if (searched) this.#services.searched();
+  }
+
+  // Scrollback kept by the backend.
+
+  /**
+   * Fetches a session's older lines when the view is scrolled to the top of what it
+   * holds, and lets them go once it has stayed at the newest output for a while.
+   */
+  #watchHistory(session: TerminalSession): void {
+    if (!session.fetchesHistory) return;
+    const { total, offset, length } = session.terminal.scrollbar();
+    if (offset === 0 && total > length && session.historyCut) session.fetchHistory();
+    const atNewest = offset + length >= total;
+    if (!session.holdsAllHistory || !atNewest) {
+      this.#stopRelease();
+      return;
+    }
+    if (this.#releaseTimer !== undefined) return;
+    const releaseMs = this.#history?.releaseMs ?? 0;
+    this.#releaseTimer = window.setTimeout(() => {
+      this.#releaseTimer = undefined;
+      // Only if the view has not moved meanwhile and nobody looks for anything.
+      if (this.#session !== session || this.#needle !== "") return;
+      const now = session.terminal.scrollbar();
+      if (now.offset + now.length >= now.total) session.releaseHistory();
+    }, releaseMs);
+  }
+
+  #stopRelease(): void {
+    if (this.#releaseTimer !== undefined) window.clearTimeout(this.#releaseTimer);
+    this.#releaseTimer = undefined;
+  }
+
+  /** The session's terminal was replaced: take the new one wherever the old was used. */
+  #onReplaced(): void {
+    const session = this.#session;
+    if (!session) return;
+    this.#gesture?.free();
+    this.#gesture = new SelectionGesture(session.terminal);
+    if (this.#search) {
+      this.#endSearch();
+      if (this.#needle !== "") this.#beginSearch();
+    }
+    this.#updateGeometry();
+    this.#markDirty();
+    this.#notify();
   }
 
   /**
@@ -1054,8 +1126,11 @@ export class TerminalView implements FrameView {
 
   /** Starts looking for the needle in the session's terminal, if there is a session. */
   #beginSearch(): void {
-    const terminal = this.#session?.terminal;
+    const session = this.#session;
+    const terminal = session?.terminal;
     if (!terminal) return;
+    // What is looked for may be among the older lines the backend keeps.
+    session.fetchHistory();
     this.#search ??= new Search(terminal);
     this.#search.setNeedle(this.#needle);
     this.#searchSelects = true;
@@ -1463,7 +1538,8 @@ export class TerminalView implements FrameView {
     this.#focused = focused;
     this.#renderer?.setFocused(focused);
     const session = this.#session;
-    if (session && session.terminal.mode(Mode.FocusEvent)) {
+    // Where the backend answers, it reports focus from the facts it is sent.
+    if (session?.answersQueries && session.terminal.mode(Mode.FocusEvent)) {
       session.send(encodeFocus(this.#services.vt, focused));
     }
     // A release that happens elsewhere is never seen, so no key is still held.

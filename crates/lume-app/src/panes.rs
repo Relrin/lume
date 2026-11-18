@@ -331,6 +331,7 @@ impl Spawner for PaneSpawner {
             env,
             size: request.size.unwrap_or_else(default_size),
             shell_integration,
+            scrollback_lines: Some(resolved.config.terminal.scrollback_lines),
         };
         let host = state.router().get(&backend).map_err(Self::failure)?;
         let session = host.spawn(spec).await.map_err(Self::failure)?;

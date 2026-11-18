@@ -18,6 +18,20 @@ pub const SUGGEST_MAX_DISTANCE: usize = 2;
 /// full of terminals can hold.
 pub const SCROLLBACK_LINES_MAX: u32 = 100_000;
 
+/// How many lines of scrollback a window keeps for a terminal it shows when older
+/// lines are fetched from the session host as they are needed, unless the settings say
+/// otherwise; and the fewest and most it may be told to keep.
+pub const WINDOW_HISTORY_LINES_DEFAULT: u32 = 1_000;
+pub const WINDOW_HISTORY_LINES_MIN: u32 = 100;
+pub const WINDOW_HISTORY_LINES_MAX: u32 = SCROLLBACK_LINES_MAX;
+
+/// How long a window keeps older lines it fetched after its terminal is back at its
+/// newest output, in seconds, unless the settings say otherwise; and the shortest and
+/// longest it may be told to.
+pub const HISTORY_RELEASE_SECONDS_DEFAULT: u32 = 60;
+pub const HISTORY_RELEASE_SECONDS_MIN: u32 = 5;
+pub const HISTORY_RELEASE_SECONDS_MAX: u32 = 86_400;
+
 /// The smallest and largest size of terminal text, in CSS pixels.
 pub const FONT_SIZE_MIN: f64 = 1.0;
 pub const FONT_SIZE_MAX: f64 = 72.0;

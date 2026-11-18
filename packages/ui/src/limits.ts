@@ -16,6 +16,14 @@ export const SCROLLBACK_MAX_LINES = 100_000;
 export const SCROLLBACK_DEFAULT_LINES = 10_000;
 
 /**
+ * How many of the newest lines a window keeps while older ones are fetched from the
+ * session host as needed, and for how many seconds it keeps the lines it fetched once
+ * it is back at the newest output, when the configuration does not say.
+ */
+export const WINDOW_HISTORY_DEFAULT_LINES = 1_000;
+export const HISTORY_RELEASE_DEFAULT_SECONDS = 60;
+
+/**
  * How much memory those lines may take. Both limits apply: long or heavily styled lines
  * reach this one first. It holds the most lines there may be at a width of more than
  * two hundred columns. Every terminal of a window shares one memory that grows and is

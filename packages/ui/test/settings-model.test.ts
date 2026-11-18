@@ -274,6 +274,54 @@ describe("the settings as pages of rows", () => {
     expect(chosenIndex(bar)).toBe(1);
   });
 
+  it("shows a row that follows a switch only while the switch is on", () => {
+    const schema = structuredClone(SCHEMA) as typeof SCHEMA;
+    const terminal = schema.properties.terminal.properties as Record<string, unknown>;
+    terminal["history-paging"] = {
+      type: "boolean",
+      default: false,
+      "x-lume-settings": {
+        page: "terminal",
+        group: "Buffer",
+        order: 20,
+        label: "Fetch older lines when needed",
+        control: "switch",
+      },
+    };
+    terminal["window-history-lines"] = {
+      type: "integer",
+      minimum: 100,
+      maximum: 100_000,
+      default: 1000,
+      "x-lume-settings": {
+        page: "terminal",
+        group: "Buffer",
+        order: 30,
+        label: "Lines kept in the window",
+        control: "number",
+        unit: "lines",
+        step: 1000,
+        when: { path: "terminal.history-paging", is: "on" },
+      },
+    };
+    const withPaging = (paging: boolean | undefined) => {
+      const base = view();
+      const config = {
+        ...base.config,
+        terminal: {
+          ...base.config.terminal,
+          ...(paging === undefined ? {} : { "history-paging": paging }),
+        },
+      };
+      return settingsPages(schema, { ...base, config }, LISTS);
+    };
+    expect(row(withPaging(true), "terminal.window-history-lines").shown).toBe(true);
+    expect(row(withPaging(false), "terminal.window-history-lines").shown).toBe(false);
+    // A core that does not say has it off.
+    expect(row(withPaging(undefined), "terminal.window-history-lines").shown).toBe(false);
+    expect(row(withPaging(false), "terminal.history-paging").shown).toBe(true);
+  });
+
   it("shows a row only while the setting it depends on is as the row says", () => {
     const following = settingsPages(SCHEMA, view(), LISTS);
     expect(row(following, "appearance.theme-dark").shown).toBe(true);

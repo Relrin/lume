@@ -6,16 +6,20 @@
 //! process over a socket, and nothing above the host can come to depend on sharing its
 //! memory.
 //!
-//! The host does not interpret terminal output. It moves bytes from each terminal to
-//! the client attached to it, as fast as that client says it can take them and no
-//! faster: when a client stops granting credit, the host stops reading the terminal,
-//! and the program in it blocks on its next write.
+//! The host keeps a copy of every session's screen, fed by the same bytes it moves to the
+//! client attached to it. A client that attaches starts from that copy, and the copy
+//! answers the program's questions to the terminal whether or not a client is attached.
+//! Output reaches a client as fast as it says it can take it and no faster: when the
+//! client stops granting credit, the host stops reading the terminal, and the program
+//! in it blocks on its next write. With no client attached the host reads on, into the
+//! screen alone.
 
 mod conn;
 mod integration;
 mod launch;
 mod pending;
 mod scan;
+mod screen;
 mod session;
 mod ssh_exit;
 pub mod tuning;
@@ -37,13 +41,16 @@ use crate::conn::Outbox;
 use crate::launch::Launch;
 use crate::session::SessionHandle;
 
+pub use crate::screen::vt_version;
+
 /// What a host is built from.
 #[derive(Clone)]
 pub struct HostConfig {
     /// Where terminals come from.
     pub pty: Arc<dyn PtySystem>,
-    /// How much output a session keeps before its first client attaches.
-    pub pre_attach_bytes: usize,
+    /// Whether sessions outlive the connection that started them. A host serving one
+    /// client for the life of that client's process ends them with the connection.
+    pub persistent: bool,
     /// The most sessions the host runs at once.
     pub max_sessions: usize,
     /// A folder the host may write its shell scripts to. Without one, no shell is
@@ -56,7 +63,7 @@ impl Default for HostConfig {
     fn default() -> Self {
         Self {
             pty: lume_pty::native(),
-            pre_attach_bytes: tuning::PRE_ATTACH_BYTES,
+            persistent: false,
             max_sessions: tuning::MAX_SESSIONS,
             shell_integration_dir: None,
         }
@@ -118,8 +125,9 @@ impl Host {
             .clone()
     }
 
-    /// Serves one client until it disconnects. Sessions the client started end with the
-    /// connection: this host does not keep sessions for a client that has gone.
+    /// Serves one client until it disconnects. Unless the host is
+    /// [`persistent`](HostConfig::persistent), sessions the client started end with the
+    /// connection.
     pub async fn serve<S>(self: Arc<Self>, io: S) -> Result<(), ServeError>
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
@@ -130,17 +138,21 @@ impl Host {
     /// What this host can and cannot do, as told to every client.
     pub(crate) fn caps(&self) -> BackendCaps {
         BackendCaps {
-            persistent: false,
+            persistent: self.config.persistent,
             multi_client: false,
             server_layout: false,
-            // The host keeps no terminal state of its own, so it cannot answer a
-            // program's questions about the terminal. The client's terminal does.
-            responder: Responder::Client,
+            // Every session's screen answers its program, so that a program gets its
+            // answer whether or not anybody is looking, and gets it once.
+            responder: Responder::Backend,
             hydrate: HydrateKinds {
-                snapshot: false,
-                vt_replay: false,
+                snapshot: true,
+                vt_replay: true,
             },
         }
+    }
+
+    pub(crate) fn persistent(&self) -> bool {
+        self.config.persistent
     }
 
     fn sessions(&self) -> std::sync::MutexGuard<'_, HashMap<SessionId, SessionHandle>> {
@@ -183,6 +195,10 @@ impl Host {
         }
 
         let size = spec.size;
+        let scrollback = spec
+            .scrollback_lines
+            .map_or(tuning::SCROLLBACK_DEFAULT_LINES, |lines| lines as usize)
+            .min(tuning::SCROLLBACK_MAX_LINES);
         let ssh = matches!(spec.launcher, lume_proto::Launcher::Ssh { .. });
         // Starting a process blocks for a moment, and so may writing the scripts, so
         // both run off the async threads.
@@ -213,7 +229,7 @@ impl Host {
             child,
             size,
             owner,
-            pre_attach_bytes: self.config.pre_attach_bytes,
+            scrollback,
             resize_pulls_scrollback: self.config.pty.resize_pulls_scrollback(),
             ssh,
         })

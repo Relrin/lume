@@ -27,7 +27,11 @@ import { computeRects, unitRectToPx } from "../layout/geometry.ts";
 import { panesOf, selectFocus, selectWindowPanes } from "../layout/selectors.ts";
 import type { LayoutState, LayoutStore } from "../layout/store.ts";
 import type { PaneContent, PaneId } from "../layout/types.ts";
-import { SCROLLBACK_DEFAULT_LINES } from "../limits.ts";
+import {
+  HISTORY_RELEASE_DEFAULT_SECONDS,
+  SCROLLBACK_DEFAULT_LINES,
+  WINDOW_HISTORY_DEFAULT_LINES,
+} from "../limits.ts";
 import { rendererTheme, type Appearance } from "../theme.ts";
 import { CommandError, type TermSize } from "../transport/types.ts";
 import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX } from "../tuning.ts";
@@ -180,6 +184,15 @@ export class PaneViews {
         blink: terminal?.["cursor-blink"] ?? true,
       },
       scrollbackLines: terminal?.["scrollback-lines"] ?? SCROLLBACK_DEFAULT_LINES,
+      ...(terminal?.["history-paging"] === true
+        ? {
+            history: {
+              windowLines: terminal["window-history-lines"] ?? WINDOW_HISTORY_DEFAULT_LINES,
+              releaseMs:
+                (terminal["history-release-seconds"] ?? HISTORY_RELEASE_DEFAULT_SECONDS) * 1000,
+            },
+          }
+        : {}),
       zoomPx: this.#zoomPx,
     };
   }

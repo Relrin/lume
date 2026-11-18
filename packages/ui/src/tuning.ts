@@ -221,3 +221,10 @@ export const GROUP_EDITOR_DELAY_MS = 180;
 
 /** How long a group's name rests after a key before it is written. */
 export const GROUP_NAME_WRITE_MS = 300;
+
+/**
+ * How full a terminal's scrollback must be, as a share of what it keeps while older lines
+ * are fetched as needed, before scrolling to its top fetches them. The library keeps
+ * whole pages, so a full scrollback can be a little short of the count.
+ */
+export const HISTORY_FULL_SHARE = 0.9;

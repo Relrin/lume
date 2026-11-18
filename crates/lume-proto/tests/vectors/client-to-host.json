@@ -5,8 +5,8 @@
       "request": {
         "body": {
           "client_kind": "app",
-          "proto": 1,
-          "proto_min": 1,
+          "proto": 2,
+          "proto_min": 2,
           "type": "hello",
           "vt_version": "1.0.1"
         },
@@ -36,6 +36,7 @@
               "program": "pwsh.exe",
               "type": "shell"
             },
+            "scrollback_lines": 10000,
             "size": {
               "cols": 80,
               "rows": 24
@@ -190,6 +191,38 @@
           "type": "kill"
         },
         "id": 5
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "rehydrate",
+    "stream": 2
+  },
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "session": "0123456789abcdef",
+          "type": "screen"
+        },
+        "id": 6
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "session": "0123456789abcdef",
+          "text": "$ ",
+          "timeout_ms": 5000,
+          "type": "wait_text"
+        },
+        "id": 7
       }
     },
     "stream": 0

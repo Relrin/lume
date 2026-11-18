@@ -990,6 +990,7 @@ mod real_shells {
                 .collect(),
             size: TermSize::new(120, 30).unwrap(),
             shell_integration: true,
+            scrollback_lines: None,
         }
     }
 

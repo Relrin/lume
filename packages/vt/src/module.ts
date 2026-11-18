@@ -173,6 +173,18 @@ export interface Exports {
     outLen: number,
   ): number;
 
+  ghostty_snapshot_decoder_new_buf(
+    allocator: number,
+    out: number,
+    ptr: number,
+    len: number,
+  ): number;
+  ghostty_snapshot_decoder_decode(decoder: number, outTerminal: number): number;
+  ghostty_snapshot_decoder_ready(decoder: number, outTerminal: number): number;
+  ghostty_snapshot_decoder_next(decoder: number): number;
+  ghostty_snapshot_decoder_get(decoder: number, data: number, out: number): number;
+  ghostty_snapshot_decoder_free(decoder: number): void;
+
   ghostty_search_new(allocator: number, out: number, terminal: number): number;
   ghostty_search_free(search: number): void;
   ghostty_search_tick(search: number, outStatus: number): number;
@@ -274,6 +286,12 @@ const REQUIRED_EXPORTS: Readonly<Record<keyof Exports, true>> = {
   ghostty_formatter_free: true,
   ghostty_formatter_set: true,
   ghostty_formatter_format_alloc: true,
+  ghostty_snapshot_decoder_new_buf: true,
+  ghostty_snapshot_decoder_decode: true,
+  ghostty_snapshot_decoder_ready: true,
+  ghostty_snapshot_decoder_next: true,
+  ghostty_snapshot_decoder_get: true,
+  ghostty_snapshot_decoder_free: true,
   ghostty_search_new: true,
   ghostty_search_free: true,
   ghostty_search_tick: true,
@@ -553,6 +571,26 @@ export class Vt {
    */
   createTerminal(cols: number, rows: number, options?: TerminalOptions): Terminal {
     return new Terminal(this.core, cols, rows, options);
+  }
+
+  /**
+   * Loads a terminal saved as a snapshot by this version of the engine, with its size,
+   * screens, scrollback and modes. `options` are applied on top, as for a new terminal:
+   * the colours, cell size and scheme a snapshot carries are those of whoever saved it.
+   * With `historyLines`, only about that many of the newest lines of scrollback are
+   * restored (whole pages of the library's, so a few more), and the rest is never
+   * unpacked. Throws if the snapshot was made by another version or is damaged.
+   */
+  loadTerminal(
+    snapshot: Uint8Array,
+    options?: TerminalOptions & { readonly historyLines?: number },
+  ): Terminal {
+    const { historyLines, ...rest } = options ?? {};
+    return new Terminal(this.core, 0, 0, {
+      ...rest,
+      snapshot,
+      ...(historyLines === undefined ? {} : { snapshotHistoryLines: historyLines }),
+    });
   }
 }
 

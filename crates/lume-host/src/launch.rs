@@ -323,6 +323,7 @@ mod tests {
             env: Vec::new(),
             size: TermSize::new(80, 24).unwrap(),
             shell_integration: false,
+            scrollback_lines: None,
         }
     }
 

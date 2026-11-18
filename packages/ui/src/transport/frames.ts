@@ -22,6 +22,7 @@ export const Kind = {
   Facts: 0x12,
   Credit: 0x13,
   Detach: 0x14,
+  Rehydrate: 0x15,
 } as const;
 
 /** The encoded size of a frame header. */
@@ -137,4 +138,9 @@ export function encodeCredit(stream: number, bytes: number): Uint8Array {
 /** Ends the attachment. The session carries on. */
 export function encodeDetach(stream: number): Uint8Array {
   return single(stream, Kind.Detach, 0).out;
+}
+
+/** Asks for the state to start again from, as of this point of the output. */
+export function encodeRehydrate(stream: number): Uint8Array {
+  return single(stream, Kind.Rehydrate, 0).out;
 }

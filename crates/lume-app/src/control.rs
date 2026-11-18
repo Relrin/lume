@@ -23,7 +23,8 @@ use lume_proto::app::{
     AppRequestBody, AppResponse, AppSession, Direction, Focused, PageRequestBody, SessionNews,
     SpawnPlace, codes,
 };
-use lume_proto::{ClientKind, ControlDecoder, SessionEvent, SessionId, negotiate};
+use lume_proto::{ClientKind, ControlDecoder, Responder, SessionEvent, SessionId, negotiate};
+use lume_session::SessionBackend;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -277,6 +278,81 @@ impl Control {
             .await
             .ok_or_else(not_shown)?;
         Ok((place, page))
+    }
+
+    /// Reads a session's screen from its backend, which keeps one when it is the
+    /// responder for the session. `None` means the backend keeps none, and a page
+    /// showing the session has to be asked instead.
+    async fn host_screen(
+        &self,
+        pane: Option<&str>,
+        session: Option<SessionId>,
+    ) -> Result<Option<Result<AppReply, AppError>>, AppError> {
+        let (key, place) = self.session(pane, session).await?;
+        let backend = self.backend_of(&key)?;
+        if backend.caps().responder != Responder::Backend {
+            return Ok(None);
+        }
+        let screen = backend.screen(key.session).await.map_err(session_error)?;
+        let pane = place
+            .map(|place| place.pane.to_string())
+            .unwrap_or_default();
+        let what = format!(
+            "read {} lines of the screen of session {}",
+            screen.lines.len(),
+            key.session
+        );
+        Ok(Some(reply(
+            what,
+            AppReplyBody::Screen {
+                pane,
+                session: key.session,
+                size: screen.size,
+                cursor: screen.cursor,
+                alternate: screen.alternate,
+                lines: screen.lines,
+            },
+        )))
+    }
+
+    /// Waits for text on a session's screen in its backend; `None` as for
+    /// [`host_screen`](Self::host_screen).
+    async fn host_wait_text(
+        &self,
+        pane: Option<&str>,
+        session: Option<SessionId>,
+        text: &str,
+        limit: Duration,
+    ) -> Result<Option<Result<AppReply, AppError>>, AppError> {
+        let (key, place) = self.session(pane, session).await?;
+        let backend = self.backend_of(&key)?;
+        if backend.caps().responder != Responder::Backend {
+            return Ok(None);
+        }
+        let found = backend
+            .wait_text(key.session, text, limit)
+            .await
+            .map_err(session_error)?;
+        let pane = place
+            .map(|place| place.pane.to_string())
+            .unwrap_or_default();
+        Ok(Some(reply(
+            format!("the text is on row {}", found.row),
+            AppReplyBody::Matched {
+                pane,
+                session: key.session,
+                row: found.row,
+                line: found.line,
+            },
+        )))
+    }
+
+    fn backend_of(&self, key: &SessionKey) -> Result<Arc<dyn SessionBackend>, AppError> {
+        self.services
+            .state
+            .router()
+            .get(&key.backend)
+            .map_err(session_error)
     }
 
     async fn handle(&self, body: AppRequestBody) -> (Result<AppReply, AppError>, Then) {
@@ -667,6 +743,9 @@ impl Control {
                 )
             }
             AppRequestBody::Screen { pane, session } => {
+                if let Some(answer) = self.host_screen(pane.as_deref(), session).await? {
+                    return answer;
+                }
                 let (place, page) = self.screen_of(pane.as_deref(), session).await?;
                 let screen = page
                     .ask(
@@ -695,10 +774,16 @@ impl Control {
                 text,
                 timeout_ms,
             } => {
+                let limit = wait_limit(timeout_ms);
+                if let Some(answer) = self
+                    .host_wait_text(pane.as_deref(), session, &text, limit)
+                    .await?
+                {
+                    return answer;
+                }
                 let (place, page) = self.screen_of(pane.as_deref(), session).await?;
                 // The page keeps the time. It is asked for a little longer, so that its
                 // own answer that the time ran out arrives before this gives up on it.
-                let limit = wait_limit(timeout_ms);
                 let found = page
                     .ask(
                         PageRequestBody::WaitText {
@@ -819,6 +904,10 @@ impl Control {
 }
 
 /// The page answered with something that is not an answer to what it was asked.
+fn session_error(error: lume_session::SessionError) -> AppError {
+    AppError::from(crate::error::CommandError::from(error))
+}
+
 fn unexpected(request: &str) -> AppError {
     AppError::new(
         codes::INTERNAL,
@@ -1615,9 +1704,10 @@ mod tests {
 
         let refused = app
             .client
-            .ask(AppRequestBody::Screen {
+            .ask(AppRequestBody::Resize {
                 pane: None,
                 session: None,
+                size: size(4, 1),
             })
             .await
             .unwrap_err();
@@ -1646,23 +1736,29 @@ mod tests {
             };
             until("the request to the page", || asked().is_some()).await;
             let request = asked().unwrap();
-            assert_eq!(request["request"]["body"]["type"], "screen");
+            assert_eq!(request["request"]["body"]["type"], "resize");
             assert_eq!(request["request"]["body"]["pane"], pane.to_string());
             let asked = request["request"]["id"].as_u64().unwrap();
-            let answer = AppReplyBody::Screen {
-                pane: pane.to_string(),
-                session: key.session,
-                size: size(4, 1),
-                cursor: lume_proto::app::ScreenCursor {
-                    col: 2,
-                    row: 0,
-                    visible: true,
-                },
-                alternate: false,
-                lines: vec!["$ ".to_owned()],
-            };
+            let answer = AppReplyBody::Resized { size: size(4, 1) };
             state.answer(&label, id, asked, Ok(answer)).unwrap();
         });
+        let resized = app
+            .client
+            .ask(AppRequestBody::Resize {
+                pane: None,
+                session: None,
+                size: size(4, 1),
+            })
+            .await
+            .unwrap();
+        answering.await.unwrap();
+        assert_eq!(
+            resized.effect,
+            format!("the terminal in pane {pane} is now 4 by 1")
+        );
+
+        // The screen is the host's to read; the page is not asked.
+        let before = page.carrier.requests().len();
         let screen = app
             .client
             .ask(AppRequestBody::Screen {
@@ -1671,12 +1767,17 @@ mod tests {
             })
             .await
             .unwrap();
-        answering.await.unwrap();
         assert_eq!(
             screen.effect,
-            format!("read 1 lines of the screen of pane {pane}")
+            format!("read 24 lines of the screen of session {}", key.session)
         );
-        assert!(matches!(screen.body, AppReplyBody::Screen { .. }));
+        assert!(
+            matches!(&screen.body, AppReplyBody::Screen { pane: shown, session, .. }
+                if *shown == pane.to_string() && *session == key.session),
+            "{:?}",
+            screen.body
+        );
+        assert_eq!(page.carrier.requests().len(), before);
         stop(app).await;
     }
 

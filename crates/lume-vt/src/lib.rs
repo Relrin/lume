@@ -1,15 +1,19 @@
 //! A safe wrapper over libghostty-vt.
 //!
-//! Current scope: create a terminal, write bytes to it, resize it, and read back text,
-//! cell attributes, the title, the working directory, modes, and what the terminal
-//! answered to the program's questions. That is enough for the smoke test and the golden
-//! corpus. Render state, input encoding, selection and snapshots are not wrapped yet.
+//! Current scope: create a terminal, write bytes to it, resize it, read back text, cell
+//! attributes, the title, the working directory and modes, collect what the terminal
+//! answered to the program's questions, and save a terminal as a snapshot or as output
+//! that rebuilds it. The colours, cell size and colour scheme a program is told about
+//! can be set. Render state, input encoding and selection are not wrapped.
 
 // bindgen gives C enums a different integer type on each platform (`i32` with MSVC, `u32`
 // elsewhere), so a cast that is needed on one platform is a no-op on another.
 #![allow(clippy::unnecessary_cast)]
 
 pub mod corpus;
+mod saved;
+
+pub use saved::{Format, Formatted, color_scheme_report, focus_report};
 
 use std::cell::{Cell as StdCell, RefCell};
 use std::ffi::{CStr, c_void};
@@ -135,13 +139,82 @@ pub struct Cursor {
     pub pending_wrap: bool,
 }
 
-/// What the library's callbacks reach while it runs: the size to report, and where
-/// the terminal's answers go.
+/// Light or dark: what a program learns when it asks which the view uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorScheme {
+    Light,
+    Dark,
+}
+
+impl ColorScheme {
+    fn raw(self) -> sys::GhosttyColorScheme {
+        match self {
+            Self::Light => sys::GHOSTTY_COLOR_SCHEME_LIGHT,
+            Self::Dark => sys::GHOSTTY_COLOR_SCHEME_DARK,
+        }
+    }
+}
+
+/// The colours a program is told the view has, and that it draws with when the program
+/// has set none: foreground, background, cursor and the 256-colour palette.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Colors {
+    pub foreground: [u8; 3],
+    pub background: [u8; 3],
+    pub cursor: [u8; 3],
+    pub palette: [[u8; 3]; 256],
+}
+
+/// The six levels each channel takes in the 6x6x6 colour cube of the 256-colour palette.
+const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+
+/// The 256-colour palette built from sixteen ANSI colours: those sixteen, the colour
+/// cube, then a ramp of 24 greys. The same palette the view builds.
+pub fn palette_256(ansi: &[[u8; 3]; 16]) -> [[u8; 3]; 256] {
+    let mut palette = [[0u8; 3]; 256];
+    palette[..16].copy_from_slice(ansi);
+    let mut i = 16;
+    for r in CUBE_LEVELS {
+        for g in CUBE_LEVELS {
+            for b in CUBE_LEVELS {
+                palette[i] = [r, g, b];
+                i += 1;
+            }
+        }
+    }
+    for step in 0..24u8 {
+        let level = 8 + step * 10;
+        palette[i] = [level, level, level];
+        i += 1;
+    }
+    palette
+}
+
+/// What the library's callbacks reach while it runs: the size and colour scheme to
+/// report, and where the terminal's answers go.
 struct Host {
     cols: StdCell<u16>,
     rows: StdCell<u16>,
-    /// Everything the terminal wrote back to the program, in order.
+    /// The size of one cell in pixels, zero while it is not known.
+    cell_width: StdCell<u32>,
+    cell_height: StdCell<u32>,
+    /// `None` leaves a program's question about the colour scheme unanswered.
+    scheme: StdCell<Option<ColorScheme>>,
+    /// Everything the terminal wrote back to the program and nobody has taken yet.
     replies: RefCell<Vec<u8>>,
+}
+
+impl Host {
+    fn new(cols: u16, rows: u16) -> Box<Self> {
+        Box::new(Self {
+            cols: StdCell::new(cols),
+            rows: StdCell::new(rows),
+            cell_width: StdCell::new(0),
+            cell_height: StdCell::new(0),
+            scheme: StdCell::new(None),
+            replies: RefCell::new(Vec::new()),
+        })
+    }
 }
 
 /// Collects what the terminal writes back to the program: answers to its questions.
@@ -169,8 +242,8 @@ unsafe extern "C" fn on_write_pty(
     host.replies.borrow_mut().extend_from_slice(bytes);
 }
 
-/// Tells the library the terminal's size when a program asks for it. The pixel size of
-/// a cell is not known here and stays zero, as the library left it.
+/// Tells the library the terminal's size when a program asks for it, in cells and, once
+/// it has been set, in pixels.
 ///
 /// # Safety
 ///
@@ -188,9 +261,42 @@ unsafe extern "C" fn on_size(
         let host = &*userdata.cast::<Host>();
         (*out_size).rows = host.rows.get();
         (*out_size).columns = host.cols.get();
+        (*out_size).cell_width = host.cell_width.get();
+        (*out_size).cell_height = host.cell_height.get();
     }
     true
 }
+
+/// Tells the library the colour scheme when a program asks, if one has been set.
+///
+/// # Safety
+///
+/// Called by the library only, with the userdata this crate set: a live [`Host`].
+unsafe extern "C" fn on_color_scheme(
+    _terminal: sys::GhosttyTerminal,
+    userdata: *mut c_void,
+    out_scheme: *mut sys::GhosttyColorScheme,
+) -> bool {
+    if userdata.is_null() || out_scheme.is_null() {
+        return false;
+    }
+    // SAFETY: as in `on_write_pty`; `out_scheme` is the library's own value.
+    unsafe {
+        let host = &*userdata.cast::<Host>();
+        match host.scheme.get() {
+            Some(scheme) => {
+                *out_scheme = scheme.raw();
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// The most of an unfinished escape sequence a terminal keeps so that it can be saved
+/// in the middle of one. A longer one makes saving it as a snapshot fail, and the
+/// terminal is then saved as output instead.
+pub const CONTINUATION_MAX_BYTES: usize = 64 * 1024;
 
 /// A terminal emulator: screen, scrollback, cursor, styles and modes.
 ///
@@ -212,6 +318,12 @@ impl Terminal {
         // SAFETY: a NULL allocator selects the library's default; `raw` is a valid place
         // for the handle.
         check(unsafe { sys::ghostty_terminal_new(std::ptr::null(), &mut raw, cols, rows) })?;
+        Self::adopt(raw, cols, rows)
+    }
+
+    /// Takes ownership of a terminal the library made and connects its callbacks. The
+    /// handle is freed if anything fails.
+    fn adopt(raw: sys::GhosttyTerminal, cols: u16, rows: u16) -> Result<Self> {
         if raw.is_null() {
             return Err(Error(sys::GHOSTTY_OUT_OF_MEMORY as i32));
         }
@@ -219,11 +331,7 @@ impl Terminal {
             raw,
             cols,
             rows,
-            host: Box::new(Host {
-                cols: StdCell::new(cols),
-                rows: StdCell::new(rows),
-                replies: RefCell::new(Vec::new()),
-            }),
+            host: Host::new(cols, rows),
             _single_thread: PhantomData,
         };
         // From here on dropping `term` frees the handle, whatever fails.
@@ -236,6 +344,36 @@ impl Terminal {
             on_write_pty as *const c_void,
         )?;
         term.set(sys::GHOSTTY_TERMINAL_OPT_SIZE, on_size as *const c_void)?;
+        term.set(
+            sys::GHOSTTY_TERMINAL_OPT_COLOR_SCHEME,
+            on_color_scheme as *const c_void,
+        )?;
+        // Reporting the title back lets output inject text into the program's input.
+        let no = false;
+        term.set(
+            sys::GHOSTTY_TERMINAL_OPT_TITLE_REPORT,
+            (&raw const no).cast(),
+        )?;
+        // Inline images are not drawn anywhere this terminal is shown from, so none are
+        // kept. A build without image support does not know the option, which amounts
+        // to the same thing.
+        let none: u64 = 0;
+        let stored = term.set(
+            sys::GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT,
+            (&raw const none).cast(),
+        );
+        if let Err(error) = stored
+            && error.0 != sys::GHOSTTY_UNSUPPORTED as i32
+        {
+            return Err(error);
+        }
+        // Keep the start of an unfinished sequence, so the terminal can be saved
+        // between two writes that split one.
+        let keep = CONTINUATION_MAX_BYTES;
+        term.set(
+            sys::GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES,
+            (&raw const keep).cast(),
+        )?;
         Ok(term)
     }
 
@@ -264,15 +402,23 @@ impl Terminal {
         unsafe { sys::ghostty_terminal_vt_write(self.raw, bytes.as_ptr(), bytes.len()) };
     }
 
-    /// Resize the grid. Cell pixel sizes are not known to this wrapper yet and are passed
-    /// as zero.
+    /// Resize the grid. The cell size in pixels is the one last set with
+    /// [`set_cell_px`](Self::set_cell_px), zero until then.
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         // The size a program is told is the one the grid is about to have: the resize
         // itself may report it.
         self.host.cols.set(cols);
         self.host.rows.set(rows);
         // SAFETY: the handle is live.
-        let resized = check(unsafe { sys::ghostty_terminal_resize(self.raw, cols, rows, 0, 0) });
+        let resized = check(unsafe {
+            sys::ghostty_terminal_resize(
+                self.raw,
+                cols,
+                rows,
+                self.host.cell_width.get(),
+                self.host.cell_height.get(),
+            )
+        });
         if resized.is_err() {
             self.host.cols.set(self.cols);
             self.host.rows.set(self.rows);
@@ -283,10 +429,102 @@ impl Terminal {
         Ok(())
     }
 
-    /// Everything the terminal has written back to the program so far: its answers to
-    /// device, cursor, size and colour queries, in the order it gave them.
+    /// Everything the terminal has written back to the program and nobody has taken:
+    /// its answers to device, cursor, size and colour queries, in the order it gave them.
     pub fn replies(&self) -> Vec<u8> {
         self.host.replies.borrow().clone()
+    }
+
+    /// Takes what [`replies`](Self::replies) would return, so that the next call starts
+    /// empty.
+    pub fn take_replies(&self) -> Vec<u8> {
+        std::mem::take(&mut *self.host.replies.borrow_mut())
+    }
+
+    /// Sets the size of one cell in pixels, as a program learns it when it asks.
+    pub fn set_cell_px(&mut self, width: u32, height: u32) -> Result<()> {
+        if (width, height) == (self.host.cell_width.get(), self.host.cell_height.get()) {
+            return Ok(());
+        }
+        self.host.cell_width.set(width);
+        self.host.cell_height.set(height);
+        // SAFETY: the handle is live.
+        check(unsafe {
+            sys::ghostty_terminal_resize(self.raw, self.cols, self.rows, width, height)
+        })
+    }
+
+    /// Sets the colour scheme a program is told about. `None` leaves its question
+    /// unanswered.
+    pub fn set_color_scheme(&mut self, scheme: Option<ColorScheme>) {
+        self.host.scheme.set(scheme);
+    }
+
+    /// Sets the colours a program is told the view has and that cells without a colour
+    /// of their own take.
+    pub fn set_colors(&mut self, colors: &Colors) -> Result<()> {
+        let rgb = |[r, g, b]: [u8; 3]| sys::GhosttyColorRgb { r, g, b };
+        let fg = rgb(colors.foreground);
+        let bg = rgb(colors.background);
+        let cursor = rgb(colors.cursor);
+        let palette: Vec<sys::GhosttyColorRgb> = colors.palette.iter().map(|&c| rgb(c)).collect();
+        self.set(
+            sys::GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND,
+            (&raw const fg).cast(),
+        )?;
+        self.set(
+            sys::GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND,
+            (&raw const bg).cast(),
+        )?;
+        self.set(
+            sys::GHOSTTY_TERMINAL_OPT_COLOR_CURSOR,
+            (&raw const cursor).cast(),
+        )?;
+        self.set(
+            sys::GHOSTTY_TERMINAL_OPT_COLOR_PALETTE,
+            palette.as_ptr().cast(),
+        )
+    }
+
+    /// Caps scrollback at about `lines` lines and `bytes` bytes, whichever is reached
+    /// first. The library keeps whole pages, so a few dozen more lines may be kept.
+    pub fn set_scrollback_limits(&mut self, lines: usize, bytes: usize) -> Result<()> {
+        self.set(
+            sys::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
+            (&raw const bytes).cast(),
+        )?;
+        self.set(
+            sys::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES,
+            (&raw const lines).cast(),
+        )
+    }
+
+    /// How many rows are in scrollback, above the active area.
+    pub fn scrollback_rows(&self) -> Result<usize> {
+        self.get::<usize>(sys::GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS)
+    }
+
+    /// The memory the terminal's screens hold, in bytes.
+    pub fn memory_bytes(&self) -> Result<u64> {
+        let mut usage = std::mem::MaybeUninit::<sys::GhosttyTerminalMemoryUsage>::zeroed();
+        // SAFETY: the struct is plain C data; the library reads its `size` field first.
+        unsafe {
+            sys::ghostty_sized_init(
+                usage.as_mut_ptr().cast(),
+                std::mem::size_of::<sys::GhosttyTerminalMemoryUsage>(),
+            );
+        }
+        // SAFETY: the handle is live and `usage` is the sized struct the key documents.
+        check(unsafe {
+            sys::ghostty_terminal_get(
+                self.raw,
+                sys::GHOSTTY_TERMINAL_DATA_MEMORY_USAGE,
+                usage.as_mut_ptr().cast(),
+            )
+        })?;
+        // SAFETY: the call succeeded and filled the struct.
+        let usage = unsafe { usage.assume_init() };
+        Ok(usage.primary_resident_bytes + usage.alternate_resident_bytes)
     }
 
     /// The title the program last set, or the empty string.

@@ -2366,6 +2366,7 @@ dependencies = [
  "lume-ipc",
  "lume-proto",
  "lume-pty",
+ "lume-vt",
  "proptest",
  "thiserror 2.0.21",
  "tokio",

@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use lume_proto::tuning::MAX_PAYLOAD;
-use lume_proto::{ExitStatus, SessionEvent, TermSize};
+use lume_proto::{ExitStatus, HydratePayload, SessionEvent, TermSize};
 
 use crate::tuning::{
     COALESCE_MAX_BYTES, COALESCE_MAX_DELAY, ECHO_IMMEDIATE_WINDOW, EVENTS_PENDING_MAX,
@@ -30,6 +30,8 @@ pub(crate) enum Segment {
     Resized(TermSize),
     Event(SessionEvent),
     Exit(ExitStatus),
+    /// The screen as of this point, for a client that asked to start again from here.
+    Hydrate(HydratePayload),
 }
 
 /// When output that was just queued should be sent.
@@ -50,6 +52,7 @@ enum Entry {
     Resized(TermSize),
     Event(SessionEvent),
     Exit(ExitStatus),
+    Hydrate(HydratePayload),
 }
 
 /// Whether a later report of the kind of `event` makes an earlier one worthless: the
@@ -163,11 +166,26 @@ impl Pending {
         self.entries.push_back(Entry::Exit(status));
     }
 
+    /// Queues a copy of the screen as of everything queued so far. It needs no credit:
+    /// the client asked for it, and it is bounded by the size of the screen.
+    pub(crate) fn push_hydrate(&mut self, payload: HydratePayload) {
+        self.entries.push_back(Entry::Hydrate(payload));
+    }
+
     /// Drops the output bytes and keeps the markers, in order.
     pub(crate) fn discard_bytes(&mut self) {
         self.entries
             .retain(|entry| !matches!(entry, Entry::Bytes { .. }));
         self.bytes = 0;
+        self.oldest = None;
+    }
+
+    /// Drops everything. What a client attaching now needs is a copy of the screen and
+    /// the state of the session, not what was queued for somebody else.
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
+        self.events = 0;
         self.oldest = None;
     }
 
@@ -215,6 +233,11 @@ impl Pending {
                 self.entries.pop_front();
                 Segment::Exit(status)
             }
+            Entry::Hydrate(_) => match self.entries.pop_front() {
+                Some(Entry::Hydrate(payload)) => Segment::Hydrate(payload),
+                // The front was just seen to be a copy of the screen.
+                _ => return None,
+            },
         };
         if self.bytes == 0 {
             self.oldest = None;

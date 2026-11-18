@@ -19,6 +19,7 @@ lume-layout = { path = "crates/lume-layout" }
 lume-proto = { path = "crates/lume-proto" }
 lume-pty = { path = "crates/lume-pty" }
 lume-session = { path = "crates/lume-session" }
+lume-vt = { path = "crates/lume-vt" }
 lume-vt-sys = { path = "crates/lume-vt-sys" }
 
 # Third-party

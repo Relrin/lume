@@ -10,6 +10,7 @@
 //! |           | background, cursor, ANSI 0 to 15                                          |
 //! | `Credit`  | `u32 bytes`                                                               |
 //! | `Detach`  | empty                                                                     |
+//! | `Rehydrate` | empty                                                                   |
 //! | `Hydrate` | `u8 form` (1 snapshot, 2 replay); a snapshot adds `u8 n` and `n` bytes    |
 //! |           | naming the engine version that wrote it; then the bytes                   |
 
@@ -173,8 +174,9 @@ pub(crate) fn decode_credit(payload: &[u8]) -> Result<u32, DecodeError> {
     Ok(u32::from_le_bytes(*bytes))
 }
 
-pub(crate) fn decode_detach(payload: &[u8]) -> Result<(), DecodeError> {
-    let _: &[u8; 0] = fixed(Kind::Detach, payload)?;
+/// A message that carries nothing but its kind.
+pub(crate) fn decode_empty(kind: Kind, payload: &[u8]) -> Result<(), DecodeError> {
+    let _: &[u8; 0] = fixed(kind, payload)?;
     Ok(())
 }
 

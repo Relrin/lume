@@ -47,7 +47,11 @@ export interface SettingAnnotation {
   /** How many times bigger a typed number is shown than it is written. */
   readonly scale?: number;
   /** The row is shown only while another setting is, or is not, in the file. */
-  readonly when?: { readonly path: string; readonly is: "unset" | "set" };
+  /**
+   * Shown only while another setting is left out (`unset`), is in the file (`set`), or
+   * is a switch that is on (`on`).
+   */
+  readonly when?: { readonly path: string; readonly is: "unset" | "set" | "on" };
   /** The only platform the row is shown on. */
   readonly platform?: string;
   /** The colours a swatch row offers, as the schema says them. */
@@ -278,7 +282,7 @@ function annotationOf(raw: unknown): SettingAnnotation | undefined {
     ...(swatches === undefined ? {} : { swatches }),
     ...(isObject(when) &&
     typeof when["path"] === "string" &&
-    (when["is"] === "unset" || when["is"] === "set")
+    (when["is"] === "unset" || when["is"] === "set" || when["is"] === "on")
       ? { when: { path: when["path"], is: when["is"] } }
       : {}),
   };
@@ -443,7 +447,7 @@ function rowOf(found: Found, view: ConfigView, lists: SettingsLists): SettingRow
   const problem = view.problems.find((candidate) => candidate.path === path);
   const when = annotation.when;
   const shown =
-    (when === undefined || (valueAt(view.config, when.path) === null) === (when.is === "unset")) &&
+    (when === undefined || met(valueAt(view.config, when.path), when.is)) &&
     (annotation.platform === undefined || annotation.platform === view.platform);
   const number = annotation.control === "number" ? numberShape(schema, annotation) : undefined;
   const swatches =
@@ -670,4 +674,10 @@ export function stepNumber(
     from ?? (typeof row.effective === "number" ? row.effective * shape.scale : shape.min);
   const next = rounded(base + steps * shape.step);
   return { op: "set", path: row.path, value: written(shape, Number.isFinite(next) ? next : 0) };
+}
+
+/** Whether another setting's value meets a row's condition for being shown. */
+function met(value: unknown, is: "unset" | "set" | "on"): boolean {
+  if (is === "on") return value === true;
+  return (value === null) === (is === "unset");
 }

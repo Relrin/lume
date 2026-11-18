@@ -17,6 +17,7 @@ import { FrameDecoder } from "./decoder.ts";
 import {
   encodeCredit,
   encodeDetach,
+  encodeRehydrate,
   encodeFacts,
   encodeInput,
   encodeResize,
@@ -44,6 +45,9 @@ export type StreamFrame = Exclude<HostFrame, { kind: "control" }>;
 /** How a new attachment is brought up to date before its output. */
 export type HydrateMode = "none" | "snapshot" | "vt_replay";
 
+/** The state an attachment starts from: a saved terminal, or output that rebuilds one. */
+export type HydrateFrame = Extract<StreamFrame, { kind: "hydrate" }>;
+
 /** An open attachment: everything that connects a view to its session. */
 export interface Attachment {
   /** The terminal's size when the attachment opened. */
@@ -59,6 +63,12 @@ export interface Attachment {
   readonly profile?: string;
 
   /**
+   * The state the session's screen was in when the attachment opened, for a view to
+   * start from before it takes any output; `undefined` when there is none. Call it
+   * before {@link start}: the frame is taken out of the flow.
+   */
+  hydrated(): Promise<HydrateFrame | undefined>;
+  /**
    * Starts the flow. `receive` gets every frame in order, beginning with any that arrived
    * while the attachment was being made. No output is sent before this is called.
    */
@@ -71,6 +81,12 @@ export interface Attachment {
   facts(facts: ClientFacts): void;
   /** Reports that `bytes` of received output have been processed, which lets more come. */
   consumed(bytes: number): void;
+  /**
+   * Asks for the state to start again from, as of this point of the output. It arrives
+   * as a `hydrate` frame in its place among the others, from a backend whose caps say it
+   * can hydrate.
+   */
+  rehydrate(): void;
   /** Ends the attachment. The session carries on. */
   detach(): void;
 }
@@ -80,6 +96,8 @@ interface Stream {
   /** Frames kept until the view is ready for them; `null` once it is. */
   waiting: StreamFrame[] | null;
   receive: ((frame: StreamFrame) => void) | null;
+  /** Whoever waits for the state the attachment starts from, until it arrives. */
+  onHydrate: ((frame: HydrateFrame | undefined) => void) | null;
 }
 
 interface WireAttached {
@@ -175,6 +193,7 @@ export class TransportClient {
       granter: new Granter(this.#opened.creditWindow),
       waiting: [],
       receive: null,
+      onHydrate: null,
     };
     // The stream exists before the request goes out: frames for it may arrive before
     // the answer does, and they must find it.
@@ -200,6 +219,18 @@ export class TransportClient {
       caps: capsFromWire(attached.caps),
       ...(attached.launcher ? { launcher: attached.launcher } : {}),
       ...(typeof attached.profile === "string" ? { profile: attached.profile } : {}),
+      hydrated: () => {
+        const waiting = stream.waiting;
+        if (attached.hydrate === "none" || !open() || !waiting) return Promise.resolve(undefined);
+        const at = waiting.findIndex((frame) => frame.kind === "hydrate");
+        if (at >= 0) {
+          const [frame] = waiting.splice(at, 1);
+          return Promise.resolve(frame as HydrateFrame);
+        }
+        return new Promise((resolve) => {
+          stream.onHydrate = resolve;
+        });
+      },
       start: (receive) => {
         if (!open() || stream.receive) return;
         stream.receive = receive;
@@ -222,9 +253,14 @@ export class TransportClient {
         const grant = stream.granter.consumed(bytes);
         if (grant > 0) this.#enqueue(encodeCredit(id, grant));
       },
+      rehydrate: () => {
+        if (open()) this.#enqueue(encodeRehydrate(id));
+      },
       detach: () => {
         if (!open()) return;
         this.#streams.delete(id);
+        stream.onHydrate?.(undefined);
+        stream.onHydrate = null;
         this.#enqueue(encodeDetach(id));
       },
     };
@@ -263,6 +299,12 @@ export class TransportClient {
         const stream = this.#streams.get(frame.stream);
         if (!stream) continue;
         if (frame.kind === "data") stream.granter.received(frame.bytes.length);
+        const onHydrate = stream.onHydrate;
+        if (frame.kind === "hydrate" && onHydrate) {
+          stream.onHydrate = null;
+          onHydrate(frame);
+          continue;
+        }
         if (stream.waiting) stream.waiting.push(frame);
         else this.#deliver(stream, frame);
       }
@@ -327,6 +369,8 @@ export class TransportClient {
     if (this.#failed) return;
     this.#failed = error;
     this.#outbox = [];
+    // Nothing more will arrive for anybody waiting.
+    for (const stream of this.#streams.values()) stream.onHydrate?.(undefined);
     this.#streams.clear();
     this.#options.onFailure?.(error);
   }

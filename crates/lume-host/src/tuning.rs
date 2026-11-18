@@ -16,11 +16,27 @@ pub const COALESCE_MAX_BYTES: usize = 64 * 1024;
 /// echo of what the user typed, and typing must not feel delayed.
 pub const ECHO_IMMEDIATE_WINDOW: Duration = Duration::from_millis(20);
 
-/// How much output a session keeps while no client has attached yet. A program starts
-/// printing as soon as it runs, before the client that asked for it can attach; this
-/// holds those first bytes. When it is full the host stops reading, so nothing is lost
-/// and nothing grows.
-pub const PRE_ATTACH_BYTES: usize = 256 * 1024;
+/// How many pieces of work may wait for a session's screen. When it is behind, the
+/// session waits, and so stops reading its terminal: the program is slowed rather than
+/// its output held.
+pub const SCREEN_QUEUE: usize = 8;
+
+/// How many lines of scrollback a session's screen keeps when the client that started it
+/// did not say.
+pub const SCROLLBACK_DEFAULT_LINES: usize = 10_000;
+
+/// The most lines of scrollback a session's screen keeps, whatever was asked for.
+pub const SCROLLBACK_MAX_LINES: usize = 100_000;
+
+/// The most bytes of scrollback a session's screen keeps. The same bound a view keeps.
+pub const SCROLLBACK_MAX_BYTES: usize = 192 * 1024 * 1024;
+
+/// How often a screen is looked at for text somebody waits for, at most, while output
+/// arrives. Looking reads the whole screen, so it is not done after every write.
+pub const WAIT_TEXT_CHECK: Duration = Duration::from_millis(50);
+
+/// The longest a client may wait for text to appear on a screen.
+pub const WAIT_TEXT_MAX: Duration = Duration::from_secs(600);
 
 /// The size of one read from a terminal.
 pub const READ_CHUNK: usize = 64 * 1024;
@@ -40,9 +56,15 @@ pub const INPUT_BACKLOG_MAX: usize = 4 * 1024 * 1024;
 /// running in the background would otherwise keep the session from ever finishing.
 pub const EXIT_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
 
-/// How long a session whose program ended before any client attached is kept, so that
-/// a client that asked for it a moment ago still gets its output and exit status.
+/// How long a session whose program ended while no client was attached is kept, so
+/// that a client that asked for it a moment ago, or comes back for it, still gets its
+/// last screen and exit status. A host whose sessions outlive their clients keeps them
+/// for [`EXITED_UNSEEN_LINGER`] instead.
 pub const UNATTACHED_EXIT_LINGER: Duration = Duration::from_secs(10);
+
+/// How long a host whose sessions outlive their clients keeps a session that ended
+/// while nobody was looking: long enough for the user to come back and see how it ended.
+pub const EXITED_UNSEEN_LINGER: Duration = Duration::from_secs(60 * 60);
 
 /// How long a connection that is closing waits for the sessions it started to end.
 /// Serving a connection is not over until its programs are gone: a host that returned

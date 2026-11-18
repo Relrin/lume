@@ -45,4 +45,4 @@ pub use types::{
 };
 
 /// The protocol version this crate speaks.
-pub const PROTO_VERSION: u32 = 1;
+pub const PROTO_VERSION: u32 = 2;

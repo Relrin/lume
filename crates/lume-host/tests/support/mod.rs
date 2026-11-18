@@ -7,7 +7,7 @@
 // Each test file compiles this module separately and uses a different part of it.
 #![allow(dead_code)]
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 use lume_host::{Host, HostConfig};
 use lume_proto::{
     Body, CONTROL_STREAM, CellPx, ClientFacts, ClientKind, ColorScheme, Control, FrameDecoder,
-    Launcher, Message, Notification, PROTO_VERSION, Palette, ProtoError, Request, RequestBody,
-    ResponseBody, Role, SessionEvent, SessionId, SessionInfo, SpawnSpec, TermSize, encode,
+    HydrateMode, HydratePayload, Launcher, Message, Notification, PROTO_VERSION, Palette,
+    ProtoError, Request, RequestBody, ResponseBody, Role, SessionEvent, SessionId, SessionInfo,
+    SpawnSpec, TermSize, encode,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -78,6 +79,7 @@ fn spec(program: &str, args: &[&str]) -> SpawnSpec {
         env: vec![("LUME_MARK".to_owned(), MARK.to_owned())],
         size: size(80, 24),
         shell_integration: false,
+        scrollback_lines: None,
     }
 }
 
@@ -175,6 +177,84 @@ pub fn reports_then_waits(done: &str) -> SpawnSpec {
     }
 }
 
+/// How [`prints_lines_then_waits`] writes line `n`.
+pub fn line_number(n: u32) -> String {
+    format!("line-{n:06}")
+}
+
+/// What [`prints_lines_then_waits`] prints after each number, to make each line about a
+/// hundred bytes long.
+const LINE_PADDING: &str =
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+/// A program that prints `count` numbered lines of about a hundred bytes and then
+/// waits for input.
+pub fn prints_lines_then_waits(count: u32) -> SpawnSpec {
+    if cfg!(windows) {
+        // Numbers padded to six digits with arithmetic, since `for /l` gives none.
+        spec(
+            "cmd.exe",
+            &[
+                "/d",
+                "/v:on",
+                "/c",
+                &format!(
+                    // Without the outer brackets the pause would be part of the loop.
+                    "(for /l %i in (1,1,{count}) do @(set /a n=1000000+%i >nul & echo line-!n:~1! {LINE_PADDING})) \
+                     & pause >nul"
+                ),
+            ],
+        )
+    } else {
+        spec(
+            "/bin/sh",
+            &[
+                "-c",
+                &format!(
+                    "i=1; while [ $i -le {count} ]; do printf 'line-%06d {LINE_PADDING}\\n' $i; i=$((i+1)); done; \
+                     read reply"
+                ),
+            ],
+        )
+    }
+}
+
+/// What [`asks_for_the_cursor`] prints once it has read an answer.
+pub const CURSOR_ANSWERED: &str = "cursor-answered";
+
+/// A program that asks the terminal where the cursor is, reads the answer, and says so.
+///
+/// On Windows the console host between the program and the terminal answers this
+/// question itself, so there the case shows only that the program is answered.
+pub fn asks_for_the_cursor() -> SpawnSpec {
+    if cfg!(windows) {
+        spec(
+            "powershell.exe",
+            &[
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!(
+                    "$p=$Host.UI.RawUI.CursorPosition; [Console]::Out.WriteLine('{CURSOR_ANSWERED}'); \
+                     [void][Console]::In.ReadLine()"
+                ),
+            ],
+        )
+    } else {
+        spec(
+            "/bin/sh",
+            &[
+                "-c",
+                &format!(
+                    "stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 >/dev/null 2>&1; \
+                     stty sane; echo {CURSOR_ANSWERED}; read reply"
+                ),
+            ],
+        )
+    }
+}
+
 pub fn missing_program() -> SpawnSpec {
     spec("no-such-program-anywhere", &[])
 }
@@ -186,6 +266,10 @@ pub struct Client {
     incoming: mpsc::UnboundedReceiver<Result<Message, String>>,
     /// Messages received while waiting for a different one, oldest first.
     stash: VecDeque<Message>,
+    /// The state each attachment started from, by stream.
+    hydrated: HashMap<u32, HydratePayload>,
+    /// The engine version this client says it runs.
+    vt_version: Option<String>,
     next_request: u64,
     reading: JoinHandle<()>,
 }
@@ -232,6 +316,8 @@ impl Client {
             writer: Box::new(writer),
             incoming,
             stash: VecDeque::new(),
+            hydrated: HashMap::new(),
+            vt_version: Some(lume_host::vt_version().to_owned()),
             next_request: 1,
             reading,
         }
@@ -302,12 +388,20 @@ impl Client {
         }
     }
 
-    /// Says hello with the current protocol version and returns the host's process id.
+    /// Says hello with the current protocol version and the host's own engine version,
+    /// so that attachments start from a snapshot, and returns the host's process id.
     pub async fn hello(&mut self) -> u32 {
+        let vt_version = self.vt_version.clone();
+        self.hello_as(vt_version).await
+    }
+
+    /// Says hello as a client running engine `vt_version`, or none.
+    pub async fn hello_as(&mut self, vt_version: Option<String>) -> u32 {
+        self.vt_version = vt_version.clone();
         let hello = RequestBody::Hello {
             proto: PROTO_VERSION,
             proto_min: PROTO_VERSION,
-            vt_version: None,
+            vt_version,
             client_kind: ClientKind::Test,
         };
         match self.request(hello).await {
@@ -323,17 +417,60 @@ impl Client {
         }
     }
 
+    /// Attaches, and takes the state the attachment starts from off the stream: it is
+    /// the first thing sent on it. [`hydrated`](Self::hydrated) returns it.
     pub async fn attach(
         &mut self,
         session: SessionId,
         stream: u32,
     ) -> Result<ResponseBody, ProtoError> {
-        self.request(RequestBody::Attach {
-            session,
-            stream,
-            facts: facts(),
-        })
-        .await
+        let response = self
+            .request(RequestBody::Attach {
+                session,
+                stream,
+                facts: facts(),
+            })
+            .await;
+        if let Ok(ResponseBody::Attached { hydrate, .. }) = &response
+            && *hydrate != HydrateMode::None
+        {
+            let is_hydrate = |message: &Message| {
+                message.stream == stream && matches!(message.body, Body::Hydrate(_))
+            };
+            let Body::Hydrate(payload) = self
+                .expect("the screen to start from", is_hydrate)
+                .await
+                .body
+            else {
+                unreachable!("matched as a hydrate");
+            };
+            self.hydrated.insert(stream, payload);
+        }
+        response
+    }
+
+    /// What the attachment on `stream` started from.
+    pub fn hydrated(&self, stream: u32) -> Option<&HydratePayload> {
+        self.hydrated.get(&stream)
+    }
+
+    /// The text of the screen the attachment on `stream` started from, as a client's
+    /// terminal of the host's own engine shows it once it has loaded it.
+    pub fn hydrated_text(&self, stream: u32) -> String {
+        let terminal = match self
+            .hydrated(stream)
+            .expect("the attachment started from a screen")
+        {
+            HydratePayload::Snapshot { bytes, .. } => {
+                lume_vt::Terminal::from_snapshot(bytes).expect("the snapshot loads")
+            }
+            HydratePayload::VtReplay(bytes) => {
+                let mut terminal = lume_vt::Terminal::new(80, 24).unwrap();
+                terminal.write(bytes);
+                terminal
+            }
+        };
+        terminal.screen_text().unwrap().join("\n")
     }
 
     /// Attaches and grants a window of credit, as a real client does at once.
@@ -412,7 +549,11 @@ impl Client {
     /// reported: a mark of where the terminal was resized or the program ended.
     pub async fn marker(&mut self, stream: u32) -> Body {
         let is_marker = |message: &Message| {
-            message.stream == stream && !matches!(message.body, Body::Data(_) | Body::Event(_))
+            message.stream == stream
+                && !matches!(
+                    message.body,
+                    Body::Data(_) | Body::Event(_) | Body::Hydrate(_)
+                )
         };
         self.expect("a marker", is_marker).await.body
     }

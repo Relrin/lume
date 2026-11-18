@@ -99,6 +99,13 @@
 # shell-args = []
 # How many lines that have scrolled off the top are kept.
 # scrollback-lines = 10000
+# Whether windows keep only the newest lines and fetch older ones from the session host
+# when you scroll back to them or search; how many lines a window keeps itself then (100
+# or more); and for how many seconds it keeps the lines it fetched once you are back at
+# the newest output (5 or more). Off, every window keeps all of the scrollback itself.
+# history-paging = false
+# window-history-lines = 1000
+# history-release-seconds = 60
 # The cursor: "block", "bar" or "underline", and whether it blinks.
 # cursor-style = "block"
 # cursor-blink = true

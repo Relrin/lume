@@ -21,11 +21,13 @@ use crate::profiles::ProfileEntry;
 use crate::settings::{PAGES_KEY, Shown, pages};
 use crate::tuning::{
     ACCENT_PRESETS, BACKGROUND_BLUR_MAX, CURSOR_EFFECT_LENGTH_MAX, CURSOR_EFFECT_LENGTH_MIN,
-    FONT_SIZE_MAX, FONT_SIZE_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN, LONG_COMMAND_SECONDS_DEFAULT,
+    FONT_SIZE_MAX, FONT_SIZE_MIN, HISTORY_RELEASE_SECONDS_DEFAULT, HISTORY_RELEASE_SECONDS_MAX,
+    HISTORY_RELEASE_SECONDS_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN, LONG_COMMAND_SECONDS_DEFAULT,
     LONG_COMMAND_SECONDS_MAX, LONG_COMMAND_SECONDS_MIN, PANE_LENGTH_MAX, SCROLLBACK_LINES_MAX,
     SETTINGS_STEP_EFFECT_LENGTH, SETTINGS_STEP_LENGTH, SETTINGS_STEP_LINE_HEIGHT,
     SETTINGS_STEP_LINES, SETTINGS_STEP_PERCENT, SETTINGS_STEP_SECONDS, UI_FONT_SIZE_MAX,
-    UI_FONT_SIZE_MIN,
+    UI_FONT_SIZE_MIN, WINDOW_HISTORY_LINES_DEFAULT, WINDOW_HISTORY_LINES_MAX,
+    WINDOW_HISTORY_LINES_MIN,
 };
 
 /// The two answers to whether closing asks first, as the settings window calls them.
@@ -883,10 +885,32 @@ pub struct TerminalConfig {
     pub shell_args: Vec<String>,
     /// How many lines that have scrolled off the top are kept.
     #[schemars(range(min = 0, max = SCROLLBACK_LINES_MAX))]
-    #[schemars(extend("x-lume-settings" = Shown::number("terminal", "Buffer", 10, "Scrollback", SETTINGS_STEP_LINES)
+    #[schemars(extend("x-lume-settings" = Shown::number("terminal", "History", 10, "Scrollback", SETTINGS_STEP_LINES)
         .help("Older lines are dropped past this limit. New terminals use it")
         .lines()))]
     pub scrollback_lines: u32,
+    /// Keep only the newest lines in each window and fetch older ones from the session
+    /// host when the terminal is scrolled back to them or searched. Off, every window
+    /// keeps all of a terminal's scrollback itself, which costs memory twice over.
+    #[schemars(extend("x-lume-settings" = Shown::switch("terminal", "History", 20, "Fetch older lines when needed")
+        .help("Windows keep only the newest lines and fetch older ones as you scroll back or search")))]
+    pub history_paging: bool,
+    /// How many lines a window keeps for a terminal while older ones are fetched when
+    /// needed.
+    #[schemars(range(min = WINDOW_HISTORY_LINES_MIN, max = WINDOW_HISTORY_LINES_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("terminal", "History", 30, "Lines kept in the window", SETTINGS_STEP_LINES)
+        .help("The newest lines a window holds itself when older ones are fetched as needed")
+        .lines()
+        .when_on("terminal.history-paging")))]
+    pub window_history_lines: u32,
+    /// How long, in seconds, a window keeps the older lines it fetched once the terminal
+    /// is back at its newest output.
+    #[schemars(range(min = HISTORY_RELEASE_SECONDS_MIN, max = HISTORY_RELEASE_SECONDS_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("terminal", "History", 40, "Let go of older lines after", SETTINGS_STEP_SECONDS)
+        .help("How long fetched lines stay once you are back at the newest output")
+        .seconds()
+        .when_on("terminal.history-paging")))]
+    pub history_release_seconds: u32,
     /// The cursor's shape, until a program chooses another.
     #[schemars(extend("x-lume-settings" = Shown::segmented("terminal", "Cursor", 10, "Cursor style")
         .options(&[("block", "Block"), ("bar", "Bar"), ("underline", "Underline")])))]
@@ -965,6 +989,9 @@ impl Default for TerminalConfig {
             shell: String::new(),
             shell_args: Vec::new(),
             scrollback_lines: 10_000,
+            history_paging: false,
+            window_history_lines: WINDOW_HISTORY_LINES_DEFAULT,
+            history_release_seconds: HISTORY_RELEASE_SECONDS_DEFAULT,
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
             cursor_trail: CursorTrail::None,

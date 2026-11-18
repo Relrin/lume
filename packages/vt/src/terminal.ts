@@ -75,6 +75,10 @@ export interface TerminalOptions {
    */
   scrollbackMaxLines?: number;
   scrollbackMaxBytes?: number;
+  /** @internal A snapshot to load instead of starting blank; see `Vt.loadTerminal`. */
+  snapshot?: Uint8Array;
+  /** @internal How many lines of the snapshot's scrollback to restore. All, if left out. */
+  snapshotHistoryLines?: number;
   /**
    * Whether growing the grid pulls rows back out of scrollback. Must be false for a pty
    * that redraws the screen itself after a resize, as the Windows pseudoconsole does.
@@ -208,6 +212,116 @@ const CURSOR_STYLE_NAMES: Readonly<Record<CursorStyle, string>> = {
   underline: "UNDERLINE",
 };
 
+/** No limit, for an option that takes a `size_t`. */
+const SIZE_MAX = 0xffff_ffff;
+
+/**
+ * Makes a terminal from a snapshot and returns its handle. The decoder gives the screen
+ * first and then the scrollback a page at a time, newest first, into a terminal that
+ * keeps no more history than its limits allow; so the limits asked for are set before
+ * any history comes back. With `snapshotHistoryLines`, restoring stops after about that
+ * many lines.
+ */
+function decodeSnapshot(
+  core: Core,
+  snapshot: Uint8Array,
+  options: TerminalOptions,
+): { handle: number; complete: boolean } {
+  // The decoder reads the bytes where they are staged, and is done with them before
+  // anything else is staged.
+  const ptr = core.stage(snapshot);
+  const decoder = core.newHandle("ghostty_snapshot_decoder_new_buf", (out) =>
+    core.x.ghostty_snapshot_decoder_new_buf(0, out, ptr, snapshot.length),
+  );
+  try {
+    const handle = core.newHandle("ghostty_snapshot_decoder_ready", (out) =>
+      core.x.ghostty_snapshot_decoder_ready(decoder, out),
+    );
+    try {
+      const wanted = options.snapshotHistoryLines ?? Infinity;
+      setLimit(core, handle, "SCROLLBACK_MAX_BYTES", options.scrollbackMaxBytes ?? SIZE_MAX);
+      setLimit(
+        core,
+        handle,
+        "SCROLLBACK_MAX_LINES",
+        Math.min(options.scrollbackMaxLines ?? SIZE_MAX, wanted === Infinity ? SIZE_MAX : wanted),
+      );
+      const complete = restoreHistory(core, decoder, handle, wanted);
+      return { handle, complete };
+    } catch (err) {
+      core.x.ghostty_terminal_free(handle);
+      throw err;
+    }
+  } finally {
+    core.x.ghostty_snapshot_decoder_free(decoder);
+  }
+}
+
+/** Sets a `size_t` option of a terminal that has no `Terminal` around it yet. */
+function setLimit(core: Core, handle: number, option: string, value: number): void {
+  const at = core.allocZeroed(8);
+  try {
+    core.view().setUint32(at, value, true);
+    core.check(
+      core.x.ghostty_terminal_set(
+        handle,
+        core.manifest.enumValue("GhosttyTerminalOption", option),
+        at,
+      ),
+      "ghostty_terminal_set",
+    );
+  } finally {
+    core.free(at, 8);
+  }
+}
+
+/**
+ * Restores history pages until about `lines` rows are back, or there are no more. Says
+ * whether every line of the snapshot's scrollback is in the terminal afterwards: the
+ * terminal's own limits may have let some go even when every page was restored.
+ */
+function restoreHistory(core: Core, decoder: number, handle: number, lines: number): boolean {
+  const m = core.manifest;
+  const data = (name: string) => m.enumValue("GhosttySnapshotDecoderData", name);
+  const page = m.enumValue("GhosttySnapshotDecoderProgressKind", "PAGE");
+  const out = core.allocZeroed(8);
+  try {
+    // How much scrollback the snapshot has, known once the screen is back.
+    core.check(
+      core.x.ghostty_snapshot_decoder_get(decoder, data("HISTORY_ROWS_PRIMARY"), out),
+      "ghostty_snapshot_decoder_get",
+    );
+    const inSnapshot = Number(core.view().getBigUint64(out, true));
+    let restored = 0;
+    while (restored < lines) {
+      const result = core.x.ghostty_snapshot_decoder_next(decoder);
+      if (result === NO_VALUE) break;
+      core.check(result, "ghostty_snapshot_decoder_next");
+      core.check(
+        core.x.ghostty_snapshot_decoder_get(decoder, data("PROGRESS_KIND"), out),
+        "ghostty_snapshot_decoder_get",
+      );
+      if (core.view().getInt32(out, true) !== page) continue;
+      core.check(
+        core.x.ghostty_snapshot_decoder_get(decoder, data("PROGRESS_ROWS"), out),
+        "ghostty_snapshot_decoder_get",
+      );
+      restored += core.view().getUint32(out, true);
+    }
+    core.check(
+      core.x.ghostty_terminal_get(
+        handle,
+        m.enumValue("GhosttyTerminalData", "SCROLLBACK_ROWS"),
+        out,
+      ),
+      "ghostty_terminal_get(SCROLLBACK_ROWS)",
+    );
+    return core.view().getUint32(out, true) >= inSnapshot;
+  } finally {
+    core.free(out, 8);
+  }
+}
+
 /** A terminal emulator: screen, scrollback, cursor, styles and modes. */
 export class Terminal {
   /** @internal The module this terminal lives in. */
@@ -224,6 +338,7 @@ export class Terminal {
   #clipboardWriteMaxBytes: number | undefined;
   #scrollbackMaxBytes: number | undefined;
   #revision = 0;
+  #leftHistoryOut = false;
 
   readonly #scratch: number;
   readonly #out: number;
@@ -258,12 +373,24 @@ export class Terminal {
     this.#out = this.#scratch;
     this.#arg = this.#scratch + OUT_BYTES;
     try {
-      this.#handle = core.newHandle("ghostty_terminal_new", (out) =>
-        core.x.ghostty_terminal_new(0, out, cols, rows),
-      );
+      const snapshot = options?.snapshot;
+      if (snapshot) {
+        const decoded = decodeSnapshot(core, snapshot, options);
+        this.#handle = decoded.handle;
+        this.#leftHistoryOut = !decoded.complete;
+      } else {
+        this.#handle = core.newHandle("ghostty_terminal_new", (out) =>
+          core.x.ghostty_terminal_new(0, out, cols, rows),
+        );
+      }
     } catch (err) {
       core.free(this.#scratch, OUT_BYTES + ARG_BYTES);
       throw err;
+    }
+    if (options?.snapshot) {
+      // A loaded terminal has the size it was saved with.
+      this.#cols = this.#getU16("COLS");
+      this.#rows = this.#getU16("ROWS");
     }
 
     try {
@@ -274,6 +401,14 @@ export class Terminal {
       this.free();
       throw err;
     }
+  }
+
+  /**
+   * Whether this terminal was loaded from a snapshot with only part of its scrollback:
+   * older lines were in the snapshot and were not restored.
+   */
+  get leftHistoryOut(): boolean {
+    return this.#leftHistoryOut;
   }
 
   /** @internal The library's handle, or 0 once freed. */
@@ -493,6 +628,18 @@ export class Terminal {
   /** Put `row`, counted as `Scrollbar.offset` is, at the top of the viewport. */
   scrollToRow(row: number): void {
     this.#scroll("ROW", row);
+  }
+
+  /**
+   * Keep about `lines` lines of scrollback from now on. Lowering it lets the older ones
+   * go at once, a page at a time.
+   */
+  setScrollbackLines(lines: number): void {
+    this.#live();
+    this.#call("input", () => {
+      this.#setSize("SCROLLBACK_MAX_LINES", lines);
+      this.#revision++;
+    });
   }
 
   /**

@@ -1,16 +1,45 @@
 //! The interface every session backend offers, and what attaching to a session yields.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use lume_layout::LayoutAuthority;
+use lume_proto::app::ScreenCursor;
 use lume_proto::{
-    BackendCaps, CellPx, ClientFacts, ExitStatus, SessionEvent, SessionId, SessionInfo, SpawnSpec,
-    TermSize,
+    BackendCaps, CellPx, ClientFacts, ErrorCode, ExitStatus, ProtoError, SessionEvent, SessionId,
+    SessionInfo, SpawnSpec, TermSize,
 };
 use tokio::sync::mpsc;
 
-use crate::Result;
+use crate::{Result, SessionError};
+
+/// The screen a session's program draws on, as text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScreenText {
+    pub size: TermSize,
+    pub cursor: ScreenCursor,
+    /// Whether a full-screen program has switched to the alternate screen.
+    pub alternate: bool,
+    /// One string for each row, with the blanks at its end removed.
+    pub lines: Vec<String>,
+}
+
+/// Where text that was waited for appeared on a screen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextFound {
+    /// The first row that holds it.
+    pub row: u16,
+    /// That row's text.
+    pub line: String,
+}
+
+fn unsupported(what: &str) -> SessionError {
+    SessionError::Refused(ProtoError::new(
+        ErrorCode::Unsupported,
+        format!("this backend cannot {what}"),
+    ))
+}
 
 /// Something that runs terminal sessions.
 ///
@@ -30,6 +59,23 @@ pub trait SessionBackend: Send + Sync {
     async fn attach(&self, id: SessionId, facts: ClientFacts) -> Result<Attachment>;
 
     async fn kill(&self, id: SessionId) -> Result<()>;
+
+    /// Reads a session's screen, for a backend that keeps one. Others refuse with
+    /// `unsupported`, and the screen has to be read from a view showing the session.
+    async fn screen(&self, _id: SessionId) -> Result<ScreenText> {
+        Err(unsupported("read a screen"))
+    }
+
+    /// Waits up to `timeout` for `text` to be on a session's screen, for a backend that
+    /// keeps one. Fails with `timeout` when it is not there in time.
+    async fn wait_text(
+        &self,
+        _id: SessionId,
+        _text: &str,
+        _timeout: Duration,
+    ) -> Result<TextFound> {
+        Err(unsupported("wait for text on a screen"))
+    }
 
     /// Who decides how this backend's sessions are arranged in panes, for a backend
     /// that decides it itself (its [`caps`](Self::caps) say `server_layout`). Any other
@@ -75,6 +121,9 @@ pub enum OutputFrame {
     Event(SessionEvent),
     /// The session's program ended. Nothing follows.
     Exit(ExitStatus),
+    /// The state to start again from, as asked for with [`InputSink::rehydrate`]: the
+    /// output before it is part of it, and the output after it follows on from it.
+    Hydrate(Hydrate),
 }
 
 /// The frames of one attachment.
@@ -104,6 +153,7 @@ pub(crate) trait Sink: Send + Sync {
     async fn resize(&self, size: TermSize, cell_px: CellPx) -> Result<()>;
     async fn facts(&self, facts: &ClientFacts) -> Result<()>;
     async fn credit(&self, bytes: u32) -> Result<()>;
+    async fn rehydrate(&self) -> Result<()>;
     async fn detach(&self) -> Result<()>;
 }
 
@@ -138,6 +188,13 @@ impl InputSink {
     /// so nothing arrives until this is called.
     pub async fn credit(&self, bytes: u32) -> Result<()> {
         self.sink.credit(bytes).await
+    }
+
+    /// Asks for the state to start again from, as of this point of the output. It
+    /// arrives as an [`OutputFrame::Hydrate`] in its place among the frames, from a
+    /// backend whose caps say it can hydrate.
+    pub async fn rehydrate(&self) -> Result<()> {
+        self.sink.rehydrate().await
     }
 
     /// Ends the attachment. The session carries on.

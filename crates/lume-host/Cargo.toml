@@ -13,6 +13,7 @@ getrandom.workspace = true
 lume-ipc.workspace = true
 lume-proto.workspace = true
 lume-pty.workspace = true
+lume-vt.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

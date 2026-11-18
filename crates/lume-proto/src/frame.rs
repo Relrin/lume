@@ -42,6 +42,8 @@ pub enum Kind {
     Credit = 0x13,
     /// The end of this attachment. Client to host.
     Detach = 0x14,
+    /// Send the state to start again from, at this point of the output. Client to host.
+    Rehydrate = 0x15,
 }
 
 impl Kind {
@@ -62,6 +64,7 @@ impl Kind {
             0x12 => Self::Facts,
             0x13 => Self::Credit,
             0x14 => Self::Detach,
+            0x15 => Self::Rehydrate,
             _ => return None,
         })
     }
@@ -83,7 +86,13 @@ impl Kind {
     pub fn from_client(self) -> bool {
         matches!(
             self,
-            Self::Control | Self::Input | Self::Resize | Self::Facts | Self::Credit | Self::Detach
+            Self::Control
+                | Self::Input
+                | Self::Resize
+                | Self::Facts
+                | Self::Credit
+                | Self::Detach
+                | Self::Rehydrate
         )
     }
 }
@@ -193,6 +202,7 @@ pub enum Body {
     Facts(ClientFacts),
     Credit(u32),
     Detach,
+    Rehydrate,
 }
 
 impl Body {
@@ -209,6 +219,7 @@ impl Body {
             Self::Facts(_) => Kind::Facts,
             Self::Credit(_) => Kind::Credit,
             Self::Detach => Kind::Detach,
+            Self::Rehydrate => Kind::Rehydrate,
         }
     }
 }
@@ -268,7 +279,7 @@ pub fn encode(message: &Message, out: &mut Vec<u8>) -> Result<(), EncodeError> {
         }
         Body::Facts(facts) => write_one(stream, kind, &payload::encode_facts(facts), out),
         Body::Credit(bytes) => write_one(stream, kind, &bytes.to_le_bytes(), out),
-        Body::Detach => write_one(stream, kind, &[], out),
+        Body::Detach | Body::Rehydrate => write_one(stream, kind, &[], out),
     }
     Ok(())
 }

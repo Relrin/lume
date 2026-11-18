@@ -2012,11 +2012,14 @@
         "cursor-pulse": "none",
         "cursor-style": "block",
         "cursor-trail": "none",
+        "history-paging": false,
+        "history-release-seconds": 60,
         "long-command-seconds": 10,
         "notify-long-command": false,
         "scrollback-lines": 10000,
         "shell": "",
-        "shell-args": []
+        "shell-args": [],
+        "window-history-lines": 1000
       },
       "description": "The terminals.",
       "properties": {
@@ -2282,6 +2285,41 @@
             "page": "terminal"
           }
         },
+        "history-paging": {
+          "default": false,
+          "description": "Keep only the newest lines in each window and fetch older ones from the session\nhost when the terminal is scrolled back to them or searched. Off, every window\nkeeps all of a terminal's scrollback itself, which costs memory twice over.",
+          "type": "boolean",
+          "x-lume-settings": {
+            "control": "switch",
+            "group": "History",
+            "help": "Windows keep only the newest lines and fetch older ones as you scroll back or search",
+            "label": "Fetch older lines when needed",
+            "order": 20,
+            "page": "terminal"
+          }
+        },
+        "history-release-seconds": {
+          "default": 60,
+          "description": "How long, in seconds, a window keeps the older lines it fetched once the terminal\nis back at its newest output.",
+          "format": "uint32",
+          "maximum": 86400,
+          "minimum": 5,
+          "type": "integer",
+          "x-lume-settings": {
+            "control": "number",
+            "group": "History",
+            "help": "How long fetched lines stay once you are back at the newest output",
+            "label": "Let go of older lines after",
+            "order": 40,
+            "page": "terminal",
+            "step": 1.0,
+            "unit": "seconds",
+            "when": {
+              "is": "on",
+              "path": "terminal.history-paging"
+            }
+          }
+        },
         "long-command-seconds": {
           "default": 10,
           "description": "How long a command runs, in seconds, before its end is notified.",
@@ -2344,7 +2382,7 @@
           "type": "integer",
           "x-lume-settings": {
             "control": "number",
-            "group": "Buffer",
+            "group": "History",
             "help": "Older lines are dropped past this limit. New terminals use it",
             "label": "Scrollback",
             "order": 10,
@@ -2365,6 +2403,28 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "window-history-lines": {
+          "default": 1000,
+          "description": "How many lines a window keeps for a terminal while older ones are fetched when\nneeded.",
+          "format": "uint32",
+          "maximum": 100000,
+          "minimum": 100,
+          "type": "integer",
+          "x-lume-settings": {
+            "control": "number",
+            "group": "History",
+            "help": "The newest lines a window holds itself when older ones are fetched as needed",
+            "label": "Lines kept in the window",
+            "order": 30,
+            "page": "terminal",
+            "step": 1000.0,
+            "unit": "lines",
+            "when": {
+              "is": "on",
+              "path": "terminal.history-paging"
+            }
+          }
         }
       },
       "type": "object"
@@ -2601,6 +2661,7 @@
       "groups": [
         "New terminals",
         "Cursor",
+        "History",
         "Buffer",
         "Closing"
       ],

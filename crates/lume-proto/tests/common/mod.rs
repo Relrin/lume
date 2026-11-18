@@ -108,6 +108,7 @@ fn spawn_spec() -> impl Strategy<Value = SpawnSpec> {
             env,
             size,
             shell_integration: false,
+            scrollback_lines: None,
         })
 }
 
@@ -401,6 +402,7 @@ pub fn message_from_client() -> impl Strategy<Value = Message> {
         1 => facts().prop_map(Body::Facts),
         1 => any::<u32>().prop_map(Body::Credit),
         1 => Just(Body::Detach),
+        1 => Just(Body::Rehydrate),
     ];
     prop_oneof![
         4 => (data_stream(), body).prop_map(|(stream, body)| Message { stream, body }),

@@ -130,10 +130,20 @@
           },
           {
             "role": "heading",
-            "name": "Buffer"
+            "name": "History"
           },
           {
             "role": "spinbutton"
+          },
+          {
+            "role": "switch",
+            "state": {
+              "checked": "false"
+            }
+          },
+          {
+            "role": "heading",
+            "name": "Buffer"
           },
           {
             "role": "spinbutton"

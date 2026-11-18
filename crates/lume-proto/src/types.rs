@@ -300,6 +300,10 @@ pub struct SpawnSpec {
     /// to ask that shell without touching the user's own start-up files.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub shell_integration: bool,
+    /// About how many lines of scrollback the host keeps for the session. `None` leaves
+    /// it to the host, which also caps it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scrollback_lines: Option<u32>,
 }
 
 /// Counters a host keeps per session. They describe the flow of output, never its content.

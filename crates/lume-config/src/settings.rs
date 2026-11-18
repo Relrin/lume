@@ -78,7 +78,8 @@ pub struct Choice {
 pub struct When {
     /// The other setting's path.
     pub path: &'static str,
-    /// `unset` or `set`: whether that setting must be left out of the file, or be in it.
+    /// `unset` or `set`: whether that setting must be left out of the file, or be in it;
+    /// or `on`: that switch must be on.
     pub is: &'static str,
 }
 
@@ -308,6 +309,13 @@ impl Shown {
         self
     }
 
+    /// Shown only while a switch is on.
+    #[must_use]
+    pub fn when_on(mut self, path: &'static str) -> Self {
+        self.when = Some(When { path, is: "on" });
+        self
+    }
+
     /// Shown only on one platform, for a setting that does nothing on the others.
     #[must_use]
     pub fn only_on(mut self, platform: &'static str) -> Self {
@@ -356,7 +364,7 @@ pub fn pages() -> [Page; 3] {
             icon: "terminal",
             group: APPLICATION,
             blurb: "The terminal new tabs open, the cursor, scrollback and what happens when a program ends.",
-            groups: &["New terminals", "Cursor", "Buffer", "Closing"],
+            groups: &["New terminals", "Cursor", "History", "Buffer", "Closing"],
         },
     ]
 }
@@ -571,7 +579,7 @@ mod tests {
                     shown().iter().any(|(path, ..)| *path == other),
                     "{path:?} depends on {other:?}"
                 );
-                assert!(["unset", "set"].contains(&when["is"].as_str().unwrap()));
+                assert!(["unset", "set", "on"].contains(&when["is"].as_str().unwrap()));
             }
         }
     }

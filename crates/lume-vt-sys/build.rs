@@ -10,8 +10,21 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     println!("cargo:rerun-if-env-changed=LUME_VT_DIR");
+    println!("cargo:rerun-if-env-changed=LUME_VT_HEADERS_ONLY");
 
     let target = env::var("TARGET").expect("TARGET is set by Cargo");
+
+    // For type-checking code for another platform (`cargo clippy --target ...`), which
+    // links nothing: the bindings come from the vendored headers, and no library is
+    // looked for. A build made this way cannot be linked.
+    if env::var_os("LUME_VT_HEADERS_ONLY").is_some_and(|v| v == "1") {
+        let source = vendored_source();
+        generate(
+            &source,
+            &source.join("include").join("ghostty").join("vt.h"),
+        );
+        return;
+    }
     let vt_dir = match env::var_os("LUME_VT_DIR") {
         Some(dir) => PathBuf::from(dir),
         None => workspace_root().join("target").join("vt").join(&target),
@@ -39,6 +52,23 @@ fn workspace_root() -> PathBuf {
         .nth(2)
         .expect("crate lives at <root>/crates/lume-vt-sys")
         .to_path_buf()
+}
+
+/// The vendored library source, which holds the headers.
+fn vendored_source() -> PathBuf {
+    let vendor = workspace_root().join("vendor").join("ghostty");
+    fs::read_dir(&vendor)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .find(|dir| {
+            dir.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("libghostty-vt-") && !name.ends_with("-deps"))
+                && dir.join("include").is_dir()
+        })
+        .unwrap_or_else(|| panic!("no libghostty-vt source under {}", vendor.display()))
 }
 
 fn link(vt_dir: &Path, target: &str) {

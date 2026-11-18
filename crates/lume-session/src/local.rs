@@ -10,6 +10,8 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use crate::backend::{ScreenText, TextFound};
+
 use async_trait::async_trait;
 use lume_host::{Host, HostConfig};
 use lume_proto::{
@@ -173,16 +175,17 @@ impl Connection {
             Body::Event(event) => forward(&state, stream, OutputFrame::Event(event)),
             Body::Exit(status) => forward(&state, stream, OutputFrame::Exit(status)),
             Body::Hydrate(payload) => {
-                match state
-                    .streams
-                    .get_mut(&stream)
-                    .and_then(|open| open.hydrate.take())
-                {
+                let Some(open) = state.streams.get_mut(&stream) else {
+                    return Ok(());
+                };
+                match open.hydrate.take() {
+                    // The state an attachment starts from.
                     Some(waiting) => {
                         let _ = waiting.send(payload);
                     }
+                    // The state to start again from, asked for later.
                     None => {
-                        return Err(format!("stream {stream} was sent state it did not expect"));
+                        let _ = open.frames.send(OutputFrame::Hydrate(hydrate_of(payload)));
                     }
                 }
             }
@@ -191,9 +194,17 @@ impl Connection {
             | Body::Resize { .. }
             | Body::Facts(_)
             | Body::Credit(_)
-            | Body::Detach => {}
+            | Body::Detach
+            | Body::Rehydrate => {}
         }
         Ok(())
+    }
+}
+
+fn hydrate_of(payload: HydratePayload) -> Hydrate {
+    match payload {
+        HydratePayload::Snapshot { vt_version, bytes } => Hydrate::Snapshot { vt_version, bytes },
+        HydratePayload::VtReplay(bytes) => Hydrate::VtReplay(bytes),
     }
 }
 
@@ -260,10 +271,12 @@ impl LocalBackend {
         let reading = tokio::spawn(read_loop(reader, Arc::clone(&connection)));
         connection.state().reading = Some(reading.abort_handle());
 
+        // The views run the same engine as the host, built from the same source, so they
+        // can start from the host's snapshots.
         let hello = RequestBody::Hello {
             proto: PROTO_VERSION,
             proto_min: PROTO_VERSION,
-            vt_version: None,
+            vt_version: Some(lume_host::vt_version().to_owned()),
             client_kind: ClientKind::App,
         };
         let caps = match connection.request(hello).await {
@@ -403,10 +416,7 @@ impl SessionBackend for LocalBackend {
         } else {
             // The state to start from is the first thing the host sends on the stream.
             match hydrated.await {
-                Ok(HydratePayload::Snapshot { vt_version, bytes }) => {
-                    Hydrate::Snapshot { vt_version, bytes }
-                }
-                Ok(HydratePayload::VtReplay(bytes)) => Hydrate::VtReplay(bytes),
+                Ok(payload) => hydrate_of(payload),
                 Err(_) => return Err(SessionError::Disconnected),
             }
         };
@@ -432,6 +442,39 @@ impl SessionBackend for LocalBackend {
         {
             ResponseBody::Killed {} => Ok(()),
             _ => Err(unexpected("kill")),
+        }
+    }
+
+    async fn screen(&self, id: SessionId) -> Result<ScreenText> {
+        match self
+            .connection
+            .request(RequestBody::Screen { session: id })
+            .await?
+        {
+            ResponseBody::Screen {
+                size,
+                cursor,
+                alternate,
+                lines,
+            } => Ok(ScreenText {
+                size,
+                cursor,
+                alternate,
+                lines,
+            }),
+            _ => Err(unexpected("screen")),
+        }
+    }
+
+    async fn wait_text(&self, id: SessionId, text: &str, timeout: Duration) -> Result<TextFound> {
+        let request = RequestBody::WaitText {
+            session: id,
+            text: text.to_owned(),
+            timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+        };
+        match self.connection.request(request).await? {
+            ResponseBody::Matched { row, line } => Ok(TextFound { row, line }),
+            _ => Err(unexpected("wait_text")),
         }
     }
 }
@@ -502,6 +545,10 @@ impl Sink for LocalSink {
         self.connection
             .send_message(&Message::new(self.stream, Body::Credit(bytes)))
             .await
+    }
+
+    async fn rehydrate(&self) -> Result<()> {
+        self.send(Body::Rehydrate).await
     }
 
     async fn detach(&self) -> Result<()> {

@@ -185,14 +185,7 @@ impl Link {
             let mut state = self.state();
             if !state.retired {
                 // The state to start from goes first, ahead of anything the pump sends.
-                let start = match hydrate {
-                    Hydrate::None => None,
-                    Hydrate::Snapshot { vt_version, bytes } => {
-                        Some(HydratePayload::Snapshot { vt_version, bytes })
-                    }
-                    Hydrate::VtReplay(bytes) => Some(HydratePayload::VtReplay(bytes)),
-                };
-                if let Some(start) = start {
+                if let Some(start) = payload_of(hydrate) {
                     let _ = self
                         .outgoing
                         .send(Queued::Frame(Message::new(stream, Body::Hydrate(start))));
@@ -239,6 +232,7 @@ impl Link {
                 Body::Resize { size, cell_px } => input.resize(size, cell_px).await,
                 Body::Facts(facts) => input.facts(&facts).await,
                 Body::Credit(bytes) => input.credit(bytes).await,
+                Body::Rehydrate => input.rehydrate().await,
                 Body::Detach => {
                     self.close(stream).await;
                     Ok(())
@@ -415,6 +409,17 @@ fn decode_client_frames(frames: &[u8]) -> Result<Vec<Message>, CommandError> {
 }
 
 /// Forwards one attachment's frames to the link's writer under the webview's stream id.
+/// The state to start from as the wire carries it, if there is any.
+fn payload_of(hydrate: Hydrate) -> Option<HydratePayload> {
+    match hydrate {
+        Hydrate::None => None,
+        Hydrate::Snapshot { vt_version, bytes } => {
+            Some(HydratePayload::Snapshot { vt_version, bytes })
+        }
+        Hydrate::VtReplay(bytes) => Some(HydratePayload::VtReplay(bytes)),
+    }
+}
+
 async fn pump(
     stream: u32,
     session: SessionKey,
@@ -441,6 +446,10 @@ async fn pump(
                 on_exit(&session, Some(status));
                 Body::Exit(status)
             }
+            OutputFrame::Hydrate(hydrate) => match payload_of(hydrate) {
+                Some(payload) => Body::Hydrate(payload),
+                None => continue,
+            },
         };
         if outgoing
             .send(Queued::Frame(Message::new(stream, body)))

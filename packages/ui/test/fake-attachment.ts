@@ -30,16 +30,22 @@ export class FakeAttachment implements Attachment {
     throw new Error("the attachment has not been started");
   };
 
-  constructor(responder: Responder = "client") {
+  constructor(responder: Responder = "client", hydrates = false) {
     this.caps = {
       persistent: false,
       multiClient: false,
       serverLayout: false,
       responder,
-      hydrate: { snapshot: false, vtReplay: false },
+      hydrate: { snapshot: hydrates, vtReplay: hydrates },
     };
   }
 
+  rehydrate(): void {
+    this.calls.push("rehydrate");
+  }
+  hydrated(): Promise<undefined> {
+    return Promise.resolve(undefined);
+  }
   start(receive: (frame: StreamFrame) => void): void {
     this.calls.push("start");
     this.deliver = receive;

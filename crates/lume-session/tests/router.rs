@@ -54,6 +54,7 @@ fn shell() -> SpawnSpec {
         env: vec![("LUME_MARK".to_owned(), "k7q".to_owned())],
         size: size(80, 24),
         shell_integration: false,
+        scrollback_lines: None,
     }
 }
 
@@ -111,12 +112,28 @@ async fn router_spawns_attaches_echoes_and_kills() {
 
     let mut attachment = backend.attach(session, facts()).await.unwrap();
     assert_eq!(attachment.size, size(80, 24));
-    assert_eq!(attachment.hydrate, Hydrate::None);
+    // The backend says it runs the host's own engine, so it is sent a snapshot.
+    assert!(
+        matches!(&attachment.hydrate, Hydrate::Snapshot { vt_version, .. }
+            if vt_version == lume_host::vt_version()),
+        "{:?}",
+        attachment.hydrate
+    );
     assert_eq!(attachment.resize_pulls_scrollback, cfg!(unix));
+
+    // The screen can be read and waited on without a view.
+    let screen = backend.screen(session).await.unwrap();
+    assert_eq!(screen.size, size(80, 24));
+    assert_eq!(screen.lines.len(), 24);
 
     attachment.input.credit(CREDIT).await.unwrap();
     attachment.input.write(PRINT_MARK).await.unwrap();
     read_until(&mut attachment, "lume-k7q-done").await;
+    let found = backend
+        .wait_text(session, "lume-k7q-done", STEP)
+        .await
+        .unwrap();
+    assert!(found.line.contains("lume-k7q-done"), "{found:?}");
 
     attachment
         .input
@@ -157,12 +174,12 @@ async fn caps_describe_the_in_process_host() {
     assert!(!caps.persistent);
     assert!(!caps.multi_client);
     assert!(!caps.server_layout);
-    assert_eq!(caps.responder, Responder::Client);
+    assert_eq!(caps.responder, Responder::Backend);
     assert_eq!(
         caps.hydrate,
         HydrateKinds {
-            snapshot: false,
-            vt_replay: false
+            snapshot: true,
+            vt_replay: true
         }
     );
     // A backend that does not arrange panes itself has no layout of its own to offer.

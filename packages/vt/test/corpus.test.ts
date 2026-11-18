@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { dump, parseScript, replay } from "../src/index.ts";
+import { dump, formatText, parseScript, replay, type Terminal } from "../src/index.ts";
 import { corpusDir, loadVt } from "./support.ts";
 
 /** Every recording directory, sorted by name, as the native suite lists them. */
@@ -36,6 +36,59 @@ describe("the golden corpus through the WebAssembly build", async () => {
     } finally {
       terminal.free();
     }
+  });
+
+  // A snapshot the native build saved at the end of each recording loads here and shows
+  // the same screen. What the terminal answered is not part of a snapshot.
+  it.each(names)("%s loads from the native snapshot", async (name) => {
+    const dir = join(corpusDir, name);
+    const snapshot = await readFile(join(dir, "snapshot.bin"));
+    const expected = (await readFile(join(dir, "expect.txt"), "utf8")).replaceAll("\r\n", "\n");
+    const withoutReplies = (text: string) => text.slice(0, text.indexOf("--- replies"));
+
+    const terminal = (await loadVt()).loadTerminal(new Uint8Array(snapshot));
+    try {
+      expect(withoutReplies(dump(terminal))).toBe(withoutReplies(expected));
+    } finally {
+      terminal.free();
+    }
+  });
+
+  it("restores only the newest history when asked to", async () => {
+    // 3000 numbered lines in a 40×5 terminal, saved by the native build.
+    const snapshot = new Uint8Array(
+      await readFile(join(corpusDir, "..", "hydrate", "history.bin")),
+    );
+    const vt = await loadVt();
+    const lines = (terminal: Terminal) =>
+      formatText(terminal, { format: "plain" })
+        .split("\n")
+        .filter((line) => line.startsWith("history-"));
+
+    const all = vt.loadTerminal(snapshot);
+    const some = vt.loadTerminal(snapshot, { historyLines: 200 });
+    try {
+      const everything = lines(all);
+      const kept = lines(some);
+      expect(everything[0]).toBe("history-0001");
+      expect(everything.at(-1)).toBe("history-3000");
+      // Whole pages are restored, so a little more than asked for, and far from all;
+      // the newest lines are the ones kept, and the screen is whole.
+      expect(kept.length).toBeGreaterThanOrEqual(200);
+      expect(kept.length).toBeLessThan(everything.length / 2);
+      expect(kept).toEqual(everything.slice(-kept.length));
+      expect(some.screenText()).toEqual(all.screenText());
+      expect(some.leftHistoryOut).toBe(true);
+      expect(all.leftHistoryOut).toBe(false);
+    } finally {
+      all.free();
+      some.free();
+    }
+  });
+
+  it("refuses a damaged snapshot", async () => {
+    const vt = await loadVt();
+    expect(() => vt.loadTerminal(new Uint8Array([1, 2, 3, 4]))).toThrow();
   });
 });
 

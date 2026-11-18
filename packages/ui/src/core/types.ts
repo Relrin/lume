@@ -81,6 +81,12 @@ export interface ConfigSettings {
   };
   readonly terminal: {
     readonly "scrollback-lines": number;
+    /** Keep only the newest lines in a window. A core that does not say means off. */
+    readonly "history-paging"?: boolean;
+    /** How many lines a window keeps then. A core that does not say means 1000. */
+    readonly "window-history-lines"?: number;
+    /** How long fetched lines stay at the newest output. A core that does not say means 60. */
+    readonly "history-release-seconds"?: number;
     readonly "cursor-style": "block" | "bar" | "underline";
     readonly "cursor-blink": boolean;
     /** What the cursor leaves behind when it jumps. A core that does not say means none. */

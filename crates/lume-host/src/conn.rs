@@ -8,7 +8,9 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+use lume_proto::app::ScreenCursor;
 use lume_proto::tuning::MAX_PAYLOAD;
 use lume_proto::{
     Body, CONTROL_STREAM, ClientFacts, Control, ErrorCode, FrameDecoder, Message, Notification,
@@ -18,8 +20,9 @@ use lume_proto::{
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::screen::{HydrateWith, vt_version};
 use crate::session::{AttachmentId, Command, SessionHandle};
-use crate::tuning::{ABANDON_WAIT, OUTBOX_PIECES, READ_CHUNK};
+use crate::tuning::{ABANDON_WAIT, OUTBOX_PIECES, READ_CHUNK, WAIT_TEXT_MAX};
 use crate::{Host, ServeError};
 
 enum Out {
@@ -92,6 +95,7 @@ where
         outbox: outbox.clone(),
         decoder: FrameDecoder::new(Role::Host),
         greeted: false,
+        hydrate: HydrateWith::Replay,
         streams: HashMap::new(),
         used_streams: HashSet::new(),
         started: Vec::new(),
@@ -130,6 +134,9 @@ struct Connection {
     decoder: FrameDecoder,
     /// Whether the client has said hello and a version was agreed.
     greeted: bool,
+    /// How the client's attachments start: from a snapshot when its terminal engine is
+    /// the host's own version, from replayed output otherwise.
+    hydrate: HydrateWith,
     streams: HashMap<u32, Stream>,
     /// Every stream id the client has used. An id is never used twice, so a frame for
     /// an old stream cannot be taken for one of a new stream.
@@ -179,7 +186,8 @@ impl Connection {
         }
     }
 
-    /// The connection is over: end what it started and let go of what it attached to.
+    /// The connection is over: let go of what it attached to and, unless sessions
+    /// outlive their clients, end what it started.
     async fn finish(&mut self) {
         for (_, stream) in self.streams.drain() {
             stream
@@ -188,6 +196,9 @@ impl Connection {
                     attachment: stream.attachment,
                 })
                 .await;
+        }
+        if self.host.persistent() {
+            return;
         }
         let mut abandoned = Vec::new();
         for id in self.started.drain(..) {
@@ -243,6 +254,10 @@ impl Connection {
                 self.forward(stream, |attachment| Command::Credit { attachment, bytes })
                     .await
             }
+            Body::Rehydrate => {
+                self.forward(stream, |attachment| Command::Rehydrate { attachment })
+                    .await
+            }
             Body::Detach => {
                 if let Some(stream) = self.streams.remove(&stream) {
                     stream
@@ -289,7 +304,7 @@ impl Connection {
                 proto,
                 proto_min,
                 client_kind,
-                ..
+                vt_version: client_vt,
             } = body
             else {
                 let refusal = error(ErrorCode::HelloRequired, "say hello before anything else");
@@ -309,11 +324,14 @@ impl Connection {
                 return false;
             };
             self.greeted = true;
-            tracing::debug!(?client_kind, version, "client connected");
+            if client_vt.as_deref() == Some(vt_version()) {
+                self.hydrate = HydrateWith::Snapshot;
+            }
+            tracing::debug!(?client_kind, version, ?client_vt, "client connected");
             let ack = ResponseBody::HelloAck {
                 proto: version,
                 host_version: env!("CARGO_PKG_VERSION").to_owned(),
-                vt_version: None,
+                vt_version: Some(vt_version().to_owned()),
                 caps: self.host.caps(),
                 max_payload: MAX_PAYLOAD as u32,
                 pid: std::process::id(),
@@ -348,8 +366,49 @@ impl Connection {
                 Some(handle) if handle.send(Command::Kill).await => Ok(ResponseBody::Killed {}),
                 _ => error(ErrorCode::NotFound, "no such session"),
             },
+            RequestBody::Screen { session } => self.screen(session).await,
+            RequestBody::WaitText {
+                session,
+                text,
+                timeout_ms,
+            } => {
+                // The answer may be a while coming; other requests go on meanwhile.
+                let Some(handle) = self.host.session(session) else {
+                    return self
+                        .outbox
+                        .respond(id, error(ErrorCode::NotFound, "no such session"))
+                        .await;
+                };
+                let outbox = self.outbox.clone();
+                let wait = Duration::from_millis(timeout_ms).min(WAIT_TEXT_MAX);
+                tokio::spawn(async move {
+                    let result = wait_text(&handle, text, wait).await;
+                    outbox.respond(id, result).await;
+                });
+                return true;
+            }
         };
         self.outbox.respond(id, result).await
+    }
+
+    async fn screen(&self, session: SessionId) -> Result<ResponseBody, ProtoError> {
+        let not_found = || ProtoError::new(ErrorCode::NotFound, "no such session");
+        let handle = self.host.session(session).ok_or_else(not_found)?;
+        let (reply, answer) = oneshot::channel();
+        if !handle.send(Command::Screen { reply }).await {
+            return Err(not_found());
+        }
+        let text = answer
+            .await
+            .map_err(|_| not_found())?
+            .ok_or_else(|| ProtoError::new(ErrorCode::Internal, "the screen could not be read"))?;
+        let (col, row, visible) = text.cursor;
+        Ok(ResponseBody::Screen {
+            size: text.size,
+            cursor: ScreenCursor { col, row, visible },
+            alternate: text.alternate,
+            lines: text.lines,
+        })
     }
 
     /// Opens `stream` as an attachment to `session`. Returns the reason if the request
@@ -383,6 +442,7 @@ impl Connection {
             request,
             stream,
             facts,
+            hydrate: self.hydrate,
             outbox: self.outbox.clone(),
             reply,
         };
@@ -406,5 +466,33 @@ impl Connection {
             // The session ended before it could answer.
             Err(_) => Some(not_found()),
         }
+    }
+}
+
+/// Waits up to `wait` for `text` to be on a session's screen.
+async fn wait_text(
+    handle: &SessionHandle,
+    text: String,
+    wait: Duration,
+) -> Result<ResponseBody, ProtoError> {
+    let gone = || ProtoError::new(ErrorCode::NotFound, "the session has ended");
+    let (reply, answer) = oneshot::channel();
+    let command = Command::WaitText {
+        text,
+        deadline: Instant::now() + wait,
+        reply,
+    };
+    if !handle.send(command).await {
+        return Err(gone());
+    }
+    match answer.await.map_err(|_| gone())? {
+        Some(found) => Ok(ResponseBody::Matched {
+            row: found.row,
+            line: found.line,
+        }),
+        None => Err(ProtoError::new(
+            ErrorCode::Timeout,
+            "the text did not appear on the screen in time",
+        )),
     }
 }

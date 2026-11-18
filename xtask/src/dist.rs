@@ -34,6 +34,16 @@ fn release_dir() -> PathBuf {
     paths::root().join("target").join("release")
 }
 
+/// The libraries the programs load at run time and that must lie beside them. On
+/// Windows the terminal engine is a library of its own; elsewhere it is linked in.
+fn libraries() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["ghostty-vt.dll"]
+    } else {
+        Vec::new()
+    }
+}
+
 /// Where everything made here ends up.
 fn dist_dir() -> PathBuf {
     paths::root().join("target").join("dist")
@@ -65,6 +75,10 @@ fn portable() -> Result<PathBuf> {
     std::fs::create_dir_all(&folder).with_context(|| format!("creating {}", folder.display()))?;
     for program in [exe("lume-gui"), exe("lume")] {
         copy(&release_dir().join(&program), &folder.join(&program))?;
+    }
+    // The build leaves each library beside the programs that load it.
+    for library in libraries() {
+        copy(&release_dir().join(library), &folder.join(library))?;
     }
     copy(&paths::root().join("LICENSE"), &folder.join("LICENSE"))?;
 
@@ -110,15 +124,21 @@ fn installers() -> Result<Vec<PathBuf>> {
         &sidecar.join(exe(&format!("lume-{triple}"))),
     )?;
 
-    run::pnpm(&[
-        "exec",
-        "tauri",
-        "build",
-        "--config",
-        BUNDLE_CONFIG,
-        "--bundles",
-        bundles()?,
-    ])?;
+    // The libraries go into the installation folder itself, beside the programs.
+    let resources: serde_json::Map<String, serde_json::Value> = libraries()
+        .into_iter()
+        .map(|library| {
+            let from = release_dir().join(library).display().to_string();
+            (from, serde_json::Value::String(library.to_owned()))
+        })
+        .collect();
+    let libraries_config = serde_json::json!({ "bundle": { "resources": resources } }).to_string();
+    let mut args = vec!["exec", "tauri", "build", "--config", BUNDLE_CONFIG];
+    if !resources.is_empty() {
+        args.extend(["--config", libraries_config.as_str()]);
+    }
+    args.extend(["--bundles", bundles()?]);
+    run::pnpm(&args)?;
 
     let made = release_dir().join("bundle");
     let mut copied = Vec::new();

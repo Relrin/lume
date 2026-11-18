@@ -784,7 +784,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(attached.size, size(80, 24));
-        assert_eq!(attached.hydrate, HydrateMode::None);
+        // The views run the host's own engine, so they start from a snapshot.
+        assert_eq!(attached.hydrate, HydrateMode::Snapshot);
         assert_eq!(attached.resize_pulls_scrollback, cfg!(unix));
 
         // A shell prints a prompt as soon as it starts, and the command below prints
@@ -802,7 +803,7 @@ mod tests {
             carrier
                 .messages()
                 .iter()
-                .all(|message| matches!(message.body, Body::Event(_))),
+                .all(|message| matches!(message.body, Body::Event(_) | Body::Hydrate(_))),
             "{:?}",
             carrier.messages()
         );

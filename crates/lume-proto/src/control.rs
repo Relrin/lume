@@ -15,6 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::app::ScreenCursor;
 use crate::error::{ErrorCode, ProtoError};
 use crate::types::{
     BackendCaps, ClientFacts, ExitStatus, SessionId, SessionInfo, SpawnSpec, StreamId, TermSize,
@@ -76,6 +77,17 @@ pub enum RequestBody {
     },
     Kill {
         session: SessionId,
+    },
+    /// Reads the screen the session's program is drawing on, as text.
+    Screen {
+        session: SessionId,
+    },
+    /// Waits until `text` is on the session's screen. Answered with `matched`, or with a
+    /// `timeout` error after `timeout_ms`.
+    WaitText {
+        session: SessionId,
+        text: String,
+        timeout_ms: u64,
     },
 }
 
@@ -168,6 +180,21 @@ pub enum ResponseBody {
         resize_pulls_scrollback: bool,
     },
     Killed {},
+    /// The screen in use, one string for each row with the blanks at its end removed.
+    Screen {
+        size: TermSize,
+        cursor: ScreenCursor,
+        /// Whether a full-screen program has switched to the alternate screen.
+        alternate: bool,
+        lines: Vec<String>,
+    },
+    /// The text waited for is on the screen.
+    Matched {
+        /// The first row that holds it.
+        row: u16,
+        /// That row's text.
+        line: String,
+    },
 }
 
 /// Something the host says without being asked.

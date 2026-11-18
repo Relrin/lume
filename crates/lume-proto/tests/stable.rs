@@ -7,6 +7,7 @@
 use std::fs;
 use std::path::PathBuf;
 
+use lume_proto::app::ScreenCursor;
 use lume_proto::{
     BackendCaps, BlockKind, Body, CellPx, ClientFacts, ClientKind, ColorScheme, CommandState,
     Control, DisconnectReason, Disconnected, ErrorCode, ExitStatus, Foreground, FrameDecoder,
@@ -18,8 +19,8 @@ use lume_proto::{
 use serde_json::{Value, json};
 
 #[test]
-fn protocol_version_is_1() {
-    assert_eq!(PROTO_VERSION, 1);
+fn protocol_version_is_2() {
+    assert_eq!(PROTO_VERSION, 2);
 }
 
 #[test]
@@ -36,6 +37,7 @@ fn kind_values_are_stable() {
         (Kind::Facts, 0x12),
         (Kind::Credit, 0x13),
         (Kind::Detach, 0x14),
+        (Kind::Rehydrate, 0x15),
     ];
     for (kind, value) in expected {
         assert_eq!(kind as u8, value, "{kind:?}");
@@ -67,6 +69,7 @@ fn error_codes_are_stable() {
         "session_exited",
         "protocol_error",
         "internal",
+        "timeout",
     ];
     assert_eq!(ErrorCode::ALL.len(), expected.len());
     for (code, spelling) in ErrorCode::ALL.into_iter().zip(expected) {
@@ -122,8 +125,8 @@ fn client_messages() -> Vec<Message> {
         request(
             1,
             RequestBody::Hello {
-                proto: 1,
-                proto_min: 1,
+                proto: 2,
+                proto_min: 2,
                 vt_version: Some("1.0.1".to_owned()),
                 client_kind: ClientKind::App,
             },
@@ -141,6 +144,7 @@ fn client_messages() -> Vec<Message> {
                     env: vec![("LANG".to_owned(), "en_GB.UTF-8".to_owned())],
                     size: size(80, 24),
                     shell_integration: false,
+                    scrollback_lines: Some(10_000),
                 },
             },
         ),
@@ -166,6 +170,16 @@ fn client_messages() -> Vec<Message> {
         Message::new(1, Body::Input(Vec::new())),
         Message::new(1, Body::Detach),
         request(5, RequestBody::Kill { session: session() }),
+        Message::new(2, Body::Rehydrate),
+        request(6, RequestBody::Screen { session: session() }),
+        request(
+            7,
+            RequestBody::WaitText {
+                session: session(),
+                text: "$ ".to_owned(),
+                timeout_ms: 5000,
+            },
+        ),
     ]
 }
 
@@ -175,17 +189,17 @@ fn host_messages() -> Vec<Message> {
         response(
             1,
             Ok(ResponseBody::HelloAck {
-                proto: 1,
+                proto: 2,
                 host_version: "0.0.0".to_owned(),
-                vt_version: None,
+                vt_version: Some("1.0.1".to_owned()),
                 caps: BackendCaps {
                     persistent: false,
                     multi_client: false,
                     server_layout: false,
-                    responder: Responder::Client,
+                    responder: Responder::Backend,
                     hydrate: HydrateKinds {
-                        snapshot: false,
-                        vt_replay: false,
+                        snapshot: true,
+                        vt_replay: true,
                     },
                 },
                 max_payload: 65536,
@@ -217,7 +231,7 @@ fn host_messages() -> Vec<Message> {
             4,
             Ok(ResponseBody::Attached {
                 size: size(80, 24),
-                hydrate: HydrateMode::None,
+                hydrate: HydrateMode::Snapshot,
                 resize_pulls_scrollback: false,
             }),
         ),
@@ -263,6 +277,33 @@ fn host_messages() -> Vec<Message> {
             code: ErrorCode::ProtocolError,
             message: "unknown frame kind 0x7f".to_owned(),
         })),
+        response(
+            7,
+            Ok(ResponseBody::Screen {
+                size: size(4, 2),
+                cursor: ScreenCursor {
+                    col: 2,
+                    row: 1,
+                    visible: true,
+                },
+                alternate: false,
+                lines: vec!["ok".to_owned(), "$ ".to_owned()],
+            }),
+        ),
+        response(
+            8,
+            Ok(ResponseBody::Matched {
+                row: 1,
+                line: "$ ".to_owned(),
+            }),
+        ),
+        response(
+            9,
+            Err(ProtoError::new(
+                ErrorCode::Timeout,
+                "the text did not appear on the screen in time",
+            )),
+        ),
     ]
     .into_iter()
     // Added after the messages above were pinned, and so after them: what was
@@ -382,6 +423,7 @@ fn describe(message: &Message) -> Value {
         ),
         Body::Credit(bytes) => ("credit", json!({ "bytes": bytes })),
         Body::Detach => ("detach", json!({})),
+        Body::Rehydrate => ("rehydrate", json!({})),
     };
     let mut described = json!({ "stream": message.stream, "kind": kind });
     if let (Value::Object(into), Value::Object(from)) = (&mut described, fields) {
@@ -485,6 +527,10 @@ fn fixed_layouts_are_spelt_out_byte_for_byte() {
     assert_eq!(
         encoded(Message::new(1, Body::Detach)),
         [1, 0, 0, 0, 0x14, 0, 0, 0, 0]
+    );
+    assert_eq!(
+        encoded(Message::new(1, Body::Rehydrate)),
+        [1, 0, 0, 0, 0x15, 0, 0, 0, 0]
     );
 
     let facts_frame = encoded(Message::new(1, Body::Facts(facts())));

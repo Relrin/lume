@@ -25,7 +25,9 @@ pub mod wsl;
 
 use lume_proto::ProtoError;
 
-pub use backend::{Attachment, FrameStream, Hydrate, InputSink, OutputFrame, SessionBackend};
+pub use backend::{
+    Attachment, FrameStream, Hydrate, InputSink, OutputFrame, ScreenText, SessionBackend, TextFound,
+};
 pub use cwd::start_dir_from_report;
 pub use local::LocalBackend;
 /// What an in-process host is built from, for [`LocalBackend::in_process`].

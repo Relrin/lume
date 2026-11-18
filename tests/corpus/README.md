@@ -14,6 +14,7 @@ A directory with three files:
 | `input.bin` | The bytes a program wrote to the terminal |
 | `script.toml` | `description`, the initial `cols` and `rows`, and `[[resize]]` entries (`at` = byte offset in the input, `cols`, `rows`) |
 | `expect.txt` | The expected dump after all input has been fed: the active area, the state the program left, and what the terminal answered |
+| `snapshot.bin` | The terminal after all input, saved as a snapshot by the native build. The WebAssembly build loads it and must show `expect.txt` without its replies section. Rewritten with `UPDATE_GOLDEN=1 cargo test -p lume-vt --test hydrate` when the library changes |
 
 ## The dump
 

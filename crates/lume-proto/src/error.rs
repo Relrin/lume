@@ -40,11 +40,13 @@ pub enum ErrorCode {
     ProtocolError,
     /// The host failed in a way the client could not have caused.
     Internal,
+    /// What was waited for did not happen in the time given.
+    Timeout,
 }
 
 impl ErrorCode {
     /// Every code, in declaration order.
-    pub const ALL: [ErrorCode; 14] = [
+    pub const ALL: [ErrorCode; 15] = [
         Self::BadRequest,
         Self::HelloRequired,
         Self::VersionMismatch,
@@ -59,6 +61,7 @@ impl ErrorCode {
         Self::SessionExited,
         Self::ProtocolError,
         Self::Internal,
+        Self::Timeout,
     ];
 
     /// The code as it is spelt on the wire.
@@ -78,6 +81,7 @@ impl ErrorCode {
             Self::SessionExited => "session_exited",
             Self::ProtocolError => "protocol_error",
             Self::Internal => "internal",
+            Self::Timeout => "timeout",
         }
     }
 }
