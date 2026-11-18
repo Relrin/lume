@@ -255,10 +255,20 @@ pub fn asks_for_the_cursor() -> SpawnSpec {
     }
 }
 
-/// Like [`asks_for_the_cursor`], but asks only once a line is typed, so that clients
-/// can attach first, and prints whatever it reads after the answer before the word:
-/// a second answer would show there.
-pub fn asks_for_the_cursor_when_told() -> SpawnSpec {
+/// What [`asks_questions_when_told`] prints before the answers it read, and after them.
+pub const ANSWERS_START: &str = "ANSWERS:";
+pub const ANSWERS_END: &str = ":END";
+
+/// A program that asks the terminal several questions once a line is typed, so that
+/// clients can attach first: where the cursor is (`CSI 6 n`), what the terminal is
+/// (`CSI c`), whether it is well (`CSI 5 n`) and its background colour (`OSC 11`). After
+/// a second it prints every byte it was answered with, in hexadecimal, between
+/// [`ANSWERS_START`] and [`ANSWERS_END`].
+///
+/// On Windows the console host between the program and the terminal answers such
+/// questions itself, so there the program asks for the cursor through the console and
+/// prints nothing between the marks: the case shows only that it is answered.
+pub fn asks_questions_when_told() -> SpawnSpec {
     if cfg!(windows) {
         spec(
             "powershell.exe",
@@ -269,7 +279,8 @@ pub fn asks_for_the_cursor_when_told() -> SpawnSpec {
                 "-Command",
                 &format!(
                     "[void][Console]::In.ReadLine(); $p=$Host.UI.RawUI.CursorPosition; \
-                     [Console]::Out.WriteLine('{CURSOR_ANSWERED}'); [void][Console]::In.ReadLine()"
+                     [Console]::Out.WriteLine('{ANSWERS_START}{ANSWERS_END}'); \
+                     [void][Console]::In.ReadLine()"
                 ),
             ],
         )
@@ -279,13 +290,61 @@ pub fn asks_for_the_cursor_when_told() -> SpawnSpec {
             &[
                 "-c",
                 &format!(
-                    "read go; stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 >/dev/null 2>&1; \
-                     stty -icanon min 0 time 10; rest=$(dd bs=64 count=1 2>/dev/null | od -An -c | tr -d ' \\n'); \
-                     stty sane; echo \"$rest{CURSOR_ANSWERED}\"; read reply"
+                    "read go; stty raw -echo; \
+                     printf '\\033[6n\\033[c\\033[5n\\033]11;?\\007'; sleep 1; \
+                     stty -icanon min 0 time 10; \
+                     got=$(dd bs=4096 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n'); \
+                     stty sane; echo \"{ANSWERS_START}$got{ANSWERS_END}\"; read reply"
                 ),
             ],
         )
     }
+}
+
+/// The answers [`asks_questions_when_told`] printed, from the lines of its screen:
+/// the final byte of each control sequence (`R`, `c`, `n`), sorted, and how many
+/// colour reports (`OSC 11`) there were.
+pub fn answers_on(lines: &[String]) -> (Vec<char>, usize) {
+    // A long line of answers wraps; the screen's rows join into it again.
+    let joined: String = lines.concat();
+    let start = joined
+        .find(ANSWERS_START)
+        .unwrap_or_else(|| panic!("no answers on the screen: {joined:?}"))
+        + ANSWERS_START.len();
+    let end = start
+        + joined[start..]
+            .find(ANSWERS_END)
+            .unwrap_or_else(|| panic!("the answers did not end: {joined:?}"));
+    let hex = &joined[start..end];
+    let bytes: Vec<u8> = (0..hex.len() / 2)
+        .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).expect("hexadecimal"))
+        .collect();
+    let mut finals = Vec::new();
+    let mut colours = 0;
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        match (bytes[i], bytes[i + 1]) {
+            (0x1b, b'[') => {
+                let mut j = i + 2;
+                while j < bytes.len() && !(0x40..=0x7e).contains(&bytes[j]) {
+                    j += 1;
+                }
+                if let Some(&last) = bytes.get(j) {
+                    finals.push(char::from(last));
+                }
+                i = j + 1;
+            }
+            (0x1b, b']') => {
+                if bytes[i + 2..].starts_with(b"11;") {
+                    colours += 1;
+                }
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+    finals.sort_unstable();
+    (finals, colours)
 }
 
 pub fn missing_program() -> SpawnSpec {

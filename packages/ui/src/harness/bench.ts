@@ -20,6 +20,7 @@ import { TauriCarrier } from "../transport/carrier.ts";
 import { TransportClient, type Attachment } from "../transport/client.ts";
 import type { ClientFacts, Launcher } from "../transport/types.ts";
 import { timeCursorFx, type FxBench } from "./fx-bench.ts";
+import { timeHydrate, type HydrateBench } from "./hydrate-bench.ts";
 import { canvasOf, createPane, drawWhole, fit, loadTestFont, TIERS } from "./panes.ts";
 import { nextFrame, sleep, timing, type Timing } from "./timing.ts";
 import {
@@ -98,6 +99,8 @@ export interface BenchReport {
   readonly flood: FloodDrawing | null;
   /** Echo of keys typed at a real shell, which includes the shell and its terminal. */
   readonly echoShell: Timing | null;
+  /** A view starting from a session's screen with ten thousand lines of scrollback. */
+  readonly hydrate: HydrateBench | null;
   /** What could not be measured, and why. */
   readonly problems: readonly string[];
 }
@@ -473,6 +476,7 @@ export async function runBench(vt: Vt, progress: (text: string) => void): Promis
   let echoSpaced: Timing | null = null;
   let floodDrawing: FloodDrawing | null = null;
   let echoShell: Timing | null = null;
+  let hydrate: HydrateBench | null = null;
   if (client) {
     transport = await measure("flooding the page", () =>
       flood(client, FLOOD_TRANSPORT_BYTES, () => undefined),
@@ -507,6 +511,9 @@ export async function runBench(vt: Vt, progress: (text: string) => void): Promis
     });
     floodDrawing = await measure("drawing under a flood", () => drawUnderFlood(vt, client, parent));
     echoShell = await measure("typing at a shell", () => shellEcho(client));
+    hydrate = await measure("starting views from a deep scrollback", () =>
+      timeHydrate(vt, client, BENCH_BACKEND),
+    );
   }
 
   document.removeEventListener("visibilitychange", watch);
@@ -525,6 +532,7 @@ export async function runBench(vt: Vt, progress: (text: string) => void): Promis
     echoSpaced,
     flood: floodDrawing,
     echoShell,
+    hydrate,
     problems,
   };
 }

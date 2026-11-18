@@ -512,6 +512,8 @@ struct Shell {
     size: (&'static str, &'static str),
     /// Prints `line-1` to `line-3000`.
     many_lines: &'static str,
+    /// Prints forty thousand long lines, some megabytes, as fast as it can.
+    flood: &'static str,
 }
 
 fn shells() -> Vec<Shell> {
@@ -534,6 +536,7 @@ fn shells() -> Vec<Shell> {
             say: |word| format!("echo \"lume-${{env:LUME_MARK}}-{word}\""),
             size: (SIZE, "size-90x20"),
             many_lines: "1..3000 | ForEach-Object { \"line-$_\" }",
+            flood: "1..40000 | ForEach-Object { \"line-$_-0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz\" }",
         };
         vec![
             Shell {
@@ -546,6 +549,7 @@ fn shells() -> Vec<Shell> {
                     "size-90x20",
                 ),
                 many_lines: "for /l %i in (1,1,3000) do @echo line-%i",
+                flood: "for /l %i in (1,1,40000) do @echo line-%i-0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz",
             },
             powershell("powershell.exe"),
             powershell("pwsh.exe"),
@@ -558,6 +562,7 @@ fn shells() -> Vec<Shell> {
             say: |word| format!("echo \"lume-${{LUME_MARK}}-{word}\""),
             size: ("echo \"size-$(stty size)\"", "size-20 90"),
             many_lines: "i=1; while [ $i -le 3000 ]; do echo line-$i; i=$((i+1)); done",
+            flood: "i=1; while [ $i -le 40000 ]; do echo line-$i-0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz; i=$((i+1)); done",
         };
         vec![
             posix("sh", &[]),
@@ -570,6 +575,7 @@ fn shells() -> Vec<Shell> {
                 say: |word| format!("echo \"lume-$LUME_MARK-{word}\""),
                 size: ("echo \"size-\"(stty size)", "size-20 90"),
                 many_lines: "for i in (seq 3000); echo line-$i; end",
+                flood: "for i in (seq 40000); echo line-$i-0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz; end",
             },
         ]
     };
@@ -1781,11 +1787,41 @@ fn the_shells_outlive_the_application_and_come_back_with_it() {
         assert_eq!(refused.status, 4, "{needs_app:?}: {}", refused.json);
         assert_eq!(refused.json["code"], "not_running", "{}", refused.json);
     }
+    // A program started with no application runs in no pane.
+    let mark = format!("LUME_MARK={MARK}");
+    let mut spawn = vec!["spawn", "--env", mark.as_str()];
+    for variable in shell.env {
+        spawn.extend_from_slice(&["--env", variable]);
+    }
+    spawn.extend_from_slice(&["--", shell.program]);
+    spawn.extend_from_slice(shell.args);
+    let unshown = ctl_at(&endpoint, &spawn).ok("spawn with no application")["session"]
+        .as_str()
+        .expect("a session id")
+        .to_owned();
 
     // Quitting and ending the sessions ends them, and the host follows.
     let app = App::start_on(home, false, endpoint.clone());
     app.status_with_session();
     assert_eq!(app.pid_of(&pane), pid);
+    // The session no window shows is driven through the application by its id.
+    app.ctl(&[
+        "send",
+        "--session",
+        &unshown,
+        "--enter",
+        "--",
+        &(shell.say)("unsh0wn"),
+    ])
+    .ok("send to a session no window shows");
+    app.ctl(&[
+        "wait",
+        "--session",
+        &unshown,
+        "--text",
+        &format!("lume-{MARK}-unsh0wn"),
+    ])
+    .ok("wait in a session no window shows");
     let log = app.quit_with(&["command", "lume.app.quit-end-sessions"]);
     let deadline = Instant::now() + Duration::from_secs(15);
     while pids.iter().any(|pid| process_alive(*pid)) {
@@ -1879,4 +1915,181 @@ fn one_session_shows_in_two_windows_and_ends_with_the_last_of_them() {
         "the shell outlived the last pane that showed it",
     );
     app.quit();
+}
+
+/// A full-screen editor to run, and its arguments: one that reads no configuration and
+/// keeps nothing of what is typed. On Windows, the one Git brings.
+fn full_screen_editor() -> Option<(String, &'static [&'static str])> {
+    const ARGS: &[&str] = &["-u", "NONE", "-i", "NONE", "-N"];
+    if cfg!(windows) {
+        let program_files = std::env::var_os("ProgramFiles")?;
+        let vim = Path::new(&program_files)
+            .join("Git")
+            .join("usr")
+            .join("bin")
+            .join("vim.exe");
+        vim.is_file()
+            .then(|| (vim.to_string_lossy().into_owned(), ARGS))
+    } else {
+        ["vim", "vi"]
+            .into_iter()
+            .find(|program| on_path(program))
+            .map(|program| (program.to_owned(), ARGS))
+    }
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_full_screen_program_comes_back_after_a_crash_and_takes_input() {
+    let Some((editor, args)) = full_screen_editor() else {
+        eprintln!("skipped: there is no vim on this machine");
+        return;
+    };
+    let number = NEXT.fetch_add(1, Ordering::Relaxed);
+    let endpoint = format!("e2e-{}-{number}", std::process::id());
+    let _stops = HostGuard(endpoint.clone());
+    let home = std::env::temp_dir().join(format!("lume-e2e-{}-{number}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join("config")).expect("a folder for the configuration");
+    std::fs::write(
+        home.join("config").join("config.toml"),
+        configuration() + "\n[host]\nmode = \"daemon\"\nidle-exit = 2\n",
+    )
+    .expect("the configuration is written");
+
+    let app = App::start_on(home.clone(), true, endpoint.clone());
+    app.status_with_session();
+    let mut spawn = vec!["spawn", "--tab", "--", editor.as_str()];
+    spawn.extend_from_slice(args);
+    let pane = pane_of(&app.ctl(&spawn).ok("starting the editor"));
+    app.ctl(&["send", "--pane", &pane, "--escapes", "ifu11-k7q-before\\e"])
+        .ok("typing into the editor");
+    app.wait_text_in(&pane, "fu11-k7q-before");
+    let before = app.ctl(&["capture", "--pane", &pane]).ok("capture");
+    assert_eq!(
+        before["alternate"], true,
+        "the editor is not full screen: {before}"
+    );
+    let pid = app.pid_of(&pane);
+
+    // The application is ended as a crash would end it, with the editor on its screen.
+    app.kill();
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(process_alive(pid), "the editor ended with the application");
+
+    // The next start shows the editor as it was, and the editor takes what is typed.
+    let app = App::start_on(home, false, endpoint);
+    app.status_with_session();
+    assert_eq!(app.pid_of(&pane), pid, "the pane started another program");
+    let after = app.ctl(&["capture", "--pane", &pane]).ok("capture");
+    assert_eq!(after["alternate"], true, "{after}");
+    assert_eq!(
+        after["lines"], before["lines"],
+        "the screen came back otherwise"
+    );
+    app.ctl(&["send", "--pane", &pane, "--escapes", "ofu11-k7q-after\\e"])
+        .ok("typing into the editor again");
+    app.wait_text_in(&pane, "fu11-k7q-after");
+    app.ctl(&["send", "--pane", &pane, "--escapes", ":q!\\r"])
+        .ok("leaving the editor");
+    until_gone(pid, Duration::from_secs(15), "the editor did not end");
+    app.quit_with(&["command", "lume.app.quit-end-sessions"]);
+}
+
+/// A client of the application's control endpoint that is shown a session, grants the
+/// output a window would grant at first, and then reads nothing more: a window that
+/// hangs. It lasts as long as what is returned is kept.
+fn hanging_view(endpoint: &str, session: &str) -> (tokio::runtime::Runtime, lume_ipc::Stream) {
+    use lume_proto::app::{APP_PROTO_VERSION, AppMessage, AppRequest, AppRequestBody};
+    use lume_proto::{Body, ClientKind, ControlDecoder, Message, TermSize, encode};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let stream = runtime.block_on(async {
+        let endpoint = lume_ipc::Endpoint::named(endpoint).expect("an endpoint name");
+        let mut io = lume_ipc::connect(&endpoint)
+            .await
+            .expect("the endpoint is served");
+        let mut decoder = ControlDecoder::new();
+        let requests = [
+            AppRequestBody::Hello {
+                proto: APP_PROTO_VERSION,
+                proto_min: APP_PROTO_VERSION,
+                client_kind: ClientKind::Test,
+            },
+            AppRequestBody::Attach {
+                pane: None,
+                session: Some(session.parse().expect("a session id")),
+                size: TermSize::new(80, 24).expect("a size"),
+            },
+        ];
+        for (id, body) in (1..).zip(requests) {
+            let mut out = Vec::new();
+            AppMessage::Request(AppRequest { id, body })
+                .encode(&mut out)
+                .expect("the request encodes");
+            io.write_all(&out).await.expect("the request is sent");
+            let mut chunk = vec![0; 16 * 1024];
+            let json = loop {
+                if let Some(json) = decoder.next().expect("the answer decodes") {
+                    break json;
+                }
+                let read = io.read(&mut chunk).await.expect("the answer is read");
+                assert_ne!(read, 0, "the application closed the connection");
+                decoder.push(&chunk[..read]);
+            };
+            match AppMessage::decode(&json).expect("an answer") {
+                AppMessage::Response(response) => {
+                    assert!(response.result.is_ok(), "{:?}", response.result);
+                }
+                other => panic!("not an answer: {other:?}"),
+            }
+        }
+        let mut out = Vec::new();
+        encode(
+            &Message::new(1, Body::Credit(lume_proto::tuning::CREDIT_WINDOW)),
+            &mut out,
+        )
+        .expect("the credit encodes");
+        io.write_all(&out).await.expect("the credit is sent");
+        io
+    });
+    (runtime, stream)
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_window_goes_on_while_another_view_of_its_session_hangs() {
+    let shell = shells().into_iter().next().expect("a shell to test with");
+    let app = App::start();
+    app.status_with_session();
+    let spawned = start_at(&app, &shell, MARK, &["--tab"]);
+    let pane = pane_of(&spawned);
+    let session = spawned["session"]
+        .as_str()
+        .expect("a session id")
+        .to_owned();
+    app.type_line_in(&pane, &(shell.say)("ready"));
+    app.wait_text_in(&pane, &format!("lume-{MARK}-ready"));
+
+    // Another view of the session takes some output and then hangs, while the session
+    // prints megabytes.
+    let hanging = hanging_view(&app.endpoint, &session);
+    app.type_line_in(&pane, shell.flood);
+    app.type_line_in(&pane, &(shell.say)("f1ooded"));
+    app.wait_text_in(&pane, &format!("lume-{MARK}-f1ooded"));
+    app.type_line_in(&pane, &(shell.say)("after"));
+    app.wait_text_in(&pane, &format!("lume-{MARK}-after"));
+    drop(hanging);
+
+    // The view that hung was left behind rather than holding the session up.
+    let log = app.quit();
+    let written = std::fs::read_to_string(&log).expect("the application wrote its log");
+    assert!(
+        written.contains("a client fell behind"),
+        "the hanging view was never left behind"
+    );
 }

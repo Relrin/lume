@@ -85,6 +85,21 @@
 "cursorJumps.on.framesPerSecond" = { min = 60.0, unit = "frames/s" }
 "cursorJumps.on.frameInterval.p99" = { max = 20.0, unit = "ms" }
 
+# A view started from a session that has printed ten thousand lines and more, the copy
+# of the screen the session host sends loaded with every line of it. Making the copy and
+# loading it are held to 50 ms. The whole, from asking to attach to holding the loaded
+# terminal, also counts the copy's way to the page, which goes at the carrier's speed
+# (a 3.6 MB copy took 37 ms of 58) and has a limit of its own. The lines are counted so
+# that the numbers cannot quietly come from a shallower scrollback.
+"hydrate.madeAndLoaded.p50" = { max = 50.0, unit = "ms" }
+"hydrate.attach.p50" = { max = 100.0, unit = "ms" }
+"hydrate.lines" = { min = 9000.0, unit = "lines" }
+# The session host's copy of that screen and a view's together, over the host's alone,
+# when the view keeps only the newest lines and fetches the rest as needed. A view that
+# keeps every line, which is the default, holds a second whole copy; that ratio is in the
+# report and is not held to a limit.
+"hydrate.memory.pagedRatio" = { max = 1.5, unit = "x" }
+
 # Shared CI runners: no GPU, a virtual display, and neighbours. These limits catch a
 # change that makes something several times slower, and nothing finer than that.
 [ci]
@@ -123,3 +138,7 @@
 "cursorFx.canvas2d.box-ripple.finish.p95" = { max = 40.0, unit = "ms" }
 "cursorJumps.on.framesPerSecond" = { min = 10.0, unit = "frames/s" }
 "cursorJumps.on.frameInterval.p99" = { max = 200.0, unit = "ms" }
+"hydrate.madeAndLoaded.p50" = { max = 500.0, unit = "ms" }
+"hydrate.attach.p50" = { max = 1000.0, unit = "ms" }
+"hydrate.lines" = { min = 9000.0, unit = "lines" }
+"hydrate.memory.pagedRatio" = { max = 1.5, unit = "x" }

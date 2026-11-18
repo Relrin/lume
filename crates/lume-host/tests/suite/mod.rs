@@ -42,7 +42,7 @@ macro_rules! host_suite {
             the_client_focused_last_gives_the_size,
             a_client_that_let_go_of_the_screen_is_sent_no_output,
             text_can_be_sent_without_attaching,
-            the_screen_answers_once_however_many_clients_there_are,
+            the_screen_answers_once_with_no_one_or_two_clients,
             frames_for_a_closed_stream_are_ignored,
             output_then_exit_arrive_in_order,
             kill_yields_exit_then_removal,
@@ -740,31 +740,59 @@ pub async fn text_can_be_sent_without_attaching<H: Harness>() {
     host.shutdown().await;
 }
 
-pub async fn the_screen_answers_once_however_many_clients_there_are<H: Harness>() {
+pub async fn the_screen_answers_once_with_no_one_or_two_clients<H: Harness>() {
     let mut host = H::start().await;
     let client = &mut host.client;
     client.hello().await;
 
-    let session = client.spawn(support::asks_for_the_cursor_when_told()).await;
-    client.attach_with_credit(session, 1).await;
-    client.attach_with_credit(session, 2).await;
-    client.type_line(1, "").await;
-    let matched = client
-        .request(RequestBody::WaitText {
-            session,
-            text: support::CURSOR_ANSWERED.to_owned(),
-            timeout_ms: STEP.as_millis() as u64,
-        })
-        .await;
-    let Ok(ResponseBody::Matched { line, .. }) = matched else {
-        panic!("the program was not answered: {matched:?}");
-    };
-    // Anything read after the one answer would be printed before the word.
-    assert_eq!(
-        line.trim(),
-        support::CURSOR_ANSWERED,
-        "more than one answer"
-    );
+    let mut stream = 0;
+    for clients in 0..=2 {
+        let session = client.spawn(support::asks_questions_when_told()).await;
+        for _ in 0..clients {
+            stream += 1;
+            client.attach_with_credit(session, stream).await;
+        }
+        // Typed without an attachment, so that the same is done whoever is attached.
+        client
+            .request(RequestBody::Send {
+                session,
+                text: "\r".to_owned(),
+            })
+            .await
+            .expect("the line is typed");
+        client
+            .request(RequestBody::WaitText {
+                session,
+                text: support::ANSWERS_END.to_owned(),
+                timeout_ms: STEP.as_millis() as u64,
+            })
+            .await
+            .unwrap_or_else(|error| panic!("with {clients} clients: not answered: {error:?}"));
+        let Ok(ResponseBody::Screen { lines, .. }) =
+            client.request(RequestBody::Screen { session }).await
+        else {
+            panic!("the screen could not be read");
+        };
+        let (finals, colours) = support::answers_on(&lines);
+        if cfg!(windows) {
+            // The console host answered; nothing reached the program from the screen.
+            assert_eq!((finals, colours), (Vec::new(), 0), "with {clients} clients");
+        } else {
+            // One answer to each question: the cursor, the device, its status.
+            assert_eq!(finals, vec!['R', 'c', 'n'], "with {clients} clients");
+            // The colour is answered from what a client said; with none there may be
+            // nobody's colour to give, but never two answers.
+            if clients == 0 {
+                assert!(colours <= 1, "with no client: {colours} colour reports");
+            } else {
+                assert_eq!(colours, 1, "with {clients} clients");
+            }
+        }
+        assert_eq!(
+            client.request(RequestBody::Kill { session }).await,
+            Ok(ResponseBody::Killed {})
+        );
+    }
     host.shutdown().await;
 }
 

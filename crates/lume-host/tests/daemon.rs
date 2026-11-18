@@ -321,3 +321,19 @@ async fn a_connection_that_is_not_read_does_not_hold_up_another() {
         Ok(ResponseBody::Killed {})
     );
 }
+
+#[test]
+fn the_answers_a_program_printed_are_read_back_across_rows() {
+    // The cursor, the device, the status and a colour, cut where a row would wrap.
+    let hex =
+        "1b5b313b31521b5b3f36323b3232631b5b306e1b5d31313b7267623a313131312f313131312f3131313107";
+    let line = format!("{}{hex}{}", support::ANSWERS_START, support::ANSWERS_END);
+    let (first, rest) = line.split_at(40);
+    let rows = vec![
+        "$ ".to_owned(),
+        first.to_owned(),
+        rest.to_owned(),
+        String::new(),
+    ];
+    assert_eq!(support::answers_on(&rows), (vec!['R', 'c', 'n'], 1));
+}

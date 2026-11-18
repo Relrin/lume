@@ -65,6 +65,22 @@ export const ECHO_FLOOD_SAMPLES = 500;
 /** Keys typed at a real shell. */
 export const ECHO_SHELL_SAMPLES = 200;
 
+/**
+ * What a session prints before views are timed starting from it: about twelve thousand
+ * lines, so that its scrollback is full at the host's ten thousand lines.
+ */
+export const HYDRATE_FLOOD_BYTES = 1_200_000;
+
+/** The grid of that session. */
+export const HYDRATE_COLS = 120;
+export const HYDRATE_ROWS = 40;
+
+/** Views timed starting from it, after one that is not timed. */
+export const HYDRATE_SAMPLES = 9;
+
+/** How long the session may take to print its lines. */
+export const HYDRATE_TIMEOUT_MS = 30_000;
+
 /** How long one echo may take before the measurement gives up on it. */
 export const ECHO_TIMEOUT_MS = 5000;
 
