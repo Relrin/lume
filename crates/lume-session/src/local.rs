@@ -39,9 +39,9 @@ use crate::{
     Attachment, FrameStream, Hydrate, InputSink, OutputFrame, Result, SessionBackend, SessionError,
 };
 
-/// The first version of the protocol with the requests that read the screen, say what
-/// the host is doing and stop it, and the frame that starts an attachment again from
-/// the screen.
+/// The first version of the protocol with the requests that read the screen, type into
+/// a session, say what the host is doing and stop it, and the frames that start an
+/// attachment again from the screen and let go of it.
 const SCREEN_VERSION: u32 = 2;
 
 /// The size of the in-memory pipe between the backend and a host in the same process.
@@ -260,7 +260,8 @@ impl Connection {
             | Body::Facts(_)
             | Body::Credit(_)
             | Body::Detach
-            | Body::Rehydrate => {}
+            | Body::Rehydrate
+            | Body::Release => {}
         }
         Ok(())
     }
@@ -535,6 +536,80 @@ impl LocalBackend {
         }
     }
 
+    /// Opens an attachment; with `replay`, one that starts from replayed output.
+    async fn attach_as(
+        &self,
+        id: SessionId,
+        facts: ClientFacts,
+        replay: bool,
+    ) -> Result<Attachment> {
+        let connection = &self.connection().await?;
+        let stream = connection.next_stream.fetch_add(1, Ordering::Relaxed);
+        let (frames, received) = mpsc::unbounded_channel();
+        let (hydrate, hydrated) = oneshot::channel();
+        // The stream is registered before the request goes out: the host may send
+        // frames for it straight after the response, and they must find it.
+        {
+            let mut state = connection.state();
+            if state.outgoing.is_none() {
+                return Err(SessionError::Disconnected);
+            }
+            let open = Stream {
+                frames,
+                window: ReceiveWindow::new(),
+                hydrate: Some(hydrate),
+            };
+            state.streams.insert(stream, open);
+        }
+
+        let request = RequestBody::Attach {
+            session: id,
+            stream,
+            facts,
+            replay,
+        };
+        let (size, mode, resize_pulls_scrollback) = match connection.request(request).await {
+            Ok(ResponseBody::Attached {
+                size,
+                hydrate,
+                resize_pulls_scrollback,
+            }) => (size, hydrate, resize_pulls_scrollback),
+            Ok(_) => {
+                connection.state().streams.remove(&stream);
+                return Err(unexpected("attach"));
+            }
+            Err(error) => {
+                connection.state().streams.remove(&stream);
+                return Err(error);
+            }
+        };
+
+        let hydrate = if mode == HydrateMode::None {
+            if let Some(open) = connection.state().streams.get_mut(&stream) {
+                open.hydrate = None;
+            }
+            Hydrate::None
+        } else {
+            // The state to start from is the first thing the host sends on the stream.
+            match hydrated.await {
+                Ok(payload) => hydrate_of(payload),
+                Err(_) => return Err(SessionError::Disconnected),
+            }
+        };
+
+        let sink = LocalSink {
+            connection: Arc::clone(connection),
+            stream,
+        };
+        Ok(Attachment {
+            size,
+            resize_pulls_scrollback,
+            hydrate,
+            output: FrameStream::new(received),
+            input: InputSink::new(Arc::new(sink)),
+        })
+    }
+
     /// Ends every session the host that runs on its own has, stops it, and starts a new
     /// one. Returns how many sessions were ended.
     pub async fn restart_host(&self) -> Result<u32> {
@@ -637,70 +712,29 @@ impl SessionBackend for LocalBackend {
     }
 
     async fn attach(&self, id: SessionId, facts: ClientFacts) -> Result<Attachment> {
-        let connection = &self.connection().await?;
-        let stream = connection.next_stream.fetch_add(1, Ordering::Relaxed);
-        let (frames, received) = mpsc::unbounded_channel();
-        let (hydrate, hydrated) = oneshot::channel();
-        // The stream is registered before the request goes out: the host may send
-        // frames for it straight after the response, and they must find it.
-        {
-            let mut state = connection.state();
-            if state.outgoing.is_none() {
-                return Err(SessionError::Disconnected);
-            }
-            let open = Stream {
-                frames,
-                window: ReceiveWindow::new(),
-                hydrate: Some(hydrate),
-            };
-            state.streams.insert(stream, open);
+        self.attach_as(id, facts, false).await
+    }
+
+    async fn attach_replaying(&self, id: SessionId, facts: ClientFacts) -> Result<Attachment> {
+        if !self.connection().await?.speaks(SCREEN_VERSION) {
+            return Err(too_old("start an attachment from replayed output"));
         }
+        self.attach_as(id, facts, true).await
+    }
 
-        let request = RequestBody::Attach {
+    async fn send(&self, id: SessionId, text: &str) -> Result<()> {
+        let connection = self.connection().await?;
+        if !connection.speaks(SCREEN_VERSION) {
+            return Err(too_old("type into a session it is not attached to"));
+        }
+        let request = RequestBody::Send {
             session: id,
-            stream,
-            facts,
+            text: text.to_owned(),
         };
-        let (size, mode, resize_pulls_scrollback) = match connection.request(request).await {
-            Ok(ResponseBody::Attached {
-                size,
-                hydrate,
-                resize_pulls_scrollback,
-            }) => (size, hydrate, resize_pulls_scrollback),
-            Ok(_) => {
-                connection.state().streams.remove(&stream);
-                return Err(unexpected("attach"));
-            }
-            Err(error) => {
-                connection.state().streams.remove(&stream);
-                return Err(error);
-            }
-        };
-
-        let hydrate = if mode == HydrateMode::None {
-            if let Some(open) = connection.state().streams.get_mut(&stream) {
-                open.hydrate = None;
-            }
-            Hydrate::None
-        } else {
-            // The state to start from is the first thing the host sends on the stream.
-            match hydrated.await {
-                Ok(payload) => hydrate_of(payload),
-                Err(_) => return Err(SessionError::Disconnected),
-            }
-        };
-
-        let sink = LocalSink {
-            connection: Arc::clone(connection),
-            stream,
-        };
-        Ok(Attachment {
-            size,
-            resize_pulls_scrollback,
-            hydrate,
-            output: FrameStream::new(received),
-            input: InputSink::new(Arc::new(sink)),
-        })
+        match connection.request(request).await? {
+            ResponseBody::Sent { .. } => Ok(()),
+            _ => Err(unexpected("send")),
+        }
     }
 
     async fn kill(&self, id: SessionId) -> Result<()> {
@@ -824,6 +858,13 @@ impl Sink for LocalSink {
             return Err(too_old("send a screen again"));
         }
         self.send(Body::Rehydrate).await
+    }
+
+    async fn release(&self) -> Result<()> {
+        if !self.connection.speaks(SCREEN_VERSION) {
+            return Err(too_old("let go of a screen"));
+        }
+        self.send(Body::Release).await
     }
 
     async fn detach(&self) -> Result<()> {

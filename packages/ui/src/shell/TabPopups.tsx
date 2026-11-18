@@ -1,6 +1,6 @@
 /**
- * The menu of a tab or the editor of a group, whichever is open, wherever the tabs are
- * listed; and the editor of a group just made, once its label is on show.
+ * The menu of a tab or of a pane, or the editor of a group, whichever is open, wherever
+ * the tabs are listed; and the editor of a group just made, once its label is on show.
  */
 
 import { useEffect } from "react";
@@ -11,6 +11,7 @@ import { GROUP_EDITOR_DELAY_MS } from "../tuning.ts";
 import { useShell } from "./context.ts";
 import { GroupEditor } from "./GroupEditor.tsx";
 import { anchorOf, labelId } from "./tab-ui.ts";
+import { PaneMenu } from "./PaneMenu.tsx";
 import { TabMenu } from "./TabMenu.tsx";
 
 export function TabPopups() {
@@ -50,6 +51,16 @@ export function TabPopups() {
   }, [app]);
 
   if (!popup) return null;
+  if (popup.kind === "pane") {
+    return (
+      <PaneMenu
+        key={popup.pane}
+        pane={popup.pane}
+        anchor={popup.anchor}
+        keyboard={popup.keyboard}
+      />
+    );
+  }
   return popup.kind === "tab" ? (
     <TabMenu key={popup.tab} tab={popup.tab} anchor={popup.anchor} keyboard={popup.keyboard} />
   ) : (

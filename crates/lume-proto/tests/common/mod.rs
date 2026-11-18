@@ -194,14 +194,16 @@ fn request_body() -> impl Strategy<Value = RequestBody> {
             ),
         spawn_spec().prop_map(|spec| RequestBody::Spawn { spec }),
         Just(RequestBody::List {}),
-        (session_id(), 1..=u32::MAX, facts()).prop_map(|(session, stream, facts)| {
-            RequestBody::Attach {
+        (session_id(), 1..=u32::MAX, facts(), any::<bool>()).prop_map(
+            |(session, stream, facts, replay)| RequestBody::Attach {
                 session,
                 stream,
                 facts,
+                replay,
             }
-        }),
+        ),
         session_id().prop_map(|session| RequestBody::Kill { session }),
+        (session_id(), text()).prop_map(|(session, text)| RequestBody::Send { session, text }),
     ]
 }
 
@@ -245,6 +247,7 @@ fn response_body() -> impl Strategy<Value = ResponseBody> {
                 }
             ),
         Just(ResponseBody::Killed {}),
+        any::<u64>().prop_map(|bytes| ResponseBody::Sent { bytes }),
     ]
 }
 
@@ -409,6 +412,7 @@ pub fn message_from_client() -> impl Strategy<Value = Message> {
         1 => any::<u32>().prop_map(Body::Credit),
         1 => Just(Body::Detach),
         1 => Just(Body::Rehydrate),
+        1 => Just(Body::Release),
     ];
     prop_oneof![
         4 => (data_stream(), body).prop_map(|(stream, body)| Message { stream, body }),

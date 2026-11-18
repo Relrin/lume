@@ -11,6 +11,7 @@
 //! | `Credit`  | `u32 bytes`                                                               |
 //! | `Detach`  | empty                                                                     |
 //! | `Rehydrate` | empty                                                                   |
+//! | `Release` | empty                                                                     |
 //! | `Hydrate` | `u8 form` (1 snapshot, 2 replay); a snapshot adds `u8 n` and `n` bytes    |
 //! |           | naming the engine version that wrote it; then the bytes                   |
 

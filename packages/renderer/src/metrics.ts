@@ -55,6 +55,8 @@ export function cellMetrics(
     underlineTop,
     strikethroughTop,
     padding: Math.max(0, Math.round(padding * dpr)),
+    originX: Math.max(0, Math.round(padding * dpr)),
+    originY: Math.max(0, Math.round(padding * dpr)),
   };
 }
 
@@ -65,6 +67,28 @@ export function cellMetrics(
  */
 export function themeMetrics(fonts: FontBackend, theme: TerminalTheme, dpr: number): CellMetrics {
   return cellMetrics(fonts.measure(theme.font, dpr), theme.font, theme.padding, dpr);
+}
+
+/**
+ * Where a grid of `cols` by `rows` starts on `surface`, in device pixels: after the
+ * padding, and when `centred`, halfway across the room the grid leaves. A grid larger
+ * than the surface starts after the padding.
+ */
+export function gridOrigin(
+  surface: Size,
+  metrics: CellMetrics,
+  cols: number,
+  rows: number,
+  centred: boolean,
+): { x: number; y: number } {
+  const { padding } = metrics;
+  if (!centred) return { x: padding, y: padding };
+  const room = (extent: number, cells: number, cell: number) =>
+    Math.max(0, Math.floor((extent - 2 * padding - cells * cell) / 2));
+  return {
+    x: padding + room(surface.width, cols, metrics.cellWidth),
+    y: padding + room(surface.height, rows, metrics.cellHeight),
+  };
 }
 
 /** The whole cells that fit a surface, at least one each way. `surface` is in device pixels. */

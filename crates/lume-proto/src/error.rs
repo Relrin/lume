@@ -20,7 +20,8 @@ pub enum ErrorCode {
     VersionMismatch,
     /// No such session.
     NotFound,
-    /// The session already has an attachment and takes only one.
+    /// The session already has an attachment and takes only one. Hosts that take several
+    /// attachments per session answer `limit_exceeded` when they have as many as they take.
     AlreadyAttached,
     /// The stream id is in use or was used before on this connection.
     StreamInUse,

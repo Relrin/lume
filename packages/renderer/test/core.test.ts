@@ -131,6 +131,30 @@ describe("building the records of a frame", () => {
     expect(rect(backend.planes!.background, 41)).toMatchObject({ x: 5 + CW, y: 5 + CH });
   });
 
+  it("draws a grid smaller than the surface in its middle when asked, and back again", () => {
+    const { renderer, backend } = setup({ ...TEST_THEME, padding: 5 });
+    const frame = makeFrame(40, 10);
+    putText(frame, 0, 0, "A", { bg: PALETTE[2]! });
+    renderer.setCentred(true);
+    renderer.draw(frame);
+    const x = 5 + Math.floor((640 - 10 - 40 * CW) / 2);
+    const y = 5 + Math.floor((384 - 10 - 10 * CH) / 2);
+    expect(renderer.origin(40, 10)).toEqual({ x, y });
+    expect(rect(backend.planes!.background, 0)).toMatchObject({ x, y });
+
+    // Nothing in the frame changed, yet every record moves back.
+    renderer.setCentred(false);
+    renderer.draw(frame);
+    expect(rect(backend.planes!.background, 0)).toMatchObject({ x: 5, y: 5 });
+    expect(renderer.origin(40, 10)).toEqual({ x: 5, y: 5 });
+  });
+
+  it("draws a grid larger than the surface from the top left even when centred", () => {
+    const { renderer } = setup({ ...TEST_THEME, padding: 5 });
+    renderer.setCentred(true);
+    expect(renderer.origin(1000, 1000)).toEqual({ x: 5, y: 5 });
+  });
+
   it("gives a wide character one glyph two cells wide and none for its second cell", () => {
     const { renderer, backend, fonts } = setup();
     const frame = makeFrame(80, 24);

@@ -43,12 +43,18 @@ pub struct Started {
 }
 
 /// The session an intent needs started before it is applied, if it needs one: the
-/// intents that make a terminal pane in a window that is already there.
+/// intents that make a terminal pane in a window that is already there, and those that
+/// show a session that runs already, wherever it goes.
 ///
 /// A window that is only being opened has no page yet to say how large its pane will
 /// be, so its pane is made without a session, which is started once the page is there.
+/// A session that runs already needs no size: the new window shows it as it is.
 pub fn needs<'a>(workspace: &Workspace, intent: &'a Intent) -> Option<&'a SpawnRequest> {
     match intent {
+        Intent::WindowNew {
+            content: NewContent::Terminal(request),
+            ..
+        } if request.session.is_some() => Some(request),
         Intent::Split {
             content: NewContent::Terminal(request),
             ..

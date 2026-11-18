@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { formatText, Vt, type ClipboardLocation } from "@lume/vt";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   OSC52_WRITE_MAX_BYTES,
@@ -9,6 +9,7 @@ import {
   SCROLLBACK_MAX_LINES,
 } from "../src/limits.ts";
 import { TerminalSession, type SessionHooks } from "../src/terminal/session.ts";
+import { LETTERBOX_SETTLE_MS } from "../src/tuning.ts";
 import { DEFAULT_APPEARANCE, terminalColors } from "../src/theme.ts";
 import type { HydrateFrame } from "../src/transport/client.ts";
 import type { CellPx, ClientFacts, ExitStatus, Responder } from "../src/transport/types.ts";
@@ -447,6 +448,132 @@ describe("a terminal session", () => {
       expect([session.terminal.cols, session.terminal.rows]).toEqual([100, 30]);
       expect(attachment.calls).toEqual(["start"]);
       expect(events.at(-2)).toBe("resized 100x30");
+      session.dispose();
+    });
+  });
+
+  describe("shown in several views", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function shared(): Opened & { sized: boolean[] } {
+      const attachment = new FakeAttachment("backend", true, true);
+      const sized: boolean[] = [];
+      const events: string[] = [];
+      const session = new TerminalSession(vt, attachment, {
+        colors: terminalColors(DEFAULT_APPEARANCE),
+        scheme: "dark",
+        cellPx: CELL,
+        hooks: {
+          changed: () => events.push("changed"),
+          sizedElsewhere: (on) => sized.push(on),
+        },
+      });
+      session.start();
+      return { attachment, session, events, sized };
+    }
+
+    it("counts a size it did not ask for as decided elsewhere once it has stayed", () => {
+      vi.useFakeTimers();
+      const { session, attachment, sized } = shared();
+      session.requestSize({ cols: 100, rows: 30 }, CELL);
+      // The answer is another view's size.
+      attachment.deliver({ stream: 1, kind: "resized", size: { cols: 90, rows: 28 } });
+      expect(session.sizedElsewhere).toBe(false);
+      vi.advanceTimersByTime(LETTERBOX_SETTLE_MS);
+      expect(session.sizedElsewhere).toBe(true);
+      expect(sized).toEqual([true]);
+
+      // This view takes the size, as the one focused last.
+      attachment.deliver({ stream: 1, kind: "resized", size: { cols: 100, rows: 30 } });
+      expect(session.sizedElsewhere).toBe(false);
+      expect(sized).toEqual([true, false]);
+      session.dispose();
+    });
+
+    it("does not count an answer that is merely on its way", () => {
+      vi.useFakeTimers();
+      const { session, attachment, sized } = shared();
+      session.requestSize({ cols: 100, rows: 30 }, CELL);
+      vi.advanceTimersByTime(LETTERBOX_SETTLE_MS / 2);
+      attachment.deliver({ stream: 1, kind: "resized", size: { cols: 100, rows: 30 } });
+      vi.advanceTimersByTime(LETTERBOX_SETTLE_MS * 2);
+      expect(sized).toEqual([]);
+      session.dispose();
+    });
+
+    it("never counts it for a backend that shows a session in one view", () => {
+      vi.useFakeTimers();
+      const { session, attachment } = open();
+      session.requestSize({ cols: 100, rows: 30 }, CELL);
+      attachment.deliver({ stream: 1, kind: "resized", size: { cols: 90, rows: 28 } });
+      vi.advanceTimersByTime(LETTERBOX_SETTLE_MS * 2);
+      expect(session.sizedElsewhere).toBe(false);
+      session.dispose();
+    });
+  });
+
+  describe("letting go of its screen", () => {
+    it("keeps the stream, takes no more output, and gets the screen back when asked", () => {
+      const attachment = new FakeAttachment("backend", true);
+      const reported: string[] = [];
+      const replaced: string[] = [];
+      const session = new TerminalSession(vt, attachment, {
+        colors: terminalColors(DEFAULT_APPEARANCE),
+        scheme: "dark",
+        cellPx: CELL,
+        hooks: {
+          reported: (event) => reported.push(event.type),
+          replaced: () => replaced.push("replaced"),
+        },
+      });
+      session.start();
+      attachment.data("before");
+      expect(session.canRelease).toBe(true);
+
+      session.release();
+      session.release();
+      expect(attachment.calls.filter((call) => call === "release")).toHaveLength(1);
+      expect(session.released).toBe(true);
+      expect(session.terminal.rowText(0)).toBe("");
+      expect(replaced).toEqual(["replaced"]);
+
+      // Output already on its way is dropped, and granted back.
+      const granted = attachment.consumedBytes;
+      attachment.data("in flight");
+      expect(session.terminal.rowText(0)).toBe("");
+      expect(attachment.consumedBytes).toBe(granted + "in flight".length);
+      // Reports and sizes still arrive.
+      attachment.deliver({ stream: 1, kind: "event", event: { type: "bell" } });
+      attachment.deliver({ stream: 1, kind: "resized", size: { cols: 100, rows: 30 } });
+      expect(reported).toEqual(["bell"]);
+      expect([session.terminal.cols, session.terminal.rows]).toEqual([100, 30]);
+      // A copy asked for before the screen was let go of is not used.
+      attachment.deliver({ stream: 1, kind: "hydrate", form: "vt_replay", bytes: utf8("stale") });
+      expect(session.terminal.rowText(0)).toBe("");
+
+      session.restore();
+      expect(session.released).toBe(false);
+      expect(session.restoring).toBe(true);
+      expect(attachment.calls.at(-1)).toBe("rehydrate");
+      attachment.deliver({ stream: 1, kind: "hydrate", form: "vt_replay", bytes: utf8("again") });
+      expect(session.restoring).toBe(false);
+      expect(session.terminal.rowText(0)).toBe("again");
+      expect([session.terminal.cols, session.terminal.rows]).toEqual([100, 30]);
+      attachment.data(" and on");
+      expect(session.terminal.rowText(0)).toBe("again and on");
+      session.dispose();
+    });
+
+    it("is not done for a backend that keeps no copy of the screen", () => {
+      const { session, attachment } = open();
+      expect(session.canRelease).toBe(false);
+      attachment.data("kept");
+      session.release();
+      expect(session.released).toBe(false);
+      expect(session.terminal.rowText(0)).toBe("kept");
+      expect(attachment.calls).not.toContain("release");
       session.dispose();
     });
   });

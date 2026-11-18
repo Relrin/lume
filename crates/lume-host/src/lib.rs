@@ -291,7 +291,7 @@ impl Host {
     pub(crate) fn caps(&self) -> BackendCaps {
         BackendCaps {
             persistent: self.config.persistent,
-            multi_client: false,
+            multi_client: true,
             server_layout: false,
             // Every session's screen answers its program, so that a program gets its
             // answer whether or not anybody is looking, and gets it once.

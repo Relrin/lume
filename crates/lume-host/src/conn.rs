@@ -3,7 +3,8 @@
 //!
 //! A connection has one writer. Sessions and the request handler hand it finished
 //! frames through a bounded queue, so frames of different streams are never interleaved
-//! mid-frame, and a connection that is slow to take bytes slows the sessions feeding it.
+//! mid-frame. A connection that is slow to take bytes holds back what goes to it; a
+//! session with clients on other connections goes on serving them meanwhile.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -25,6 +26,14 @@ use crate::session::{AttachmentId, Command, SessionHandle};
 use crate::tuning::{ABANDON_WAIT, OUTBOX_PIECES, READ_CHUNK, WAIT_TEXT_MAX};
 use crate::{Host, ServeError};
 
+/// Why frames could not be queued at once.
+pub(crate) enum Behind {
+    /// The connection is behind; here are the frames back.
+    Full(Vec<u8>),
+    /// The connection has gone.
+    Gone,
+}
+
 enum Out {
     /// Whole frames, to be written as they are.
     Frames(Vec<u8>),
@@ -44,6 +53,16 @@ impl Outbox {
     /// connection has gone.
     pub(crate) async fn frames(&self, frames: Vec<u8>) -> bool {
         self.queue.send(Out::Frames(frames)).await.is_ok()
+    }
+
+    /// Queues whole frames if there is room now. When there is not, the frames come
+    /// back, to be sent with [`Outbox::frames`] by something that can wait.
+    pub(crate) fn try_frames(&self, frames: Vec<u8>) -> Result<(), Behind> {
+        match self.queue.try_send(Out::Frames(frames)) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Full(Out::Frames(frames))) => Err(Behind::Full(frames)),
+            Err(_) => Err(Behind::Gone),
+        }
     }
 
     async fn control(&self, control: Control) -> bool {
@@ -273,6 +292,10 @@ impl Connection {
                 self.forward(stream, |attachment| Command::Rehydrate { attachment })
                     .await
             }
+            Body::Release => {
+                self.forward(stream, |attachment| Command::Release { attachment })
+                    .await
+            }
             Body::Detach => {
                 if let Some(stream) = self.streams.remove(&stream) {
                     stream
@@ -374,8 +397,14 @@ impl Connection {
                 session,
                 stream,
                 facts,
+                replay,
             } => {
-                match self.attach(id, session, stream, facts).await {
+                let hydrate = if replay {
+                    HydrateWith::Replay
+                } else {
+                    self.hydrate
+                };
+                match self.attach(id, session, stream, facts, hydrate).await {
                     // The session has answered the request itself.
                     None => return true,
                     Some(refusal) => Err(refusal),
@@ -385,6 +414,16 @@ impl Connection {
                 Some(handle) if handle.send(Command::Kill).await => Ok(ResponseBody::Killed {}),
                 _ => error(ErrorCode::NotFound, "no such session"),
             },
+            RequestBody::Send { session, text } => {
+                let bytes = text.into_bytes();
+                let len = bytes.len() as u64;
+                match self.host.session(session) {
+                    Some(handle) if handle.send(Command::Write { bytes }).await => {
+                        Ok(ResponseBody::Sent { bytes: len })
+                    }
+                    _ => error(ErrorCode::NotFound, "no such session"),
+                }
+            }
             RequestBody::Screen { session } => self.screen(session).await,
             RequestBody::HostStatus {} => Ok(self.host.status()),
             RequestBody::Shutdown { end_sessions } => {
@@ -479,6 +518,7 @@ impl Connection {
         session: SessionId,
         stream: u32,
         facts: ClientFacts,
+        hydrate: HydrateWith,
     ) -> Option<ProtoError> {
         if stream == CONTROL_STREAM {
             return Some(ProtoError::new(
@@ -502,7 +542,7 @@ impl Connection {
             request,
             stream,
             facts,
-            hydrate: self.hydrate,
+            hydrate,
             outbox: self.outbox.clone(),
             reply,
         };

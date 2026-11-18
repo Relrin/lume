@@ -21,7 +21,8 @@ use crate::profiles::ProfileEntry;
 use crate::settings::{PAGES_KEY, Shown, pages};
 use crate::tuning::{
     ACCENT_PRESETS, BACKGROUND_BLUR_MAX, CURSOR_EFFECT_LENGTH_MAX, CURSOR_EFFECT_LENGTH_MIN,
-    FONT_SIZE_MAX, FONT_SIZE_MIN, HISTORY_RELEASE_SECONDS_DEFAULT, HISTORY_RELEASE_SECONDS_MAX,
+    FONT_SIZE_MAX, FONT_SIZE_MIN, HIDDEN_RELEASE_SECONDS_DEFAULT, HIDDEN_RELEASE_SECONDS_MAX,
+    HIDDEN_RELEASE_SECONDS_MIN, HISTORY_RELEASE_SECONDS_DEFAULT, HISTORY_RELEASE_SECONDS_MAX,
     HISTORY_RELEASE_SECONDS_MIN, HOST_IDLE_EXIT_SECONDS_DEFAULT, HOST_IDLE_EXIT_SECONDS_MAX,
     LINE_HEIGHT_MAX, LINE_HEIGHT_MIN, LONG_COMMAND_SECONDS_DEFAULT, LONG_COMMAND_SECONDS_MAX,
     LONG_COMMAND_SECONDS_MIN, PANE_LENGTH_MAX, SCROLLBACK_LINES_MAX, SETTINGS_STEP_EFFECT_LENGTH,
@@ -954,6 +955,20 @@ pub struct TerminalConfig {
         .seconds()
         .when_on("terminal.history-paging")))]
     pub history_release_seconds: u32,
+    /// Let a pane that is out of sight, in a tab not on show or a float put down, let go
+    /// of its window's copy of the screen, and get it back from the session host when it
+    /// is shown again. Off, every pane keeps its copy all the time.
+    #[schemars(extend("x-lume-settings" = Shown::switch("terminal", "History", 50, "Let go of hidden panes")
+        .help("Panes in hidden tabs let go of their copy of the screen and get it back from the session host when shown")))]
+    pub hidden_release: bool,
+    /// How long, in seconds, a pane stays out of sight before it lets go of its copy of
+    /// the screen.
+    #[schemars(range(min = HIDDEN_RELEASE_SECONDS_MIN, max = HIDDEN_RELEASE_SECONDS_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("terminal", "History", 60, "Let go of hidden panes after", SETTINGS_STEP_SECONDS)
+        .help("How long a pane stays out of sight before it lets go of its screen")
+        .seconds()
+        .when_on("terminal.hidden-release")))]
+    pub hidden_release_seconds: u32,
     /// The cursor's shape, until a program chooses another.
     #[schemars(extend("x-lume-settings" = Shown::segmented("terminal", "Cursor", 10, "Cursor style")
         .options(&[("block", "Block"), ("bar", "Bar"), ("underline", "Underline")])))]
@@ -1035,6 +1050,8 @@ impl Default for TerminalConfig {
             history_paging: false,
             window_history_lines: WINDOW_HISTORY_LINES_DEFAULT,
             history_release_seconds: HISTORY_RELEASE_SECONDS_DEFAULT,
+            hidden_release: false,
+            hidden_release_seconds: HIDDEN_RELEASE_SECONDS_DEFAULT,
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
             cursor_trail: CursorTrail::None,

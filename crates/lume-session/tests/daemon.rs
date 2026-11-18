@@ -265,8 +265,88 @@ async fn the_backend_works_with_the_host_another_build_left_running() {
         }
         Err(error) => panic!("{error}"),
     }
+    match backend.send(session, "rem\r").await {
+        Ok(()) => assert!(hello.proto >= 2),
+        Err(SessionError::Refused(error)) => {
+            assert!(hello.proto < 2);
+            assert_eq!(error.code, ErrorCode::Unsupported);
+        }
+        Err(error) => panic!("{error}"),
+    }
+    if hello.proto < 2 {
+        let refused = attachment.input.release().await;
+        assert!(
+            matches!(&refused, Err(SessionError::Refused(error)) if error.code == ErrorCode::Unsupported),
+            "{refused:?}"
+        );
+    }
 
     backend.kill(session).await.unwrap();
     read_to_exit(&mut attachment).await;
     backend.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_backends_show_one_session_at_once() {
+    let Some(program) = built_host() else {
+        eprintln!(
+            "skipped: the host is not built beside these tests ({:?})",
+            std::env::current_exe()
+        );
+        return;
+    };
+    let daemon = Daemon {
+        endpoint: endpoint_name("shared"),
+        program,
+        idle_exit: Duration::from_secs(1),
+        log: None,
+        state: None,
+    };
+    let one = LocalBackend::daemon(daemon.clone()).await.unwrap();
+    let other = LocalBackend::daemon(daemon).await.unwrap();
+    assert!(one.caps().multi_client);
+    let session = one.spawn(shell()).await.unwrap();
+
+    let mut first = one.attach(session, facts()).await.unwrap();
+    first.input.credit(CREDIT).await.unwrap();
+    // The second passes its output to a real terminal, so it starts from replayed output.
+    let mut second = other.attach_replaying(session, facts()).await.unwrap();
+    assert!(
+        matches!(second.hydrate, Hydrate::VtReplay(_)),
+        "{:?}",
+        second.hydrate
+    );
+    second.input.credit(CREDIT).await.unwrap();
+
+    // Typed by a backend not attached at all, and seen by both attachments.
+    other
+        .send(session, std::str::from_utf8(PRINT_MARK).unwrap())
+        .await
+        .unwrap();
+    read_until(&mut first, MARK_OUTPUT).await;
+    read_until(&mut second, MARK_OUTPUT).await;
+
+    // One lets go of its screen; it gets the screen back when it asks.
+    second.input.release().await.unwrap();
+    first.input.write(b"echo while-let-go-k7q\r").await.unwrap();
+    read_until(&mut first, "while-let-go-k7q").await;
+    second.input.rehydrate().await.unwrap();
+    let screen = loop {
+        match timeout(STEP, second.output.next()).await {
+            Ok(Some(OutputFrame::Hydrate(screen))) => break screen,
+            Ok(Some(OutputFrame::Data(_) | OutputFrame::Event(_) | OutputFrame::Resized(_))) => {}
+            other => panic!("the screen never came back ({other:?})"),
+        }
+    };
+    assert!(
+        hydrated_text(&screen).contains("while-let-go-k7q"),
+        "{}",
+        hydrated_text(&screen)
+    );
+
+    one.kill(session).await.unwrap();
+    read_to_exit(&mut first).await;
+    read_to_exit(&mut second).await;
+    one.shutdown().await;
+    other.shutdown().await;
 }

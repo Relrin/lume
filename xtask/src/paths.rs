@@ -13,6 +13,16 @@ pub fn root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Where Cargo puts what it builds: `CARGO_TARGET_DIR` when it is set (relative to the
+/// repository root if it is relative), `target` otherwise. The programs the suites run
+/// are taken from here, so that they are the ones just built.
+pub fn build_dir() -> PathBuf {
+    match std::env::var_os("CARGO_TARGET_DIR") {
+        Some(dir) if !dir.is_empty() => root().join(dir),
+        _ => root().join("target"),
+    }
+}
+
 /// Downloaded and unpacked tools. Git-ignored.
 pub fn tools_dir() -> PathBuf {
     root().join(".tools")

@@ -32,6 +32,13 @@ pub const HISTORY_RELEASE_SECONDS_DEFAULT: u32 = 60;
 pub const HISTORY_RELEASE_SECONDS_MIN: u32 = 5;
 pub const HISTORY_RELEASE_SECONDS_MAX: u32 = 86_400;
 
+/// How long a pane stays out of sight before its window lets go of its copy of the
+/// screen, in seconds, unless the settings say otherwise; and the shortest and longest
+/// it may be told to.
+pub const HIDDEN_RELEASE_SECONDS_DEFAULT: u32 = 30;
+pub const HIDDEN_RELEASE_SECONDS_MIN: u32 = 5;
+pub const HIDDEN_RELEASE_SECONDS_MAX: u32 = 86_400;
+
 /// How long the session host stays with no window and no running session before it
 /// exits, in seconds, unless the settings say otherwise; and the longest it may be told
 /// to. Zero keeps it running.

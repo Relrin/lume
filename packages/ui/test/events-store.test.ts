@@ -219,6 +219,23 @@ describe("the reports of a window's panes", () => {
     expect(store.get("p1").activity).toBe("idle");
   });
 
+  it("notes when another view sizes a pane's terminal, and keeps it through a whole state", () => {
+    const { store, told } = reports();
+    store.attached("p1", { session: "a" });
+    store.sizedElsewhere("p1", true);
+    store.sizedElsewhere("p1", true);
+    expect(store.get("p1").sizedElsewhere).toBe(true);
+    store.reported("p1", { type: "state", state: { title: "vim" } });
+    expect(store.get("p1")).toMatchObject({ title: "vim", sizedElsewhere: true });
+    store.sizedElsewhere("p1", false);
+    expect("sizedElsewhere" in store.get("p1")).toBe(false);
+    expect(told).toEqual(["p1", "p1", "p1", "p1"]);
+    // A view that shows another session starts with its own size.
+    store.sizedElsewhere("p1", true);
+    store.attached("p1", { session: "b" });
+    expect(store.get("p1").sizedElsewhere).toBeUndefined();
+  });
+
   it("forgets a pane, and every pane", () => {
     const { store, told } = reports();
     store.attached("p1", { session: "a" });

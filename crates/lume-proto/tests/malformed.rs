@@ -224,6 +224,7 @@ fn fixed_layout_payloads_of_the_wrong_length_are_refused() {
         (Role::Host, Kind::Credit, 4),
         (Role::Host, Kind::Detach, 0),
         (Role::Host, Kind::Rehydrate, 0),
+        (Role::Host, Kind::Release, 0),
     ] {
         for len in [expected + 1, expected.saturating_sub(1)] {
             if len == expected {

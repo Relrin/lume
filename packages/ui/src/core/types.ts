@@ -87,6 +87,10 @@ export interface ConfigSettings {
     readonly "window-history-lines"?: number;
     /** How long fetched lines stay at the newest output. A core that does not say means 60. */
     readonly "history-release-seconds"?: number;
+    /** Let panes out of sight let go of their screen. A core that does not say means off. */
+    readonly "hidden-release"?: boolean;
+    /** After how many seconds out of sight. A core that does not say means 30. */
+    readonly "hidden-release-seconds"?: number;
     readonly "cursor-style": "block" | "bar" | "underline";
     readonly "cursor-blink": boolean;
     /** What the cursor leaves behind when it jumps. A core that does not say means none. */

@@ -181,16 +181,7 @@ impl App {
     }
 
     fn ctl(&self, args: &[&str]) -> Answer {
-        let output = Command::new(lume())
-            .args(["ctl", "--endpoint", &self.endpoint, "--timeout", WAIT])
-            .args(args)
-            .output()
-            .expect("lume runs");
-        let text = String::from_utf8_lossy(&output.stdout);
-        Answer {
-            status: output.status.code().unwrap_or(-1),
-            json: serde_json::from_str(text.trim()).unwrap_or(Value::String(text.into_owned())),
-        }
+        ctl_at(&self.endpoint, args)
     }
 
     /// The application's status once the pane that has the keyboard has a session. The
@@ -385,6 +376,20 @@ impl Drop for App {
         }
         let _ = child.kill();
         let _ = child.wait();
+    }
+}
+
+/// The answer of `lume ctl` for the application on `endpoint`, running or not.
+fn ctl_at(endpoint: &str, args: &[&str]) -> Answer {
+    let output = Command::new(lume())
+        .args(["ctl", "--endpoint", endpoint, "--timeout", WAIT])
+        .args(args)
+        .output()
+        .expect("lume runs");
+    let text = String::from_utf8_lossy(&output.stdout);
+    Answer {
+        status: output.status.code().unwrap_or(-1),
+        json: serde_json::from_str(text.trim()).unwrap_or(Value::String(text.into_owned())),
     }
 }
 
@@ -1689,6 +1694,15 @@ fn the_shells_outlive_the_application_and_come_back_with_it() {
     let pid = app.pid_of(&pane);
     let pids = app.session_pids();
     assert_eq!(pids.len(), 2, "two sessions are running");
+    let listed = app.ctl(&["list"]).ok("list");
+    let session = listed["sessions"]
+        .as_array()
+        .expect("a list of sessions")
+        .iter()
+        .find(|listed| listed["pane"] == pane.as_str())
+        .and_then(|listed| listed["info"]["id"].as_str())
+        .expect("the pane's session")
+        .to_owned();
     let status = host(&endpoint, &["status"]).ok("host status");
     assert_eq!(status["sessions"], 2, "{status}");
     let host_pid = status["pid"].clone();
@@ -1722,6 +1736,51 @@ fn the_shells_outlive_the_application_and_come_back_with_it() {
         host(&endpoint, &["status"]).ok("host status")["pid"],
         host_pid
     );
+
+    // With no application, the sessions are still driven, through the host.
+    let listed = ctl_at(&endpoint, &["list"]).ok("list with no application");
+    assert_eq!(
+        listed["sessions"].as_array().map(Vec::len),
+        Some(2),
+        "{listed}"
+    );
+    let alone = format!("n0app{}", std::process::id());
+    ctl_at(
+        &endpoint,
+        &[
+            "send",
+            "--session",
+            &session,
+            "--enter",
+            "--",
+            &(shell.say)(&alone),
+        ],
+    )
+    .ok("send with no application");
+    ctl_at(
+        &endpoint,
+        &[
+            "wait",
+            "--session",
+            &session,
+            "--text",
+            &format!("lume-{MARK}-{alone}"),
+        ],
+    )
+    .ok("wait with no application");
+    let screen =
+        ctl_at(&endpoint, &["capture", "--session", &session]).ok("capture with no application");
+    assert!(screen["lines"].to_string().contains(&alone), "{screen}");
+    // What needs the application says so.
+    for needs_app in [
+        &["status"][..],
+        &["capture", "--pane", &pane],
+        &["layout", "view"],
+    ] {
+        let refused = ctl_at(&endpoint, needs_app);
+        assert_eq!(refused.status, 4, "{needs_app:?}: {}", refused.json);
+        assert_eq!(refused.json["code"], "not_running", "{}", refused.json);
+    }
 
     // Quitting and ending the sessions ends them, and the host follows.
     let app = App::start_on(home, false, endpoint.clone());
@@ -1761,4 +1820,63 @@ fn the_shells_outlive_the_application_and_come_back_with_it() {
         );
     }
     let _ = std::fs::remove_file(&host_log);
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn one_session_shows_in_two_windows_and_ends_with_the_last_of_them() {
+    let shell = shells().into_iter().next().expect("a shell to test with");
+    let app = App::start();
+    app.status_with_session();
+    let first = pane_of(&start_at(&app, &shell, MARK, &["--tab"]));
+    let pid = app.pid_of(&first);
+
+    let args = format!(r#"{{"pane":"{first}"}}"#);
+    app.ctl(&["command", "lume.pane.show-in-new-window", &args])
+        .ok("showing the pane's session in a new window");
+    let layout = app.layout();
+    let windows = layout["workspace"]["windows"]
+        .as_array()
+        .expect("the windows");
+    assert_eq!(windows.len(), 2, "{layout}");
+    let second = windows[1]["focus"]
+        .as_str()
+        .expect("the new window's pane")
+        .to_owned();
+    let window = windows[1]["id"].as_str().expect("a window id").to_owned();
+    assert_ne!(second, first);
+    // One session, shown twice: no shell was started for the new pane.
+    assert_eq!(
+        app.session_pids().len(),
+        2,
+        "a shell was started for the new pane"
+    );
+
+    // What is typed in either pane reaches the one shell.
+    app.type_line_in(&second, &(shell.say)("tw0"));
+    app.wait_text_in(&first, &format!("lume-{MARK}-tw0"));
+    app.type_line_in(&first, &(shell.say)("tw1"));
+    app.wait_text_in(&second, &format!("lume-{MARK}-tw1"));
+
+    // Closing the window of one of them leaves the shell to the other.
+    let close = format!(r#"{{"type":"window_close","window":"{window}"}}"#);
+    app.ctl(&["layout", "apply", &close])
+        .ok("closing the second window");
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(
+        process_alive(pid),
+        "the shell ended with one of its two panes"
+    );
+    app.type_line_in(&first, &(shell.say)("tw2"));
+    app.wait_text_in(&first, &format!("lume-{MARK}-tw2"));
+
+    // Closing the last one ends it.
+    app.ctl(&["command", "lume.pane.close", &args])
+        .ok("closing the last pane");
+    until_gone(
+        pid,
+        Duration::from_secs(15),
+        "the shell outlived the last pane that showed it",
+    );
+    app.quit();
 }

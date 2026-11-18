@@ -5,6 +5,8 @@ import {
   encodeDetach,
   encodeFacts,
   encodeInput,
+  encodeRehydrate,
+  encodeRelease,
   encodeResize,
   HEADER_LEN,
 } from "../src/transport/frames.ts";
@@ -84,6 +86,12 @@ describe("the frames the page writes", () => {
         case "detach":
           encoded = encodeDetach(stream);
           break;
+        case "rehydrate":
+          encoded = encodeRehydrate(stream);
+          break;
+        case "release":
+          encoded = encodeRelease(stream);
+          break;
         default:
           // Control messages do not travel this way from the page.
           return;
@@ -93,7 +101,7 @@ describe("the frames the page writes", () => {
       );
       compared++;
     });
-    expect(compared).toBe(6);
+    expect(compared).toBe(8);
   });
 
   it("split input longer than one payload into several frames that join to the original", () => {

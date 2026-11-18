@@ -180,15 +180,6 @@ impl Pending {
         self.oldest = None;
     }
 
-    /// Drops everything. What a client attaching now needs is a copy of the screen and
-    /// the state of the session, not what was queued for somebody else.
-    pub(crate) fn clear(&mut self) {
-        self.entries.clear();
-        self.bytes = 0;
-        self.events = 0;
-        self.oldest = None;
-    }
-
     /// Takes the next thing to send. Output is released only against `credit`, at most
     /// one frame at a time; markers need no credit. `None` means there is nothing, or
     /// the next thing is output and there is no credit for it.

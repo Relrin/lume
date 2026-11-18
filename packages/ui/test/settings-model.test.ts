@@ -501,4 +501,38 @@ describe("the configuration's own schema", () => {
       }
     }
   });
+
+  it.skipIf(pages.length === 0)(
+    "lists the history rows in order, the time a hidden pane waits only while it lets go",
+    () => {
+      const terminal = pages.find((page) => page.id === "terminal");
+      const history = terminal?.groups.find((group) => group.label === "History");
+      expect(history?.rows.map((held) => held.path)).toEqual([
+        "terminal.scrollback-lines",
+        "terminal.history-paging",
+        "terminal.window-history-lines",
+        "terminal.history-release-seconds",
+        "terminal.hidden-release",
+        "terminal.hidden-release-seconds",
+      ]);
+      const shown = (releasing: boolean | undefined) => {
+        const base = view();
+        const config = {
+          ...base.config,
+          terminal: {
+            ...base.config.terminal,
+            ...(releasing === undefined ? {} : { "hidden-release": releasing }),
+          },
+        };
+        return row(
+          settingsPages(schema, { ...base, config }, LISTS),
+          "terminal.hidden-release-seconds",
+        ).shown;
+      };
+      expect(shown(true)).toBe(true);
+      expect(shown(false)).toBe(false);
+      // A core that does not say has it off.
+      expect(shown(undefined)).toBe(false);
+    },
+  );
 });

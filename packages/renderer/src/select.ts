@@ -73,6 +73,7 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
   #dpr = 1;
   #focused = true;
   #cursorVisible = true;
+  #centred = false;
   #underlines: readonly UnderlineRange[] = [];
   /** The highlighted runs as last given, kept to hand to the tier that takes over. */
   readonly #highlights: Highlights = { data: new Int32Array(0), count: 0 };
@@ -160,6 +161,15 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
     return this.#inner.gridSize();
   }
 
+  setCentred(centred: boolean): void {
+    this.#centred = centred;
+    this.#inner.setCentred(centred);
+  }
+
+  origin(cols: number, rows: number): { x: number; y: number } {
+    return this.#inner.origin(cols, rows);
+  }
+
   draw(frame: RenderFrame): void {
     if (this.#disposed) return;
     if (this.#lost === undefined) {
@@ -209,6 +219,7 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
       inner.setCursorVisible(this.#cursorVisible);
       inner.setUnderlines(this.#underlines);
       inner.setHighlights(this.#highlights);
+      inner.setCentred(this.#centred);
       if (this.#size.width > 0 && this.#size.height > 0) {
         this.#surface.setCssSize(canvas, this.#size);
         inner.resize(this.#size, this.#dpr);

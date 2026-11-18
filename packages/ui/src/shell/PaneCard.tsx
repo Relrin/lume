@@ -33,6 +33,7 @@ import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
 import { describeNow, followPane, mark } from "./describing.ts";
 import { useKeyHint } from "./hints.ts";
+import { anchorOf } from "./tab-ui.ts";
 import {
   AgainIcon,
   CloseIcon,
@@ -56,6 +57,7 @@ interface HeaderMarks {
   readonly failed: number | null;
   readonly status: PaneDescription["status"];
   readonly ended: PaneDescription["ended"];
+  readonly sizedElsewhere: boolean;
 }
 
 function marksOf(description: PaneDescription): string {
@@ -65,6 +67,7 @@ function marksOf(description: PaneDescription): string {
     failed: description.failed,
     status: description.status,
     ended: description.ended,
+    sizedElsewhere: description.sizedElsewhere,
   };
   return JSON.stringify(marks);
 }
@@ -141,9 +144,17 @@ export function useProgramIcon(app: ShellApp, pane: PaneId): PaneIcon {
 /** The marks a header shows after its spacer: what runs, how the program says it stands. */
 function HeaderMarksView({ pane, marks }: { pane: PaneId; marks: HeaderMarks }) {
   const app = useShell();
-  const { running, failed, status, ended } = marks;
+  const { running, failed, status, ended, sizedElsewhere } = marks;
   return (
     <>
+      {sizedElsewhere && (
+        <span
+          className="pane-sized"
+          title="Another view of this session decides its size. Click in this pane to give the terminal its size."
+        >
+          Sized by another view
+        </span>
+      )}
       {running && <span className="pane-running" role="img" aria-label="Running" title="Running" />}
       {failed !== null && (
         <span className="pane-exit" title={`The last command ended with code ${failed}`}>
@@ -261,6 +272,16 @@ function PaneHeader({
         event.preventDefault();
         if (floating) app.area.startFloatDrag(pane, "move", event.nativeEvent, event.currentTarget);
         else app.cardDrag.start(pane, event.nativeEvent, event.currentTarget);
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        // A menu asked for from the keyboard comes with no place of the pointer's, and
+        // opens under the header.
+        const keyboard = event.clientX === 0 && event.clientY === 0;
+        const anchor = keyboard
+          ? anchorOf(event.currentTarget)
+          : { left: event.clientX, top: event.clientY, bottom: event.clientY };
+        app.tabUi.getState().open({ kind: "pane", pane, anchor, keyboard });
       }}
     >
       <span className="pane-icon">

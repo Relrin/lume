@@ -59,9 +59,8 @@ pub(crate) enum HydrateWith {
 enum Op {
     Feed(Vec<u8>),
     Resize(TermSize, CellPx),
+    /// What the clients say together; with none attached, the last of them, unfocused.
     Facts(ClientFacts),
-    /// Nobody shows the session any more. The other facts stay as they were.
-    Unfocused,
     Hydrate(HydrateWith, oneshot::Sender<Option<HydratePayload>>),
     Text(oneshot::Sender<Option<ScreenText>>),
     WaitText {
@@ -161,11 +160,6 @@ impl Screen {
 
     pub(crate) async fn facts(&self, facts: ClientFacts) {
         self.send(Op::Facts(facts)).await;
-    }
-
-    /// Nobody shows the session now: a program that hears of focus is told it left.
-    pub(crate) async fn unfocused(&self) {
-        self.send(Op::Unfocused).await;
     }
 
     /// The state a new client starts from, as of everything fed so far.
@@ -287,7 +281,6 @@ impl State {
                 self.changed = true;
             }
             Op::Facts(facts) => self.on_facts(facts),
-            Op::Unfocused => self.set_focused(false),
             Op::Hydrate(with, reply) => {
                 let _ = reply.send(self.hydrate(with));
             }

@@ -1200,6 +1200,15 @@ fn an_intent_says_whether_a_session_must_be_started_for_it() {
         bounds: None,
     };
     assert!(needs(&workspace, &open).is_none());
+    // Unless it shows a session that runs already, which needs no size.
+    let shown = Intent::WindowNew {
+        content: NewContent::Terminal(SpawnRequest {
+            session: Some(SessionId::new(7).unwrap()),
+            ..SpawnRequest::default()
+        }),
+        bounds: None,
+    };
+    assert!(needs(&workspace, &shown).is_some());
 
     let show = Intent::ScratchShow {
         window,

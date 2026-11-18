@@ -12,6 +12,15 @@ pub const COALESCE_MAX_DELAY: Duration = Duration::from_millis(4);
 /// not taking output: beyond it the host stops reading the terminal.
 pub const COALESCE_MAX_BYTES: usize = 64 * 1024;
 
+/// The most output the host keeps for one of several clients of a session while it takes
+/// that output more slowly than another. Beyond it that client is dropped behind: its
+/// waiting output is thrown away, and once it takes output again it starts afresh from a
+/// copy of the screen. One slow client does not slow the others down.
+pub const ATTACHMENT_QUEUE_MAX: usize = 1024 * 1024;
+
+/// The most clients one session shows its output to at once.
+pub const ATTACHMENTS_PER_SESSION_MAX: usize = 16;
+
 /// Output read this soon after input is sent without waiting. It is most likely the
 /// echo of what the user typed, and typing must not feel delayed.
 pub const ECHO_IMMEDIATE_WINDOW: Duration = Duration::from_millis(20);

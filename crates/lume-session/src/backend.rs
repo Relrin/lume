@@ -56,9 +56,24 @@ pub trait SessionBackend: Send + Sync {
     async fn spawn(&self, spec: SpawnSpec) -> Result<SessionId>;
 
     /// Attaches to a session. `facts` describes the view the session will be shown in.
+    /// A backend whose caps say `multi_client` takes several attachments to a session
+    /// at once: the one focused most recently gives the terminal its size.
     async fn attach(&self, id: SessionId, facts: ClientFacts) -> Result<Attachment>;
 
+    /// Attaches for a view that passes the output on to a real terminal, which can load
+    /// no copy of a screen: it starts from replayed output whatever engine this side
+    /// runs. Backends that cannot refuse with `unsupported`.
+    async fn attach_replaying(&self, _id: SessionId, _facts: ClientFacts) -> Result<Attachment> {
+        Err(unsupported("start an attachment from replayed output"))
+    }
+
     async fn kill(&self, id: SessionId) -> Result<()>;
+
+    /// Types `text` into a session without attaching to it. Backends that cannot
+    /// refuse with `unsupported`, and the text has to go through an attachment.
+    async fn send(&self, _id: SessionId, _text: &str) -> Result<()> {
+        Err(unsupported("type into a session it is not attached to"))
+    }
 
     /// Reads a session's screen, for a backend that keeps one. Others refuse with
     /// `unsupported`, and the screen has to be read from a view showing the session.
@@ -154,6 +169,7 @@ pub(crate) trait Sink: Send + Sync {
     async fn facts(&self, facts: &ClientFacts) -> Result<()>;
     async fn credit(&self, bytes: u32) -> Result<()>;
     async fn rehydrate(&self) -> Result<()>;
+    async fn release(&self) -> Result<()>;
     async fn detach(&self) -> Result<()>;
 }
 
@@ -195,6 +211,14 @@ impl InputSink {
     /// backend whose caps say it can hydrate.
     pub async fn rehydrate(&self) -> Result<()> {
         self.sink.rehydrate().await
+    }
+
+    /// Lets go of the view's copy of the screen: the session sends no more output until
+    /// [`rehydrate`](Self::rehydrate) is called, which starts the view again from the
+    /// screen as it is then. Reports, sizes and the exit still arrive meanwhile. For a
+    /// backend whose caps say it can hydrate.
+    pub async fn release(&self) -> Result<()> {
+        self.sink.release().await
     }
 
     /// Ends the attachment. The session carries on.

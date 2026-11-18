@@ -23,6 +23,7 @@ export const Kind = {
   Credit: 0x13,
   Detach: 0x14,
   Rehydrate: 0x15,
+  Release: 0x16,
 } as const;
 
 /** The encoded size of a frame header. */
@@ -143,4 +144,12 @@ export function encodeDetach(stream: number): Uint8Array {
 /** Asks for the state to start again from, as of this point of the output. */
 export function encodeRehydrate(stream: number): Uint8Array {
   return single(stream, Kind.Rehydrate, 0).out;
+}
+
+/**
+ * Asks for no more output until the next rehydrate: the view has let go of its terminal.
+ * Events, sizes and the exit still come.
+ */
+export function encodeRelease(stream: number): Uint8Array {
+  return single(stream, Kind.Release, 0).out;
 }

@@ -28,7 +28,7 @@ use crate::frame::{Kind, encode_control_json};
 use crate::types::{BackendId, ExitStatus, Launcher, SessionId, SessionInfo, TermSize};
 
 /// The version of the control endpoint's messages this crate speaks.
-pub const APP_PROTO_VERSION: u32 = 6;
+pub const APP_PROTO_VERSION: u32 = 7;
 
 /// The name the control endpoint is served under, and looked for, when none is given.
 ///
@@ -295,6 +295,20 @@ pub enum AppRequestBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session: Option<SessionId>,
     },
+    /// Shows a session to the client as a terminal of its own: after the answer this
+    /// connection carries the attachment on stream 1, as the session protocol carries
+    /// one. The application sends the screen to start from as replayed output, then the
+    /// output, sizes, reports and the exit; the client sends input, sizes, its view,
+    /// credit, and a detach to end it. No further request is read from the connection.
+    /// The client sends nothing more until it has the answer.
+    Attach {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pane: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<SessionId>,
+        /// The size of the client's terminal.
+        size: TermSize,
+    },
     /// Lists the commands there are.
     Commands {},
     /// Runs a command, in the window named or the one the user is working in.
@@ -546,6 +560,14 @@ pub enum AppReplyBody {
     },
     /// The sessions are being followed: their reports come next on this connection.
     Following {},
+    /// The attachment is open on stream 1 of this connection.
+    Attached {
+        /// The pane that shows the session, if one does.
+        pane: Option<String>,
+        session: SessionId,
+        /// The terminal's size now.
+        size: TermSize,
+    },
     /// The grid a pane that is about to be made will have. Only a page answers this.
     Estimated {
         size: TermSize,

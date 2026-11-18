@@ -18,6 +18,7 @@ import {
   encodeCredit,
   encodeDetach,
   encodeRehydrate,
+  encodeRelease,
   encodeFacts,
   encodeInput,
   encodeResize,
@@ -87,6 +88,12 @@ export interface Attachment {
    * can hydrate.
    */
   rehydrate(): void;
+  /**
+   * Asks for no more output until the next {@link rehydrate}: the view has let go of its
+   * terminal. Events, sizes and the exit still arrive. Only for a backend whose caps say
+   * it can hydrate.
+   */
+  release(): void;
   /** Ends the attachment. The session carries on. */
   detach(): void;
 }
@@ -255,6 +262,9 @@ export class TransportClient {
       },
       rehydrate: () => {
         if (open()) this.#enqueue(encodeRehydrate(id));
+      },
+      release: () => {
+        if (open()) this.#enqueue(encodeRelease(id));
       },
       detach: () => {
         if (!open()) return;

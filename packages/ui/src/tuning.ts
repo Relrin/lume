@@ -6,6 +6,19 @@
 export const CURSOR_BLINK_INTERVAL_MS = 600;
 
 /**
+ * How long a terminal's size must stay other than the one its view asked for before
+ * the view counts it as sized by another view, and draws it in its middle with a mark.
+ * Shorter than this is a size request still on its way back.
+ */
+export const LETTERBOX_SETTLE_MS = 250;
+
+/**
+ * How long a view that let go of its terminal waits for the copy of the screen it asked
+ * for when shown again before it draws what it has.
+ */
+export const RESTORE_WAIT_MS = 1000;
+
+/**
  * How often, at most, a view tells its session about a new size. Dragging a window edge
  * changes the size on every frame; the session hears about the last one of each interval.
  */

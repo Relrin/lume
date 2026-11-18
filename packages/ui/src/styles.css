@@ -2113,6 +2113,22 @@
     white-space: nowrap;
   }
 
+  /* Another view of the session decides the terminal's size. */
+  .pane-sized {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: min(5px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-text-muted) 14%, transparent);
+    color: var(--lume-color-text-muted);
+    font-size: 11px;
+    line-height: 18px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* How a program in the pane says its work stands. Narrow, only its mark is left. */
   .pane-status {
     --status-tone: var(--lume-color-accent);
@@ -2216,7 +2232,8 @@
   }
 
   @container (max-width: 320px) {
-    .pane-exit {
+    .pane-exit,
+    .pane-sized {
       display: none;
     }
   }

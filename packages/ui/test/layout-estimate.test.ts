@@ -191,6 +191,8 @@ describe("the grid of a terminal in a card", () => {
     underlineTop: 14,
     strikethroughTop: 8,
     padding: 4,
+    originX: 4,
+    originY: 4,
   };
   const chrome = { headerPx: 34, borderPx: 1 };
 

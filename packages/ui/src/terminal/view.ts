@@ -71,6 +71,7 @@ import {
   MAC_OPTION_AS_ALT,
   PINNED_SIZE_TIMEOUT_MS,
   REPORT_INTERVAL_MS,
+  RESTORE_WAIT_MS,
   SEARCH_CLEAR_ROWS,
   SEARCH_MATCHES_MAX,
   SEARCH_REFEED_INTERVAL_MS,
@@ -188,6 +189,11 @@ export interface ViewServices {
   reported(event: SessionEvent): void;
   /** Told that the session's program has ended. */
   exited(status: ExitStatus): void;
+  /**
+   * Told whether another view of the session decides the terminal's size, so that this
+   * one draws a grid of another size in its middle.
+   */
+  sizedElsewhere?(sizedElsewhere: boolean): void;
   /** Told that the view's terminal has taken the keyboard. */
   focused(): void;
   /** Starts a new session in place of one whose program has ended. */
@@ -297,6 +303,12 @@ export class TerminalView implements FrameView {
   #planned: TermSize | undefined;
   /** There is nothing to show and no session to wait for: the session has gone. */
   #lost = false;
+  /**
+   * Until when, in page time, a view shown again waits for the screen it let go of
+   * before it draws what it has, and what draws it then.
+   */
+  #restoreUntil = 0;
+  #restoreTimer: number | undefined;
 
   #appearance: Appearance;
   #cursor: CursorDefault;
@@ -379,6 +391,7 @@ export class TerminalView implements FrameView {
       },
     );
     this.#renderer.setFocused(this.#focused);
+    this.#renderer.setCentred(this.#session?.sizedElsewhere ?? false);
     // A new renderer has none of the runs a search found.
     this.#searchTouched = true;
 
@@ -414,6 +427,7 @@ export class TerminalView implements FrameView {
     this.#stopListening.push(() => observer.disconnect());
     this.#watchPixelRatio();
 
+    this.#restore();
     this.#measure();
     host.loop.add(this);
     this.#showStatus();
@@ -430,6 +444,7 @@ export class TerminalView implements FrameView {
     this.#stopListening = [];
     this.#stopBlink();
     this.#stopAutoscroll();
+    this.#stopRestoring();
     if (this.#reportTimer !== undefined) window.clearTimeout(this.#reportTimer);
     this.#reportTimer = undefined;
     this.#drag = undefined;
@@ -444,6 +459,51 @@ export class TerminalView implements FrameView {
     if (this.#reportTimer !== undefined) window.clearTimeout(this.#reportTimer);
     this.#reportTimer = undefined;
     this.#report();
+  }
+
+  /**
+   * Whether the view can let go of its terminal while it is not on show and get the
+   * screen back from the session's backend when it is shown again.
+   */
+  get canRelease(): boolean {
+    return this.#session?.canRelease ?? false;
+  }
+
+  /** Whether the view has let go of its terminal and has not had it back. */
+  get released(): boolean {
+    return this.#session?.released ?? false;
+  }
+
+  /**
+   * Lets go of the terminal and its scrollback while the view is not on show. The
+   * session stays attached: what it reports and how it ends still arrive. Showing the
+   * view again asks the backend for the screen. Does nothing for a view on show, or one
+   * whose backend keeps no copy of the screen.
+   */
+  release(): void {
+    const session = this.#session;
+    if (this.#elements || !session?.canRelease || session.released) return;
+    this.#stopRelease();
+    session.release();
+  }
+
+  /** Asks for the screen back when a view that let go of it is shown again. */
+  #restore(): void {
+    const session = this.#session;
+    if (!session?.released) return;
+    session.restore();
+    this.#restoreUntil = performance.now() + RESTORE_WAIT_MS;
+    this.#stopRestoring();
+    // If the screen does not come, what there is gets drawn.
+    this.#restoreTimer = window.setTimeout(() => {
+      this.#restoreTimer = undefined;
+      this.#markDirty();
+    }, RESTORE_WAIT_MS);
+  }
+
+  #stopRestoring(): void {
+    if (this.#restoreTimer !== undefined) window.clearTimeout(this.#restoreTimer);
+    this.#restoreTimer = undefined;
   }
 
   /** Unmounts, detaches from the session and frees what the view allocated. */
@@ -660,6 +720,7 @@ export class TerminalView implements FrameView {
     const terminal = this.#session?.terminal;
     if (!renderer || !terminal) return;
     const m = renderer.metrics;
+    const origin = renderer.origin(terminal.cols, terminal.rows);
     const width = Math.round(this.#cssSize.width * this.#dpr);
     const height = Math.round(this.#cssSize.height * this.#dpr);
     this.#mouse.setGeometry({
@@ -667,15 +728,15 @@ export class TerminalView implements FrameView {
       screenHeight: height,
       cellWidth: m.cellWidth,
       cellHeight: m.cellHeight,
-      paddingTop: m.padding,
-      paddingLeft: m.padding,
-      paddingRight: Math.max(0, width - m.padding - terminal.cols * m.cellWidth),
-      paddingBottom: Math.max(0, height - m.padding - terminal.rows * m.cellHeight),
+      paddingTop: origin.y,
+      paddingLeft: origin.x,
+      paddingRight: Math.max(0, width - origin.x - terminal.cols * m.cellWidth),
+      paddingBottom: Math.max(0, height - origin.y - terminal.rows * m.cellHeight),
     });
     this.#gesture?.setGeometry({
       columns: terminal.cols,
       cellWidth: m.cellWidth,
-      paddingLeft: m.padding,
+      paddingLeft: origin.x,
       screenHeight: height,
     });
     this.#gesture?.setClickTiming({
@@ -775,9 +836,11 @@ export class TerminalView implements FrameView {
         reported: (event) => this.#services.reported(event),
         clipboardWrite: (text, location) => this.#onProgramClipboard(text, location),
         replaced: () => this.#onReplaced(),
+        sizedElsewhere: (sizedElsewhere) => this.#onSizedElsewhere(sizedElsewhere),
       },
     });
     this.#session = opened;
+    this.#renderer?.setCentred(false);
     this.#gesture = new SelectionGesture(opened.terminal);
     // What was being looked for is looked for in the new session too.
     if (this.#needle !== "") this.#beginSearch();
@@ -813,6 +876,7 @@ export class TerminalView implements FrameView {
   #dropSession(): void {
     const showed = this.#shown !== undefined;
     this.#stopRelease();
+    this.#stopRestoring();
     this.#gesture?.free();
     this.#gesture = undefined;
     this.#endSearch();
@@ -931,7 +995,10 @@ export class TerminalView implements FrameView {
   // Drawing.
 
   needsFrame(): boolean {
-    return this.#dirty && this.#renderer !== undefined && this.#session !== undefined;
+    const session = this.#session;
+    if (!this.#dirty || this.#renderer === undefined || session === undefined) return false;
+    // An empty screen in place of the one on its way would only flash.
+    return !session.restoring || performance.now() >= this.#restoreUntil;
   }
 
   frame(now: number = performance.now()): void {
@@ -987,10 +1054,22 @@ export class TerminalView implements FrameView {
     this.#releaseTimer = undefined;
   }
 
+  /**
+   * Another view of the session decides its size, or no longer does: the grid is drawn
+   * in the middle of the view, or from its corner again.
+   */
+  #onSizedElsewhere(sizedElsewhere: boolean): void {
+    this.#renderer?.setCentred(sizedElsewhere);
+    this.#updateGeometry();
+    this.#markDirty();
+    this.#services.sizedElsewhere?.(sizedElsewhere);
+  }
+
   /** The session's terminal was replaced: take the new one wherever the old was used. */
   #onReplaced(): void {
     const session = this.#session;
     if (!session) return;
+    if (!session.restoring) this.#stopRestoring();
     this.#gesture?.free();
     this.#gesture = new SelectionGesture(session.terminal);
     if (this.#search) {
@@ -1014,9 +1093,13 @@ export class TerminalView implements FrameView {
     const box = elements.root.getBoundingClientRect();
     if (box.width === 0 || box.height === 0) return undefined;
     const m = renderer.metrics;
+    const terminal = this.#session?.terminal;
+    const origin = terminal
+      ? renderer.origin(terminal.cols, terminal.rows)
+      : { x: m.padding, y: m.padding };
     return {
-      x: box.left + (m.padding + col * m.cellWidth) / this.#dpr,
-      y: box.top + (m.padding + row * m.cellHeight) / this.#dpr,
+      x: box.left + (origin.x + col * m.cellWidth) / this.#dpr,
+      y: box.top + (origin.y + row * m.cellHeight) / this.#dpr,
       width: m.cellWidth / this.#dpr,
       height: m.cellHeight / this.#dpr,
     };
@@ -1260,8 +1343,12 @@ export class TerminalView implements FrameView {
     const renderer = this.#renderer;
     if (!elements || !renderer) return;
     const m = renderer.metrics;
-    const left = (m.padding + cursor.x * m.cellWidth) / this.#dpr;
-    const top = (m.padding + cursor.y * m.cellHeight) / this.#dpr;
+    const terminal = this.#session?.terminal;
+    const origin = terminal
+      ? renderer.origin(terminal.cols, terminal.rows)
+      : { x: m.padding, y: m.padding };
+    const left = (origin.x + cursor.x * m.cellWidth) / this.#dpr;
+    const top = (origin.y + cursor.y * m.cellHeight) / this.#dpr;
     // At least the text's own size: a line may be shorter than its letters, and what is
     // being composed must still be readable.
     const height = Math.max(m.cellHeight / this.#dpr, this.#fontSizePx);
@@ -1557,6 +1644,7 @@ export class TerminalView implements FrameView {
     if (!elements || !renderer || !terminal) return undefined;
     const box = elements.root.getBoundingClientRect();
     const m = renderer.metrics;
+    const origin = renderer.origin(terminal.cols, terminal.rows);
     return gridPoint(
       (event.clientX - box.left) * this.#dpr,
       (event.clientY - box.top) * this.#dpr,
@@ -1565,7 +1653,8 @@ export class TerminalView implements FrameView {
         rows: terminal.rows,
         cellWidth: m.cellWidth,
         cellHeight: m.cellHeight,
-        padding: m.padding,
+        originX: origin.x,
+        originY: origin.y,
       },
     );
   }

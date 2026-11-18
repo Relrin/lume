@@ -112,7 +112,7 @@ describe("mouse buttons", () => {
 });
 
 describe("the cell under the pointer", () => {
-  const grid = { cols: 80, rows: 24, cellWidth: 8, cellHeight: 16, padding: 4 };
+  const grid = { cols: 80, rows: 24, cellWidth: 8, cellHeight: 16, originX: 4, originY: 4 };
 
   it("is found from the padding and the cell size", () => {
     expect(gridPoint(4, 4, grid)).toEqual({ col: 0, row: 0, x: 4, y: 4 });

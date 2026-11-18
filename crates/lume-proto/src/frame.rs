@@ -44,6 +44,9 @@ pub enum Kind {
     Detach = 0x14,
     /// Send the state to start again from, at this point of the output. Client to host.
     Rehydrate = 0x15,
+    /// Send no more output bytes on this stream until the next `Rehydrate`; events, sizes
+    /// and the exit still come. Client to host.
+    Release = 0x16,
 }
 
 impl Kind {
@@ -65,6 +68,7 @@ impl Kind {
             0x13 => Self::Credit,
             0x14 => Self::Detach,
             0x15 => Self::Rehydrate,
+            0x16 => Self::Release,
             _ => return None,
         })
     }
@@ -93,6 +97,7 @@ impl Kind {
                 | Self::Credit
                 | Self::Detach
                 | Self::Rehydrate
+                | Self::Release
         )
     }
 }
@@ -203,6 +208,7 @@ pub enum Body {
     Credit(u32),
     Detach,
     Rehydrate,
+    Release,
 }
 
 impl Body {
@@ -220,6 +226,7 @@ impl Body {
             Self::Credit(_) => Kind::Credit,
             Self::Detach => Kind::Detach,
             Self::Rehydrate => Kind::Rehydrate,
+            Self::Release => Kind::Release,
         }
     }
 }
@@ -279,7 +286,7 @@ pub fn encode(message: &Message, out: &mut Vec<u8>) -> Result<(), EncodeError> {
         }
         Body::Facts(facts) => write_one(stream, kind, &payload::encode_facts(facts), out),
         Body::Credit(bytes) => write_one(stream, kind, &bytes.to_le_bytes(), out),
-        Body::Detach | Body::Rehydrate => write_one(stream, kind, &[], out),
+        Body::Detach | Body::Rehydrate | Body::Release => write_one(stream, kind, &[], out),
     }
     Ok(())
 }

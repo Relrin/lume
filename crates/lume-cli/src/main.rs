@@ -13,8 +13,11 @@
 //! make a theme from another terminal's colour scheme.
 
 mod args;
+mod attach;
 mod client;
+mod console;
 mod ctl;
+mod direct;
 mod host;
 mod launch;
 mod offline;

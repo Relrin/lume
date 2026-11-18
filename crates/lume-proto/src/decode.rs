@@ -169,6 +169,12 @@ impl ControlDecoder {
         self.buffer.extend_from_slice(bytes);
     }
 
+    /// The bytes received after the last complete message, for a connection that goes
+    /// on with frames of other kinds, read by a [`FrameDecoder`] from here.
+    pub fn into_rest(mut self) -> Vec<u8> {
+        self.buffer.split_off(self.read)
+    }
+
     /// The JSON of the next complete message, or `Ok(None)` when more bytes are needed.
     #[allow(clippy::should_implement_trait)] // Fallible, and not an iterator: more may come.
     pub fn next(&mut self) -> Result<Option<Vec<u8>>, DecodeError> {
@@ -252,6 +258,10 @@ fn decode_body(kind: Kind, bytes: Vec<u8>) -> Result<Body, DecodeError> {
         Kind::Rehydrate => {
             payload::decode_empty(Kind::Rehydrate, &bytes)?;
             Body::Rehydrate
+        }
+        Kind::Release => {
+            payload::decode_empty(Kind::Release, &bytes)?;
+            Body::Release
         }
     })
 }

@@ -32,7 +32,7 @@ fn exe(name: &str) -> String {
 }
 
 fn release_dir() -> PathBuf {
-    paths::root().join("target").join("release")
+    paths::build_dir().join("release")
 }
 
 /// The libraries the programs load at run time and that must lie beside them. On

@@ -24,6 +24,12 @@ export const WINDOW_HISTORY_DEFAULT_LINES = 1_000;
 export const HISTORY_RELEASE_DEFAULT_SECONDS = 60;
 
 /**
+ * After how many seconds out of sight a pane lets go of its copy of the screen, when
+ * the configuration turns that on and does not say how long.
+ */
+export const HIDDEN_RELEASE_DEFAULT_SECONDS = 30;
+
+/**
  * How much memory those lines may take. Both limits apply: long or heavily styled lines
  * reach this one first. It holds the most lines there may be at a width of more than
  * two hundred columns. Every terminal of a window shares one memory that grows and is

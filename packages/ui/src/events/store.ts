@@ -50,6 +50,11 @@ export interface PaneReport {
   readonly exit?: ExitStatus;
   /** Whether the pane has something to show that the user has not looked at. */
   readonly activity: Activity;
+  /**
+   * Whether another view of the same session decides the terminal's size, so that this
+   * pane shows a grid of another size than its own.
+   */
+  readonly sizedElsewhere?: boolean;
 }
 
 /** What is known of a pane whose view has attached to a session. */
@@ -122,7 +127,7 @@ function withStatus(
 /** The part of a report a state in one piece replaces. */
 function fromState(report: PaneReport, state: SessionState): PaneReport {
   const title = clean(state.title);
-  const { session, launcher, profile, exit, activity } = report;
+  const { session, launcher, profile, exit, activity, sizedElsewhere } = report;
   return {
     session,
     ...(launcher ? { launcher } : {}),
@@ -137,6 +142,7 @@ function fromState(report: PaneReport, state: SessionState): PaneReport {
     ...(state.disconnected ? { disconnected: cleanDisconnected(state.disconnected) } : {}),
     ...(exit === undefined ? {} : { exit }),
     activity,
+    ...(sizedElsewhere ? { sizedElsewhere } : {}),
   };
 }
 
@@ -230,6 +236,16 @@ export class PaneReports {
     const held = this.get(pane);
     const activity = exitActivity(held.activity, status, this.#attended(pane));
     this.#set(pane, { ...held, exit: status, activity });
+  }
+
+  /** Notes whether another view of a pane's session decides its terminal's size. */
+  sizedElsewhere(pane: PaneId, sizedElsewhere: boolean): void {
+    const held = this.get(pane);
+    if ((held.sizedElsewhere ?? false) === sizedElsewhere) return;
+    const next: Mutable<PaneReport> = { ...held };
+    if (sizedElsewhere) next.sizedElsewhere = true;
+    else delete next.sizedElsewhere;
+    this.#set(pane, next);
   }
 
   /** The user is looking at a pane: whatever it had to show has been seen. */

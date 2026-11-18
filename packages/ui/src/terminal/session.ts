@@ -17,7 +17,7 @@ import {
   type Vt,
 } from "@lume/vt";
 
-import { HISTORY_FULL_SHARE } from "../tuning.ts";
+import { HISTORY_FULL_SHARE, LETTERBOX_SETTLE_MS } from "../tuning.ts";
 import {
   OSC52_WRITE_MAX_BYTES,
   SCROLLBACK_DEFAULT_LINES,
@@ -57,6 +57,11 @@ export interface SessionHooks {
    * whatever holds on to the old one must take the new one.
    */
   replaced?(): void;
+  /**
+   * Whether the terminal has a size other than the one this view asked for, and has
+   * kept it: another view of the same session decides its size.
+   */
+  sizedElsewhere?(sizedElsewhere: boolean): void;
 }
 
 /** How the terminal is set up. */
@@ -101,6 +106,12 @@ export class TerminalSession {
   #requested: { size: TermSize; cellPx: CellPx };
   #exit: ExitStatus | undefined;
   #disposed = false;
+  /** Whether the screen was let go of, and the output with it, until it is asked back. */
+  #released = false;
+  /** Whether the screen was asked back and has not arrived. */
+  #restoring = false;
+  #sizedElsewhere = false;
+  #sizeTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(vt: Vt, attachment: Attachment, options: SessionOptions) {
     this.#attachment = attachment;
@@ -187,9 +198,64 @@ export class TerminalSession {
    * screen, which replaces the terminal; the view stays on the lines it shows.
    */
   fetchHistory(): void {
-    if (this.#disposed || this.#holdsAll || this.#fetching || this.#exit !== undefined) return;
+    if (this.#disposed || this.#released || this.#holdsAll || this.#fetching) return;
+    if (this.#exit !== undefined) return;
     this.#fetching = true;
     this.#attachment.rehydrate();
+  }
+
+  /**
+   * Whether this session can let go of its screen and get it back: the backend keeps a
+   * copy it can send.
+   */
+  get canRelease(): boolean {
+    const { hydrate } = this.#attachment.caps;
+    return hydrate.snapshot || hydrate.vtReplay;
+  }
+
+  /** Whether the screen has been let go of and not yet asked back. */
+  get released(): boolean {
+    return this.#released;
+  }
+
+  /** Whether the screen was asked back and has not arrived yet. */
+  get restoring(): boolean {
+    return this.#restoring;
+  }
+
+  /**
+   * Lets go of the screen and its scrollback while nobody looks at them, and of the
+   * output that would keep them up to date. What the session reports, its size and its
+   * end still arrive. The terminal is replaced by an empty one of the same size, which
+   * {@link restore} replaces in turn with a copy of the session's screen.
+   */
+  release(): void {
+    if (this.#disposed || this.#released || !this.canRelease) return;
+    this.#released = true;
+    this.#restoring = false;
+    this.#fetching = false;
+    this.#attachment.release();
+    const old = this.#terminal;
+    this.#terminal = this.#vt.createTerminal(old.cols, old.rows, this.#withLines(0));
+    this.#state.free();
+    this.#state = new RenderState(this.#terminal);
+    old.free();
+    this.#holdsAll = this.#windowLines === undefined;
+    this.#cut = false;
+    this.#hooks.replaced?.();
+  }
+
+  /** Asks for the screen back after {@link release}. It arrives as a copy of the screen. */
+  restore(): void {
+    if (this.#disposed || !this.#released) return;
+    this.#released = false;
+    this.#restoring = true;
+    this.#attachment.rehydrate();
+  }
+
+  /** Whether another view of the session decides the terminal's size. */
+  get sizedElsewhere(): boolean {
+    return this.#sizedElsewhere;
   }
 
   /** Lets the older lines go again, keeping only the newest. */
@@ -251,6 +317,7 @@ export class TerminalSession {
     this.#requested = { size, cellPx };
     if (this.#exit === undefined) {
       this.#attachment.resize(size, cellPx);
+      this.#checkSize();
     } else {
       // Nobody is left to answer; what remains on screen simply follows the view.
       this.#resize(size);
@@ -266,6 +333,8 @@ export class TerminalSession {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    if (this.#sizeTimer !== undefined) clearTimeout(this.#sizeTimer);
+    this.#sizeTimer = undefined;
     this.#attachment.detach();
     this.#state.free();
     this.#terminal.free();
@@ -275,6 +344,12 @@ export class TerminalSession {
     if (this.#disposed) return;
     switch (frame.kind) {
       case "data":
+        // Output on its way when the screen was let go of is not wanted, but it was
+        // sent against credit and is granted back as if it had been taken.
+        if (this.#released) {
+          this.#attachment.consumed(frame.bytes.length);
+          break;
+        }
         this.#terminal.write(frame.bytes);
         // Only now are the bytes out of the way, and more may come.
         this.#attachment.consumed(frame.bytes.length);
@@ -293,6 +368,7 @@ export class TerminalSession {
         break;
       case "exit":
         this.#exit = frame.status;
+        this.#checkSize();
         this.#hooks.exited?.(frame.status);
         this.#hooks.changed?.();
         break;
@@ -305,6 +381,10 @@ export class TerminalSession {
    * were asked for, the copy is taken with all of them.
    */
   #restart(frame: HydrateFrame): void {
+    // One asked for before the screen was let go of; another is asked for when it is
+    // wanted again.
+    if (this.#released) return;
+    this.#restoring = false;
     const all = this.#fetching || this.#holdsAll;
     this.#fetching = false;
     const settings = this.#withLines(all ? undefined : this.#windowLines);
@@ -347,8 +427,40 @@ export class TerminalSession {
   #resize(size: TermSize): void {
     const { cellPx } = this.#requested;
     this.#terminal.resize(size.cols, size.rows, cellPx.w, cellPx.h);
+    this.#checkSize();
     this.#hooks.resized?.(size);
     this.#hooks.changed?.();
+  }
+
+  /**
+   * Notices a terminal whose size stays other than the one asked for. Only a backend
+   * that shows a session in several views answers a request with another size, and
+   * only once the answer has had time to come back does it count.
+   */
+  #checkSize(): void {
+    const differs = (): boolean => {
+      if (this.#disposed || this.#exit !== undefined) return false;
+      if (!this.#attachment.caps.multiClient) return false;
+      const wanted = this.#requested.size;
+      return wanted.cols !== this.#terminal.cols || wanted.rows !== this.#terminal.rows;
+    };
+    if (!differs()) {
+      if (this.#sizeTimer !== undefined) clearTimeout(this.#sizeTimer);
+      this.#sizeTimer = undefined;
+      this.#setSizedElsewhere(false);
+      return;
+    }
+    if (this.#sizedElsewhere || this.#sizeTimer !== undefined) return;
+    this.#sizeTimer = setTimeout(() => {
+      this.#sizeTimer = undefined;
+      if (differs()) this.#setSizedElsewhere(true);
+    }, LETTERBOX_SETTLE_MS);
+  }
+
+  #setSizedElsewhere(sizedElsewhere: boolean): void {
+    if (this.#sizedElsewhere === sizedElsewhere) return;
+    this.#sizedElsewhere = sizedElsewhere;
+    this.#hooks.sizedElsewhere?.(sizedElsewhere);
   }
 }
 

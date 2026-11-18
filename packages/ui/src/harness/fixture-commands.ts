@@ -70,7 +70,10 @@ export const FIXTURE_BINDINGS: readonly KeyBinding[] = [
   },
 ];
 
-/** The commands about sessions that run with no pane to show them, and the session host. */
+/**
+ * The commands about sessions that run with no pane to show them, about a session shown
+ * in a second place, and about the session host.
+ */
 export const SESSION_COMMANDS: readonly CommandSpec[] = [
   {
     id: "lume.session.detached",
@@ -92,6 +95,20 @@ export const SESSION_COMMANDS: readonly CommandSpec[] = [
     category: "Session",
     runs: "core",
     palette: false,
+  },
+  {
+    id: "lume.pane.show-in-new-tab",
+    title: "Show Pane in New Tab",
+    category: "Pane",
+    runs: "core",
+    palette: true,
+  },
+  {
+    id: "lume.pane.show-in-new-window",
+    title: "Show Pane in New Window",
+    category: "Pane",
+    runs: "core",
+    palette: true,
   },
   {
     id: "lume.app.quit-end-sessions",

@@ -87,6 +87,8 @@ export interface PaneDescription {
   /** How the pane's program ended, once it has. */
   readonly ended: PaneEnd | null;
   readonly activity: Activity;
+  /** Whether another view of the same session decides the terminal's size. */
+  readonly sizedElsewhere: boolean;
 }
 
 /** What each status is called, and how much it presses: the first that holds is shown. */
@@ -288,6 +290,7 @@ export function describePane(
     status: ended ? null : statusMark(report.statuses),
     ended,
     activity: report.activity,
+    sizedElsewhere: report.sizedElsewhere === true && ended === null,
   };
 }
 

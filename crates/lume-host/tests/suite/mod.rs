@@ -36,7 +36,13 @@ macro_rules! host_suite {
             input_is_echoed,
             resize_is_marked_in_the_output_and_reaches_the_shell,
             detach_keeps_the_session_and_a_new_stream_continues,
-            a_second_attach_is_refused,
+            a_second_attach_shares_the_session,
+            a_session_takes_only_so_many_clients,
+            a_client_that_takes_nothing_does_not_hold_up_another,
+            the_client_focused_last_gives_the_size,
+            a_client_that_let_go_of_the_screen_is_sent_no_output,
+            text_can_be_sent_without_attaching,
+            the_screen_answers_once_however_many_clients_there_are,
             frames_for_a_closed_stream_are_ignored,
             output_then_exit_arrive_in_order,
             kill_yields_exit_then_removal,
@@ -100,7 +106,8 @@ pub async fn hello_must_come_first<H: Harness>() {
             // The host keeps every session's screen, and that screen answers.
             assert_eq!(vt_version.as_deref(), Some(lume_host::vt_version()));
             assert_eq!(caps.responder, Responder::Backend);
-            assert!(!caps.persistent && !caps.multi_client && !caps.server_layout);
+            assert!(!caps.persistent && !caps.server_layout);
+            assert!(caps.multi_client);
             assert!(caps.hydrate.snapshot && caps.hydrate.vt_replay);
         }
         other => panic!("hello was answered with {other:?}"),
@@ -495,21 +502,269 @@ pub async fn detach_keeps_the_session_and_a_new_stream_continues<H: Harness>() {
     host.shutdown().await;
 }
 
-pub async fn a_second_attach_is_refused<H: Harness>() {
+pub async fn a_second_attach_shares_the_session<H: Harness>() {
     let mut host = H::start().await;
     let client = &mut host.client;
     client.hello().await;
 
     let session = client.spawn(support::shell()).await;
     client.attach_with_credit(session, 1).await;
-    assert_eq!(
-        code(client.attach(session, 2).await),
-        Some(ErrorCode::AlreadyAttached)
-    );
+    client.attach_with_credit(session, 2).await;
+    assert!(client.only_session().await.attached);
 
-    // The refused stream was not opened, and the first is unaffected.
+    // What is typed through either is seen by both.
     client.type_line(1, PRINT_MARK).await;
     client.read_until(1, MARK_OUTPUT).await;
+    client.read_until(2, MARK_OUTPUT).await;
+    client.type_line(2, "echo from-the-second-k7q").await;
+    client.read_until(1, "from-the-second-k7q").await;
+    client.read_until(2, "from-the-second-k7q").await;
+
+    // One going leaves the other as it was.
+    client.send(Message::new(1, Body::Detach)).await;
+    client.type_line(2, "echo still-here-k7q").await;
+    client.read_until(2, "still-here-k7q").await;
+    host.shutdown().await;
+}
+
+pub async fn a_session_takes_only_so_many_clients<H: Harness>() {
+    const TAKEN: u32 = 16;
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::shell()).await;
+    for stream in 1..=TAKEN {
+        client.attach_with_credit(session, stream).await;
+    }
+    assert_eq!(
+        code(client.attach(session, TAKEN + 1).await),
+        Some(ErrorCode::LimitExceeded)
+    );
+    // Room is made by a client that goes.
+    client.send(Message::new(1, Body::Detach)).await;
+    client.attach_with_credit(session, TAKEN + 2).await;
+    client.type_line(TAKEN + 2, PRINT_MARK).await;
+    client.read_until(TAKEN + 2, MARK_OUTPUT).await;
+    host.shutdown().await;
+}
+
+pub async fn a_client_that_takes_nothing_does_not_hold_up_another<H: Harness>() {
+    /// Far more than the host keeps for a client that is behind.
+    const READ: usize = 6 * 1024 * 1024;
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::flood()).await;
+    // The first takes output as fast as it comes; the second grants nothing.
+    client.attach_with_credit(session, 1).await;
+    let attached = client.attach(session, 2).await;
+    assert!(
+        matches!(attached, Ok(ResponseBody::Attached { .. })),
+        "{attached:?}"
+    );
+
+    let mut received = 0;
+    while received < READ {
+        let bytes = client
+            .data(1, STEP)
+            .await
+            .expect("output goes on for the client that takes it");
+        received += bytes.len();
+        client.credit(1, bytes.len() as u32).await;
+    }
+    assert_eq!(
+        client.data(2, Duration::from_millis(100)).await,
+        None,
+        "output without credit"
+    );
+    // What is kept for the one that took nothing stays bounded.
+    let stats = client.only_session().await.stats;
+    assert!(
+        (stats.pending_bytes as usize) <= 1024 * 1024 + 4 * MAX_PAYLOAD,
+        "{stats:?}"
+    );
+
+    // Once it takes output again, it starts afresh from the screen and goes on from there.
+    client.credit(2, 1024 * 1024).await;
+    let screen = client.rehydrated(2).await;
+    assert!(
+        matches!(screen, HydratePayload::Snapshot { .. }),
+        "{screen:?}"
+    );
+    client.read_until(2, "0123456789").await;
+
+    assert_eq!(
+        client.request(RequestBody::Kill { session }).await,
+        Ok(ResponseBody::Killed {})
+    );
+    host.shutdown().await;
+}
+
+pub async fn the_client_focused_last_gives_the_size<H: Harness>() {
+    let cell_px = CellPx { w: 9, h: 18 };
+    let resize = |cols, rows| Body::Resize {
+        size: size(cols, rows),
+        cell_px,
+    };
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::shell()).await;
+    client.attach_with_credit(session, 1).await;
+    let mut unfocused = support::facts();
+    unfocused.focused = false;
+    let attached = client.attach_with(session, 2, unfocused.clone()).await;
+    assert!(
+        matches!(attached, Ok(ResponseBody::Attached { .. })),
+        "{attached:?}"
+    );
+    client.credit(2, 1024 * 1024).await;
+
+    // The focused client gives the size, and both are told.
+    client.send(Message::new(1, resize(100, 30))).await;
+    assert_eq!(client.marker(1).await, Body::Resized(size(100, 30)));
+    assert_eq!(client.marker(2).await, Body::Resized(size(100, 30)));
+
+    // The other asks for its own and is told the size there is.
+    client.send(Message::new(2, resize(90, 20))).await;
+    assert_eq!(client.marker(2).await, Body::Resized(size(100, 30)));
+    assert_eq!(client.only_session().await.size, size(100, 30));
+
+    // Focused, it gets the size it asked for.
+    let mut focused = unfocused;
+    focused.focused = true;
+    client.send(Message::new(2, Body::Facts(focused))).await;
+    assert_eq!(client.marker(1).await, Body::Resized(size(90, 20)));
+    assert_eq!(client.marker(2).await, Body::Resized(size(90, 20)));
+
+    // When it goes, the size goes back to the one that is left.
+    client.send(Message::new(2, Body::Detach)).await;
+    assert_eq!(client.marker(1).await, Body::Resized(size(100, 30)));
+    client
+        .list_until("the size did not go back", |sessions| {
+            sessions[0].size == size(100, 30)
+        })
+        .await;
+    host.shutdown().await;
+}
+
+pub async fn a_client_that_let_go_of_the_screen_is_sent_no_output<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::shell()).await;
+    client.attach_with_credit(session, 1).await;
+    client.type_line(1, "echo before-k7q").await;
+    client.read_until(1, "before-k7q").await;
+    client.discard_output(1).await;
+
+    client.send(Message::new(1, Body::Release)).await;
+    client.type_line(1, PRINT_MARK).await;
+    client
+        .request(RequestBody::WaitText {
+            session,
+            text: MARK_OUTPUT.to_owned(),
+            timeout_ms: STEP.as_millis() as u64,
+        })
+        .await
+        .expect("the program ran on");
+    assert_eq!(
+        client.data(1, Duration::from_millis(300)).await,
+        None,
+        "output went to a client that let go of the screen"
+    );
+
+    // Asked for, the screen comes back with what was missed, and output follows it.
+    client.send(Message::new(1, Body::Rehydrate)).await;
+    let screen = client.rehydrated(1).await;
+    let HydratePayload::Snapshot { bytes, .. } = screen else {
+        panic!("not a snapshot: {screen:?}");
+    };
+    let text = lume_vt::Terminal::from_snapshot(&bytes)
+        .unwrap()
+        .screen_text()
+        .unwrap()
+        .join("\n");
+    assert!(text.contains(MARK_OUTPUT), "{text}");
+    client.type_line(1, "echo after-k7q").await;
+    client.read_until(1, "after-k7q").await;
+
+    // The end of the program is told even while the screen is let go of.
+    client.send(Message::new(1, Body::Release)).await;
+    client.type_line(1, "exit").await;
+    assert!(matches!(client.marker(1).await, Body::Exit(_)));
+    host.shutdown().await;
+}
+
+pub async fn text_can_be_sent_without_attaching<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::shell()).await;
+    let line = format!("{PRINT_MARK}\r");
+    assert_eq!(
+        client
+            .request(RequestBody::Send {
+                session,
+                text: line.clone(),
+            })
+            .await,
+        Ok(ResponseBody::Sent {
+            bytes: line.len() as u64
+        })
+    );
+    client
+        .request(RequestBody::WaitText {
+            session,
+            text: MARK_OUTPUT.to_owned(),
+            timeout_ms: STEP.as_millis() as u64,
+        })
+        .await
+        .expect("the program read what was sent");
+    assert_eq!(
+        code(
+            client
+                .request(RequestBody::Send {
+                    session: not_a_session(),
+                    text: "x".to_owned(),
+                })
+                .await
+        ),
+        Some(ErrorCode::NotFound)
+    );
+    host.shutdown().await;
+}
+
+pub async fn the_screen_answers_once_however_many_clients_there_are<H: Harness>() {
+    let mut host = H::start().await;
+    let client = &mut host.client;
+    client.hello().await;
+
+    let session = client.spawn(support::asks_for_the_cursor_when_told()).await;
+    client.attach_with_credit(session, 1).await;
+    client.attach_with_credit(session, 2).await;
+    client.type_line(1, "").await;
+    let matched = client
+        .request(RequestBody::WaitText {
+            session,
+            text: support::CURSOR_ANSWERED.to_owned(),
+            timeout_ms: STEP.as_millis() as u64,
+        })
+        .await;
+    let Ok(ResponseBody::Matched { line, .. }) = matched else {
+        panic!("the program was not answered: {matched:?}");
+    };
+    // Anything read after the one answer would be printed before the word.
+    assert_eq!(
+        line.trim(),
+        support::CURSOR_ANSWERED,
+        "more than one answer"
+    );
     host.shutdown().await;
 }
 
@@ -951,6 +1206,7 @@ pub async fn a_session_nobody_sees_is_looked_at_when_it_prints<H: Harness>() {
             session,
             stream: 1,
             facts,
+            replay: false,
         })
         .await;
     assert!(

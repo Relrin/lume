@@ -129,15 +129,17 @@ export interface GridGeometry {
   rows: number;
   cellWidth: number;
   cellHeight: number;
-  padding: number;
+  /** From the left and top edges of the surface to the grid. */
+  originX: number;
+  originY: number;
 }
 
 /** The grid point for a position in device pixels. */
 export function gridPoint(x: number, y: number, grid: GridGeometry): GridPoint {
   const clamp = (value: number, most: number) => Math.min(Math.max(value, 0), most);
   return {
-    col: clamp(Math.floor((x - grid.padding) / grid.cellWidth), grid.cols - 1),
-    row: clamp(Math.floor((y - grid.padding) / grid.cellHeight), grid.rows - 1),
+    col: clamp(Math.floor((x - grid.originX) / grid.cellWidth), grid.cols - 1),
+    row: clamp(Math.floor((y - grid.originY) / grid.cellHeight), grid.rows - 1),
     x,
     y,
   };

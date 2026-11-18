@@ -47,7 +47,7 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_CHUNK: usize = 16 * 1024;
 
 /// An open connection on which hello has been said.
-struct HostClient {
+pub(crate) struct HostClient {
     io: Stream,
     decoder: FrameDecoder,
     next_id: u64,
@@ -80,7 +80,25 @@ impl HostClient {
         }
     }
 
-    async fn ask(&mut self, body: RequestBody) -> io::Result<Result<ResponseBody, ProtoError>> {
+    pub(crate) async fn ask(
+        &mut self,
+        body: RequestBody,
+    ) -> io::Result<Result<ResponseBody, ProtoError>> {
+        self.ask_within(body, ANSWER_TIMEOUT).await
+    }
+
+    /// The connection and what has been read from it and not yet taken, for a
+    /// connection that goes on to carry an attachment.
+    pub(crate) fn into_parts(self) -> (Stream, FrameDecoder) {
+        (self.io, self.decoder)
+    }
+
+    /// Like [`ask`](Self::ask), with the answer given `limit` to arrive.
+    pub(crate) async fn ask_within(
+        &mut self,
+        body: RequestBody,
+        limit: Duration,
+    ) -> io::Result<Result<ResponseBody, ProtoError>> {
         let id = self.next_id;
         self.next_id += 1;
         let mut frames = Vec::new();
@@ -114,11 +132,9 @@ impl HostClient {
                 self.decoder.push(&chunk[..read]);
             }
         };
-        tokio::time::timeout(ANSWER_TIMEOUT, exchange)
-            .await
-            .map_err(|_| {
-                io::Error::new(io::ErrorKind::TimedOut, "the session host did not answer")
-            })?
+        tokio::time::timeout(limit, exchange).await.map_err(|_| {
+            io::Error::new(io::ErrorKind::TimedOut, "the session host did not answer")
+        })?
     }
 
     /// What the host says it is doing, as printed.
@@ -167,7 +183,7 @@ fn refused(error: ProtoError) -> io::Error {
 }
 
 /// Connects to the host, if one serves the endpoint.
-async fn reach(endpoint: &Endpoint) -> io::Result<Option<HostClient>> {
+pub(crate) async fn reach(endpoint: &Endpoint) -> io::Result<Option<HostClient>> {
     match lume_ipc::connect(endpoint).await {
         Ok(stream) => HostClient::hello(stream).await.map(Some),
         Err(error) if lume_ipc::not_served(&error) => Ok(None),

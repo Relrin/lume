@@ -7,15 +7,19 @@
 //!
 //! One request has more than an answer: `events` follows what the sessions report, and
 //! prints each report as a line of its own after the answer, for as long as it is left
-//! to run.
+//! to run. `attach` shows a session in the console (see [`crate::attach`]).
+//!
+//! With no application running, the requests about sessions are asked of the session
+//! host, if one runs on its own (see [`crate::direct`]).
 
 use std::time::Duration;
 
 use lume_proto::app::{AppError, AppReply, AppReplyBody, AppRequestBody, codes};
 use serde_json::{Value, json};
 
-use crate::args::Ctl;
+use crate::args::{AttachMode, Ctl};
 use crate::client::{ANSWER_TIMEOUT, Client, Failure, endpoint};
+use crate::{attach, direct};
 
 /// The request was carried out.
 pub const EXIT_OK: u8 = 0;
@@ -26,6 +30,9 @@ pub const EXIT_TIMEOUT: u8 = 3;
 /// Nothing serves the endpoint.
 pub const EXIT_NOT_RUNNING: u8 = 4;
 
+/// The code printed when the application is not running.
+pub const NOT_RUNNING: &str = "not_running";
+
 /// How much longer than a wait's own limit the connection is given: the application
 /// keeps the time, and its answer that the time ran out must be able to arrive.
 const WAIT_SLACK: Duration = Duration::from_secs(10);
@@ -35,7 +42,7 @@ pub(crate) fn failure(code: &str, message: impl std::fmt::Display) -> Value {
 }
 
 /// The object printed for a request that was carried out.
-fn success(reply: &AppReply) -> Value {
+pub(crate) fn success(reply: &AppReply) -> Value {
     let mut object = match serde_json::to_value(&reply.body) {
         Ok(Value::Object(object)) => object,
         _ => serde_json::Map::new(),
@@ -98,31 +105,71 @@ async fn follow(client: &mut Client, limit: Option<Duration>) -> Result<(), Fail
     }
 }
 
+/// Prints an answer that is all there is to print.
+fn print_answer(reply: &AppReply, plain: bool) {
+    match (&reply.body, plain) {
+        (AppReplyBody::Screen { lines, .. }, true) => {
+            for line in lines {
+                println!("{line}");
+            }
+        }
+        _ => println!("{}", success(reply)),
+    }
+}
+
+/// Asks the session host what `ctl` asks, when the application is not running. `None`
+/// when no host runs either.
+async fn ask_host(ctl: &Ctl) -> Option<Result<AppReply, Failure>> {
+    let request = match request(ctl) {
+        Ok(request) => request,
+        Err(failure) => return Some(Err(failure)),
+    };
+    match direct::reach(ctl.endpoint.as_deref()).await {
+        Ok(Some(mut host)) => Some(direct::carry_out(&mut host, &request, ctl.timeout).await),
+        Ok(None) => None,
+        Err(failure) => Some(Err(failure)),
+    }
+}
+
 /// Sends the request, prints the answer and returns the exit status.
 pub async fn run(ctl: Ctl) -> u8 {
+    match ctl.attach {
+        Some(AttachMode::Raw) => return attach::raw(&ctl).await,
+        Some(AttachMode::Text) => return attach::text(&ctl).await,
+        None => {}
+    }
     let asked = match ask(&ctl).await {
         Ok((reply, mut client)) => {
-            match (&reply.body, ctl.plain) {
-                (AppReplyBody::Screen { lines, .. }, true) => {
-                    for line in lines {
-                        println!("{line}");
-                    }
-                }
-                _ => println!("{}", success(&reply)),
-            }
+            print_answer(&reply, ctl.plain);
             match reply.body {
                 AppReplyBody::Following {} => follow(&mut client, ctl.follow_for).await,
                 _ => Ok(()),
             }
         }
+        Err(Failure::NotRunning(error)) => match ask_host(&ctl).await {
+            Some(Ok(reply)) => {
+                print_answer(&reply, ctl.plain);
+                Ok(())
+            }
+            Some(Err(failure)) => Err(failure),
+            None => Err(Failure::NotRunning(error)),
+        },
         Err(failure) => Err(failure),
     };
+    report(asked)
+}
+
+/// Prints how a request went, unless it went well and was printed already, and returns
+/// the exit status.
+pub(crate) fn report(asked: Result<(), Failure>) -> u8 {
     match asked {
         Ok(()) => EXIT_OK,
         Err(Failure::Refused(error)) => {
             println!("{}", failure(&error.code, &error.message));
             if error.code == codes::TIMEOUT {
                 EXIT_TIMEOUT
+            } else if error.code == NOT_RUNNING {
+                EXIT_NOT_RUNNING
             } else {
                 EXIT_FAILED
             }
@@ -131,7 +178,7 @@ pub async fn run(ctl: Ctl) -> u8 {
             println!(
                 "{}",
                 failure(
-                    "not_running",
+                    NOT_RUNNING,
                     format!("the application is not running ({error})")
                 )
             );

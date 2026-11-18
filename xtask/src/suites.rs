@@ -31,7 +31,7 @@ fn binary(profile: Profile, name: &str) -> Result<PathBuf> {
     } else {
         name.to_owned()
     };
-    let path = paths::root().join("target").join(profile.dir()).join(file);
+    let path = paths::build_dir().join(profile.dir()).join(file);
     if !path.is_file() {
         bail!("{} has not been built", path.display());
     }

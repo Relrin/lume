@@ -233,6 +233,7 @@ impl Link {
                 Body::Facts(facts) => input.facts(&facts).await,
                 Body::Credit(bytes) => input.credit(bytes).await,
                 Body::Rehydrate => input.rehydrate().await,
+                Body::Release => input.release().await,
                 Body::Detach => {
                     self.close(stream).await;
                     Ok(())

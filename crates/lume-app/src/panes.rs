@@ -774,14 +774,24 @@ impl Panes {
             .unwrap_or_else(lume_session::Router::local_id)
     }
 
-    /// The pane that shows a session, if one does.
+    /// The pane that shows a session, if one does: the first of them, if several do.
     pub fn pane_of(&self, key: &SessionKey) -> Option<PaneId> {
+        self.panes_of(key).into_iter().next()
+    }
+
+    /// Every pane that shows a session. A session may be shown in several panes, of
+    /// one window or of several.
+    pub fn panes_of(&self, key: &SessionKey) -> Vec<PaneId> {
         let workspace = self.workspace();
-        workspace.panes().into_iter().find_map(|pane| {
-            let terminal = terminal_of(pane)?;
-            (terminal.session == Some(key.session) && self.backend_of(terminal) == key.backend)
-                .then_some(pane.id)
-        })
+        workspace
+            .panes()
+            .into_iter()
+            .filter_map(|pane| {
+                let terminal = terminal_of(pane)?;
+                (terminal.session == Some(key.session) && self.backend_of(terminal) == key.backend)
+                    .then_some(pane.id)
+            })
+            .collect()
     }
 
     /// Whether something runs in a pane that closing it would end.
@@ -809,8 +819,10 @@ impl Panes {
     /// Whether a session is in a pane of `window`: whether that window's page may
     /// attach to it.
     pub fn owns(&self, window: WindowId, key: &SessionKey) -> bool {
-        self.pane_of(key)
-            .is_some_and(|pane| self.workspace().window_of(pane) == Some(window))
+        let workspace = self.workspace();
+        self.panes_of(key)
+            .into_iter()
+            .any(|pane| workspace.window_of(pane) == Some(window))
     }
 
     /// Applies an intent that someone other than the application asked for.
@@ -1046,7 +1058,8 @@ impl Panes {
         if self.closing.load(Ordering::Relaxed) || lock(&self.ending_on_purpose).remove(key) {
             return;
         }
-        let Some(pane) = self.pane_of(key) else {
+        let panes = self.panes_of(key);
+        let Some(&pane) = panes.first() else {
             return;
         };
         // A profile may say otherwise than the settings do.
@@ -1067,10 +1080,13 @@ impl Panes {
             return;
         };
         if close {
-            let panes = Arc::clone(self);
+            // Every pane that showed it goes.
+            let this = Arc::clone(self);
             state.runtime().spawn(async move {
-                if let Err(error) = panes.layout.apply_core(Intent::Close { pane }).await {
-                    tracing::debug!(%pane, %error, "the pane of a program that ended could not be closed");
+                for pane in panes {
+                    if let Err(error) = this.layout.apply_core(Intent::Close { pane }).await {
+                        tracing::debug!(%pane, %error, "the pane of a program that ended could not be closed");
+                    }
                 }
             });
         }
@@ -1200,6 +1216,10 @@ impl Panes {
                     backend: self.backend_of(terminal),
                     session,
                 };
+                if self.pane_of(&key).is_some() {
+                    // Another pane still shows it.
+                    return;
+                }
                 // Not waited for: a session that is slow to end must not hold up what
                 // the pages are told next.
                 let state = Arc::clone(state);
@@ -2846,5 +2866,63 @@ mod tests {
         );
         assert_eq!(start_dir(None, Some(&here), NewPaneCwd::Home), home);
         assert_eq!(start_dir(None, Some(gone), NewPaneCwd::Workspace), home);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_shown_in_two_panes_ends_with_the_last_of_them() {
+        let app = running("two-views", "").await;
+        let (_carrier, id) = page(&app).await;
+        let first = only_pane(&app);
+        let key = start(&app, first).await;
+
+        crate::host::reattach(&app.panes, app.window, key.clone(), crate::host::Place::Tab)
+            .await
+            .unwrap();
+        let shown = app.panes.panes_of(&key);
+        assert_eq!(shown.len(), 2, "{shown:?}");
+        let second = shown[1];
+        assert!(app.panes.owns(app.window, &key));
+        // The window's page may attach to it once for each pane.
+        let label = label_of(app.window);
+        for stream in [1, 2] {
+            app.state
+                .attach(&label, id, &key.backend, key.session, stream, facts())
+                .await
+                .unwrap();
+        }
+
+        let local = app.state.router().get(&Router::local_id()).unwrap();
+        let running = async || {
+            local
+                .list()
+                .await
+                .unwrap()
+                .iter()
+                .any(|info| info.id == key.session && info.exit.is_none())
+        };
+        app.panes
+            .apply(Intent::Close { pane: first })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            running().await,
+            "closing one pane ended what the other shows"
+        );
+        assert_eq!(app.panes.panes_of(&key), vec![second]);
+
+        app.panes
+            .apply(Intent::Close { pane: second })
+            .await
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while running().await {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the session outlived its last pane"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        app.state.shutdown().await;
     }
 }

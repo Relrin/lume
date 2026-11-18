@@ -126,6 +126,12 @@ impl Client {
         }
     }
 
+    /// The connection and the bytes read after the last answer, for a connection that
+    /// goes on to carry an attachment.
+    pub fn into_parts(self) -> (Stream, Vec<u8>) {
+        (self.io, self.decoder.into_rest())
+    }
+
     /// The next thing a session reported, on a connection that has asked to follow
     /// sessions. `None` once the application has closed the connection.
     pub async fn event(&mut self) -> io::Result<Option<AppEvent>> {

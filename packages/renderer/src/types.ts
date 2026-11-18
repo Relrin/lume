@@ -78,8 +78,14 @@ export interface CellMetrics {
   underlineTop: number;
   /** From the top of the cell to the top of a strikethrough. */
   strikethroughTop: number;
-  /** From the edge of the surface to the grid. */
+  /** From the edge of the surface to the grid, the least there is on every side. */
   padding: number;
+  /**
+   * From the left and top edges of the surface to the grid. The padding, unless the grid
+   * is drawn centred on a surface it does not fill.
+   */
+  originX: number;
+  originY: number;
 }
 
 /**
@@ -114,6 +120,14 @@ export interface CellRenderer {
   setHighlights(highlights: Highlights | undefined): void;
   /** The grid that fits the surface at its current size. */
   gridSize(): { cols: number; rows: number };
+  /**
+   * Whether a grid smaller than the surface is drawn in its middle rather than from the
+   * top left: for a terminal whose size another view decides. A grid larger than the
+   * surface is drawn from the top left either way, and what does not fit is cut off.
+   */
+  setCentred(centred: boolean): void;
+  /** Where a grid of `cols` by `rows` is drawn on the surface now, in device pixels. */
+  origin(cols: number, rows: number): { x: number; y: number };
   /** Draw a frame. Rows the frame does not flag as changed are not rebuilt. */
   draw(frame: RenderFrame): void;
   dispose(): void;

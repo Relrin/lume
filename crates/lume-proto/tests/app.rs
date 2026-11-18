@@ -6,8 +6,8 @@ use lume_proto::app::{
 };
 use lume_proto::tuning::{MAX_CONTROL_MESSAGE, MAX_PAYLOAD};
 use lume_proto::{
-    Body, ControlDecoder, DecodeError, EncodeError, Header, Kind, Message, encode,
-    encode_control_json,
+    Body, ControlDecoder, DecodeError, EncodeError, FrameDecoder, Header, Kind, Message, Role,
+    encode, encode_control_json,
 };
 use proptest::prelude::*;
 
@@ -151,4 +151,21 @@ fn json_that_is_not_a_message_is_reported() {
             ..
         })
     ));
+}
+
+#[test]
+fn what_follows_the_last_message_is_left_for_a_frame_decoder() {
+    let mut wire = Vec::new();
+    request(1, "first".to_owned()).encode(&mut wire).unwrap();
+    encode(&Message::new(1, Body::Data(b"output".to_vec())), &mut wire).unwrap();
+    let mut control = ControlDecoder::new();
+    control.push(&wire);
+    assert!(control.next().unwrap().is_some());
+    let mut frames = FrameDecoder::new(Role::Client);
+    frames.push(&control.into_rest());
+    assert_eq!(
+        frames.next().unwrap(),
+        Some(Message::new(1, Body::Data(b"output".to_vec())))
+    );
+    assert_eq!(frames.next().unwrap(), None);
 }

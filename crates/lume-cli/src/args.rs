@@ -46,6 +46,12 @@ Commands of lume ctl, which drive the running application:
   workspaces                     list the workspaces, and say which is on show
   profiles                       list the profiles: the shells, WSL distributions and
                                  SSH hosts a terminal can be started in
+  attach [<target>] [--raw | --text]
+                                 show the session in this console: --raw (the
+                                 default) makes it the session's terminal, with its
+                                 size, until Ctrl+\\ is pressed twice; --text prints its
+                                 screen as capture does, each time it changes, until
+                                 the session goes or for --timeout seconds
   events [<target>]              follow what terminals report: titles, directories,
                                  commands that start and end, the program that has
                                  the terminal, how a session ended. One JSON object a
@@ -58,6 +64,10 @@ Commands of lume ctl, which drive the running application:
 A <target> is --pane <id> (as in p12) or --session <id>. A command that names neither
 means the pane that has the keyboard. Each prints one JSON object. --timeout is how
 long a wait may last, in seconds (10 if not given).
+
+With the application not running and the session host running on its own, list,
+spawn -- <program>, send, wait, capture, kill and attach are asked of the host, for a
+session named by --session; the rest say that they need the application.
 
 Commands on the configuration, which need no application running:
   config schema                  print the JSON Schema of config.toml, for an editor
@@ -206,6 +216,17 @@ pub struct Ctl {
     pub plain: bool,
     /// The request's intent is to be read from standard input.
     pub intent_from_input: bool,
+    /// The session is to be shown in the console, and how.
+    pub attach: Option<AttachMode>,
+}
+
+/// How `ctl attach` shows a session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttachMode {
+    /// As the console's terminal.
+    Raw,
+    /// As its screen's text, printed each time it changes.
+    Text,
 }
 
 /// The terminal a request is about, as far as its arguments say.
@@ -452,6 +473,7 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
 
     let mut plain = false;
     let mut intent_from_input = false;
+    let mut attach = None;
     let request = match command.as_str() {
         "status" => {
             nothing_more(words, "status")?;
@@ -533,6 +555,34 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
             nothing_more(words, "profiles")?;
             AppRequestBody::Profiles {}
         }
+        "attach" => {
+            let mut target = Target::default();
+            let mut mode = AttachMode::Raw;
+            while let Some(word) = words.next() {
+                if target.take(&word, words)? {
+                    continue;
+                }
+                match word.as_str() {
+                    "--raw" => mode = AttachMode::Raw,
+                    "--text" => mode = AttachMode::Text,
+                    "--plain" => plain = true,
+                    other => return Err(format!("attach does not take {other}")),
+                }
+            }
+            attach = Some(mode);
+            match mode {
+                AttachMode::Raw => AppRequestBody::Attach {
+                    pane: target.pane,
+                    session: target.session,
+                    // The console's size, read when the command runs.
+                    size: TermSize::new(80, 24).map_err(|error| error.to_string())?,
+                },
+                AttachMode::Text => AppRequestBody::Screen {
+                    pane: target.pane,
+                    session: target.session,
+                },
+            }
+        }
         "events" => {
             let mut target = Target::default();
             while let Some(word) = words.next() {
@@ -586,6 +636,7 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
         follow_for,
         plain,
         intent_from_input,
+        attach,
     })
 }
 
@@ -769,6 +820,34 @@ mod tests {
 
     fn id() -> SessionId {
         "00000000000000ab".parse().unwrap()
+    }
+
+    #[test]
+    fn a_session_is_attached_to_as_a_terminal_or_as_text() {
+        let attached = |args: &[&str]| match parsed(args) {
+            Ok(Command::Ctl(ctl)) => (ctl.attach, ctl.request),
+            other => panic!("not a request: {other:?}"),
+        };
+        let (mode, request) = attached(&["ctl", "attach", "--session", "00000000000000ab"]);
+        assert_eq!(mode, Some(AttachMode::Raw));
+        assert!(
+            matches!(request, AppRequestBody::Attach { pane: None, session: Some(session), .. } if session == id()),
+            "{request:?}"
+        );
+        let (mode, request) = attached(&["ctl", "attach", "--pane", "p3", "--text"]);
+        assert_eq!(mode, Some(AttachMode::Text));
+        assert_eq!(
+            request,
+            AppRequestBody::Screen {
+                pane: Some("p3".to_owned()),
+                session: None
+            }
+        );
+        assert!(parsed(&["ctl", "attach", "--now"]).is_err());
+        let Ok(Command::Ctl(ctl)) = parsed(&["ctl", "list"]) else {
+            panic!("list is a request");
+        };
+        assert_eq!(ctl.attach, None);
     }
 
     #[test]

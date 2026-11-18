@@ -16,7 +16,7 @@ import { collectDirtyRows, rowRuns } from "./dirty.ts";
 import { HIGHLIGHT_STRIDE, NO_SELECTION, type Highlights, type RenderFrame } from "./frame.ts";
 import { buildOverlay, buildRow, type OverlayCounts } from "./instances.ts";
 import { createPlanes, type PlaneName, type Planes } from "./layout.ts";
-import { fontKey, gridSize, themeMetrics } from "./metrics.ts";
+import { fontKey, gridOrigin, gridSize, themeMetrics } from "./metrics.ts";
 import type {
   CellMetrics,
   CellRenderer,
@@ -39,6 +39,9 @@ export class GridRenderer implements CellRenderer {
   #focused = true;
   #cursorVisible = true;
   #underlines: readonly UnderlineRange[] = [];
+  #centred = false;
+  /** Where the grid was last built from, to notice when that moves. */
+  #originKey = "";
   #disposed = false;
 
   /** The surface in CSS pixels and the device pixel ratio, as last set. */
@@ -155,12 +158,31 @@ export class GridRenderer implements CellRenderer {
     return gridSize(this.#surface, this.#ensureMetrics());
   }
 
+  setCentred(centred: boolean): void {
+    this.#centred = centred;
+  }
+
+  origin(cols: number, rows: number): { x: number; y: number } {
+    return gridOrigin(this.#surface, this.#ensureMetrics(), cols, rows, this.#centred);
+  }
+
   draw(frame: RenderFrame): void {
     if (this.#disposed) return;
     // A surface with no area has nothing to draw on, and some tiers reject it outright.
     if (this.#surface.width === 0 || this.#surface.height === 0) return;
 
-    const metrics = this.#ensureMetrics();
+    const measured = this.#ensureMetrics();
+    const origin = gridOrigin(this.#surface, measured, frame.cols, frame.rows, this.#centred);
+    const metrics =
+      origin.x === measured.originX && origin.y === measured.originY
+        ? measured
+        : { ...measured, originX: origin.x, originY: origin.y };
+    const originKey = `${origin.x},${origin.y}`;
+    // Every record holds where it is drawn, so a grid that moves is built again.
+    if (originKey !== this.#originKey) {
+      this.#originKey = originKey;
+      this.#force = true;
+    }
     const atlas = this.#atlas!;
     if (this.#surfaceStale) {
       this.#backend.configure(this.#surface.width, this.#surface.height);

@@ -2074,6 +2074,8 @@
         "cursor-pulse": "none",
         "cursor-style": "block",
         "cursor-trail": "none",
+        "hidden-release": false,
+        "hidden-release-seconds": 30,
         "history-paging": false,
         "history-release-seconds": 60,
         "long-command-seconds": 10,
@@ -2345,6 +2347,41 @@
             ],
             "order": 30,
             "page": "terminal"
+          }
+        },
+        "hidden-release": {
+          "default": false,
+          "description": "Let a pane that is out of sight, in a tab not on show or a float put down, let go\nof its window's copy of the screen, and get it back from the session host when it\nis shown again. Off, every pane keeps its copy all the time.",
+          "type": "boolean",
+          "x-lume-settings": {
+            "control": "switch",
+            "group": "History",
+            "help": "Panes in hidden tabs let go of their copy of the screen and get it back from the session host when shown",
+            "label": "Let go of hidden panes",
+            "order": 50,
+            "page": "terminal"
+          }
+        },
+        "hidden-release-seconds": {
+          "default": 30,
+          "description": "How long, in seconds, a pane stays out of sight before it lets go of its copy of\nthe screen.",
+          "format": "uint32",
+          "maximum": 86400,
+          "minimum": 5,
+          "type": "integer",
+          "x-lume-settings": {
+            "control": "number",
+            "group": "History",
+            "help": "How long a pane stays out of sight before it lets go of its screen",
+            "label": "Let go of hidden panes after",
+            "order": 60,
+            "page": "terminal",
+            "step": 1.0,
+            "unit": "seconds",
+            "when": {
+              "is": "on",
+              "path": "terminal.hidden-release"
+            }
           }
         },
         "history-paging": {

@@ -1,4 +1,4 @@
-//! One session: a terminal, the program in it, its screen, and the client attached to it.
+//! One session: a terminal, the program in it, its screen, and the clients attached to it.
 //!
 //! Terminal I/O blocks, so each session has three threads: one reads the terminal, one
 //! writes to it, one waits for the program to end. A fourth owns the session's screen
@@ -12,12 +12,20 @@
 //! the system now and then which program has the terminal, and passes both on as events,
 //! in their place in the output.
 //!
+//! Several clients may be attached at once, each with its own queue and its own credit.
+//! The one focused most recently gives the terminal its size; the others are told the
+//! size it has and show it as best they can. The screen answers the program's questions
+//! from what the clients say together: focused if any of them is, with the colours of the
+//! one that gives the size.
+//!
 //! Backpressure is the absence of work. The reading thread hands each read to the task
 //! through a queue two reads long. With no client attached the task takes every read:
-//! the program runs on, and its output goes to the screen alone. When a client is
-//! attached and has granted no more credit, the task stops taking from that queue, the
-//! thread blocks on it, the terminal's own buffer fills, and the program blocks on its
-//! next write. Nothing is dropped and nothing grows.
+//! the program runs on, and its output goes to the screen alone. With clients attached
+//! the task takes reads while the fastest of them keeps up; when none has granted more
+//! credit, it stops taking from that queue, the thread blocks on it, the terminal's own
+//! buffer fills, and the program blocks on its next write. A client that falls far
+//! behind the fastest has its waiting output dropped and later starts again from a copy
+//! of the screen, so what is held for it stays bounded.
 
 use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -34,15 +42,16 @@ use lume_pty::{Child, ChildKiller, ForegroundProbe, ForegroundProcess, Pty, PtyS
 use tokio::sync::{mpsc, oneshot};
 
 use crate::Host;
-use crate::conn::Outbox;
+use crate::conn::{Behind, Outbox};
 use crate::pending::{Flush, Pending, Segment};
 use crate::scan::{Report, Scanner};
 use crate::screen::{Answers, Found, HydrateWith, Screen, ScreenText};
 use crate::ssh_exit::{self, Tail};
 use crate::tuning::{
-    ACTIVITY_INTERVAL, COALESCE_MAX_BYTES, COMMAND_QUEUE, EVENT_WINDOW, EVENTS_PER_WINDOW_MAX,
-    EXIT_DRAIN_TIMEOUT, EXITED_UNSEEN_LINGER, FOREGROUND_SETTLE, INPUT_BACKLOG_MAX, READ_CHUNK,
-    READ_QUEUE_CHUNKS, SEND_BATCH_BYTES, STATE_STATUSES_MAX_BYTES, UNATTACHED_EXIT_LINGER,
+    ACTIVITY_INTERVAL, ATTACHMENT_QUEUE_MAX, ATTACHMENTS_PER_SESSION_MAX, COALESCE_MAX_BYTES,
+    COMMAND_QUEUE, EVENT_WINDOW, EVENTS_PER_WINDOW_MAX, EXIT_DRAIN_TIMEOUT, EXITED_UNSEEN_LINGER,
+    FOREGROUND_SETTLE, INPUT_BACKLOG_MAX, READ_CHUNK, READ_QUEUE_CHUNKS, SEND_BATCH_BYTES,
+    STATE_STATUSES_MAX_BYTES, UNATTACHED_EXIT_LINGER,
 };
 
 /// Identifies one attachment of a session. A frame from a client names the attachment
@@ -85,9 +94,18 @@ pub(crate) enum Command {
         attachment: AttachmentId,
     },
     /// Send the attachment a copy of the screen, behind the output already on its way
-    /// to it, for the client to start again from.
+    /// to it, for the client to start again from. Ends a release.
     Rehydrate {
         attachment: AttachmentId,
+    },
+    /// Send the attachment no output until it asks to start again: the client has let
+    /// go of its copy of the screen. Reports, sizes and the exit still go to it.
+    Release {
+        attachment: AttachmentId,
+    },
+    /// Write to the terminal as a client's input would, for someone who is not attached.
+    Write {
+        bytes: Vec<u8>,
     },
     /// Read the screen as text.
     Screen {
@@ -278,6 +296,7 @@ pub(crate) fn start(start: Start) -> io::Result<SessionHandle> {
 
     let (command_tx, commands) = mpsc::channel(COMMAND_QUEUE);
     let (poll_tx, polled) = mpsc::channel(1);
+    let (sent_tx, sent) = mpsc::unbounded_channel();
     let session = Session {
         host,
         id,
@@ -295,10 +314,14 @@ pub(crate) fn start(start: Start) -> io::Result<SessionHandle> {
         input,
         input_queued,
         input_dropped: false,
-        pending: Pending::new(),
-        attachment: None,
+        attachments: Vec::new(),
         next_attachment: 1,
-        ever_attached: false,
+        focus_clock: 0,
+        size_owner: None,
+        told_screen: None,
+        unsettled: false,
+        sent_tx,
+        sent,
         last_input: None,
         flush_at: None,
         drain_at: None,
@@ -339,12 +362,37 @@ struct Attachment {
     id: AttachmentId,
     stream: u32,
     outbox: Outbox,
+    /// What is waiting to be sent to this client.
+    pending: Pending,
     /// The output bytes the client has said it can take.
     window: SendWindow,
     /// The client's view, kept for when the host answers a program on its behalf.
     facts: ClientFacts,
     /// How the client is brought up to date, by what its engine can load.
     hydrate: HydrateWith,
+    /// When the client last became focused, on the session's own clock; zero if it never
+    /// was. The client focused last gives the terminal its size.
+    focused_at: u64,
+    /// The size the client last asked for, kept for when it comes to give the size.
+    wanted: Option<(TermSize, CellPx)>,
+    /// The client fell too far behind: its output is being dropped until it takes
+    /// output again and is sent a copy of the screen to start from.
+    behind: bool,
+    /// The client let go of its copy of the screen and takes no output until it asks
+    /// for a new copy.
+    released: bool,
+    /// The exit marker has been sent to this client.
+    exit_delivered: bool,
+    /// Frames for this client are waiting for room on its connection; nothing more is
+    /// sent to it until they are on their way.
+    sending: bool,
+}
+
+impl Attachment {
+    /// Whether output read now is queued for this client.
+    fn takes_output(&self) -> bool {
+        !self.behind && !self.released
+    }
 }
 
 /// Why a session is being ended before its program chose to end.
@@ -376,10 +424,21 @@ struct Session {
     input_queued: Arc<AtomicUsize>,
     input_dropped: bool,
 
-    pending: Pending,
-    attachment: Option<Attachment>,
+    attachments: Vec<Attachment>,
     next_attachment: AttachmentId,
-    ever_attached: bool,
+    /// Counts focus changes, to tell which client was focused last.
+    focus_clock: u64,
+    /// The client that gives the terminal its size, if any is attached.
+    size_owner: Option<AttachmentId>,
+    /// What the screen was last told of the clients together.
+    told_screen: Option<ClientFacts>,
+    /// A client went away; the size and the screen are brought in line with the ones
+    /// left before anything else is done.
+    unsettled: bool,
+    /// Says when frames that had to wait for room on a connection are on their way, and
+    /// whether the connection was still there.
+    sent_tx: mpsc::UnboundedSender<(AttachmentId, bool)>,
+    sent: mpsc::UnboundedReceiver<(AttachmentId, bool)>,
     last_input: Option<Instant>,
 
     /// When waiting output must be sent.
@@ -392,9 +451,9 @@ struct Session {
 
     reader_done: bool,
     exit: Option<ExitStatus>,
-    /// The exit marker is in `pending`: no more output will follow.
+    /// The exit marker is queued: no more output will follow.
     exit_queued: bool,
-    /// The exit marker has been sent to a client.
+    /// The exit marker has been sent to some client.
     exit_delivered: bool,
     ending: Option<Ending>,
 
@@ -464,6 +523,9 @@ async fn at(deadline: Option<Instant>) {
 impl Session {
     async fn run(mut self) {
         loop {
+            if self.unsettled {
+                self.settle().await;
+            }
             self.publish();
             self.arm_linger();
             if self.finished() {
@@ -491,6 +553,9 @@ impl Session {
                     self.on_exit(status.unwrap_or(ExitStatus::Unknown)).await;
                 }
                 () = at(self.flush_at) => self.flush().await,
+                Some((attachment, connected)) = self.sent.recv() => {
+                    self.on_sent(attachment, connected).await;
+                }
                 found = self.polled.recv() => self.on_polled(found.flatten()).await,
                 () = at(self.poll_at), if poll => self.poll(),
                 () = at(self.resync_at) => self.resync().await,
@@ -516,14 +581,17 @@ impl Session {
         }
         if self.ending.is_some() {
             // Nobody is owed anything but the exit itself.
-            return self.attachment.is_none() || self.exit_delivered;
+            return self
+                .attachments
+                .iter()
+                .all(|attachment| attachment.exit_delivered);
         }
-        match self.attachment {
-            // The client is still showing the session; it goes when the client detaches.
-            Some(_) => false,
-            // A client saw how it ended, or nobody came back for it in time.
-            None => self.exit_delivered || self.linger_over,
+        if !self.attachments.is_empty() {
+            // A client is still showing the session; it goes when the clients detach.
+            return false;
         }
+        // A client saw how it ended, or nobody came back for it in time.
+        self.exit_delivered || self.linger_over
     }
 
     /// Starts the wait for a client to come back to a session that ended while nobody
@@ -531,7 +599,7 @@ impl Session {
     fn arm_linger(&mut self) {
         let unseen = self.exit_queued
             && !self.exit_delivered
-            && self.attachment.is_none()
+            && self.attachments.is_empty()
             && self.ending.is_none();
         if unseen && self.linger_at.is_none() && !self.linger_over {
             let linger = if self.host.persistent() {
@@ -545,20 +613,52 @@ impl Session {
 
     /// Whether to take more output from the reading thread. Not taking it is what stops
     /// the program. With no client attached everything is taken: the program runs on,
-    /// and its output goes to the screen alone. A client is sent no more than one send
-    /// can carry ahead of its credit.
+    /// and its output goes to the screen alone. Output is read while the fastest client
+    /// has no more than one send waiting beyond its credit; the clients that are behind
+    /// or have let go of the screen do not count.
     fn can_ingest(&self) -> bool {
-        !self.reader_done
-            && (self.ending.is_some()
-                || self.attachment.is_none()
-                || self.pending.bytes() < COALESCE_MAX_BYTES)
+        if self.reader_done {
+            return false;
+        }
+        if self.ending.is_some() {
+            return true;
+        }
+        let mut taking = self
+            .attachments
+            .iter()
+            .filter(|attachment| attachment.takes_output())
+            .peekable();
+        taking.peek().is_none()
+            || taking.any(|attachment| attachment.pending.bytes() < COALESCE_MAX_BYTES)
+    }
+
+    /// The most output waiting for any one client.
+    fn pending_bytes(&self) -> usize {
+        self.attachments
+            .iter()
+            .map(|attachment| attachment.pending.bytes())
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn attachment(&mut self, id: AttachmentId) -> Option<&mut Attachment> {
+        self.attachments
+            .iter_mut()
+            .find(|attachment| attachment.id == id)
+    }
+
+    /// Queues a report or marker for every client.
+    fn push_event(&mut self, event: &SessionEvent) {
+        for attachment in &mut self.attachments {
+            attachment.pending.push_event(event.clone());
+        }
     }
 
     /// Makes the session's state visible to listings.
     fn publish(&self) {
         let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
         shared.size = self.size;
-        shared.attached = self.attachment.is_some();
+        shared.attached = !self.attachments.is_empty();
         shared.exit = self.exit;
         if shared.title != self.seen.title {
             shared.title.clone_from(&self.seen.title);
@@ -569,7 +669,7 @@ impl Session {
         shared.stats = SessionStats {
             read_bytes: self.read_bytes,
             sent_bytes: self.sent_bytes,
-            pending_bytes: u32::try_from(self.pending.bytes()).unwrap_or(u32::MAX),
+            pending_bytes: u32::try_from(self.pending_bytes()).unwrap_or(u32::MAX),
             paused: !self.reader_done && !self.can_ingest(),
         };
     }
@@ -604,10 +704,11 @@ impl Session {
         // Kept for the next read, so that it is not allocated anew each time.
         self.found = found;
 
-        let unwatched = self
-            .attachment
-            .as_ref()
-            .is_some_and(|attachment| !attachment.facts.focused);
+        let unwatched = !self.attachments.is_empty()
+            && !self
+                .attachments
+                .iter()
+                .any(|attachment| attachment.facts.focused);
         let due = self
             .last_activity
             .is_none_or(|last| now.saturating_duration_since(last) >= ACTIVITY_INTERVAL);
@@ -682,20 +783,21 @@ impl Session {
             return;
         }
         self.window_events += 1;
-        self.pending.push_event(event);
+        self.push_event(&event);
     }
 
-    /// Tells the client the whole state, after reports had to be left out.
+    /// Tells the clients the whole state, after reports had to be left out.
     async fn resync(&mut self) {
         self.resync_at = None;
-        self.pending.push_event(whole(&self.seen));
+        self.push_event(&whole(&self.seen));
         self.flush().await;
     }
 
+    /// Whether any client shows the session.
     fn shown(&self) -> bool {
-        self.attachment
-            .as_ref()
-            .is_some_and(|attachment| attachment.facts.visible)
+        self.attachments
+            .iter()
+            .any(|attachment| attachment.facts.visible)
     }
 
     /// Whether to ask which program has the terminal when the time comes.
@@ -760,19 +862,57 @@ impl Session {
         }
     }
 
-    /// Puts output that was read and observed on the screen and, when a client is
-    /// attached, in the queue to it, followed by what was found in it. Says when to
-    /// send, or `None` when nothing is queued for a client.
+    /// Puts output that was read and observed on the screen and in the queue of every
+    /// client that takes it, followed by what was found in it. Says when to send, or
+    /// `None` when nothing is queued for a client.
     async fn take_output(&mut self, bytes: Vec<u8>, now: Instant) -> Option<Flush> {
-        if self.attachment.is_none() {
+        let takers = self
+            .attachments
+            .iter()
+            .filter(|attachment| attachment.takes_output())
+            .count();
+        if takers == 0 {
             self.screen.feed(bytes).await;
             self.report(now);
             return None;
         }
         self.screen.feed(bytes.clone()).await;
-        let flush = self.pending.push_bytes(bytes, now, self.last_input);
+        let mut bytes = bytes;
+        let mut left = takers;
+        let mut flush = None;
+        let last_input = self.last_input;
+        let session = self.id;
+        for attachment in self
+            .attachments
+            .iter_mut()
+            .filter(|attachment| attachment.takes_output())
+        {
+            left -= 1;
+            // The last client takes the bytes themselves.
+            let data = if left == 0 {
+                std::mem::take(&mut bytes)
+            } else {
+                bytes.clone()
+            };
+            let wanted = attachment.pending.push_bytes(data, now, last_input);
+            if attachment.pending.bytes() > ATTACHMENT_QUEUE_MAX {
+                // Far behind the fastest client. What it has not taken is let go, and
+                // it starts again from a copy of the screen once it takes output again.
+                attachment.pending.discard_bytes();
+                attachment.behind = true;
+                tracing::debug!(%session, attachment = attachment.id, "a client fell behind");
+                continue;
+            }
+            flush = Some(match (flush, wanted) {
+                (Some(Flush::Now), _) | (_, Flush::Now) => Flush::Now,
+                (Some(Flush::At(set)), Flush::At(at)) => Flush::At(set.min(at)),
+                (None, at) => at,
+            });
+        }
         self.report(now);
-        Some(flush)
+        // With every client dropped behind there is no output to wait for, only what
+        // was found in it.
+        Some(flush.unwrap_or(Flush::Now))
     }
 
     async fn on_reader_end(&mut self) {
@@ -818,9 +958,11 @@ impl Session {
             // Said whatever was said before: how a session ended is not left out.
             let ended = SessionEvent::Disconnected(ssh_exit::classify(status, tail));
             self.seen.apply(&ended);
-            self.pending.push_event(ended);
+            self.push_event(&ended);
         }
-        self.pending.push_exit(status);
+        for attachment in &mut self.attachments {
+            attachment.pending.push_exit(status);
+        }
         self.owner
             .notify(Notification::SessionExited {
                 session: self.id,
@@ -834,7 +976,9 @@ impl Session {
     fn end(&mut self, ending: Ending) {
         if self.ending.is_none() {
             self.ending = Some(ending);
-            self.pending.discard_bytes();
+            for attachment in &mut self.attachments {
+                attachment.pending.discard_bytes();
+            }
             self.flush_at = None;
             if self.exit.is_none()
                 && let Err(error) = self.killer.kill()
@@ -843,14 +987,26 @@ impl Session {
             }
         }
         if ending == Ending::Abandoned {
-            self.attachment = None;
+            self.attachments.clear();
+            self.size_owner = None;
         }
     }
 
-    fn current(&mut self, id: AttachmentId) -> Option<&mut Attachment> {
-        self.attachment
-            .as_mut()
-            .filter(|attachment| attachment.id == id)
+    /// Takes a client off the session. The size and the screen follow on the next turn
+    /// of the task.
+    fn drop_attachment(&mut self, id: AttachmentId) {
+        self.attachments.retain(|attachment| attachment.id != id);
+        self.unsettled = true;
+    }
+
+    /// Queues a copy of the screen for a client to start again from, behind what is
+    /// already queued for it.
+    async fn restart(&mut self, id: AttachmentId, with: HydrateWith) {
+        if let Some(payload) = self.screen.hydrate(with).await
+            && let Some(attachment) = self.attachment(id)
+        {
+            attachment.pending.push_hydrate(payload);
+        }
     }
 
     async fn on_command(&mut self, command: Command) {
@@ -872,75 +1028,110 @@ impl Session {
                 }
             }
             Command::Input { attachment, bytes } => {
-                if self.current(attachment).is_some() {
+                if self.attachment(attachment).is_some() {
                     self.last_input = Some(Instant::now());
                     self.write_input(bytes);
                 }
+            }
+            Command::Write { bytes } => {
+                self.last_input = Some(Instant::now());
+                self.write_input(bytes);
             }
             Command::Resize {
                 attachment,
                 size,
                 cell_px,
             } => {
-                if self.current(attachment).is_some() {
+                let owner = self.size_owner == Some(attachment);
+                let current = self.size;
+                let Some(open) = self.attachment(attachment) else {
+                    return;
+                };
+                open.wanted = Some((size, cell_px));
+                if owner {
                     self.resize(size, cell_px).await;
+                } else {
+                    // Another client gives the size. This one is told the size the
+                    // terminal has, and gets its own when it is focused.
+                    open.pending.push_resized(current);
+                    self.flush().await;
                 }
             }
             Command::Facts { attachment, facts } => {
-                let Some(attachment) = self.current(attachment) else {
+                let shown = self.shown();
+                let clock = self.focus_clock + 1;
+                let Some(open) = self.attachment(attachment) else {
                     return;
                 };
-                let was = std::mem::replace(&mut attachment.facts, facts.clone());
-                let (focused, visible) = (attachment.facts.focused, attachment.facts.visible);
-                self.screen.facts(facts).await;
+                let was = std::mem::replace(&mut open.facts, facts);
+                let (focused, visible) = (open.facts.focused, open.facts.visible);
+                let became_focused = focused && !was.focused;
+                if became_focused {
+                    open.focused_at = clock;
+                    self.focus_clock = clock;
+                }
                 tracing::trace!(focused, visible, "client facts updated");
                 if was.focused != focused {
                     // The next output while nobody types here is said again at once.
                     self.last_activity = None;
                 }
-                if visible && !was.visible {
+                let now_shown = self.shown();
+                if now_shown && !shown {
                     // A session that comes on show is brought up to date.
                     self.poll_at = sooner(self.poll_at, Some(Instant::now()));
-                } else if !visible && was.visible {
+                } else if shown && !now_shown {
                     // Looked at once more as it goes out of sight, since it is not
                     // looked at again while nobody sees it: what was started a moment
                     // ago is known.
                     self.poll_soon(Instant::now());
                 }
+                self.settle().await;
             }
             Command::Credit { attachment, bytes } => {
-                let Some(attachment) = self.current(attachment) else {
+                let Some(open) = self.attachment(attachment) else {
                     return;
                 };
-                if attachment.window.grant(bytes).is_err() {
-                    attachment
-                        .outbox
+                if open.window.grant(bytes).is_err() {
+                    open.outbox
                         .fatal(
                             ErrorCode::ProtocolError,
                             "more credit was granted than a stream may hold",
                         )
                         .await;
-                    self.attachment = None;
+                    self.drop_attachment(attachment);
                     return;
+                }
+                if open.behind && !open.released {
+                    // A client that fell behind takes output again: it starts afresh
+                    // from the screen as it is now.
+                    open.behind = false;
+                    let with = open.hydrate;
+                    self.restart(attachment, with).await;
                 }
                 self.flush().await;
             }
             Command::Detach { attachment } => {
-                if self.current(attachment).is_some() {
-                    self.attachment = None;
-                    self.screen.unfocused().await;
+                if self.attachment(attachment).is_some() {
+                    self.drop_attachment(attachment);
                 }
             }
             Command::Rehydrate { attachment } => {
-                let Some(with) = self.current(attachment).map(|open| open.hydrate) else {
+                let Some(open) = self.attachment(attachment) else {
                     return;
                 };
+                open.released = false;
+                open.behind = false;
+                let with = open.hydrate;
                 // Everything read so far is queued for the client and on the screen, so
                 // the copy goes behind it: the client starts again exactly where the
                 // output it has not yet taken ends.
-                if let Some(payload) = self.screen.hydrate(with).await {
-                    self.pending.push_hydrate(payload);
-                    self.flush().await;
+                self.restart(attachment, with).await;
+                self.flush().await;
+            }
+            Command::Release { attachment } => {
+                if let Some(open) = self.attachment(attachment) {
+                    open.released = true;
+                    open.pending.discard_bytes();
                 }
             }
             Command::Screen { reply } => {
@@ -975,10 +1166,10 @@ impl Session {
                 ErrorCode::SessionExited,
                 "the session is ending",
             ))
-        } else if self.attachment.is_some() {
+        } else if self.attachments.len() >= ATTACHMENTS_PER_SESSION_MAX {
             Some(ProtoError::new(
-                ErrorCode::AlreadyAttached,
-                "the session already has a client",
+                ErrorCode::LimitExceeded,
+                "the session has as many clients as it takes",
             ))
         } else {
             None
@@ -1019,32 +1210,96 @@ impl Session {
         if !start.is_empty() && !outbox.frames(start).await {
             return None;
         }
-        // What was waiting was waiting for nobody: the copy and the state cover it.
-        // Only the end of the program, if it has ended, is still to be told.
-        self.pending.clear();
+        // The copy and the state cover everything so far. Only the end of the program,
+        // if it has ended, is still to be told.
+        let mut pending = Pending::new();
         if self.exit_queued
             && let Some(status) = self.exit
         {
-            self.pending.push_exit(status);
+            pending.push_exit(status);
         }
-        self.screen.facts(facts.clone()).await;
         let id = self.next_attachment;
         self.next_attachment += 1;
         if facts.visible {
             self.poll_at = sooner(self.poll_at, Some(Instant::now()));
         }
         self.last_activity = None;
-        self.attachment = Some(Attachment {
+        let focused_at = if facts.focused {
+            self.focus_clock += 1;
+            self.focus_clock
+        } else {
+            0
+        };
+        self.attachments.push(Attachment {
             id,
             stream,
             outbox,
+            pending,
             window: SendWindow::new(),
             facts,
             hydrate,
+            focused_at,
+            wanted: None,
+            behind: false,
+            released: false,
+            exit_delivered: false,
+            sending: false,
         });
-        self.ever_attached = true;
         self.linger_at = None;
+        self.settle().await;
         Some(id)
+    }
+
+    /// Brings the terminal's size and the screen's view of its clients in line with the
+    /// clients attached now. The client focused most recently gives the size (the first
+    /// to attach, until one is focused); when that changes, the size it last asked for
+    /// is applied. The screen answers the program as if for one client: focused and
+    /// visible if any client is, with the colours and cell size of the one giving the
+    /// size, and with nobody attached as the last clients were, unfocused.
+    async fn settle(&mut self) {
+        self.unsettled = false;
+        let owner = self
+            .attachments
+            .iter()
+            .rev()
+            .max_by_key(|attachment| attachment.focused_at)
+            .map(|attachment| (attachment.id, attachment.wanted));
+        let owner_id = owner.map(|(id, _)| id);
+        if owner_id != self.size_owner {
+            self.size_owner = owner_id;
+            if let Some((_, Some((size, cell_px)))) = owner
+                && size != self.size
+            {
+                self.resize(size, cell_px).await;
+            }
+        }
+
+        let together = match owner_id.and_then(|id| {
+            self.attachments
+                .iter()
+                .find(|attachment| attachment.id == id)
+        }) {
+            Some(owner) => {
+                let mut facts = owner.facts.clone();
+                facts.focused = self
+                    .attachments
+                    .iter()
+                    .any(|attachment| attachment.facts.focused);
+                facts.visible = self.shown();
+                Some(facts)
+            }
+            None => self.told_screen.clone().map(|facts| ClientFacts {
+                focused: false,
+                visible: false,
+                ..facts
+            }),
+        };
+        if let Some(facts) = together
+            && self.told_screen.as_ref() != Some(&facts)
+        {
+            self.told_screen = Some(facts.clone());
+            self.screen.facts(facts).await;
+        }
     }
 
     fn write_input(&mut self, bytes: Vec<u8>) {
@@ -1087,61 +1342,116 @@ impl Session {
         }
         self.size = size;
         self.screen.resize(size, cell_px).await;
-        if self.attachment.is_some() {
-            self.pending.push_resized(size);
-        }
-        if let Some(attachment) = &mut self.attachment {
-            // The size requested is the size the client has; its facts follow it.
-            attachment.facts.size = size;
-            attachment.facts.cell_px = cell_px;
+        let owner = self.size_owner;
+        for attachment in &mut self.attachments {
+            attachment.pending.push_resized(size);
+            if Some(attachment.id) == owner {
+                // The size requested is the size the client has; its facts follow it.
+                attachment.facts.size = size;
+                attachment.facts.cell_px = cell_px;
+            }
         }
         self.flush().await;
     }
 
-    /// Sends what is waiting, as far as the client's credit allows.
+    /// Sends what is waiting to each client, as far as its credit and its connection
+    /// allow.
     async fn flush(&mut self) {
         self.flush_at = None;
-        let Some(attachment) = &mut self.attachment else {
+        let Self {
+            attachments,
+            sent_bytes,
+            exit_delivered,
+            sent_tx,
+            ..
+        } = self;
+        let mut gone = Vec::new();
+        for attachment in attachments.iter_mut() {
+            if !send_waiting(attachment, sent_bytes, exit_delivered, sent_tx) {
+                gone.push(attachment.id);
+            }
+        }
+        for id in gone {
+            // The connection has gone; the session carries on without that client.
+            self.drop_attachment(id);
+        }
+    }
+
+    /// Frames that waited for room on a client's connection are on their way, or the
+    /// connection has gone.
+    async fn on_sent(&mut self, id: AttachmentId, connected: bool) {
+        let Some(attachment) = self.attachment(id) else {
             return;
         };
-        let stream = attachment.stream;
-        let mut batch = Vec::new();
-        let mut connected = true;
+        attachment.sending = false;
+        if connected {
+            self.flush().await;
+        } else {
+            self.drop_attachment(id);
+        }
+    }
+}
 
-        while connected {
-            let Some(segment) = self.pending.pop(attachment.window.available() as usize) else {
-                break;
-            };
-            match segment {
-                Segment::Bytes(bytes) => {
-                    attachment.window.take(bytes.len());
-                    self.sent_bytes += bytes.len() as u64;
-                    encode_bytes(stream, BytesKind::Data, &bytes, &mut batch);
-                }
-                Segment::Resized(size) => {
-                    append(&mut batch, &Message::new(stream, Body::Resized(size)));
-                }
-                Segment::Event(event) => {
-                    append(&mut batch, &Message::new(stream, Body::Event(event)));
-                }
-                Segment::Hydrate(payload) => {
-                    append(&mut batch, &Message::new(stream, Body::Hydrate(payload)));
-                }
-                Segment::Exit(status) => {
-                    append(&mut batch, &Message::new(stream, Body::Exit(status)));
-                    self.exit_delivered = true;
-                }
+/// Sends what is waiting for one client, as far as its credit allows. When its
+/// connection has no room, the frames wait for it off the session's task, and nothing
+/// more goes to that client until they are on their way: a connection that is slow to
+/// take bytes holds back only its own clients. `false` means the connection has gone.
+fn send_waiting(
+    attachment: &mut Attachment,
+    sent_bytes: &mut u64,
+    exit_delivered: &mut bool,
+    sent: &mpsc::UnboundedSender<(AttachmentId, bool)>,
+) -> bool {
+    if attachment.sending {
+        return true;
+    }
+    let stream = attachment.stream;
+    let mut batch = Vec::new();
+    loop {
+        let segment = attachment
+            .pending
+            .pop(attachment.window.available() as usize);
+        let more = segment.is_some();
+        match segment {
+            Some(Segment::Bytes(bytes)) => {
+                attachment.window.take(bytes.len());
+                *sent_bytes += bytes.len() as u64;
+                encode_bytes(stream, BytesKind::Data, &bytes, &mut batch);
             }
-            if batch.len() >= SEND_BATCH_BYTES {
-                connected = attachment.outbox.frames(std::mem::take(&mut batch)).await;
+            Some(Segment::Resized(size)) => {
+                append(&mut batch, &Message::new(stream, Body::Resized(size)));
+            }
+            Some(Segment::Event(event)) => {
+                append(&mut batch, &Message::new(stream, Body::Event(event)));
+            }
+            Some(Segment::Hydrate(payload)) => {
+                append(&mut batch, &Message::new(stream, Body::Hydrate(payload)));
+            }
+            Some(Segment::Exit(status)) => {
+                append(&mut batch, &Message::new(stream, Body::Exit(status)));
+                attachment.exit_delivered = true;
+                *exit_delivered = true;
+            }
+            None => {}
+        }
+        if batch.len() >= SEND_BATCH_BYTES || (!more && !batch.is_empty()) {
+            match attachment.outbox.try_frames(std::mem::take(&mut batch)) {
+                Ok(()) => {}
+                Err(Behind::Full(frames)) => {
+                    attachment.sending = true;
+                    let outbox = attachment.outbox.clone();
+                    let (id, sent) = (attachment.id, sent.clone());
+                    tokio::spawn(async move {
+                        let connected = outbox.frames(frames).await;
+                        let _ = sent.send((id, connected));
+                    });
+                    return true;
+                }
+                Err(Behind::Gone) => return false,
             }
         }
-        if connected && !batch.is_empty() {
-            connected = attachment.outbox.frames(batch).await;
-        }
-        if !connected {
-            // The connection has gone; the session carries on without a client.
-            self.attachment = None;
+        if !more {
+            return true;
         }
     }
 }

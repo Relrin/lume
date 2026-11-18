@@ -8,7 +8,7 @@
 
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import type { GroupId, TabId } from "../layout/types.ts";
+import type { GroupId, PaneId, TabId } from "../layout/types.ts";
 
 /** Where a menu or an editor opens from: the box of what opened it, in the window. */
 export interface Anchor {
@@ -40,6 +40,13 @@ export type TabPopup =
       readonly anchor: Anchor;
       /** Whether its name field takes the keyboard, as it does for a group just made. */
       readonly focusName: boolean;
+    }
+  | {
+      /** The menu of one pane, opened from its header. */
+      readonly kind: "pane";
+      readonly pane: PaneId;
+      readonly anchor: Anchor;
+      readonly keyboard: boolean;
     };
 
 /** Which side of what it is let go over a dragged tab or group lands on. */

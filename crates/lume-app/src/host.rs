@@ -59,6 +59,8 @@ pub enum Place {
     Tab,
     /// Beside the pane that has the keyboard.
     Split,
+    /// In a window of its own.
+    Window,
 }
 
 /// Tells the user when the host that runs on its own is not this application's
@@ -151,20 +153,15 @@ async fn kept_for_other_workspaces(panes: &Panes) -> HashSet<SessionId> {
     .unwrap_or_default()
 }
 
-/// Shows a session that no pane shows, in a new tab of `window` or beside the pane that
-/// has the keyboard there.
+/// Shows a session in a new tab of `window`, beside the pane that has the keyboard
+/// there, or in a new window. The session may be shown in other panes already: each
+/// shows it as it is, and the one focused last gives the terminal its size.
 pub async fn reattach(
     panes: &Panes,
     window: WindowId,
     key: SessionKey,
     place: Place,
 ) -> Result<(), CommandError> {
-    if panes.pane_of(&key).is_some() {
-        return Err(CommandError::new(
-            "exists",
-            format!("session {} is shown in a pane already", key.session),
-        ));
-    }
     let content = NewContent::Terminal(SpawnRequest {
         backend: Some(key.backend.clone()),
         session: Some(key.session),
@@ -176,6 +173,10 @@ pub async fn reattach(
             dir: Dir::Right,
             ratio: UNITS / 2,
             content,
+        },
+        (Place::Window, _) => Intent::WindowNew {
+            content,
+            bounds: None,
         },
         _ => Intent::TabNew {
             window,

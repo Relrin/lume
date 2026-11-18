@@ -289,3 +289,35 @@ async fn status_pid(client: &mut Client) -> u32 {
         other => panic!("not a status: {other:?}"),
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_connection_that_is_not_read_does_not_hold_up_another() {
+    /// Far more than a connection and the host hold for a client that reads nothing.
+    const READ: usize = 8 * 1024 * 1024;
+    let daemon = Daemon::start(0);
+    let mut reader = daemon.client().await;
+    let session = reader.spawn(support::flood()).await;
+    reader.attach_with_credit(session, 1).await;
+
+    // Another client attaches, grants all the credit a stream may hold, and then reads
+    // nothing more from its connection.
+    let mut stuck = daemon.client().await;
+    stuck.attach_with_credit(session, 1).await;
+    stuck.credit(1, 15 * 1024 * 1024).await;
+    stuck.stop_reading();
+
+    let mut received = 0;
+    while received < READ {
+        let bytes = reader
+            .data(1, STEP)
+            .await
+            .expect("output goes on for the client that reads it");
+        received += bytes.len();
+        reader.credit(1, bytes.len() as u32).await;
+    }
+    drop(stuck);
+    assert_eq!(
+        reader.request(RequestBody::Kill { session }).await,
+        Ok(ResponseBody::Killed {})
+    );
+}

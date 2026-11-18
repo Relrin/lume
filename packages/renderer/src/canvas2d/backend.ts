@@ -117,14 +117,14 @@ export class Canvas2dBackend implements TierBackend {
     const image = this.#image;
     if (!image) return;
     const { planes, cols, rows, metrics, repaint } = info;
-    const { cellHeight, padding } = metrics;
+    const { cellHeight, originY } = metrics;
     // The background is opaque whatever the colour says: nothing shows through a terminal.
     const clear = (info.clear | 0xff000000) >>> 0;
 
     if (!repaint) this.#words.fill(clear);
     for (let row = 0; row < rows; row++) {
       if (repaint && repaint[row] !== 1) continue;
-      const y = padding + row * cellHeight;
+      const y = originY + row * cellHeight;
       // Start the row again from the background, across the whole width.
       if (repaint) this.#fill(0, y, this.#width, cellHeight, clear);
       const first = row * cols;
@@ -148,7 +148,7 @@ export class Canvas2dBackend implements TierBackend {
       if (repaint[row] !== 1) continue;
       let end = row + 1;
       while (end < rows && repaint[end] === 1) end++;
-      const top = padding + row * cellHeight;
+      const top = originY + row * cellHeight;
       const height = Math.min(this.#height - top, (end - row) * cellHeight);
       if (height > 0) this.#context.putImageData(image, 0, 0, 0, top, this.#width, height);
       row = end;

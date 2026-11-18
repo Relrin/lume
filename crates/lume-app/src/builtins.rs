@@ -290,6 +290,20 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.pane.show-in-new-tab",
+        "Show Pane's Session in New Tab",
+        "Pane",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.pane.show-in-new-window",
+        "Show Pane's Session in New Window",
+        "Pane",
+        Runs::Core,
+        true,
+    ),
+    (
         "lume.pane.reconnect",
         "Reconnect or Restart Pane",
         "Pane",
@@ -712,6 +726,8 @@ fn arguments(id: &str) -> Option<Value> {
         | "lume.pane.zoom"
         | "lume.pane.float"
         | "lume.pane.minimise"
+        | "lume.pane.show-in-new-tab"
+        | "lume.pane.show-in-new-window"
         | "lume.pane.move-to-new-tab" => Some(object(json!({ "pane": pane }), &[])),
         "lume.panel.toggle" => Some(object(
             json!({ "area": {
@@ -788,8 +804,8 @@ fn arguments(id: &str) -> Option<Value> {
                 "backend": { "type": "string", "description": "Its backend; the local one if left out" },
                 "place": {
                     "type": "string",
-                    "enum": ["tab", "split"],
-                    "description": "A new tab, or beside the pane that has the keyboard",
+                    "enum": ["tab", "split", "window"],
+                    "description": "A new tab, beside the pane that has the keyboard, or a new window",
                 },
             }),
             &["session"],
@@ -1117,6 +1133,18 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
         "lume.session.reattach" => {
             let key = session_key(args)?;
             let place = argument::<host::Place>(args, "place")?.unwrap_or_default();
+            return host::reattach(panes, window, key, place).await;
+        }
+        "lume.pane.show-in-new-tab" | "lume.pane.show-in-new-window" => {
+            let pane = context.pane(args)?;
+            let key = panes
+                .session_of(pane)
+                .ok_or_else(|| CommandError::not_found(format!("pane {pane} shows no session")))?;
+            let place = if id == "lume.pane.show-in-new-window" {
+                host::Place::Window
+            } else {
+                host::Place::Tab
+            };
             return host::reattach(panes, window, key, place).await;
         }
         "lume.session.end" => {

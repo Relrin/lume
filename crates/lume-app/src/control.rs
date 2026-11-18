@@ -23,19 +23,26 @@ use lume_proto::app::{
     AppRequestBody, AppResponse, AppSession, Direction, Focused, PageRequestBody, SessionNews,
     SpawnPlace, codes,
 };
-use lume_proto::{ClientKind, ControlDecoder, Responder, SessionEvent, SessionId, negotiate};
-use lume_session::SessionBackend;
+use lume_proto::{
+    Body, BytesKind, ClientFacts, ClientKind, ColorScheme, ControlDecoder, ErrorCode, FrameDecoder,
+    HydratePayload, Message, Palette, Responder, Role, SessionEvent, SessionId, TermSize, encode,
+    encode_bytes, negotiate,
+};
+use lume_session::{Attachment, Hydrate, InputSink, OutputFrame, SessionBackend, SessionError};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::carrier::{Link, SessionKey};
 use crate::services::{Asker, Services};
 use crate::sessions::News;
-use crate::tuning::{PAGE_ANSWER_TIMEOUT, PAGE_OPEN_TIMEOUT, WAIT_MAX, WAIT_SLACK};
+use crate::tuning::{ATTACH_CELL_PX, PAGE_ANSWER_TIMEOUT, PAGE_OPEN_TIMEOUT, WAIT_MAX, WAIT_SLACK};
 use crate::window::label_of;
 
 /// How many bytes are read from a client at a time.
 const READ_CHUNK: usize = 16 * 1024;
+
+/// The stream an attachment is carried on, on a connection that asked for one.
+const ATTACHED_STREAM: u32 = 1;
 
 /// What the endpoint, and the application itself, can do to its windows.
 pub trait Shell: Send + Sync + 'static {
@@ -84,13 +91,15 @@ pub struct Control {
 }
 
 /// What to do once an answer has been written.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Then {
     Carry,
     /// The application was asked to close; it does once the client has its answer.
     Quit,
     /// The client asked to follow sessions; their reports are sent to it from here on.
     Follow(Followed),
+    /// The client asked to be shown a session; the connection carries the attachment
+    /// from here on.
+    Attach(Box<Attachment>),
 }
 
 /// Which sessions a client follows: the one in a pane, whichever that is at the time,
@@ -356,6 +365,17 @@ impl Control {
     }
 
     async fn handle(&self, body: AppRequestBody) -> (Result<AppReply, AppError>, Then) {
+        if let AppRequestBody::Attach {
+            pane,
+            session,
+            size,
+        } = &body
+        {
+            return match self.attach(pane.as_deref(), *session, *size).await {
+                Ok((answer, attachment)) => (Ok(answer), Then::Attach(Box::new(attachment))),
+                Err(error) => (Err(error), Then::Carry),
+            };
+        }
         if let AppRequestBody::Events { pane, session } = &body {
             return match self.followed(pane.as_deref(), *session).await {
                 Ok(followed) => (
@@ -373,6 +393,69 @@ impl Control {
             Then::Carry
         };
         (result, then)
+    }
+
+    /// Attaches to the session a request means, for a client that shows it in a real
+    /// terminal of `size`: the client is told the screen as output to replay, and gives
+    /// the terminal its size, as a window that is focused does.
+    async fn attach(
+        &self,
+        pane: Option<&str>,
+        session: Option<SessionId>,
+        size: TermSize,
+    ) -> Result<(AppReply, Attachment), AppError> {
+        let (key, place) = self.session(pane, session).await?;
+        let backend = self.backend_of(&key)?;
+        let facts = ClientFacts {
+            size,
+            cell_px: ATTACH_CELL_PX,
+            palette: Palette::default(),
+            scheme: ColorScheme::Dark,
+            focused: true,
+            visible: true,
+        };
+        let attachment = backend
+            .attach_replaying(key.session, facts)
+            .await
+            .map_err(session_error)?;
+        let answer = reply(
+            format!(
+                "attached to session {} on stream {ATTACHED_STREAM}",
+                key.session
+            ),
+            AppReplyBody::Attached {
+                pane: place.map(|place| place.pane.to_string()),
+                session: key.session,
+                size: attachment.size,
+            },
+        )?;
+        Ok((answer, attachment))
+    }
+
+    /// Carries an attachment over a client's connection until the client detaches or
+    /// goes, or the session ends. `rest` is what the client sent after its request.
+    async fn carry_attachment<S>(
+        &self,
+        io: &mut S,
+        rest: Vec<u8>,
+        attachment: Attachment,
+    ) -> io::Result<()>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        let Attachment {
+            hydrate,
+            mut output,
+            input,
+            ..
+        } = attachment;
+        let carried = carry(io, rest, hydrate, &mut output, &input).await;
+        if let Err(error) = input.detach().await
+            && !matches!(error, SessionError::Detached)
+        {
+            tracing::debug!(%error, "an attachment carried for a client could not be ended");
+        }
+        carried
     }
 
     /// Which sessions a request to follow them means. A pane or a session that is
@@ -670,6 +753,20 @@ impl Control {
                 text,
             } => {
                 let (key, place) = self.session(pane.as_deref(), session).await?;
+                let typed = |key: &SessionKey| {
+                    reply(
+                        format!("typed {} bytes into session {}", text.len(), key.session),
+                        AppReplyBody::Sent {
+                            bytes: text.len() as u64,
+                        },
+                    )
+                };
+                // A backend that can be typed into directly needs no window.
+                match self.backend_of(&key)?.send(key.session, &text).await {
+                    Ok(()) => return typed(&key),
+                    Err(SessionError::Refused(error)) if error.code == ErrorCode::Unsupported => {}
+                    Err(error) => return Err(session_error(error)),
+                }
                 let not_shown = || {
                     AppError::new(
                         codes::NOT_SHOWN,
@@ -859,9 +956,9 @@ impl Control {
                 )
             }
             // Answered before it gets here, since its answer is not the end of it.
-            AppRequestBody::Events { .. } => Err(AppError::new(
+            AppRequestBody::Events { .. } | AppRequestBody::Attach { .. } => Err(AppError::new(
                 codes::INTERNAL,
-                "a request to follow sessions was handled as a plain request",
+                "a request that goes on after its answer was handled as a plain request",
             )),
             AppRequestBody::Commands {} => {
                 let commands = registry.list();
@@ -905,6 +1002,110 @@ impl Control {
 }
 
 /// The page answered with something that is not an answer to what it was asked.
+/// Writes an attachment's frames to a client and passes on what the client sends, until
+/// the client detaches or goes, or the session ends.
+async fn carry<S>(
+    io: &mut S,
+    rest: Vec<u8>,
+    hydrate: Hydrate,
+    output: &mut lume_session::FrameStream,
+    input: &InputSink,
+) -> io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let mut out = Vec::new();
+    if let Some(payload) = payload_of(hydrate) {
+        encode_frame(Body::Hydrate(payload), &mut out);
+        io.write_all(&out).await?;
+        io.flush().await?;
+    }
+    let mut decoder = FrameDecoder::new(Role::Host);
+    decoder.push(&rest);
+    let mut chunk = vec![0; READ_CHUNK];
+    loop {
+        while let Some(message) = decoder.next().map_err(io::Error::other)? {
+            if message.stream != ATTACHED_STREAM {
+                continue;
+            }
+            let result = match message.body {
+                Body::Input(bytes) if bytes.is_empty() => Ok(()),
+                Body::Input(bytes) => input.write(&bytes).await,
+                Body::Resize { size, cell_px } => input.resize(size, cell_px).await,
+                Body::Facts(facts) => input.facts(&facts).await,
+                Body::Credit(bytes) => input.credit(bytes).await,
+                Body::Rehydrate => input.rehydrate().await,
+                Body::Release => input.release().await,
+                Body::Detach => return Ok(()),
+                // Requests are not read once the attachment is carried.
+                _ => Ok(()),
+            };
+            match result {
+                Ok(()) | Err(SessionError::Detached) => {}
+                Err(SessionError::CreditOverflow) => {
+                    return Err(io::Error::other(
+                        "the client granted more credit than a stream may hold",
+                    ));
+                }
+                Err(error) => tracing::debug!(%error, "a client's frame could not be passed on"),
+            }
+        }
+        tokio::select! {
+            frame = output.next() => {
+                let Some(frame) = frame else {
+                    // The session went without an exit: its backend went away.
+                    return Ok(());
+                };
+                let exit = matches!(frame, OutputFrame::Exit(_));
+                out.clear();
+                match frame {
+                    OutputFrame::Data(bytes) => {
+                        encode_bytes(ATTACHED_STREAM, BytesKind::Data, &bytes, &mut out);
+                    }
+                    OutputFrame::Resized(size) => encode_frame(Body::Resized(size), &mut out),
+                    OutputFrame::Event(event) => encode_frame(Body::Event(event), &mut out),
+                    OutputFrame::Exit(status) => encode_frame(Body::Exit(status), &mut out),
+                    OutputFrame::Hydrate(hydrate) => {
+                        if let Some(payload) = payload_of(hydrate) {
+                            encode_frame(Body::Hydrate(payload), &mut out);
+                        }
+                    }
+                }
+                io.write_all(&out).await?;
+                io.flush().await?;
+                if exit {
+                    return Ok(());
+                }
+            }
+            read = io.read(&mut chunk) => {
+                let read = read?;
+                if read == 0 {
+                    return Ok(());
+                }
+                decoder.push(&chunk[..read]);
+            }
+        }
+    }
+}
+
+/// Appends one frame of the carried attachment. Every frame carried is one a session
+/// sent and so one that encodes; one that did not would be left out.
+fn encode_frame(body: Body, out: &mut Vec<u8>) {
+    if let Err(error) = encode(&Message::new(ATTACHED_STREAM, body), out) {
+        tracing::error!(%error, "a frame of a carried attachment could not be encoded");
+    }
+}
+
+fn payload_of(hydrate: Hydrate) -> Option<HydratePayload> {
+    match hydrate {
+        Hydrate::None => None,
+        Hydrate::Snapshot { vt_version, bytes } => {
+            Some(HydratePayload::Snapshot { vt_version, bytes })
+        }
+        Hydrate::VtReplay(bytes) => Some(HydratePayload::VtReplay(bytes)),
+    }
+}
+
 fn session_error(error: lume_session::SessionError) -> AppError {
     AppError::from(crate::error::CommandError::from(error))
 }
@@ -1059,6 +1260,10 @@ where
                 return Ok(());
             }
             Then::Follow(followed) => return control.follow(&mut io, followed).await,
+            Then::Attach(attachment) => {
+                let rest = std::mem::take(&mut decoder).into_rest();
+                return control.carry_attachment(&mut io, rest, *attachment).await;
+            }
         }
     }
 }
@@ -2128,7 +2333,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(malformed.code, codes::BAD_REQUEST);
 
-        // A session in no pane has no screen and no keyboard.
+        // A session in no pane is typed into all the same, through its host.
         let stray = app
             .services
             .state
@@ -2138,16 +2343,28 @@ mod tests {
             .spawn(crate::testing::shell())
             .await
             .unwrap();
-        let refused = app
+        let sent = app
             .client
             .ask(AppRequestBody::Send {
                 pane: None,
                 session: Some(stray),
-                text: "x".to_owned(),
+                text: "echo typed-k7q\r".to_owned(),
             })
             .await
-            .unwrap_err();
-        assert_eq!(refused.code, codes::NOT_SHOWN);
+            .unwrap();
+        assert!(
+            matches!(sent.body, AppReplyBody::Sent { bytes: 15 }),
+            "{sent:?}"
+        );
+        app.client
+            .ask(AppRequestBody::WaitText {
+                pane: None,
+                session: Some(stray),
+                text: "typed-k7q".to_owned(),
+                timeout_ms: 10_000,
+            })
+            .await
+            .unwrap();
 
         let unknown = app
             .client
@@ -2157,6 +2374,83 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(unknown.code, codes::NOT_FOUND);
+        stop(app).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_is_shown_to_a_client_as_a_terminal_of_its_own() {
+        use lume_proto::{Body, FrameDecoder, HydratePayload, Message, Role};
+
+        let mut app = running("attach").await;
+        app.client.hello().await;
+        let (page, _pane, key) = shown(&app).await;
+
+        let attached = app
+            .client
+            .ask(AppRequestBody::Attach {
+                pane: None,
+                session: Some(key.session),
+                size: lume_proto::TermSize::new(100, 30).unwrap(),
+            })
+            .await
+            .unwrap();
+        assert!(
+            matches!(attached.body, AppReplyBody::Attached { session, .. } if session == key.session),
+            "{attached:?}"
+        );
+
+        // From here the connection carries the attachment on stream 1.
+        let mut frames = FrameDecoder::new(Role::Client);
+        frames.push(&std::mem::take(&mut app.client.decoder).into_rest());
+        let mut chunk = vec![0; READ_CHUNK];
+        let mut next = async |frames: &mut FrameDecoder, io: &mut DuplexStream| loop {
+            if let Some(message) = frames.next().unwrap() {
+                return Some(message);
+            }
+            let read = timeout(STEP, io.read(&mut chunk)).await.ok()?.unwrap();
+            if read == 0 {
+                return None;
+            }
+            frames.push(&chunk[..read]);
+        };
+        let first = next(&mut frames, &mut app.client.io).await.unwrap();
+        assert!(
+            matches!(first.body, Body::Hydrate(HydratePayload::VtReplay(_))),
+            "{first:?}"
+        );
+
+        let send = async |io: &mut DuplexStream, body: Body| {
+            let mut out = Vec::new();
+            lume_proto::encode(&Message::new(1, body), &mut out).unwrap();
+            io.write_all(&out).await.unwrap();
+        };
+        send(&mut app.client.io, Body::Credit(1024 * 1024)).await;
+        let command = if cfg!(windows) {
+            "echo lume-%OS:~0,0%k7q-bridged\r"
+        } else {
+            "echo \"lume-\"\"k7q-bridged\"\r"
+        };
+        send(&mut app.client.io, Body::Input(command.as_bytes().to_vec())).await;
+        let mut seen = String::new();
+        while !seen.contains("lume-k7q-bridged") {
+            match next(&mut frames, &mut app.client.io).await {
+                Some(Message {
+                    body: Body::Data(bytes),
+                    ..
+                }) => seen.push_str(&String::from_utf8_lossy(&bytes)),
+                Some(_) => {}
+                None => panic!("the output never came; got {seen:?}"),
+            }
+        }
+        // The window showing the session saw it too.
+        until("the window's copy of the output", || {
+            page.text().contains("lume-k7q-bridged")
+        })
+        .await;
+
+        // A detach ends what the connection was for.
+        send(&mut app.client.io, Body::Detach).await;
+        while next(&mut frames, &mut app.client.io).await.is_some() {}
         stop(app).await;
     }
 }

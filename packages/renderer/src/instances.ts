@@ -54,9 +54,9 @@ export function buildRow(
   marks?: Uint8Array,
 ): void {
   const { cols, glyph, fg, bg, underlineColor, flags } = frame;
-  const { cellWidth, cellHeight, lineThickness, padding } = metrics;
+  const { cellWidth, cellHeight, lineThickness, originX, originY } = metrics;
   const first = row * cols;
-  const y = padding + row * cellHeight;
+  const y = originY + row * cellHeight;
 
   clearSlots(planes.background, first, cols);
   clearSlots(planes.underline, first, cols);
@@ -68,7 +68,7 @@ export function buildRow(
 
   for (let col = 0; col < cols; col++) {
     const index = first + col;
-    const x = padding + col * cellWidth;
+    const x = originX + col * cellWidth;
     const cellFlags = flags[index]!;
     const selected =
       col >= selectionStart && col <= selectionEnd && selectionStart !== NO_SELECTION;
@@ -193,7 +193,7 @@ export function buildOverlay(
 
   // The records in use are drawn from the first slot on, so the runs follow the cursor's
   // rectangles directly.
-  const { cellWidth, lineThickness, underlineTop, padding } = metrics;
+  const { cellWidth, lineThickness, underlineTop, originX, originY } = metrics;
   for (const range of underlines) {
     if (counts.rects >= overlayRect.capacity) break;
     if (range.row < 0 || range.row >= frame.rows) continue;
@@ -203,8 +203,8 @@ export function buildOverlay(
     writeRect(
       overlayRect,
       counts.rects++,
-      padding + start * cellWidth,
-      padding + range.row * metrics.cellHeight + underlineTop,
+      originX + start * cellWidth,
+      originY + range.row * metrics.cellHeight + underlineTop,
       (end - start + 1) * cellWidth,
       lineThickness,
       frame.fg[range.row * frame.cols + start]!,
@@ -235,13 +235,13 @@ function buildCursor(
     return { rects: 0, glyphs: 0 };
   }
 
-  const { cellWidth, cellHeight, lineThickness: t, padding } = metrics;
+  const { cellWidth, cellHeight, lineThickness: t, originX, originY } = metrics;
   // On the second half of a double-width character the cursor covers the whole character.
   const col = cursor.wideTail && cursor.x > 0 ? cursor.x - 1 : cursor.x;
   const index = cursor.y * frame.cols + col;
   const wide = cursor.wideTail || (frame.flags[index]! & CellFlag.Wide) !== 0;
-  const x = padding + col * cellWidth;
-  const y = padding + cursor.y * cellHeight;
+  const x = originX + col * cellWidth;
+  const y = originY + cursor.y * cellHeight;
   const width = wide ? cellWidth * 2 : cellWidth;
   const color = cursor.hasColor ? cursor.color : theme.cursor;
   const shape = focused ? cursor.shape : CursorShape.HollowBlock;

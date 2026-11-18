@@ -11,6 +11,10 @@
  * it is in no window. The window that showed it keeps its view meanwhile, so that what
  * was on its screen is there when it is shown again.
  *
+ * A view out of sight can let go of its terminal after a while, when the configuration
+ * says so; its session stays attached, and the screen comes back from the session's
+ * backend when it is shown again.
+ *
  * When the window is given another workspace, every view goes: the panes of two
  * workspaces may be called the same, and are never the same panes.
  *
@@ -28,6 +32,7 @@ import { panesOf, selectFocus, selectWindowPanes } from "../layout/selectors.ts"
 import type { LayoutState, LayoutStore } from "../layout/store.ts";
 import type { PaneContent, PaneId } from "../layout/types.ts";
 import {
+  HIDDEN_RELEASE_DEFAULT_SECONDS,
   HISTORY_RELEASE_DEFAULT_SECONDS,
   SCROLLBACK_DEFAULT_LINES,
   WINDOW_HISTORY_DEFAULT_LINES,
@@ -47,7 +52,14 @@ import type { PaneTitles } from "./titles.ts";
 /** What every view of the window shares. */
 export type SharedServices = Omit<
   ViewServices,
-  "shortcut" | "attached" | "reported" | "exited" | "focused" | "restart" | "searched"
+  | "shortcut"
+  | "attached"
+  | "reported"
+  | "exited"
+  | "sizedElsewhere"
+  | "focused"
+  | "restart"
+  | "searched"
 >;
 
 /** What the views need from their surroundings. */
@@ -103,6 +115,8 @@ export class PaneViews {
   #scheduled = false;
   /** Which layout the views were last brought in line with. */
   #epoch: number | undefined;
+  /** Out of sight, each of these panes lets go of its screen when its timer runs out. */
+  readonly #releases = new Map<PaneId, number>();
 
   constructor(services: ViewsServices) {
     this.#services = services;
@@ -159,13 +173,52 @@ export class PaneViews {
     this.reconcile();
     const view = this.get(pane);
     if (!view) return;
+    this.#keep(pane);
     view.mount(elements);
     if (selectFocus(this.#services.layout.getState()) === pane) view.focus();
   }
 
-  /** Takes the elements of a pane's card back. The view and its session carry on. */
+  /**
+   * Takes the elements of a pane's card back. The view and its session carry on; when
+   * the configuration says so, the view lets go of its screen after a while unseen.
+   */
   unmount(pane: PaneId): void {
-    this.get(pane)?.unmount();
+    const view = this.get(pane);
+    if (!view) return;
+    view.unmount();
+    this.#armRelease(pane);
+  }
+
+  // Panes out of sight.
+
+  /** How long a pane stays out of sight before it lets go of its screen; none: it keeps it. */
+  #hiddenReleaseMs(): number | undefined {
+    const terminal = this.#services.config()?.config.terminal;
+    if (terminal?.["hidden-release"] !== true) return undefined;
+    return (terminal["hidden-release-seconds"] ?? HIDDEN_RELEASE_DEFAULT_SECONDS) * 1000;
+  }
+
+  /** Lets a pane out of sight let go of its screen once the time the configuration gives is up. */
+  #armRelease(pane: PaneId): void {
+    const ms = this.#hiddenReleaseMs();
+    if (ms === undefined || this.#releases.has(pane)) return;
+    const view = this.get(pane);
+    if (!view || view.mounted || view.released) return;
+    const timer = window.setTimeout(() => {
+      this.#releases.delete(pane);
+      const now = this.get(pane);
+      // Shown again, gone, or the configuration changed its mind meanwhile.
+      if (now !== view || view.mounted || this.#hiddenReleaseMs() === undefined) return;
+      view.release();
+    }, ms);
+    this.#releases.set(pane, timer);
+  }
+
+  /** A pane is on show, or gone: it keeps its screen. */
+  #keep(pane: PaneId): void {
+    const timer = this.#releases.get(pane);
+    if (timer !== undefined) window.clearTimeout(timer);
+    this.#releases.delete(pane);
   }
 
   /** Gives the keyboard to the pane the layout says has it, if its card is rendered. */
@@ -199,10 +252,14 @@ export class PaneViews {
 
   /** Sets every view up again: the configuration or the zoom changed. */
   configure(): void {
+    const releasing = this.#hiddenReleaseMs() !== undefined;
     for (const [pane, entry] of this.#entries) {
       const settings = this.#settings(pane);
       entry.look = settings.appearance;
       entry.view.configure(settings);
+      // Panes out of sight start counting when the setting is turned on, and stop when off.
+      if (releasing) this.#armRelease(pane);
+      else this.#keep(pane);
     }
     this.#plan();
   }
@@ -274,6 +331,7 @@ export class PaneViews {
       pane === parked?.id ? parked.content : state.panes[pane]?.content;
     for (const [pane, entry] of this.#entries) {
       if (panes.has(pane)) continue;
+      this.#keep(pane);
       entry.view.dispose();
       this.#entries.delete(pane);
       titles.forget(pane);
@@ -322,6 +380,7 @@ export class PaneViews {
           if (event.type === "title" || event.type === "state") retitle();
         },
         exited: (status) => reports.exited(pane, status),
+        sizedElsewhere: (sizedElsewhere) => reports.sizedElsewhere(pane, sizedElsewhere),
         focused: () => this.#tookFocus(pane),
         restart: () => this.restart(pane),
         searched: () => this.#services.searched(pane),
@@ -355,6 +414,8 @@ export class PaneViews {
         session,
       );
       if (this.#entries.get(pane) !== entry) entry.view.dispose();
+      // A pane that has never been on show counts as out of sight from now.
+      else this.#armRelease(pane);
     } catch (error) {
       // The pane has moved on to another session, or gone, while this was tried.
       if (this.#entries.get(pane) !== entry || entry.session !== session) return;
@@ -457,6 +518,7 @@ export class PaneViews {
 
   /** Disposes of every view. Their sessions carry on. */
   dispose(): void {
+    for (const pane of [...this.#releases.keys()]) this.#keep(pane);
     for (const entry of this.#entries.values()) entry.view.dispose();
     this.#entries.clear();
   }

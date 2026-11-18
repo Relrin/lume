@@ -433,5 +433,18 @@
       }
     },
     "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "response": {
+        "id": 12,
+        "ok": {
+          "bytes": 4,
+          "type": "sent"
+        }
+      }
+    },
+    "stream": 0
   }
 ]

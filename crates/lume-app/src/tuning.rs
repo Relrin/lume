@@ -85,6 +85,10 @@ pub const SAVE_MAX_DELAY: Duration = Duration::from_secs(5);
 /// is started at a size that is put right when the pane is drawn.
 pub const ESTIMATE_TIMEOUT: Duration = Duration::from_millis(500);
 
+/// The cell size a terminal outside the application is taken to have, when the
+/// command-line tool shows a session in one: it cannot tell, and programs seldom ask.
+pub const ATTACH_CELL_PX: lume_proto::CellPx = lume_proto::CellPx { w: 9, h: 18 };
+
 /// The grid a session is started with when nobody could say how large its pane is.
 pub const DEFAULT_SPAWN_COLS: u16 = 80;
 pub const DEFAULT_SPAWN_ROWS: u16 = 24;

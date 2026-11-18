@@ -172,7 +172,7 @@ async fn caps_describe_the_in_process_host() {
     let (router, local) = local_router().await;
     let caps = router.get(&Router::local_id()).unwrap().caps();
     assert!(!caps.persistent);
-    assert!(!caps.multi_client);
+    assert!(caps.multi_client);
     assert!(!caps.server_layout);
     assert_eq!(caps.responder, Responder::Backend);
     assert_eq!(

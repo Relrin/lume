@@ -70,13 +70,25 @@ pub enum RequestBody {
     List {},
     /// Opens `stream` as an attachment to `session`. The client chooses the stream id: at
     /// least 1 and never used before on this connection. The stream starts with no credit.
+    ///
+    /// A session takes several attachments at once. The one focused most recently gives
+    /// the terminal its size; the others are told the size it has.
     Attach {
         session: SessionId,
         stream: StreamId,
         facts: ClientFacts,
+        /// Start this attachment from replayed output whatever engine the client said it
+        /// runs at hello: for a client that passes the output on to a real terminal.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        replay: bool,
     },
     Kill {
         session: SessionId,
+    },
+    /// Types `text` into the session, as bytes of UTF-8, as an attachment's input would.
+    Send {
+        session: SessionId,
+        text: String,
     },
     /// Reads the screen the session's program is drawing on, as text.
     Screen {
@@ -188,6 +200,10 @@ pub enum ResponseBody {
         resize_pulls_scrollback: bool,
     },
     Killed {},
+    /// The text was handed to the program: `bytes` of it.
+    Sent {
+        bytes: u64,
+    },
     /// The screen in use, one string for each row with the blanks at its end removed.
     Screen {
         size: TermSize,

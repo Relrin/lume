@@ -255,6 +255,39 @@ pub fn asks_for_the_cursor() -> SpawnSpec {
     }
 }
 
+/// Like [`asks_for_the_cursor`], but asks only once a line is typed, so that clients
+/// can attach first, and prints whatever it reads after the answer before the word:
+/// a second answer would show there.
+pub fn asks_for_the_cursor_when_told() -> SpawnSpec {
+    if cfg!(windows) {
+        spec(
+            "powershell.exe",
+            &[
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &format!(
+                    "[void][Console]::In.ReadLine(); $p=$Host.UI.RawUI.CursorPosition; \
+                     [Console]::Out.WriteLine('{CURSOR_ANSWERED}'); [void][Console]::In.ReadLine()"
+                ),
+            ],
+        )
+    } else {
+        spec(
+            "/bin/sh",
+            &[
+                "-c",
+                &format!(
+                    "read go; stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 >/dev/null 2>&1; \
+                     stty -icanon min 0 time 10; rest=$(dd bs=64 count=1 2>/dev/null | od -An -c | tr -d ' \\n'); \
+                     stty sane; echo \"$rest{CURSOR_ANSWERED}\"; read reply"
+                ),
+            ],
+        )
+    }
+}
+
 pub fn missing_program() -> SpawnSpec {
     spec("no-such-program-anywhere", &[])
 }
@@ -321,6 +354,13 @@ impl Client {
             next_request: 1,
             reading,
         }
+    }
+
+    /// Stops reading the connection, as a client that hangs does; what the host sends
+    /// piles up in the connection.
+    #[allow(dead_code, reason = "not every test binary uses it")]
+    pub fn stop_reading(&mut self) {
+        self.reading.abort();
     }
 
     pub async fn send(&mut self, message: Message) {
@@ -424,11 +464,22 @@ impl Client {
         session: SessionId,
         stream: u32,
     ) -> Result<ResponseBody, ProtoError> {
+        self.attach_with(session, stream, facts()).await
+    }
+
+    /// Like [`attach`](Self::attach), with the client's view as given.
+    pub async fn attach_with(
+        &mut self,
+        session: SessionId,
+        stream: u32,
+        facts: ClientFacts,
+    ) -> Result<ResponseBody, ProtoError> {
         let response = self
             .request(RequestBody::Attach {
                 session,
                 stream,
-                facts: facts(),
+                facts,
+                replay: false,
             })
             .await;
         if let Ok(ResponseBody::Attached { hydrate, .. }) = &response
@@ -481,6 +532,18 @@ impl Client {
             "{attached:?}"
         );
         self.credit(stream, 1024 * 1024).await;
+    }
+
+    /// Takes the next copy of the screen sent on `stream` in the middle of its output,
+    /// and the output before it.
+    pub async fn rehydrated(&mut self, stream: u32) -> HydratePayload {
+        let is_hydrate = |message: &Message| {
+            message.stream == stream && matches!(message.body, Body::Hydrate(_))
+        };
+        match self.expect("a copy of the screen", is_hydrate).await.body {
+            Body::Hydrate(payload) => payload,
+            _ => unreachable!("matched as a hydrate"),
+        }
     }
 
     pub async fn credit(&mut self, stream: u32, bytes: u32) {

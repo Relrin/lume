@@ -251,5 +251,74 @@
       }
     },
     "stream": 0
+  },
+  {
+    "kind": "release",
+    "stream": 2
+  },
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "session": "0123456789abcdef",
+          "text": "dir\r",
+          "type": "send"
+        },
+        "id": 10
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "facts": {
+            "cell_px": {
+              "h": 18,
+              "w": 9
+            },
+            "focused": true,
+            "palette": {
+              "ansi": [
+                "#000000",
+                "#010203",
+                "#020406",
+                "#030609",
+                "#04080c",
+                "#050a0f",
+                "#060c12",
+                "#070e15",
+                "#081018",
+                "#09121b",
+                "#0a141e",
+                "#0b1621",
+                "#0c1824",
+                "#0d1a27",
+                "#0e1c2a",
+                "#0f1e2d"
+              ],
+              "bg": "#101112",
+              "cursor": "#fedcba",
+              "fg": "#d0d1d2"
+            },
+            "scheme": "dark",
+            "size": {
+              "cols": 120,
+              "rows": 40
+            },
+            "visible": false
+          },
+          "replay": true,
+          "session": "0123456789abcdef",
+          "stream": 3,
+          "type": "attach"
+        },
+        "id": 11
+      }
+    },
+    "stream": 0
   }
 ]

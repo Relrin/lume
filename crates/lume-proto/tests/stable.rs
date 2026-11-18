@@ -38,6 +38,7 @@ fn kind_values_are_stable() {
         (Kind::Credit, 0x13),
         (Kind::Detach, 0x14),
         (Kind::Rehydrate, 0x15),
+        (Kind::Release, 0x16),
     ];
     for (kind, value) in expected {
         assert_eq!(kind as u8, value, "{kind:?}");
@@ -155,6 +156,7 @@ fn client_messages() -> Vec<Message> {
                 session: session(),
                 stream: 1,
                 facts: facts(),
+                replay: false,
             },
         ),
         Message::new(1, Body::Credit(1024 * 1024)),
@@ -185,6 +187,24 @@ fn client_messages() -> Vec<Message> {
             9,
             RequestBody::Shutdown {
                 end_sessions: false,
+            },
+        ),
+        // Added after the messages above were pinned, and so after them.
+        Message::new(2, Body::Release),
+        request(
+            10,
+            RequestBody::Send {
+                session: session(),
+                text: "dir\r".to_owned(),
+            },
+        ),
+        request(
+            11,
+            RequestBody::Attach {
+                session: session(),
+                stream: 3,
+                facts: facts(),
+                replay: true,
             },
         ),
     ]
@@ -336,6 +356,7 @@ fn host_messages() -> Vec<Message> {
             }),
         ),
         response(11, Ok(ResponseBody::Stopping { ended: 2 })),
+        response(12, Ok(ResponseBody::Sent { bytes: 4 })),
     ])
     .collect()
 }
@@ -448,6 +469,7 @@ fn describe(message: &Message) -> Value {
         Body::Credit(bytes) => ("credit", json!({ "bytes": bytes })),
         Body::Detach => ("detach", json!({})),
         Body::Rehydrate => ("rehydrate", json!({})),
+        Body::Release => ("release", json!({})),
     };
     let mut described = json!({ "stream": message.stream, "kind": kind });
     if let (Value::Object(into), Value::Object(from)) = (&mut described, fields) {
@@ -555,6 +577,10 @@ fn fixed_layouts_are_spelt_out_byte_for_byte() {
     assert_eq!(
         encoded(Message::new(1, Body::Rehydrate)),
         [1, 0, 0, 0, 0x15, 0, 0, 0, 0]
+    );
+    assert_eq!(
+        encoded(Message::new(1, Body::Release)),
+        [1, 0, 0, 0, 0x16, 0, 0, 0, 0]
     );
 
     let facts_frame = encoded(Message::new(1, Body::Facts(facts())));
