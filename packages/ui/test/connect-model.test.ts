@@ -147,7 +147,13 @@ describe("what the Connect palette lists", () => {
   it("moves through the profiles, then the actions", () => {
     const rows = connectRows(connectGroups(LIST, "", "all"));
     expect(
-      rows.map((row) => (row.type === "profile" ? row.entry.profile.id : row.action.id)),
+      rows.map((row) =>
+        row.type === "profile"
+          ? row.entry.profile.id
+          : row.type === "action"
+            ? row.action.id
+            : row.type,
+      ),
     ).toEqual([
       "nu",
       "auto.pwsh",
@@ -166,8 +172,9 @@ describe("what the Connect palette lists", () => {
   it("steps through the filters in the order they are shown, round and round", () => {
     expect(stepFilter("all", 1)).toBe("ssh");
     expect(stepFilter("ssh", 1)).toBe("wsl");
-    expect(stepFilter("local", 1)).toBe("all");
-    expect(stepFilter("all", -1)).toBe("local");
+    expect(stepFilter("local", 1)).toBe("detached");
+    expect(stepFilter("detached", 1)).toBe("all");
+    expect(stepFilter("all", -1)).toBe("detached");
   });
 });
 

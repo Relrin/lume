@@ -12,10 +12,11 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use lume_proto::SessionId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::model::{PaneContent, Workspace};
+use crate::model::Workspace;
 use crate::tuning::{CORRUPT_KEPT, WORKSPACE_FILE_VERSION, WORKSPACE_NAME_MAX_CHARS};
 use crate::validate::{is_normalised, validate};
 
@@ -43,8 +44,8 @@ const MIGRATIONS: &[(u32, Migration)] = &[(1, Ok)];
 /// What reading a workspace's file gave.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Loaded {
-    /// The workspace, with the sessions it had forgotten: they ended with the
-    /// application that wrote the file.
+    /// The workspace, with the sessions its panes showed when it was written. Those
+    /// may have ended since; whoever shows the workspace finds out which.
     Workspace(Box<Workspace>),
     /// There is no such file.
     Missing,
@@ -191,6 +192,27 @@ impl Store {
         }
     }
 
+    /// The sessions the panes of a workspace's file show, without setting aside a file
+    /// that cannot be read: one that cannot be read shows none.
+    pub fn sessions_in(&self, name: &str) -> Result<Vec<SessionId>, StoreError> {
+        let path = self.path(name)?;
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) if error.kind() == io::ErrorKind::InvalidData => return Ok(Vec::new()),
+            Err(error) => return Err(Self::io(&path)(error)),
+        };
+        Ok(read(&text, name, MIGRATIONS, WORKSPACE_FILE_VERSION)
+            .map(|workspace| {
+                workspace
+                    .sessions()
+                    .into_iter()
+                    .map(|(_, session)| session)
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
     /// Moves a file that cannot be used out of the way, and removes the oldest of the
     /// files set aside before it when there are more than are kept.
     fn set_aside(
@@ -324,7 +346,6 @@ fn read(
     // The file is named after the workspace, and a file that was renamed or copied by
     // hand is the workspace its new name says.
     workspace.name = name.to_owned();
-    forget_sessions(&mut workspace);
     if let Err(violations) = validate(&workspace) {
         let first = violations
             .first()
@@ -357,18 +378,6 @@ fn migrate(
         }
     }
     Ok(value)
-}
-
-/// The sessions a file names ended with the application that wrote it.
-fn forget_sessions(workspace: &mut Workspace) {
-    let ids: Vec<_> = workspace.panes().into_iter().map(|pane| pane.id).collect();
-    for id in ids {
-        if let Some(pane) = workspace.pane_mut(id)
-            && let PaneContent::Terminal(terminal) = &mut pane.content
-        {
-            terminal.session = None;
-        }
-    }
 }
 
 #[cfg(test)]

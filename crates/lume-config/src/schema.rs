@@ -22,12 +22,12 @@ use crate::settings::{PAGES_KEY, Shown, pages};
 use crate::tuning::{
     ACCENT_PRESETS, BACKGROUND_BLUR_MAX, CURSOR_EFFECT_LENGTH_MAX, CURSOR_EFFECT_LENGTH_MIN,
     FONT_SIZE_MAX, FONT_SIZE_MIN, HISTORY_RELEASE_SECONDS_DEFAULT, HISTORY_RELEASE_SECONDS_MAX,
-    HISTORY_RELEASE_SECONDS_MIN, LINE_HEIGHT_MAX, LINE_HEIGHT_MIN, LONG_COMMAND_SECONDS_DEFAULT,
-    LONG_COMMAND_SECONDS_MAX, LONG_COMMAND_SECONDS_MIN, PANE_LENGTH_MAX, SCROLLBACK_LINES_MAX,
-    SETTINGS_STEP_EFFECT_LENGTH, SETTINGS_STEP_LENGTH, SETTINGS_STEP_LINE_HEIGHT,
-    SETTINGS_STEP_LINES, SETTINGS_STEP_PERCENT, SETTINGS_STEP_SECONDS, UI_FONT_SIZE_MAX,
-    UI_FONT_SIZE_MIN, WINDOW_HISTORY_LINES_DEFAULT, WINDOW_HISTORY_LINES_MAX,
-    WINDOW_HISTORY_LINES_MIN,
+    HISTORY_RELEASE_SECONDS_MIN, HOST_IDLE_EXIT_SECONDS_DEFAULT, HOST_IDLE_EXIT_SECONDS_MAX,
+    LINE_HEIGHT_MAX, LINE_HEIGHT_MIN, LONG_COMMAND_SECONDS_DEFAULT, LONG_COMMAND_SECONDS_MAX,
+    LONG_COMMAND_SECONDS_MIN, PANE_LENGTH_MAX, SCROLLBACK_LINES_MAX, SETTINGS_STEP_EFFECT_LENGTH,
+    SETTINGS_STEP_LENGTH, SETTINGS_STEP_LINE_HEIGHT, SETTINGS_STEP_LINES, SETTINGS_STEP_PERCENT,
+    SETTINGS_STEP_SECONDS, UI_FONT_SIZE_MAX, UI_FONT_SIZE_MIN, WINDOW_HISTORY_LINES_DEFAULT,
+    WINDOW_HISTORY_LINES_MAX, WINDOW_HISTORY_LINES_MIN,
 };
 
 /// The two answers to whether closing asks first, as the settings window calls them.
@@ -43,6 +43,8 @@ pub struct Config {
     pub window: WindowConfig,
     /// Workspaces.
     pub workspace: WorkspaceConfig,
+    /// The session host, which runs the programs in the terminals.
+    pub host: HostSettings,
     /// How things look: the theme and what overrides it.
     pub appearance: AppearanceConfig,
     /// The fonts.
@@ -224,8 +226,49 @@ pub enum OnSwitch {
     /// They are ended.
     #[default]
     Close,
-    /// They keep running. Not available yet: programs are ended as with `close`.
+    /// They keep running, and the workspace's panes show them again when it is opened
+    /// again.
     Keep,
+}
+
+/// Where the session host runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostMode {
+    /// In a process of its own, which keeps the programs running when the application
+    /// closes, crashes or is updated; the application shows them again when it starts.
+    Daemon,
+    /// Inside the application: the programs end when it closes.
+    #[default]
+    InProcess,
+}
+
+/// The session host, which runs the programs in the terminals.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct HostSettings {
+    /// Where the session host runs. Read when the application starts.
+    #[schemars(extend("x-lume-settings" = Shown::select("general", "Sessions", 10, "Keep programs running")
+        .help("After Lume closes, programs keep running and come back when it starts again. Takes effect the next time Lume starts")
+        .options(&[("in-process", "Only while Lume runs"), ("daemon", "After Lume closes")])))]
+    pub mode: HostMode,
+    /// How long, in seconds, the session host stays with no window and no running
+    /// program before it exits, when programs are kept running after the application
+    /// closes. Zero keeps it running.
+    #[schemars(range(max = HOST_IDLE_EXIT_SECONDS_MAX))]
+    #[schemars(extend("x-lume-settings" = Shown::number("general", "Sessions", 20, "Session host exits when idle after", SETTINGS_STEP_SECONDS)
+        .help("With no window open and no program running. 0 keeps it running")
+        .seconds()))]
+    pub idle_exit: u32,
+}
+
+impl Default for HostSettings {
+    fn default() -> Self {
+        Self {
+            mode: HostMode::InProcess,
+            idle_exit: HOST_IDLE_EXIT_SECONDS_DEFAULT,
+        }
+    }
 }
 
 /// Workspaces.

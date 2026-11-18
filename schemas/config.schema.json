@@ -1396,6 +1396,68 @@
       },
       "type": "object"
     },
+    "host": {
+      "default": {
+        "idle-exit": 60,
+        "mode": "in-process"
+      },
+      "description": "The session host, which runs the programs in the terminals.",
+      "properties": {
+        "idle-exit": {
+          "default": 60,
+          "description": "How long, in seconds, the session host stays with no window and no running\nprogram before it exits, when programs are kept running after the application\ncloses. Zero keeps it running.",
+          "format": "uint32",
+          "maximum": 86400,
+          "minimum": 0,
+          "type": "integer",
+          "x-lume-settings": {
+            "control": "number",
+            "group": "Sessions",
+            "help": "With no window open and no program running. 0 keeps it running",
+            "label": "Session host exits when idle after",
+            "order": 20,
+            "page": "general",
+            "step": 1.0,
+            "unit": "seconds"
+          }
+        },
+        "mode": {
+          "default": "in-process",
+          "description": "Where the session host runs. Read when the application starts.",
+          "oneOf": [
+            {
+              "const": "daemon",
+              "description": "In a process of its own, which keeps the programs running when the application\ncloses, crashes or is updated; the application shows them again when it starts.",
+              "type": "string"
+            },
+            {
+              "const": "in-process",
+              "description": "Inside the application: the programs end when it closes.",
+              "type": "string"
+            }
+          ],
+          "x-lume-settings": {
+            "control": "select",
+            "group": "Sessions",
+            "help": "After Lume closes, programs keep running and come back when it starts again. Takes effect the next time Lume starts",
+            "label": "Keep programs running",
+            "options": [
+              {
+                "label": "Only while Lume runs",
+                "value": "in-process"
+              },
+              {
+                "label": "After Lume closes",
+                "value": "daemon"
+              }
+            ],
+            "order": 10,
+            "page": "general"
+          }
+        }
+      },
+      "type": "object"
+    },
     "keybindings": {
       "additionalProperties": {
         "anyOf": [
@@ -2616,7 +2678,7 @@
             },
             {
               "const": "keep",
-              "description": "They keep running. Not available yet: programs are ended as with `close`.",
+              "description": "They keep running, and the workspace's panes show them again when it is opened\nagain.",
               "type": "string"
             }
           ]
@@ -2635,7 +2697,8 @@
         "Startup",
         "Windows",
         "Attention",
-        "Closing"
+        "Closing",
+        "Sessions"
       ],
       "icon": "general",
       "id": "general",

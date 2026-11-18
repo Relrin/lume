@@ -7,26 +7,37 @@
  * list, and the column beside it says what the marked profile will run and where it
  * comes from. Enter opens the profile in a new tab and Ctrl+Enter beside the pane that
  * has the keyboard; Escape puts the palette away.
+ *
+ * Sessions that still run in the session host with no pane to show them are listed
+ * after the profiles, and are shown again in a tab of their own, or beside the pane
+ * that has the keyboard, the same way.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 
+import type { DetachedSession } from "../core/types.ts";
+import { homeShortened } from "../events/where.ts";
 import { useShell } from "../shell/context.ts";
 import { FileIcon, RefreshIcon, SearchIcon } from "../shell/icons.tsx";
+import { sentence } from "../shell/notices.ts";
 import { KindIcon } from "./icons.tsx";
 import {
-  CONNECT_FILTERS,
+  DETACHED_LABEL,
+  connectFilters,
   connectGroups,
   connectRows,
   describeRun,
+  detachedEntries,
   openCommand,
+  reattachCommand,
   sourceOf,
   stepFilter,
   type ConnectAction,
   type ConnectEntry,
   type ConnectFilter,
   type ConnectRow,
+  type DetachedEntry,
 } from "./model.ts";
 
 const LIST_ID = "connect-list";
@@ -61,17 +72,87 @@ function MarkedName({ text, indices }: { text: string; indices: readonly number[
   );
 }
 
-/** The column that says what the marked profile, or action, is. */
+/** Whether a detached session's program runs, as a dot like the mockup's. */
+function SessionDot({ session }: { session: DetachedSession }) {
+  return (
+    <span className="connect-tile connect-session-tile">
+      <span className="connect-dot" data-state={session.exited ? "ended" : "running"} />
+    </span>
+  );
+}
+
+/** What the column beside the list says of a detached session. */
+function SessionDetail({
+  entry,
+  place,
+  attach,
+  end,
+}: {
+  entry: DetachedEntry;
+  place: (cwd: string) => string;
+  attach: (entry: DetachedEntry, how: "tab" | "split") => void;
+  end: (entry: DetachedEntry) => void;
+}) {
+  const { session } = entry;
+  const facts: [string, string][] = [["Runs", session.program]];
+  if (session.cwd !== null && session.cwd !== "") facts.push(["In", place(session.cwd)]);
+  if (session.pid !== null) facts.push(["Process", String(session.pid)]);
+  facts.push(["Started", new Date(session.created_unix_ms).toLocaleString()]);
+  facts.push(["Session", session.session]);
+  return (
+    <section className="connect-detail" aria-label="Selection">
+      <div className="connect-detail-head">
+        <h2 className="connect-detail-name">{entry.name}</h2>
+        <span className="connect-detail-line">
+          {session.exited ? "Ended, not shown in any pane" : "Running, not shown in any pane"}
+        </span>
+      </div>
+      <dl className="connect-facts">
+        {facts.map(([label, value]) => (
+          <div key={label} className="connect-fact">
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="connect-detail-spacer" />
+      <div className="connect-detail-buttons">
+        <button
+          type="button"
+          className="connect-primary"
+          tabIndex={-1}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => attach(entry, "tab")}
+        >
+          Attach in new tab
+        </button>
+        <button
+          type="button"
+          className="connect-secondary"
+          tabIndex={-1}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => end(entry)}
+        >
+          End session
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** The column that says what the marked profile, session or action is. */
 function Detail({
   row,
   splitKey,
   open,
   act,
+  session,
 }: {
   row: ConnectRow | undefined;
   splitKey: string;
   open: (entry: ConnectEntry, how: "tab" | "split") => void;
   act: (action: ConnectAction) => void;
+  session: (entry: DetachedEntry) => ReactNode;
 }) {
   if (!row) {
     return (
@@ -80,6 +161,7 @@ function Detail({
       </section>
     );
   }
+  if (row.type === "session") return session(row.entry);
   if (row.type === "action") {
     return (
       <section className="connect-detail" aria-label="Selection">
@@ -152,18 +234,55 @@ function ConnectDialog() {
   const app = useShell();
   const list = useStore(app.profiles, (state) => state.list);
   const platform = useStore(app.config, (state) => state.view?.platform);
+  const opened = useStore(app.connect, (state) => state.filter);
   const field = useRef<HTMLInputElement>(null);
   const results = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<ConnectFilter>("all");
+  const [filter, setFilter] = useState<ConnectFilter>(opened);
   const [selected, setSelected] = useState(0);
+  // The sessions no pane shows: `null` until the core has said, and if it could not.
+  const [detached, setDetached] = useState<readonly DetachedSession[] | null>(null);
+  const [detachedProblem, setDetachedProblem] = useState<string | null>(null);
+  const [asked, setAsked] = useState(0);
+  // When the list was read, which is what the sessions' ages are counted from.
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     field.current?.focus();
   }, []);
 
+  useEffect(() => {
+    let current = true;
+    app.client.sessionsDetached().then(
+      (answer) => {
+        if (!current) return;
+        setDetached(answer.sessions);
+        setDetachedProblem(null);
+        setNow(Date.now());
+      },
+      (error: unknown) => {
+        if (!current) return;
+        setDetached(null);
+        setDetachedProblem(error instanceof Error ? error.message : String(error));
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [app.client, asked]);
+
+  const windows = platform === "windows";
+  const place = useMemo(
+    () => (cwd: string) => homeShortened(cwd, app.machine.home, windows),
+    [app.machine.home, windows],
+  );
+  const filters = connectFilters((detached?.length ?? 0) > 0, filter);
   const groups = useMemo(() => connectGroups(list, query, filter), [list, query, filter]);
-  const rows = useMemo(() => connectRows(groups), [groups]);
+  const sessions = useMemo(
+    () => detachedEntries(detached, query, filter, now, place),
+    [detached, query, filter, now, place],
+  );
+  const rows = useMemo(() => connectRows(groups, sessions), [groups, sessions]);
   const marked = Math.min(selected, Math.max(0, rows.length - 1));
   const splitKey = platform === "macos" ? "⌘ ↵" : "Ctrl ↵";
 
@@ -182,10 +301,27 @@ function ConnectDialog() {
     close();
     app.commands.run(action.command);
   };
+  const attach = (entry: DetachedEntry, how: "tab" | "split") => {
+    const command = reattachCommand(entry.session, how);
+    close();
+    app.commands.run(command.id, command.args);
+  };
+  // The palette stays, and lists the sessions again once the session has gone.
+  const end = (entry: DetachedEntry) => {
+    const { session, backend } = entry.session;
+    app.client.commandRun("lume.session.end", { session, backend }).then(
+      () => setAsked((count) => count + 1),
+      (error: unknown) => {
+        app.notices.push("error", sentence(error instanceof Error ? error.message : String(error)));
+        setAsked((count) => count + 1);
+      },
+    );
+  };
   const accept = (index: number, how: "tab" | "split") => {
     const row = rows[index];
     if (!row) return;
     if (row.type === "profile") open(row.entry, how);
+    else if (row.type === "session") attach(row.entry, how);
     else act(row.action);
   };
   const move = (to: number) => {
@@ -199,11 +335,21 @@ function ConnectDialog() {
 
   const profileCount = rows.filter((row) => row.type === "profile").length;
   let index = 0;
+  const keyOf = (row: ConnectRow): string => {
+    switch (row.type) {
+      case "profile":
+        return `profile:${row.entry.profile.id}`;
+      case "session":
+        return `session:${row.entry.session.backend}:${row.entry.session.session}`;
+      case "action":
+        return `action:${row.action.id}`;
+    }
+  };
   const option = (row: ConnectRow, children: ReactNode, className: string) => {
     const at = index++;
     return (
       <div
-        key={row.type === "profile" ? `profile:${row.entry.profile.id}` : `action:${row.action.id}`}
+        key={keyOf(row)}
         id={optionId(at)}
         className={className}
         role="option"
@@ -266,7 +412,7 @@ function ConnectDialog() {
                   move(rows.length - 1);
                   break;
                 case "Tab":
-                  filterBy(stepFilter(filter, event.shiftKey ? -1 : 1));
+                  filterBy(stepFilter(filter, event.shiftKey ? -1 : 1, filters));
                   break;
                 case "Enter":
                   accept(marked, event.ctrlKey || event.metaKey ? "split" : "tab");
@@ -284,7 +430,7 @@ function ConnectDialog() {
             }}
           />
           <span className="connect-chips" role="group" aria-label="Show">
-            {CONNECT_FILTERS.map((choice) => (
+            {filters.map((choice) => (
               <button
                 key={choice.value}
                 type="button"
@@ -335,6 +481,31 @@ function ConnectDialog() {
                   )}
                 </div>
               ))}
+              {sessions.length > 0 && (
+                <div className="connect-group" role="group" aria-label={DETACHED_LABEL}>
+                  <div className="connect-heading" aria-hidden="true">
+                    {DETACHED_LABEL}
+                  </div>
+                  {sessions.map((entry) => {
+                    const isMarked =
+                      rows[marked]?.type === "session" && rows[marked].entry === entry;
+                    return option(
+                      { type: "session", entry },
+                      <>
+                        <SessionDot session={entry.session} />
+                        <span className="connect-row-text">
+                          <span className="connect-row-name">
+                            <MarkedName text={entry.name} indices={entry.indices} />
+                          </span>
+                          <span className="connect-row-line">{entry.line}</span>
+                        </span>
+                        {isMarked && <span className="connect-hint">↵ attach</span>}
+                      </>,
+                      "connect-row",
+                    );
+                  })}
+                </div>
+              )}
               <div className="connect-group" role="group" aria-label="Actions">
                 <div className="connect-heading" aria-hidden="true">
                   Actions
@@ -355,13 +526,24 @@ function ConnectDialog() {
                   )}
               </div>
             </div>
-            {profileCount === 0 && (
-              <p className="connect-note">
-                {list === null
-                  ? "Looking for shells, distributions and hosts…"
-                  : "No profile matches."}
-              </p>
-            )}
+            {filter === "detached"
+              ? sessions.length === 0 && (
+                  <p className="connect-note">
+                    {detachedProblem !== null
+                      ? `The detached sessions could not be listed: ${detachedProblem}`
+                      : detached === null
+                        ? "Looking for detached sessions…"
+                        : "No session runs without a pane to show it."}
+                  </p>
+                )
+              : profileCount === 0 &&
+                sessions.length === 0 && (
+                  <p className="connect-note">
+                    {list === null
+                      ? "Looking for shells, distributions and hosts…"
+                      : "No profile matches."}
+                  </p>
+                )}
             {list !== null && !list.looked && (
               <p className="connect-note">Still looking for shells, distributions and hosts…</p>
             )}
@@ -371,7 +553,15 @@ function ConnectDialog() {
               </p>
             ))}
           </div>
-          <Detail row={rows[marked]} splitKey={splitKey} open={open} act={act} />
+          <Detail
+            row={rows[marked]}
+            splitKey={splitKey}
+            open={open}
+            act={act}
+            session={(entry) => (
+              <SessionDetail entry={entry} place={place} attach={attach} end={end} />
+            )}
+          />
         </div>
         <div className="connect-footer">
           <span>

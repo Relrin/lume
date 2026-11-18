@@ -34,8 +34,18 @@
 # corners = "round"
 
 [workspace]
-# What happens to a workspace's programs when another workspace is opened: "close".
+# What happens to a workspace's programs when another workspace is opened: "close"
+# ends them, "keep" keeps them running for when the workspace is opened again.
 # on-switch = "close"
+
+[host]
+# Where the programs in the terminals run: "in-process", inside Lume, so that they end
+# with it, or "daemon", in a session host of their own that keeps them running after
+# Lume closes and shows them again when it starts. Read when Lume starts.
+# mode = "in-process"
+# With "daemon": how long, in seconds, the session host stays with no window and no
+# running program before it exits. 0 keeps it running.
+# idle-exit = 60
 
 [appearance]
 # The theme, whatever the system's colour scheme is. Left out, the theme follows the

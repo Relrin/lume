@@ -30,7 +30,7 @@ pub const EXIT_NOT_RUNNING: u8 = 4;
 /// keeps the time, and its answer that the time ran out must be able to arrive.
 const WAIT_SLACK: Duration = Duration::from_secs(10);
 
-fn failure(code: &str, message: impl std::fmt::Display) -> Value {
+pub(crate) fn failure(code: &str, message: impl std::fmt::Display) -> Value {
     json!({ "ok": false, "code": code, "message": message.to_string() })
 }
 

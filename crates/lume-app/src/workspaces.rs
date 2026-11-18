@@ -16,6 +16,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use lume_config::schema::OnSwitch;
 use lume_config::{Dirs, LayerInput, LayerKind, resolve_layers};
 use lume_layout::{
     GroupId, Intent, Loaded, NewContent, Shelved, SpawnRequest, Store, StoreError, Workspace,
@@ -399,13 +400,17 @@ impl Panes {
             return Ok(());
         }
 
+        // What becomes of its programs is the say of the workspace being put away.
+        let keep = self.config.current().config.workspace.on_switch == OnSwitch::Keep;
         // The one on show is written as it stands, with every pane still in it.
         self.save().await;
         let store = Arc::clone(&self.store);
         let wanted = name.to_owned();
-        let opened = tokio::task::spawn_blocking(move || open_workspace(&store, &wanted, None))
+        let mut opened = tokio::task::spawn_blocking(move || open_workspace(&store, &wanted, None))
             .await
             .map_err(|error| CommandError::internal(error.to_string()))?;
+        // Its programs may have been kept running while it was put away.
+        self.keep_live_sessions(&mut opened.workspace).await;
         // A file that differs from the name asked for only in the case of its letters
         // is the same workspace, and the layout takes the name it was read under.
         let name = opened.workspace.name.clone();
@@ -419,8 +424,9 @@ impl Panes {
             self.notice("warning", warning);
         }
 
-        // The sessions of the workspace that was put away end with it.
-        if let Some(state) = self.state.upgrade() {
+        // The sessions of the workspace that was put away end with it, unless they are
+        // to be kept for when it is shown again. Its file names them.
+        if let Some(state) = self.state.upgrade().filter(|_| !keep) {
             for (pane, session) in old.sessions() {
                 let Some(found) = old.pane(pane) else {
                     continue;

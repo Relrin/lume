@@ -89,6 +89,14 @@ pub enum RequestBody {
         text: String,
         timeout_ms: u64,
     },
+    /// Says what the host is and what it is doing.
+    HostStatus {},
+    /// Stops the host. With `end_sessions` false it is refused while any session's
+    /// program runs; with it true every session is ended first. Answered with
+    /// `stopping` before the host closes its connections and exits.
+    Shutdown {
+        end_sessions: bool,
+    },
 }
 
 /// The answer to a request.
@@ -194,6 +202,26 @@ pub enum ResponseBody {
         row: u16,
         /// That row's text.
         line: String,
+    },
+    HostStatus {
+        host_version: String,
+        pid: u32,
+        /// When the host started, in milliseconds since the Unix epoch.
+        started_unix_ms: u64,
+        /// Whether sessions outlive the clients that started them.
+        persistent: bool,
+        /// Sessions, running or ended and not yet removed.
+        sessions: u32,
+        /// Connected clients that keep the host busy: every kind but command-line tools.
+        clients: u32,
+        /// How long the host stays with no session and no client before it exits, if
+        /// it ever does by itself.
+        idle_exit_ms: Option<u64>,
+    },
+    /// The host is stopping: it closes every connection and exits.
+    Stopping {
+        /// How many sessions it ended on the way.
+        ended: u32,
     },
 }
 

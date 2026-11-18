@@ -32,6 +32,12 @@ pub const HISTORY_RELEASE_SECONDS_DEFAULT: u32 = 60;
 pub const HISTORY_RELEASE_SECONDS_MIN: u32 = 5;
 pub const HISTORY_RELEASE_SECONDS_MAX: u32 = 86_400;
 
+/// How long the session host stays with no window and no running session before it
+/// exits, in seconds, unless the settings say otherwise; and the longest it may be told
+/// to. Zero keeps it running.
+pub const HOST_IDLE_EXIT_SECONDS_DEFAULT: u32 = 60;
+pub const HOST_IDLE_EXIT_SECONDS_MAX: u32 = 86_400;
+
 /// The smallest and largest size of terminal text, in CSS pixels.
 pub const FONT_SIZE_MIN: f64 = 1.0;
 pub const FONT_SIZE_MAX: f64 = 72.0;

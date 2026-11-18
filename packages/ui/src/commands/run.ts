@@ -157,6 +157,10 @@ export class Commands {
         palette.getState().close();
         connect.getState().toggle();
         return;
+      case "lume.session.detached":
+        palette.getState().close();
+        connect.getState().open("detached");
+        return;
       case "lume.search.open": {
         const pane = this.#pane(args);
         search.open(pane, queryOf(args));

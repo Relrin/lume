@@ -1,10 +1,13 @@
 //! `lume-gui`: the Lume application.
 //!
 //! It opens the windows of a workspace, whose webviews show terminals in tabs and
-//! panes. The sessions behind them run on a session host inside this process, reached
-//! through the session protocol like any other host would be. Which windows and panes
-//! there are is the layout's to say, the application opens the windows and starts and
-//! ends the sessions, and each webview follows through commands and a byte carrier.
+//! panes. The sessions behind them run on a session host, reached through the session
+//! protocol: a host inside this process, whose sessions end with it, or, if the settings
+//! say so, `lume-host`, a process of its own that keeps them running after the
+//! application closes and that the application starts when it is not running. Which
+//! windows and panes there are is the layout's to say, the application opens the
+//! windows and starts and ends the sessions, and each webview follows through commands
+//! and a byte carrier.
 //!
 //! `lume-gui --probe` starts no session. The page reports which webview engine it runs
 //! on and what GPU paths the engine offers, the findings are printed to standard output
@@ -40,6 +43,7 @@ mod error;
 mod fonts;
 mod frames;
 mod harness;
+mod host;
 mod log;
 mod marks;
 mod opener;
@@ -58,12 +62,13 @@ mod workspaces;
 
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
-use lume_config::schema::Confirm;
+use lume_config::schema::{Confirm, HostMode, HostSettings};
 use lume_config::{ColorScheme, Dirs};
 use lume_ipc::Listener;
 use lume_layout::{Intent, Store};
-use lume_session::{BackendId, HostConfig, LocalBackend, Router};
+use lume_session::{BackendId, Daemon, HostConfig, LocalBackend, Router};
 use tauri::webview::PageLoadEvent;
 use tauri::{Manager, RunEvent, WindowEvent};
 
@@ -79,17 +84,68 @@ use crate::state::AppState;
 use crate::synthetic::SyntheticPty;
 use crate::window::WindowShell;
 
-/// Starts the backend for sessions on this machine and puts it in a router.
-fn local_sessions(router: &Router) -> Option<Arc<LocalBackend>> {
+/// The backend for sessions on this machine, and what the user is to be told about it.
+struct LocalSessions {
+    backend: Option<Arc<LocalBackend>>,
+    /// Why the sessions run inside this process when they were meant not to.
+    warning: Option<String>,
+}
+
+/// Connects to the session host that runs on its own, starting it if it is not
+/// running.
+fn daemon_sessions(
+    settings: &HostSettings,
+    app_endpoint: Option<&str>,
+) -> Result<LocalBackend, String> {
+    let program = Daemon::beside_this_program()
+        .map_err(|error| format!("the session host's program is missing ({error})"))?;
+    let daemon = Daemon {
+        endpoint: lume_proto::host_endpoint_name(app_endpoint),
+        program,
+        idle_exit: Duration::from_secs(u64::from(settings.idle_exit)),
+        log: lume_config::host_log_file(),
+        state: Dirs::resolve().map(|dirs| dirs.state),
+    };
+    // The backend's tasks live on Tauri's runtime, which is the one commands run on.
+    tauri::async_runtime::block_on(LocalBackend::daemon(daemon)).map_err(|error| error.to_string())
+}
+
+/// Starts the backend for sessions on this machine and puts it in a router: inside this
+/// process, unless the settings ask for the session host that runs on its own and it
+/// can be reached.
+fn local_sessions(
+    router: &Router,
+    settings: Option<&HostSettings>,
+    app_endpoint: Option<&str>,
+) -> LocalSessions {
+    let mut warning = None;
+    if let Some(settings) = settings.filter(|settings| settings.mode == HostMode::Daemon) {
+        match daemon_sessions(settings, app_endpoint) {
+            Ok(local) => {
+                let local = Arc::new(local);
+                router.insert(Router::local_id(), local.clone());
+                return LocalSessions {
+                    backend: Some(local),
+                    warning: None,
+                };
+            }
+            Err(problem) => {
+                tracing::error!(
+                    problem,
+                    "the session host could not be reached; sessions run inside the application"
+                );
+                warning = Some(format!("Programs will end when Lume closes: {problem}."));
+            }
+        }
+    }
     let config = HostConfig {
         // Without a folder of its own the host asks no shell to report anything.
         shell_integration_dir: Dirs::resolve()
             .map(|dirs| dirs.state.join(tuning::SHELL_INTEGRATION_DIR)),
         ..HostConfig::default()
     };
-    // The backend's tasks live on Tauri's runtime, which is the one commands run on.
     let started = tauri::async_runtime::block_on(LocalBackend::in_process(config));
-    match started {
+    let backend = match started {
         Ok(local) => {
             let local = Arc::new(local);
             router.insert(Router::local_id(), local.clone());
@@ -100,7 +156,8 @@ fn local_sessions(router: &Router) -> Option<Arc<LocalBackend>> {
             tracing::error!(%error, "the session host did not start");
             None
         }
-    }
+    };
+    LocalSessions { backend, warning }
 }
 
 /// Starts the backend whose terminals run a benchmark's built-in programs. They are
@@ -162,21 +219,31 @@ impl Launch {
     }
 }
 
-/// Reads the configuration and the workspace to show, and puts the workspace's panes in
-/// the application's charge.
-fn terminals(state: &Arc<AppState>, launch: &Launch) -> Result<Terminals, String> {
+/// Reads the user's configuration. Which session host to use and which workspace to
+/// show are the user's own settings, so they are read before any workspace's settings
+/// are laid over the user's.
+fn user_config() -> Result<Arc<ConfigService>, String> {
     let dirs = Dirs::resolve().ok_or_else(|| {
         "the folders for the configuration and the saved workspaces could not be found".to_owned()
     })?;
+    let config = ConfigService::load(dirs, None);
+    config.ensure_default_file();
+    Ok(config)
+}
+
+/// Reads the workspace to show, and puts the workspace's panes in the application's
+/// charge.
+fn terminals(
+    state: &Arc<AppState>,
+    config: Arc<ConfigService>,
+    launch: &Launch,
+) -> Result<Terminals, String> {
+    let dirs = config.dirs().clone();
     if let Some(name) = &launch.workspace
         && !lume_layout::valid_name(name)
     {
         return Err(format!("`{name}` cannot be a workspace's name"));
     }
-    // Which workspace to show is the user's own setting, so it is read before any
-    // workspace's settings are laid over the user's.
-    let config = ConfigService::load(dirs.clone(), None);
-    config.ensure_default_file();
     let name = workspaces::start_workspace(
         launch.workspace.as_deref(),
         &config.current().config.app.start_workspace,
@@ -281,12 +348,33 @@ fn main() -> ExitCode {
         }
     };
 
+    let user = match mode {
+        Mode::Terminal => match user_config() {
+            Ok(config) => Some(config),
+            Err(problem) => {
+                eprintln!("lume-gui: {problem}");
+                return ExitCode::FAILURE;
+            }
+        },
+        Mode::Probe | Mode::Harness(_) => None,
+    };
+    let host_settings = user
+        .as_ref()
+        .map(|config| config.current().config.host.clone());
+
     let router = Router::new();
-    // Only the terminal needs sessions on this machine.
+    // Only the terminal needs sessions on this machine. A benchmark times real shells
+    // as well as the built-in programs, on hosts in this process, which it leaves as it
+    // found them.
+    let mut host_warning = None;
     let locals: Vec<Arc<LocalBackend>> = match mode {
-        Mode::Terminal => local_sessions(&router).into_iter().collect(),
-        // A benchmark times real shells as well as the built-in programs.
-        Mode::Harness(Suite::Bench) => local_sessions(&router)
+        Mode::Terminal => {
+            let local = local_sessions(&router, host_settings.as_ref(), args.endpoint.as_deref());
+            host_warning = local.warning;
+            local.backend.into_iter().collect()
+        }
+        Mode::Harness(Suite::Bench) => local_sessions(&router, None, None)
+            .backend
             .into_iter()
             .chain(bench_sessions(&router))
             .collect(),
@@ -301,16 +389,22 @@ fn main() -> ExitCode {
         Arc::clone(&marks),
     );
 
-    let terminals = match mode {
-        Mode::Terminal => match terminals(&state, &launch) {
+    let terminals = match user {
+        Some(config) => match terminals(&state, config, &launch) {
             Ok(terminals) => Some(terminals),
             Err(problem) => {
                 eprintln!("lume-gui: {problem}");
                 return ExitCode::FAILURE;
             }
         },
-        Mode::Probe | Mode::Harness(_) => None,
+        None => None,
     };
+    if let (Some(terminals), Some(warning)) = (&terminals, host_warning) {
+        terminals.panes.notice("warning", warning);
+    }
+    if let Some(terminals) = &terminals {
+        host::tell_of_an_older_host(&state, &terminals.panes);
+    }
     let config = terminals
         .as_ref()
         .map(|terminals| Arc::clone(&terminals.config));
@@ -444,6 +538,7 @@ fn main() -> ExitCode {
             commands_layout::layout_apply,
             commands_layout::sessions_start,
             commands_layout::panes_busy,
+            commands_layout::sessions_detached,
             commands_layout::commands_list,
             commands_layout::command_run,
             commands_config::config_view,
@@ -524,9 +619,14 @@ fn main() -> ExitCode {
                     });
                     let asked = windows.is_some_and(|windows| windows.take_confirmed(&label));
                     let page = state.page_of(&label);
+                    // The last window closes the application, which ends nothing when the
+                    // sessions run in a host of their own: they are there at the next
+                    // start. Any other window ends what ran in it.
+                    let last = panes.workspace().windows.len() <= 1;
+                    let kept = last && state.locals().iter().any(|local| local.is_daemon());
                     if window::close_asks(
                         always,
-                        panes.runs_something(window),
+                        panes.runs_something(window) && !kept,
                         page.is_some(),
                         asked,
                     ) {
@@ -564,13 +664,16 @@ fn main() -> ExitCode {
             }
         }
         RunEvent::Exit => {
-            // The workspace is written while its panes are all still there: the
-            // sessions that end next end because the application is closing.
+            // The workspace is written while its panes are all still there, with the
+            // sessions they show: a session host of its own keeps them running for
+            // the next start, and a host in this process ends them next, because the
+            // application is closing.
             if let Some(panes) = state.panes() {
                 panes.close();
             }
             // A program in a terminal can outlive a process that exits without closing
-            // the terminal, so the sessions are ended before the process is.
+            // the terminal, so a host in this process ends its sessions before the
+            // process exits. A host of its own is only let go of.
             tauri::async_runtime::block_on(state.shutdown());
         }
         _ => {}

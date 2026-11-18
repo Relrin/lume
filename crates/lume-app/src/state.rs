@@ -184,6 +184,31 @@ impl AppState {
     }
 
     /// What the sessions have reported about themselves.
+    /// The backends for sessions on this machine.
+    pub fn locals(&self) -> &[Arc<LocalBackend>] {
+        &self.locals
+    }
+
+    /// The id the router knows one of the local backends by.
+    pub fn backend_id_of(&self, local: &Arc<LocalBackend>) -> BackendId {
+        let wanted = Arc::as_ptr(local).cast::<()>();
+        self.router
+            .ids()
+            .into_iter()
+            .find(|id| {
+                self.router
+                    .get(id)
+                    .is_ok_and(|backend| Arc::as_ptr(&backend).cast::<()>() == wanted)
+            })
+            .unwrap_or_else(Router::local_id)
+    }
+
+    /// The sessions a page holds: ones it started or attached to that are in no pane,
+    /// and ones whose page went away and that wait to be claimed again.
+    pub fn held(&self) -> Vec<SessionKey> {
+        lock(&self.sessions).keys().cloned().collect()
+    }
+
     pub fn reports(&self) -> &Arc<SessionStates> {
         &self.reports
     }

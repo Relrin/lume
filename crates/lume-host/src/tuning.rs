@@ -157,3 +157,18 @@ pub const SSH_TAIL_LINES: usize = 3;
 
 /// The most characters of the client's last line that are passed on.
 pub const SSH_DETAIL_MAX_CHARS: usize = 200;
+
+/// How long a host that runs on its own waits, once asked to stop, for its connections
+/// to close before it exits regardless.
+pub const STOP_WAIT: Duration = Duration::from_secs(2);
+
+/// How soon a host that runs on its own and has had nothing to do for its idle time looks
+/// again, when a connection is open whose client has not said yet what it is.
+pub const IDLE_RECHECK: Duration = Duration::from_millis(200);
+
+/// How long a host that runs on its own stays with no running session and no client,
+/// when it is not told.
+pub const IDLE_EXIT_DEFAULT: Duration = Duration::from_secs(60);
+
+/// How large the host's log file may grow before it is set aside and begun again.
+pub const LOG_FILE_MAX_BYTES: u64 = 4 * 1024 * 1024;

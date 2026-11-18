@@ -20,7 +20,7 @@ use toml::de::{DeTable, DeValue};
 use crate::accent::{ACCENT_FORMAT, FORMAT_KEY, check_accent};
 use crate::profiles::ProfileEntry;
 use crate::schema::{
-    Config, NOT_IN_A_WORKSPACE, OnSwitch, PROFILES_KEY, WORKSPACE_PROFILE_KEY, WORKSPACE_ROOT_KEY,
+    Config, NOT_IN_A_WORKSPACE, PROFILES_KEY, WORKSPACE_PROFILE_KEY, WORKSPACE_ROOT_KEY,
     WorkspaceSettings, config_schema,
 };
 use crate::source::{Position, Problem, ProblemKind, Source, join_path};
@@ -786,25 +786,6 @@ fn default_tree() -> Map<String, Value> {
     }
 }
 
-/// What is understood but does nothing yet, said once the layers are merged.
-fn not_available(config: &Config, sources: &BTreeMap<String, Source>, problems: &mut Vec<Problem>) {
-    if config.workspace.on_switch == OnSwitch::Keep {
-        let path = "workspace.on-switch";
-        let location = sources.get(path).and_then(Source::location);
-        problems.push(Problem {
-            kind: ProblemKind::NotAvailable,
-            path: path.to_owned(),
-            file: location.map(|(file, _)| file.clone()),
-            line: location.map_or(0, |(_, line)| line),
-            column: 0,
-            message: "`workspace.on-switch = \"keep\"` is not available yet: a workspace's \
-                      programs are ended when another workspace is opened"
-                .to_owned(),
-            suggestion: None,
-        });
-    }
-}
-
 /// Lays the files over the defaults, the first lowest.
 pub fn resolve_layers(inputs: &[LayerInput]) -> Layered {
     let schema = config_schema();
@@ -885,7 +866,6 @@ pub fn resolve_layers(inputs: &[LayerInput]) -> Layered {
             Config::default()
         }
     };
-    not_available(&config, &sources, &mut problems);
     Layered {
         config,
         sources,
@@ -898,6 +878,7 @@ pub fn resolve_layers(inputs: &[LayerInput]) -> Layered {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::OnSwitch;
     use crate::schema::{
         BindingEntry, BindingValue, CloseOnExit, CursorStyle, TabPlacement, default_config_text,
     };
@@ -1189,14 +1170,10 @@ mod tests {
     }
 
     #[test]
-    fn keeping_a_workspaces_programs_is_accepted_and_said_to_do_nothing_yet() {
+    fn a_workspaces_programs_can_be_kept_running() {
         let layered = resolve_layers(&[user("[workspace]\non-switch = \"keep\"\n")]);
         assert_eq!(layered.config.workspace.on_switch, OnSwitch::Keep);
-        assert_eq!(layered.problems.len(), 1);
-        let problem = &layered.problems[0];
-        assert_eq!(problem.kind, ProblemKind::NotAvailable);
-        assert_eq!(problem.line, 2);
-        assert!(problem.message.contains("not available yet"));
+        assert!(layered.problems.is_empty(), "{:?}", layered.problems);
     }
 
     #[test]

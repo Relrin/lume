@@ -540,6 +540,7 @@ impl Control {
                     cwd: spec.cwd,
                     env: spec.env,
                     size,
+                    session: None,
                 });
                 let intent = match place {
                     SpawnPlace::Tab {} => Intent::TabNew {

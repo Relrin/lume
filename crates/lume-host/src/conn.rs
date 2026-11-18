@@ -13,9 +13,9 @@ use std::time::{Duration, Instant};
 use lume_proto::app::ScreenCursor;
 use lume_proto::tuning::MAX_PAYLOAD;
 use lume_proto::{
-    Body, CONTROL_STREAM, ClientFacts, Control, ErrorCode, FrameDecoder, Message, Notification,
-    PROTO_VERSION, ProtoError, Request, RequestBody, Response, ResponseBody, Role, SessionId,
-    encode, negotiate,
+    Body, CONTROL_STREAM, ClientFacts, ClientKind, Control, ErrorCode, FrameDecoder, Message,
+    Notification, PROTO_VERSION, ProtoError, Request, RequestBody, Response, ResponseBody, Role,
+    SessionId, encode, negotiate,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
@@ -89,21 +89,33 @@ where
     let (queue, queued) = mpsc::channel(OUTBOX_PIECES);
     let outbox = Outbox { queue };
     let writing = tokio::spawn(write_loop(writer, queued));
+    let serving = Arc::clone(&host);
 
     let mut connection = Connection {
         host,
         outbox: outbox.clone(),
         decoder: FrameDecoder::new(Role::Host),
         greeted: false,
+        counted: false,
         hydrate: HydrateWith::Replay,
         streams: HashMap::new(),
         used_streams: HashSet::new(),
         started: Vec::new(),
     };
-    let result = connection.read_loop(&mut reader).await;
+    // A host that is asked to stop closes every connection.
+    let mut stopping = serving.stopping();
+    // A connection that closes before its hello is answered was never counted; one
+    // that says hello as a client that keeps the host busy is counted until it closes.
+    let result = tokio::select! {
+        result = connection.read_loop(&mut reader) => result,
+        _ = stopping.wait_for(|stopping| *stopping) => Ok(()),
+    };
     connection.finish().await;
     outbox.close().await;
     let _ = writing.await;
+    if connection.counted {
+        serving.client_went();
+    }
     result
 }
 
@@ -134,6 +146,9 @@ struct Connection {
     decoder: FrameDecoder,
     /// Whether the client has said hello and a version was agreed.
     greeted: bool,
+    /// Whether the client is one of those that keep the host from being idle: any but
+    /// a command-line tool asking a question.
+    counted: bool,
     /// How the client's attachments start: from a snapshot when its terminal engine is
     /// the host's own version, from replayed output otherwise.
     hydrate: HydrateWith,
@@ -324,6 +339,10 @@ impl Connection {
                 return false;
             };
             self.greeted = true;
+            if client_kind != ClientKind::Ctl {
+                self.counted = true;
+                self.host.client_came();
+            }
             if client_vt.as_deref() == Some(vt_version()) {
                 self.hydrate = HydrateWith::Snapshot;
             }
@@ -367,6 +386,19 @@ impl Connection {
                 _ => error(ErrorCode::NotFound, "no such session"),
             },
             RequestBody::Screen { session } => self.screen(session).await,
+            RequestBody::HostStatus {} => Ok(self.host.status()),
+            RequestBody::Shutdown { end_sessions } => {
+                match self.shutdown(end_sessions).await {
+                    Ok(ended) => {
+                        let stopping = ResponseBody::Stopping { ended };
+                        let told = self.outbox.respond(id, Ok(stopping)).await;
+                        // Told first: the connection closes as soon as the host stops.
+                        self.host.stop();
+                        return told;
+                    }
+                    Err(refusal) => Err(refusal),
+                }
+            }
             RequestBody::WaitText {
                 session,
                 text,
@@ -389,6 +421,34 @@ impl Connection {
             }
         };
         self.outbox.respond(id, result).await
+    }
+
+    /// Ends the sessions, if asked to and if the host may stop at all. Returns how many
+    /// were ended.
+    async fn shutdown(&self, end_sessions: bool) -> Result<u32, ProtoError> {
+        if !self.host.persistent() {
+            return Err(ProtoError::new(
+                ErrorCode::Unsupported,
+                "this host stops with its client",
+            ));
+        }
+        let running = self
+            .host
+            .list()
+            .iter()
+            .filter(|info| info.exit.is_none())
+            .count();
+        if running > 0 && !end_sessions {
+            return Err(ProtoError::new(
+                ErrorCode::BadRequest,
+                format!(
+                    "{running} session{} still running; ask again to end them",
+                    if running == 1 { " is" } else { "s are" }
+                ),
+            ));
+        }
+        tracing::info!(sessions = running, "the host was asked to stop");
+        Ok(self.host.end_all().await)
     }
 
     async fn screen(&self, session: SessionId) -> Result<ResponseBody, ProtoError> {

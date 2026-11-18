@@ -12,6 +12,7 @@ publish.workspace = true
 async-trait.workspace = true
 lume-config.workspace = true
 lume-host.workspace = true
+lume-ipc.workspace = true
 lume-layout.workspace = true
 lume-proto.workspace = true
 thiserror.workspace = true
@@ -22,7 +23,7 @@ tracing.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
-lume-ipc.workspace = true
+lume-vt.workspace = true
 
 [lints]
 workspace = true

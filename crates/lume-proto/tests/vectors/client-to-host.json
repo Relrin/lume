@@ -226,5 +226,30 @@
       }
     },
     "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "type": "host_status"
+        },
+        "id": 8
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "request": {
+        "body": {
+          "end_sessions": false,
+          "type": "shutdown"
+        },
+        "id": 9
+      }
+    },
+    "stream": 0
   }
 ]

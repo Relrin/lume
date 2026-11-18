@@ -401,5 +401,37 @@
     },
     "kind": "event",
     "stream": 4
+  },
+  {
+    "kind": "control",
+    "message": {
+      "response": {
+        "id": 10,
+        "ok": {
+          "clients": 1,
+          "host_version": "0.0.0",
+          "idle_exit_ms": 60000,
+          "persistent": true,
+          "pid": 4242,
+          "sessions": 2,
+          "started_unix_ms": 1763400000000,
+          "type": "host_status"
+        }
+      }
+    },
+    "stream": 0
+  },
+  {
+    "kind": "control",
+    "message": {
+      "response": {
+        "id": 11,
+        "ok": {
+          "ended": 2,
+          "type": "stopping"
+        }
+      }
+    },
+    "stream": 0
   }
 ]

@@ -283,8 +283,8 @@ fn time_one_start(app: &Path, lume: &Path, endpoint: &str) -> Result<Start> {
         }
     };
 
-    // Closed, not killed: its shell is ended with it.
-    if ask(lume, endpoint, &["quit"]).is_none() {
+    // Closed, not killed, and with its sessions ended, whichever host runs them.
+    if ask(lume, endpoint, &["command", "lume.app.quit-end-sessions"]).is_none() {
         let _ = child.kill();
     }
     let _ = child.wait();

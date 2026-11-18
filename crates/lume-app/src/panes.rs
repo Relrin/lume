@@ -11,6 +11,7 @@
 //! closes a window whose last tab has gone, and writes the workspace to its file a
 //! moment after it last changed.
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -27,7 +28,7 @@ use lume_layout::{
 use lume_proto::app::{AppReplyBody, PageRequestBody};
 use lume_session::start_dir_from_report;
 use lume_session::{
-    BackendId, ExitStatus, Launcher, SessionId, SpawnSpec, TermSize, default_shell,
+    BackendId, ExitStatus, Launcher, SessionId, SessionInfo, SpawnSpec, TermSize, default_shell,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -263,6 +264,9 @@ struct PaneSpawner {
     state: Weak<AppState>,
     config: Arc<ConfigService>,
     profiles: Arc<ProfileService>,
+    /// Sessions that were running already when a pane was made to show them. A pane
+    /// that is not made after all leaves such a session as it was.
+    adopted: Mutex<HashSet<SessionKey>>,
 }
 
 impl PaneSpawner {
@@ -271,6 +275,144 @@ impl PaneSpawner {
         SpawnFailure {
             code: error.code.into_owned(),
             message: error.message,
+        }
+    }
+
+    /// What a session that was started before this application ran, or that no pane
+    /// shows, most likely runs: what the pane's `request` would start, or, when it
+    /// says nothing, the program the backend lists.
+    async fn launcher_of(
+        &self,
+        request: &SpawnRequest,
+        info: &SessionInfo,
+    ) -> (Launcher, Option<String>) {
+        if request.launcher.is_none() && request.profile.is_none() && request.session.is_some() {
+            return (start_launcher(&info.program, &[]), None);
+        }
+        let resolved = self.config.current();
+        let wanted = match &request.launcher {
+            Some(_) => None,
+            None => request
+                .profile
+                .clone()
+                .or_else(|| self.profiles.default_id()),
+        };
+        let profile = match &wanted {
+            Some(id) => self.profiles.resolve(id).await,
+            None => None,
+        };
+        let Start { launcher, .. } = plan_start(
+            request,
+            profile.as_ref(),
+            &resolved.config.terminal,
+            resolved.workspace.root.as_deref(),
+            resolved.config.layout.new_pane_cwd,
+        );
+        (launcher, profile.map(|profile| profile.id))
+    }
+
+    /// Takes in a session that runs already, as a pane's: what it runs is noted as if
+    /// it had been started here.
+    async fn remember(
+        &self,
+        state: &AppState,
+        key: &SessionKey,
+        request: &SpawnRequest,
+        info: &SessionInfo,
+    ) {
+        if state.reports().launched(key).is_none() {
+            let (launcher, profile) = self.launcher_of(request, info).await;
+            state.reports().started(key.clone(), launcher, profile);
+        }
+        if let Some(pid) = info.pid {
+            state.reports().set_pid(key, pid);
+        }
+    }
+
+    /// A pane is to show a session that runs already.
+    async fn adopt(
+        &self,
+        state: &AppState,
+        backend: BackendId,
+        session: SessionId,
+        request: &SpawnRequest,
+    ) -> Result<Started, SpawnFailure> {
+        let host = state.router().get(&backend).map_err(Self::failure)?;
+        let listed = host.list().await.map_err(Self::failure)?;
+        let info = listed
+            .into_iter()
+            .find(|info| info.id == session)
+            .ok_or_else(|| SpawnFailure {
+                code: "not_found".to_owned(),
+                message: format!("there is no session {session}"),
+            })?;
+        let key = SessionKey {
+            backend: backend.clone(),
+            session,
+        };
+        self.remember(state, &key, request, &info).await;
+        lock(&self.adopted).insert(key);
+        Ok(Started {
+            backend,
+            session,
+            cwd: None,
+        })
+    }
+
+    /// Goes over the sessions a workspace read from its file names: those that still
+    /// run are kept, and their panes show them again; the others have ended since the
+    /// file was written, or ran on a host that has gone, and their panes are left
+    /// without, to be started afresh.
+    async fn keep_live_sessions(&self, state: &AppState, workspace: &mut Workspace) {
+        let saved = workspace.sessions();
+        if saved.is_empty() {
+            return;
+        }
+        let mut listed: HashMap<BackendId, Vec<SessionInfo>> = HashMap::new();
+        for (pane, session) in saved {
+            let Some(terminal) = workspace.pane(pane).and_then(terminal_of).cloned() else {
+                continue;
+            };
+            let backend = terminal
+                .backend
+                .clone()
+                .unwrap_or_else(lume_session::Router::local_id);
+            if !listed.contains_key(&backend) {
+                let sessions = match state.router().get(&backend) {
+                    Ok(host) => host.list().await.unwrap_or_default(),
+                    Err(_) => Vec::new(),
+                };
+                listed.insert(backend.clone(), sessions);
+            }
+            let running = listed[&backend]
+                .iter()
+                .find(|info| info.id == session && info.exit.is_none())
+                .cloned();
+            match running {
+                Some(info) => {
+                    let key = SessionKey { backend, session };
+                    let request = SpawnRequest {
+                        backend: terminal.backend.clone(),
+                        profile: terminal.profile.clone(),
+                        launcher: terminal.launcher.clone(),
+                        cwd: terminal.cwd.clone(),
+                        env: terminal.env.clone(),
+                        size: None,
+                        session: None,
+                    };
+                    self.remember(state, &key, &request, &info).await;
+                    tracing::info!(%pane, session = %key.session, "a pane shows its session again");
+                }
+                None => {
+                    if let Some(Pane {
+                        content: PaneContent::Terminal(terminal),
+                        ..
+                    }) = workspace.pane_mut(pane)
+                    {
+                        terminal.session = None;
+                    }
+                }
+            }
         }
     }
 }
@@ -287,6 +429,9 @@ impl Spawner for PaneSpawner {
             .backend
             .clone()
             .unwrap_or_else(|| state.default_backend());
+        if let Some(session) = request.session {
+            return self.adopt(&state, backend, session, request).await;
+        }
         // A pane that names its program needs no profile, and is not kept waiting for
         // one.
         let wanted = match &request.launcher {
@@ -374,9 +519,25 @@ impl Spawner for PaneSpawner {
             backend: started.backend.clone(),
             session: started.session,
         };
+        // A session that ran before the pane was to show it runs on without it.
+        if lock(&self.adopted).remove(&key) {
+            return;
+        }
         if let Err(error) = state.end(&key).await {
             tracing::debug!(session = %key.session, %error, "a session nobody needs could not be ended");
         }
+    }
+}
+
+/// Whether a change gives a pane a session: a pane whose session was set, or a tab
+/// that comes with its panes.
+fn shows_a_session(change: &LayoutChange) -> bool {
+    let has = |pane: &Pane| terminal_of(pane).is_some_and(|terminal| terminal.session.is_some());
+    match change {
+        LayoutChange::Pane { pane } => has(pane),
+        LayoutChange::TabAdded { tab, .. } => tab.root.panes().into_iter().any(has),
+        LayoutChange::TabTree { root, .. } => root.panes().into_iter().any(has),
+        _ => false,
     }
 }
 
@@ -437,6 +598,9 @@ pub struct Panes {
     /// Set when the application is closing. Sessions that end from then on were ended
     /// by that, and their panes stay in the workspace's file.
     closing: AtomicBool,
+    /// Sessions that are being ended for a reason that keeps their panes: their panes
+    /// stay, whatever the settings say about a program that ends.
+    ending_on_purpose: Mutex<HashSet<SessionKey>>,
     /// Held while another workspace is put on show, or the one on show is renamed or
     /// one is deleted: these go one at a time.
     pub(crate) switching: tokio::sync::Mutex<()>,
@@ -461,7 +625,7 @@ impl Panes {
         name: &str,
         first: Option<SpawnRequest>,
     ) -> (Arc<Self>, bool) {
-        let opened = open_workspace(&store, name, first);
+        let mut opened = open_workspace(&store, name, first);
         let pending = opened
             .warning
             .iter()
@@ -472,7 +636,11 @@ impl Panes {
             state: Arc::downgrade(state),
             config: Arc::clone(&config),
             profiles: Arc::clone(&profiles),
+            adopted: Mutex::new(HashSet::new()),
         });
+        spawner
+            .keep_live_sessions(state, &mut opened.workspace)
+            .await;
         let layout = LocalLayout::new(opened.workspace, 1, spawner.clone());
         // Taken before anything can change the layout, so the task that follows it
         // misses nothing.
@@ -488,11 +656,26 @@ impl Panes {
             starting: tokio::sync::Mutex::new(()),
             pending: Mutex::new(pending),
             closing: AtomicBool::new(false),
+            ending_on_purpose: Mutex::new(HashSet::new()),
             switching: tokio::sync::Mutex::new(()),
             saving: tokio::sync::Mutex::new(()),
         });
         panes.sync_tab_panel().await;
         (panes, opened.fresh)
+    }
+
+    /// Says that these sessions are about to be ended with their panes kept: the panes
+    /// stay when their programs end.
+    pub(crate) fn expect_ends(&self, keys: &[SessionKey]) {
+        lock(&self.ending_on_purpose).extend(keys.iter().cloned());
+    }
+
+    /// Leaves the panes of a workspace read from its file showing the sessions they
+    /// showed when it was written, where those still run, and without one otherwise.
+    pub(crate) async fn keep_live_sessions(&self, workspace: &mut Workspace) {
+        if let Some(state) = self.state.upgrade() {
+            self.spawner.keep_live_sessions(&state, workspace).await;
+        }
     }
 
     /// The layout as it is now.
@@ -756,6 +939,7 @@ impl Panes {
             cwd: terminal.cwd.clone(),
             env: terminal.env.clone(),
             size: Some(size),
+            session: None,
         };
         let started = self
             .spawner
@@ -859,7 +1043,7 @@ impl Panes {
     /// Acts on the end of a session's program: its pane closes, or stays to say how
     /// the program ended, as the configuration has it.
     pub fn exited(self: &Arc<Self>, key: &SessionKey, status: ExitStatus) {
-        if self.closing.load(Ordering::Relaxed) {
+        if self.closing.load(Ordering::Relaxed) || lock(&self.ending_on_purpose).remove(key) {
             return;
         }
         let Some(pane) = self.pane_of(key) else {
@@ -909,6 +1093,10 @@ impl Panes {
         // When the workspace first and last changed since it was written.
         let mut unsaved: Option<(Instant, Instant)> = None;
         loop {
+            // Which session a pane shows is written at once when sessions outlive the
+            // application: an application that is ended a moment later finds its
+            // panes' sessions again at its next start, not new ones beside them.
+            let mut names_a_session = false;
             let event = match unsaved {
                 Some((first, last)) => {
                     let due = (last + SAVE_DEBOUNCE).min(first + SAVE_MAX_DELAY);
@@ -947,6 +1135,7 @@ impl Panes {
                     for change in &changes {
                         self.act_on(&state, change, shell.as_ref()).await;
                     }
+                    names_a_session = changes.iter().any(shows_a_session);
                 }
                 LayoutEvent::Reset(snapshot) => {
                     // Another workspace is on show. The windows it has are opened
@@ -985,7 +1174,13 @@ impl Panes {
                 }
             }
             let now = Instant::now();
-            unsaved = Some((unsaved.map_or(now, |(first, _)| first), now));
+            let kept = state.locals().iter().any(|local| local.is_daemon());
+            if names_a_session && kept {
+                self.save().await;
+                unsaved = None;
+            } else {
+                unsaved = Some((unsaved.map_or(now, |(first, _)| first), now));
+            }
             // Whoever waits for a pane to have a session looks again.
             state.wake();
         }

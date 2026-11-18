@@ -20,6 +20,7 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+mod detach;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -29,6 +30,8 @@ mod windows;
 use unix as platform;
 #[cfg(windows)]
 use windows as platform;
+
+pub use detach::{not_served, spawn_detached, start_and_connect};
 
 /// The longest endpoint name. Socket paths are limited to about a hundred bytes on some
 /// systems, directory included.

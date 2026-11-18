@@ -10,8 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use common::*;
 use lume_layout::tuning::{CORRUPT_KEPT, WORKSPACE_FILE_VERSION};
 use lume_layout::{
-    Area, Dir, Intent, Loaded, PaneContent, PanelContent, PanelId, Store, StoreError, Workspace,
-    WorkspaceFile,
+    Area, Dir, Intent, Loaded, PanelContent, PanelId, Store, StoreError, Workspace, WorkspaceFile,
 };
 
 static NEXT: AtomicU32 = AtomicU32::new(1);
@@ -106,18 +105,6 @@ fn furnished(name: &str) -> Workspace {
     workspace
 }
 
-/// A workspace as it comes back from a file: the sessions it showed are forgotten.
-fn without_sessions(workspace: &Workspace) -> Workspace {
-    let mut workspace = workspace.clone();
-    let ids: Vec<_> = workspace.panes().into_iter().map(|pane| pane.id).collect();
-    for id in ids {
-        if let PaneContent::Terminal(terminal) = &mut workspace.pane_mut(id).unwrap().content {
-            terminal.session = None;
-        }
-    }
-    workspace
-}
-
 fn loaded(store: &Store, name: &str) -> Workspace {
     match store.load(name, 1_000).unwrap() {
         Loaded::Workspace(workspace) => *workspace,
@@ -138,7 +125,7 @@ fn write(path: &Path, text: &str) {
 }
 
 #[test]
-fn a_workspace_comes_back_as_it_was_saved_without_its_sessions() {
+fn a_workspace_comes_back_as_it_was_saved_with_its_sessions() {
     let dir = TestDir::new();
     let store = dir.store();
     let workspace = furnished("default");
@@ -146,8 +133,8 @@ fn a_workspace_comes_back_as_it_was_saved_without_its_sessions() {
 
     store.save(&workspace, "1.2.3", 42).unwrap();
     let back = loaded(&store, "default");
-    assert_eq!(back, without_sessions(&workspace));
-    assert!(back.sessions().is_empty());
+    assert_eq!(back, workspace);
+    assert_eq!(back.sessions().len(), 2);
     // The directory a terminal was started in is kept: it is started there again.
     assert!(format!("{back:?}").contains("/projects/lume"));
 
@@ -171,7 +158,7 @@ fn saving_again_replaces_the_file() {
     let pane = workspace.panes()[0].id;
     must(&mut workspace, Intent::Close { pane });
     store.save(&workspace, "1", 2).unwrap();
-    assert_eq!(loaded(&store, "default"), without_sessions(&workspace));
+    assert_eq!(loaded(&store, "default"), workspace);
 }
 
 #[test]
@@ -391,7 +378,7 @@ fn groups_and_what_was_put_away_come_back_and_a_first_version_file_still_reads()
     assert_eq!(workspace.window(window).unwrap().centre.groups.len(), 1);
 
     store.save(&workspace, "1", 1).unwrap();
-    assert_eq!(loaded(&store, "default"), without_sessions(&workspace));
+    assert_eq!(loaded(&store, "default"), workspace);
 
     // A file written before groups existed says version 1 and has none of their fields.
     let (old, ..) = one_pane();

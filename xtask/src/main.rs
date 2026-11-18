@@ -4,6 +4,7 @@
 //! builds with `cargo xtask setup && cargo xtask build` on Windows, Linux and macOS.
 
 mod bench;
+mod compat;
 mod dist;
 mod fetch;
 mod generate;
@@ -46,9 +47,14 @@ Commands:
   latency --table
                Set the kept latency reports side by side
   dist [--installers]
-               Build for release and pack the application and the console command
-               into a portable archive in target/dist; with --installers, make the
-               platform's installers too (the bundler may fetch tools to do so)
+               Build for release and pack the application, the session host and the
+               console command into a portable archive in target/dist; with
+               --installers, make the platform's installers too (the bundler may fetch
+               tools to do so)
+  compat --host-ref <ref> | --latest-release
+               Build the session host as it was at a tag, branch or commit (or the
+               newest release whose host runs on its own), and run this tree's backend
+               against it
   schema       Write the JSON Schemas of the settings and of themes into schemas/
   tokens       Write the design tokens' TypeScript module and stylesheet into
                packages/tokens/src/
@@ -75,6 +81,8 @@ fn main() -> Result<()> {
             smoke::run()
         }
         ["dist"] => dist::run(false),
+        ["compat", "--host-ref", host_ref] => compat::run(host_ref),
+        ["compat", "--latest-release"] => compat::run_latest_release(),
         ["dist", "--installers"] => dist::run(true),
         ["bench"] => bench("reference"),
         ["bench", "--profile", profile] => bench(profile),
@@ -135,6 +143,8 @@ fn build_release_for_testing() -> Result<()> {
         "lume-app",
         "-p",
         "lume-cli",
+        "-p",
+        "lume-host",
         "--features",
         "lume-app/custom-protocol",
     ])
@@ -178,6 +188,9 @@ fn lint() -> Result<()> {
 fn dev() -> Result<()> {
     vt::native(false)?;
     vt::wasm(false)?;
+    // The application starts the session host from beside itself, and the Tauri CLI
+    // builds the application alone.
+    run::cargo(&["build", "-p", "lume-host"])?;
     // The Tauri CLI finds `crates/lume-app/tauri.conf.json` by searching from the root.
     run::pnpm(&["exec", "tauri", "dev"])
 }

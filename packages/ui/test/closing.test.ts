@@ -8,11 +8,13 @@ import type { PaneId } from "../src/layout/types.ts";
 import {
   closeRequested,
   closingText,
+  confirmRequested,
   mayRun,
   panesClosedBy,
   type ClosingApp,
+  type ConfirmingApp,
 } from "../src/shell/closing.ts";
-import { PromptStore, type Closing } from "../src/terminal/prompts.ts";
+import { PromptStore, type Closing, type Confirmation } from "../src/terminal/prompts.ts";
 import { oneTab, pane, split, viewOf } from "./layout-support.ts";
 
 function view(confirm: "never" | "always"): ConfigView {
@@ -199,5 +201,72 @@ describe("asking before closing what still runs a program", () => {
     expect(closingText({ what: "window", running: 3 })).toBe(
       "Its panes have 3 programs that are still running. Closing the window ends them.",
     );
+  });
+});
+
+describe("asking before a command the core says would end programs", () => {
+  const notice = {
+    type: "confirm_requested",
+    title: "Restart the session host?",
+    message: "Every program in every terminal ends.",
+    confirm: "Restart",
+    command: "lume.host.restart",
+    args: { confirmed: true },
+  } as const;
+
+  function confirming(ok: boolean) {
+    const prompts = new PromptStore();
+    const asked: Confirmation[] = [];
+    const ran: { id: string; args: unknown }[] = [];
+    let refocused = 0;
+    prompts.subscribe(() => {
+      const current = prompts.current();
+      if (current?.kind !== "confirm") return;
+      asked.push(current.confirmation);
+      current.answer(ok);
+    });
+    const app = {
+      prompts,
+      views: { focus: () => void (refocused += 1) },
+      commands: { run: (id: string, args: unknown) => void ran.push({ id, args }) },
+    } as unknown as ConfirmingApp;
+    return { app, asked, ran, refocused: () => refocused };
+  }
+
+  it("asks with what the core said, and runs the command as given on a yes", async () => {
+    const { app, asked, ran, refocused } = confirming(true);
+    await confirmRequested(app, notice);
+    expect(asked).toEqual([
+      {
+        title: "Restart the session host?",
+        message: "Every program in every terminal ends.",
+        confirm: "Restart",
+      },
+    ]);
+    expect(ran).toEqual([{ id: "lume.host.restart", args: { confirmed: true } }]);
+    expect(refocused()).toBe(0);
+  });
+
+  it("runs nothing on a no, and gives the keyboard back", async () => {
+    const { app, ran, refocused } = confirming(false);
+    await confirmRequested(app, notice);
+    expect(ran).toEqual([]);
+    expect(refocused()).toBe(1);
+  });
+
+  it("is one prompt at a time, answered once", async () => {
+    const prompts = new PromptStore();
+    const first = prompts.confirm({ title: "A?", message: "a", confirm: "Go" });
+    const second = prompts.confirm({ title: "B?", message: "b", confirm: "Go" });
+    const current = prompts.current();
+    expect(current?.kind === "confirm" && current.confirmation.title).toBe("A?");
+    current?.answer(true);
+    current?.answer(false);
+    expect(await first).toBe(true);
+    const next = prompts.current();
+    expect(next?.kind === "confirm" && next.confirmation.title).toBe("B?");
+    next?.answer(false);
+    expect(await second).toBe(false);
+    expect(prompts.current()).toBeNull();
   });
 });

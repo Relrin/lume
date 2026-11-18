@@ -137,6 +137,8 @@ impl SessionHandle {
             attached: shared.attached,
             exit: shared.exit,
             stats: shared.stats,
+            title: shared.title.clone(),
+            cwd: shared.cwd.clone(),
         }
     }
 }
@@ -150,6 +152,8 @@ struct Shared {
     attached: bool,
     exit: Option<ExitStatus>,
     stats: SessionStats,
+    title: Option<String>,
+    cwd: Option<String>,
 }
 
 /// Everything needed to start a session around a program that is already running.
@@ -268,6 +272,8 @@ pub(crate) fn start(start: Start) -> io::Result<SessionHandle> {
         attached: false,
         exit: None,
         stats: SessionStats::default(),
+        title: None,
+        cwd: None,
     }));
 
     let (command_tx, commands) = mpsc::channel(COMMAND_QUEUE);
@@ -554,6 +560,12 @@ impl Session {
         shared.size = self.size;
         shared.attached = self.attachment.is_some();
         shared.exit = self.exit;
+        if shared.title != self.seen.title {
+            shared.title.clone_from(&self.seen.title);
+        }
+        if shared.cwd != self.seen.cwd {
+            shared.cwd.clone_from(&self.seen.cwd);
+        }
         shared.stats = SessionStats {
             read_bytes: self.read_bytes,
             sent_bytes: self.sent_bytes,
@@ -773,6 +785,9 @@ impl Session {
 
     async fn on_exit(&mut self, status: ExitStatus) {
         self.exit = Some(status);
+        // A host with nothing else running may now be idle.
+        self.publish();
+        self.host.touched();
         if self.reader_done {
             self.queue_exit(status).await;
         } else {

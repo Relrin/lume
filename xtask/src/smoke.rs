@@ -318,9 +318,10 @@ pub fn run() -> Result<()> {
         Ok(())
     })();
 
-    // Closed through its own endpoint first, so that its shell is ended with it; ending
-    // the WebDriver session would end the process and leave the shell behind.
-    let _ = ctl(&lume, &endpoint, &["quit"]);
+    // Closed through its own endpoint first, with its sessions ended: with a session
+    // host of its own, closing alone would leave its shells running for the next start,
+    // and ending the WebDriver session would end the process and leave them behind.
+    let _ = ctl(&lume, &endpoint, &["command", "lume.app.quit-end-sessions"]);
     let _ = ureq::delete(&format!("{DRIVER}/session/{id}")).call();
     typed
 }

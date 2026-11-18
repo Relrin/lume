@@ -6,6 +6,8 @@
 //! request on the application's control endpoint, which only the user who runs the
 //! application can reach.
 //!
+//! `lume host` says whether the session host runs, and starts or stops it.
+//!
 //! `lume config`, `lume keymap` and `lume theme` read and write the configuration's
 //! files and need no application: they check a file, list the keys that are bound, and
 //! make a theme from another terminal's colour scheme.
@@ -13,6 +15,7 @@
 mod args;
 mod client;
 mod ctl;
+mod host;
 mod launch;
 mod offline;
 
@@ -58,6 +61,18 @@ fn main() -> ExitCode {
             None,
         ),
         Command::Ctl(ctl) => (None, Some(ctl)),
+        Command::Host(command) => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            return match runtime {
+                Ok(runtime) => ExitCode::from(runtime.block_on(host::run(command))),
+                Err(error) => {
+                    eprintln!("lume: {error}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
     };
 
     let runtime = match tokio::runtime::Builder::new_current_thread()

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sessions-detached"
+description = "Enables the sessions_detached command without any pre-configured scope."
+commands.allow = ["sessions_detached"]
+
+[[permission]]
+identifier = "deny-sessions-detached"
+description = "Denies the sessions_detached command without any pre-configured scope."
+commands.deny = ["sessions_detached"]

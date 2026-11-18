@@ -17,9 +17,13 @@ use lume_layout::{
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use lume_session::{BackendId, Router, SessionId};
+
+use crate::carrier::SessionKey;
 use crate::configsvc::ConfigService;
 use crate::control::Shell;
 use crate::error::CommandError;
+use crate::host;
 use crate::opener;
 use crate::panes::{Panes, equal_ratios};
 use crate::registry::{CommandSpec, Owner, Registry, Runs};
@@ -35,6 +39,41 @@ const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 
 const COMMANDS: &[Row] = &[
     ("lume.app.quit", "Quit", "Application", Runs::Core, true),
+    (
+        "lume.app.quit-end-sessions",
+        "Quit and End Sessions",
+        "Application",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.host.restart",
+        "Restart Session Host",
+        "Application",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.session.detached",
+        "Detached Sessions…",
+        "Session",
+        Runs::Page,
+        true,
+    ),
+    (
+        "lume.session.reattach",
+        "Show Detached Session",
+        "Session",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.session.end",
+        "End Detached Session",
+        "Session",
+        Runs::Core,
+        false,
+    ),
     (
         "lume.app.show-logs",
         "Show Logs",
@@ -736,6 +775,32 @@ fn arguments(id: &str) -> Option<Value> {
             } }),
             &["root"],
         )),
+        "lume.app.quit-end-sessions" | "lume.host.restart" => Some(object(
+            json!({ "confirmed": {
+                "type": "boolean",
+                "description": "The user has agreed; asked from a window, the window asks first otherwise",
+            } }),
+            &[],
+        )),
+        "lume.session.reattach" => Some(object(
+            json!({
+                "session": { "type": "string", "description": "The session's id" },
+                "backend": { "type": "string", "description": "Its backend; the local one if left out" },
+                "place": {
+                    "type": "string",
+                    "enum": ["tab", "split"],
+                    "description": "A new tab, or beside the pane that has the keyboard",
+                },
+            }),
+            &["session"],
+        )),
+        "lume.session.end" => Some(object(
+            json!({
+                "session": { "type": "string", "description": "The session's id" },
+                "backend": { "type": "string", "description": "Its backend; the local one if left out" },
+            }),
+            &["session"],
+        )),
         _ => None,
     }
 }
@@ -782,7 +847,107 @@ fn argument<T: DeserializeOwned>(args: &Value, name: &str) -> Result<Option<T>, 
     }
 }
 
+/// The session a command's arguments name, on the backend they name or the local one.
+fn session_key(args: &Value) -> Result<SessionKey, CommandError> {
+    let session: SessionId = argument(args, "session")?
+        .ok_or_else(|| CommandError::bad_request("the argument `session` is missing"))?;
+    let backend = argument::<BackendId>(args, "backend")?.unwrap_or_else(Router::local_id);
+    Ok(SessionKey { backend, session })
+}
+
+/// Whether a command that ends programs is to go ahead now. Asked for in a window and
+/// not yet agreed to, the window asks the user first, and runs it again on a yes;
+/// asked for from outside, nobody is there to answer.
+fn agreed(context: &Context<'_>, args: &Value) -> Result<bool, CommandError> {
+    Ok(context.asker != Asker::Page || argument::<bool>(args, "confirmed")?.unwrap_or(false))
+}
+
+/// Writes the workspace, ends every session the host runs, and quits. Asks first in a
+/// window where something other than a shell at its prompt runs.
+async fn quit_ending_sessions(context: &Context<'_>, args: &Value) -> Result<(), CommandError> {
+    let panes = context.panes;
+    let state = context.state()?;
+    if !agreed(context, args)? {
+        let busy = panes
+            .workspace()
+            .panes()
+            .into_iter()
+            .filter(|pane| panes.busy(pane.id))
+            .count();
+        if busy > 0 {
+            let message = format!(
+                "{} still running a program. Quitting this way ends every program in every \
+                 terminal, those of sessions no pane shows too.",
+                if busy == 1 {
+                    "A pane is".to_owned()
+                } else {
+                    format!("{busy} panes are")
+                }
+            );
+            return host::ask_first(
+                &state,
+                context.window,
+                "lume.app.quit-end-sessions",
+                args,
+                host::Question {
+                    title: "Quit and end every program?".to_owned(),
+                    message,
+                    confirm: "Quit and end".to_owned(),
+                },
+            );
+        }
+    }
+    // Written first, with every pane in it: the panes are not closed by their programs
+    // ending, and come back with fresh ones at the next start.
+    panes.close();
+    let ended = host::end_all(&state, panes).await;
+    tracing::info!(sessions = ended, "quitting with every session ended");
+    context.shell.quit();
+    Ok(())
+}
+
+/// Ends every session, restarts the session host, and starts every pane again. Always
+/// asks first in a window.
+async fn restart_host(context: &Context<'_>, args: &Value) -> Result<(), CommandError> {
+    let state = context.state()?;
+    if !agreed(context, args)? {
+        return host::ask_first(
+            &state,
+            context.window,
+            host::RESTART_COMMAND,
+            args,
+            host::Question {
+                title: "Restart the session host?".to_owned(),
+                message: "Every program in every terminal ends, those of sessions no pane \
+                          shows too. The panes start new ones."
+                    .to_owned(),
+                confirm: "Restart".to_owned(),
+            },
+        );
+    }
+    let ended = host::restart(&state, context.panes).await?;
+    context.panes.notice(
+        "info",
+        match ended {
+            0 => "The session host was restarted.".to_owned(),
+            1 => "The session host was restarted, and the program it ran was ended.".to_owned(),
+            ended => format!(
+                "The session host was restarted, and the {ended} programs it ran were ended."
+            ),
+        },
+    );
+    Ok(())
+}
+
 impl Context<'_> {
+    /// The application's state, while the application runs.
+    fn state(&self) -> Result<std::sync::Arc<crate::state::AppState>, CommandError> {
+        self.panes
+            .state
+            .upgrade()
+            .ok_or_else(|| CommandError::new("disconnected", "the application is closing"))
+    }
+
     /// The pane a command acts on: the one its arguments name, or the focused one.
     fn pane(&self, args: &Value) -> Result<PaneId, CommandError> {
         argument(args, "pane")?
@@ -946,6 +1111,17 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
         "lume.app.quit" => {
             context.shell.quit();
             return Ok(());
+        }
+        "lume.app.quit-end-sessions" => return quit_ending_sessions(context, args).await,
+        "lume.host.restart" => return restart_host(context, args).await,
+        "lume.session.reattach" => {
+            let key = session_key(args)?;
+            let place = argument::<host::Place>(args, "place")?.unwrap_or_default();
+            return host::reattach(panes, window, key, place).await;
+        }
+        "lume.session.end" => {
+            let state = context.state()?;
+            return host::end(&state, &session_key(args)?).await;
         }
         "lume.config.open" => {
             context.config.ensure_default_file();
@@ -1169,6 +1345,7 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
                     cwd,
                     env: terminal.env,
                     size: None,
+                    session: None,
                 }),
             }
         }

@@ -75,6 +75,14 @@ pub fn parse_file_url(url: &str) -> Option<(String, String)> {
     Some((host.to_owned(), path))
 }
 
+/// The directory a `file:` URL names, as it is shown to the user: a path of a Windows
+/// drive as Windows writes it, any other path as it is. Nothing is checked: this is
+/// for showing, never for starting a program in.
+pub fn shown_dir(url: &str) -> Option<String> {
+    let (_, path) = parse_file_url(url)?;
+    Some(windows_path(&path).unwrap_or(path))
+}
+
 /// The bytes a percent-encoded path stands for. `None` when a percent sign begins no
 /// encoding: a shell that reports a path encodes every percent sign in it.
 fn percent_decode(text: &[u8]) -> Option<Vec<u8>> {

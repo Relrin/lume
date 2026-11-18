@@ -334,6 +334,12 @@ pub struct SessionInfo {
     /// Set once the program has ended and until the session is removed.
     pub exit: Option<ExitStatus>,
     pub stats: SessionStats,
+    /// The title the program last gave the terminal, if it gave one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The working directory as last reported, as a URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 /// Which side answers a program's questions to the terminal (device attributes, cursor

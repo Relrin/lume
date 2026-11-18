@@ -70,7 +70,11 @@ const CONTENTS: Readonly<Record<Which, readonly (readonly (Row | readonly Row[])
         ["lume.config.open", "Open configuration file"],
       ],
     ],
-    [["lume.app.quit", "Quit Lume"]],
+    [["lume.session.detached", "Detached sessions…"]],
+    [
+      ["lume.app.quit", "Quit Lume"],
+      ["lume.app.quit-end-sessions", "Quit and end sessions"],
+    ],
   ],
   view: [
     [
@@ -89,8 +93,15 @@ const CONTENTS: Readonly<Record<Which, readonly (readonly (Row | readonly Row[])
       ["lume.app.report-issue", "Report an issue"],
       ["lume.app.show-logs", "Show logs"],
     ],
+    [["lume.host.restart", "Restart session host"]],
   ],
 };
+
+/** The commands that end programs, which the menu marks as such. */
+const ENDS_PROGRAMS: ReadonlySet<string> = new Set([
+  "lume.app.quit-end-sessions",
+  "lume.host.restart",
+]);
 
 function isRow(place: Row | readonly Row[]): place is Row {
   return typeof place[0] === "string";
@@ -195,6 +206,7 @@ export function AppMenu() {
           label,
           hint: hintOf(command),
           separated: first && items.length > 0,
+          ...(ENDS_PROGRAMS.has(command) ? { danger: true } : {}),
           choose: () => {
             if (how === "ask") app.palette.getState().openFor(command);
             else app.commands.run(command);

@@ -2371,6 +2371,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "windows-sys 0.61.2",
 ]
 
@@ -2428,6 +2429,7 @@ dependencies = [
  "lume-ipc",
  "lume-layout",
  "lume-proto",
+ "lume-vt",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

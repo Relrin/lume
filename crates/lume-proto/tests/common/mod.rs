@@ -133,17 +133,23 @@ fn session_info() -> impl Strategy<Value = SessionInfo> {
         any::<bool>(),
         option::of(exit_status()),
         stats(),
+        option::of(text()),
+        option::of(text()),
     )
         .prop_map(
-            |(id, program, pid, size, created_unix_ms, attached, exit, stats)| SessionInfo {
-                id,
-                program,
-                pid,
-                size,
-                created_unix_ms,
-                attached,
-                exit,
-                stats,
+            |(id, program, pid, size, created_unix_ms, attached, exit, stats, title, cwd)| {
+                SessionInfo {
+                    id,
+                    program,
+                    pid,
+                    size,
+                    created_unix_ms,
+                    attached,
+                    exit,
+                    stats,
+                    title,
+                    cwd,
+                }
             },
         )
 }

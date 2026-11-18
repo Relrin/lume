@@ -180,6 +180,13 @@ fn client_messages() -> Vec<Message> {
                 timeout_ms: 5000,
             },
         ),
+        request(8, RequestBody::HostStatus {}),
+        request(
+            9,
+            RequestBody::Shutdown {
+                end_sessions: false,
+            },
+        ),
     ]
 }
 
@@ -224,6 +231,8 @@ fn host_messages() -> Vec<Message> {
                         pending_bytes: 512,
                         paused: true,
                     },
+                    title: None,
+                    cwd: None,
                 }],
             }),
         ),
@@ -313,6 +322,21 @@ fn host_messages() -> Vec<Message> {
             .into_iter()
             .map(|event| Message::new(4, Body::Event(event))),
     )
+    .chain([
+        response(
+            10,
+            Ok(ResponseBody::HostStatus {
+                host_version: "0.0.0".to_owned(),
+                pid: 4242,
+                started_unix_ms: 1_763_400_000_000,
+                persistent: true,
+                sessions: 2,
+                clients: 1,
+                idle_exit_ms: Some(60_000),
+            }),
+        ),
+        response(11, Ok(ResponseBody::Stopping { ended: 2 })),
+    ])
     .collect()
 }
 

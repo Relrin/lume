@@ -14,6 +14,7 @@ usage: lume [--endpoint <name>] [--workspace <name>] [-e <program> [<arg>...]]
        lume keymap [--platform windows|macos|linux] [--workspace <name>] [--json]
        lume theme import <file> [--name <name>]
        lume shell-integration bash|zsh|fish|powershell
+       lume host [--endpoint <name>] status | start | stop [--end-sessions]
        lume --help | --version
 
 Without a command, lume starts the application, or brings its window to the front if
@@ -76,6 +77,17 @@ Commands on the configuration, which need no application running:
                                  your own: on a machine reached over SSH, or for a
                                  shell lume does not set up by itself
 
+Commands of lume host, on the session host, which runs the programs in the terminals
+and keeps them running after the application closes:
+  status                         whether it runs, which version, how many sessions and
+                                 windows it has
+  start                          start it, if it is not running; the application
+                                 starts it by itself when it needs it
+  stop [--end-sessions]          stop it; while a program runs in it, only with
+                                 --end-sessions, which ends them all
+--endpoint names the application's control endpoint, as for ctl; the host it uses is
+the one meant.
+
 Exit status: 0 done, 1 refused or failed (for config check: something is wrong), 2
 arguments not understood, 3 a wait ran out of time, 4 the application is not running.";
 
@@ -99,6 +111,53 @@ pub enum Command {
     Ctl(Ctl),
     /// Read or write the configuration. The application need not be running.
     Offline(Offline),
+    /// Ask the session host something, or start or stop it.
+    Host(HostCommand),
+}
+
+/// A command for the session host.
+#[derive(Debug, PartialEq, Eq)]
+pub struct HostCommand {
+    /// The application's endpoint, which names the host's.
+    pub endpoint: Option<String>,
+    pub action: HostAction,
+}
+
+/// What `lume host` does.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HostAction {
+    Status,
+    Start,
+    Stop { end_sessions: bool },
+}
+
+fn host(words: &mut Words, endpoint: Option<String>) -> Result<HostCommand, String> {
+    let mut endpoint = endpoint;
+    let action = loop {
+        let word = words
+            .next()
+            .ok_or("host needs a command: status, start or stop")?;
+        match word.as_str() {
+            "--endpoint" => endpoint = Some(value(words, "--endpoint", "a name")?),
+            "status" => break HostAction::Status,
+            "start" => break HostAction::Start,
+            "stop" => {
+                let end_sessions = match words.next().as_deref() {
+                    None => false,
+                    Some("--end-sessions") => true,
+                    Some(other) => return Err(format!("host stop does not take {other}")),
+                };
+                break HostAction::Stop { end_sessions };
+            }
+            other => {
+                return Err(format!(
+                    "{other} is not something lume host does (status, start or stop)"
+                ));
+            }
+        }
+    };
+    nothing_more(words, "host")?;
+    Ok(HostCommand { endpoint, action })
 }
 
 /// Something done with the configuration's files alone.
@@ -641,6 +700,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
                 ctl.endpoint = ctl.endpoint.or(endpoint);
                 return Ok(Command::Ctl(ctl));
             }
+            "host" => return host(&mut words, endpoint).map(Command::Host),
             "config" => return config(&mut words).map(Command::Offline),
             "keymap" => return keymap(&mut words).map(Command::Offline),
             "theme" => return theme(&mut words).map(Command::Offline),
@@ -661,6 +721,43 @@ mod tests {
 
     fn parsed(args: &[&str]) -> Result<Command, String> {
         parse(args.iter().map(|arg| (*arg).to_owned()))
+    }
+
+    #[test]
+    fn the_session_host_is_asked_about_started_and_stopped() {
+        let host = |endpoint: Option<&str>, action| {
+            Ok(Command::Host(HostCommand {
+                endpoint: endpoint.map(str::to_owned),
+                action,
+            }))
+        };
+        assert_eq!(parsed(&["host", "status"]), host(None, HostAction::Status));
+        assert_eq!(parsed(&["host", "start"]), host(None, HostAction::Start));
+        assert_eq!(
+            parsed(&["host", "stop"]),
+            host(
+                None,
+                HostAction::Stop {
+                    end_sessions: false
+                }
+            )
+        );
+        assert_eq!(
+            parsed(&["--endpoint", "trial", "host", "stop", "--end-sessions"]),
+            host(Some("trial"), HostAction::Stop { end_sessions: true })
+        );
+        assert_eq!(
+            parsed(&["host", "--endpoint", "trial", "status"]),
+            host(Some("trial"), HostAction::Status)
+        );
+        for wrong in [
+            &["host"][..],
+            &["host", "restart"],
+            &["host", "stop", "--now"],
+            &["host", "status", "extra"],
+        ] {
+            assert!(parsed(wrong).is_err(), "{wrong:?} was understood");
+        }
     }
 
     fn request(args: &[&str]) -> AppRequestBody {

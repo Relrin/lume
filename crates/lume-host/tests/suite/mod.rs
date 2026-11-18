@@ -186,12 +186,19 @@ pub async fn output_before_attach_is_on_the_screen_a_client_starts_from<H: Harne
     let session = client
         .spawn(support::prints_then_waits("printed-before-attach"))
         .await;
-    // Let the program print before anyone is attached.
-    client
-        .list_until("the program printed nothing", |sessions| {
-            sessions[0].stats.read_bytes > 0
+    // Let the program print before anyone is attached. The terminal's own start-up
+    // sequences come before the program's line, so the wait is for the line itself.
+    let printed = client
+        .request(RequestBody::WaitText {
+            session,
+            text: "printed-before-attach".to_owned(),
+            timeout_ms: u64::try_from(STEP.as_millis()).unwrap(),
         })
         .await;
+    assert!(
+        matches!(printed, Ok(ResponseBody::Matched { .. })),
+        "{printed:?}"
+    );
 
     match client.attach(session, 1).await {
         Ok(ResponseBody::Attached {
@@ -280,11 +287,19 @@ pub async fn a_client_of_another_engine_starts_from_replayed_output<H: Harness>(
     let session = client
         .spawn(support::prints_then_waits("printed-before-attach"))
         .await;
-    client
-        .list_until("the program printed nothing", |sessions| {
-            sessions[0].stats.read_bytes > 0
+    // The terminal's own start-up sequences come before the program's line, so the
+    // wait is for the line itself.
+    let printed = client
+        .request(RequestBody::WaitText {
+            session,
+            text: "printed-before-attach".to_owned(),
+            timeout_ms: u64::try_from(STEP.as_millis()).unwrap(),
         })
         .await;
+    assert!(
+        matches!(printed, Ok(ResponseBody::Matched { .. })),
+        "{printed:?}"
+    );
     match client.attach(session, 1).await {
         Ok(ResponseBody::Attached { hydrate, .. }) => assert_eq!(hydrate, HydrateMode::VtReplay),
         other => panic!("attach was answered with {other:?}"),

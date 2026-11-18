@@ -3008,6 +3008,12 @@
     border-color: transparent;
   }
 
+  .prompt-actions .prompt-proceed[data-danger] {
+    background: color-mix(in srgb, var(--lume-color-status-danger) 18%, transparent);
+    border-color: color-mix(in srgb, var(--lume-color-status-danger) 45%, transparent);
+    color: var(--lume-color-status-danger);
+  }
+
   /*
    * The settings window: a bar of its own where the page draws the title bar, a list
    * of pages down the left, and the page on show beside it.
@@ -3941,6 +3947,32 @@
   .connect-mark {
     @apply text-accent;
     background: transparent;
+  }
+
+  .connect-session-tile {
+    background: transparent;
+  }
+
+  .connect-dot {
+    box-sizing: border-box;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .connect-dot[data-state="running"] {
+    border: 2px solid var(--lume-color-accent);
+  }
+
+  .connect-dot[data-state="ended"] {
+    border: 1.5px solid var(--lume-color-text-muted);
+  }
+
+  .connect-hint {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
   }
 
   .connect-badge {

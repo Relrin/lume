@@ -14,11 +14,17 @@ import {
   selectTabPanes,
   selectWindowPanes,
 } from "../layout/selectors.ts";
+import type { Notice } from "../core/types.ts";
 import type { LayoutState } from "../layout/store.ts";
 import type { GroupId, PaneId, TabId } from "../layout/types.ts";
 import type { Closing } from "../terminal/prompts.ts";
 import type { ShellApp } from "./boot.ts";
 import { sentence } from "./notices.ts";
+
+/** The parts of the page answering the core's question about a command need. */
+export type ConfirmingApp = Pick<ShellApp, "prompts" | "views"> & {
+  readonly commands: Pick<ShellApp["commands"], "run">;
+};
 
 /** The parts of the page asking about a close needs. */
 export type ClosingApp = Pick<ShellApp, "layout" | "config" | "views" | "prompts" | "client"> &
@@ -173,4 +179,21 @@ export async function closeRequested(app: ClosingApp): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     app.notices?.push("error", sentence(message));
   }
+}
+
+/**
+ * Answers the core's word that a command run from this page would end programs and
+ * must be agreed to first: asks, and runs the command with the arguments the core gave
+ * on a yes. On a no the keyboard goes back to where the user was working.
+ */
+export async function confirmRequested(
+  app: ConfirmingApp,
+  notice: Extract<Notice, { type: "confirm_requested" }>,
+): Promise<void> {
+  const { title, message, confirm, command, args } = notice;
+  if (!(await app.prompts.confirm({ title, message, confirm }))) {
+    app.views.focus();
+    return;
+  }
+  app.commands.run(command, args);
 }

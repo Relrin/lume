@@ -51,7 +51,7 @@ import { TauriCarrier, type Carrier } from "../transport/carrier.ts";
 import { CommandError } from "../transport/types.ts";
 import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX } from "../tuning.ts";
 import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
-import { closeRequested, mayRun } from "./closing.ts";
+import { closeRequested, confirmRequested, mayRun } from "./closing.ts";
 import { describeTabNow, paneFacts } from "./describing.ts";
 import { focusBar } from "./focus-bar.ts";
 import { NoticeStore, sentence } from "./notices.ts";
@@ -424,6 +424,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         break;
       case "close_requested":
         void closeRequested({ layout, config, views, prompts, client, notices });
+        break;
+      case "confirm_requested":
+        void confirmRequested({ prompts, views, commands }, notice);
         break;
       case "profiles_changed":
         // A profile's look may be another now.

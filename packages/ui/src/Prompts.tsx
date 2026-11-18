@@ -21,6 +21,8 @@ interface Described {
   body: React.ReactNode;
   /** The label of the button that goes ahead, when there is something to go ahead with. */
   proceed?: string;
+  /** Whether going ahead cannot be taken back, and the button says so by its look. */
+  danger?: boolean;
   dismiss: string;
 }
 
@@ -59,13 +61,21 @@ function describe(prompt: Prompt): Described {
         proceed: prompt.closing.what === "moved-group" ? "Move" : "Close",
         dismiss: "Cancel",
       };
+    case "confirm":
+      return {
+        title: prompt.confirmation.title,
+        body: <p>{prompt.confirmation.message}</p>,
+        proceed: prompt.confirmation.confirm,
+        danger: true,
+        dismiss: "Cancel",
+      };
     case "notice":
       return { title: "Lume", body: <p>{prompt.message}</p>, dismiss: "OK" };
   }
 }
 
 function PromptDialog({ prompt }: { prompt: Prompt }) {
-  const { title, body, proceed, dismiss } = describe(prompt);
+  const { title, body, proceed, danger, dismiss } = describe(prompt);
   const cautious = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -90,7 +100,12 @@ function PromptDialog({ prompt }: { prompt: Prompt }) {
             {dismiss}
           </button>
           {proceed && (
-            <button type="button" className="prompt-proceed" onClick={() => prompt.answer(true)}>
+            <button
+              type="button"
+              className="prompt-proceed"
+              data-danger={danger || undefined}
+              onClick={() => prompt.answer(true)}
+            >
               {proceed}
             </button>
           )}

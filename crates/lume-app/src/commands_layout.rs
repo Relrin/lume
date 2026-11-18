@@ -84,6 +84,14 @@ pub fn panes_busy(
         .collect())
 }
 
+/// The sessions on this machine that no pane of any workspace shows, for the user to
+/// show again or end.
+#[tauri::command]
+pub async fn sessions_detached(services: Shared<'_>) -> Result<Value, CommandError> {
+    let sessions = crate::host::detached(&services.state, &services.panes).await?;
+    Ok(serde_json::json!({ "sessions": sessions }))
+}
+
 /// Every command there is.
 #[tauri::command]
 pub fn commands_list(services: Shared<'_>) -> Vec<CommandSpec> {

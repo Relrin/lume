@@ -16,7 +16,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use tracing::Level;
@@ -25,12 +25,6 @@ use crate::tuning::LOG_FILE_MAX_BYTES;
 
 /// The variable that sets how much is logged.
 const LEVEL_VARIABLE: &str = "LUME_LOG";
-
-/// The variable that names the log file.
-const FILE_VARIABLE: &str = "LUME_LOG_FILE";
-
-/// The log file's name in the log directory.
-const FILE_NAME: &str = "lume.log";
 
 /// How much to log, as `LUME_LOG` spells it. `None` is no logging at all.
 fn level(spelling: Option<&str>) -> Option<Level> {
@@ -46,29 +40,8 @@ fn level(spelling: Option<&str>) -> Option<Level> {
     }
 }
 
-/// The user's directory for an application's logs, from the variables that place it.
-fn log_dir(variable: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
-    if cfg!(windows) {
-        Some(variable("LOCALAPPDATA")?.join("Lume").join("logs"))
-    } else if cfg!(target_os = "macos") {
-        Some(variable("HOME")?.join("Library/Logs/Lume"))
-    } else {
-        let state = variable("XDG_STATE_HOME")
-            .filter(|dir| dir.is_absolute())
-            .or_else(|| Some(variable("HOME")?.join(".local/state")))?;
-        Some(state.join("lume"))
-    }
-}
-
 /// The file to log to: the one named, or the default in the user's log directory.
-pub fn log_file() -> Option<PathBuf> {
-    let variable = |name: &str| {
-        std::env::var_os(name)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
-    variable(FILE_VARIABLE).or_else(|| Some(log_dir(variable)?.join(FILE_NAME)))
-}
+pub use lume_config::log_file;
 
 /// Opens the log file for appending. A file that has grown past its limit is set aside
 /// first, replacing the one set aside before, so the log is bounded at twice the limit.
@@ -150,27 +123,9 @@ mod tests {
     }
 
     #[test]
-    fn the_log_directory_is_the_users_own() {
-        let home = |name: &str| match name {
-            "LOCALAPPDATA" => Some(PathBuf::from(r"C:\Users\u\AppData\Local")),
-            "HOME" => Some(PathBuf::from("/home/u")),
-            _ => None,
-        };
-        let dir = log_dir(home).unwrap();
-        if cfg!(windows) {
-            assert_eq!(dir, PathBuf::from(r"C:\Users\u\AppData\Local\Lume\logs"));
-        } else if cfg!(target_os = "macos") {
-            assert_eq!(dir, PathBuf::from("/home/u/Library/Logs/Lume"));
-        } else {
-            assert_eq!(dir, PathBuf::from("/home/u/.local/state/lume"));
-        }
-        assert_eq!(log_dir(|_| None), None);
-    }
-
-    #[test]
     fn a_log_past_its_limit_is_set_aside_and_begun_again() {
         let dir = std::env::temp_dir().join(format!("lume-log-test-{}", std::process::id()));
-        let path = dir.join("nested").join(FILE_NAME);
+        let path = dir.join("nested").join("lume.log");
         let aside = dir.join("nested").join("lume.log.old");
 
         open(&path, 10).unwrap().write_all(b"short").unwrap();

@@ -307,6 +307,10 @@ pub struct SpawnRequest {
     /// size its pane turns out to have draws its first screen once, not twice.
     #[serde(default)]
     pub size: Option<TermSize>,
+    /// A session that is already running, for the pane to show instead of starting
+    /// one: a session no pane shows any more.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionId>,
 }
 
 /// Which pane is to have the keyboard.

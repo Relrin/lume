@@ -46,3 +46,29 @@ pub use types::{
 
 /// The protocol version this crate speaks.
 pub const PROTO_VERSION: u32 = 2;
+
+/// The oldest protocol version a client of this crate still speaks: a newer application
+/// can use a host that an older one left running.
+pub const PROTO_VERSION_MIN: u32 = 1;
+
+/// The name the session host is served under when it runs on its own, for an
+/// application that serves its control endpoint under the default name.
+///
+/// A build made for development has a name of its own, so that it neither uses nor
+/// stops the host of an installed copy.
+pub const HOST_ENDPOINT_NAME: &str = if cfg!(debug_assertions) {
+    "host-dev"
+} else {
+    "host"
+};
+
+/// The name the session host is served under for an application whose control endpoint
+/// is called `app_endpoint`. An application started under a name of its own, as tests
+/// and trials are, has a host of its own too.
+pub fn host_endpoint_name(app_endpoint: Option<&str>) -> String {
+    match app_endpoint {
+        None => HOST_ENDPOINT_NAME.to_owned(),
+        Some(name) if name == app::ENDPOINT_NAME => HOST_ENDPOINT_NAME.to_owned(),
+        Some(name) => format!("{name}-host"),
+    }
+}

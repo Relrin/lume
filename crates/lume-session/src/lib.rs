@@ -15,6 +15,7 @@
 
 mod backend;
 pub mod cwd;
+pub mod daemon;
 mod local;
 pub mod profiles;
 mod router;
@@ -29,7 +30,8 @@ pub use backend::{
     Attachment, FrameStream, Hydrate, InputSink, OutputFrame, ScreenText, SessionBackend, TextFound,
 };
 pub use cwd::start_dir_from_report;
-pub use local::LocalBackend;
+pub use daemon::Daemon;
+pub use local::{HostHello, HostStatus, LocalBackend};
 /// What an in-process host is built from, for [`LocalBackend::in_process`].
 pub use lume_host::HostConfig;
 pub use lume_proto::{
@@ -62,6 +64,9 @@ pub enum SessionError {
     CreditOverflow,
     #[error("there is no session backend called `{0}`")]
     UnknownBackend(BackendId),
+    /// The backend's host could not be reached or started.
+    #[error("{0}")]
+    Unreachable(String),
 }
 
 pub type Result<T> = std::result::Result<T, SessionError>;

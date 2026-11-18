@@ -1,12 +1,13 @@
 /**
  * What the Connect palette lists, worked out from the profiles there are and what was
- * typed: groups of profiles by where their terminal is, the actions after them, and
- * what is said of the profile that is marked.
+ * typed: groups of profiles by where their terminal is, the sessions that run with no
+ * pane to show them, the actions after them, and what is said of the row that is
+ * marked.
  *
  * Nothing here touches the page, so all of it is tested with plain objects.
  */
 
-import type { Profile, ProfileList } from "../core/types.ts";
+import type { DetachedSession, Profile, ProfileList } from "../core/types.ts";
 import { rank } from "../palette/fuzzy.ts";
 import type { Launcher } from "../transport/types.ts";
 import { CONNECT_GROUP_MAX } from "./tuning.ts";
@@ -14,8 +15,8 @@ import { CONNECT_GROUP_MAX } from "./tuning.ts";
 /** Where a profile's terminal is. */
 export type ConnectKind = "local" | "wsl" | "ssh";
 
-/** Which kinds of profile the palette lists. */
-export type ConnectFilter = "all" | ConnectKind;
+/** Which kinds of profile the palette lists, or the detached sessions alone. */
+export type ConnectFilter = "all" | ConnectKind | "detached";
 
 /** The filters, in the order the palette offers them, with what each is called. */
 export const CONNECT_FILTERS: readonly { readonly value: ConnectFilter; readonly label: string }[] =
@@ -24,7 +25,22 @@ export const CONNECT_FILTERS: readonly { readonly value: ConnectFilter; readonly
     { value: "ssh", label: "SSH" },
     { value: "wsl", label: "WSL" },
     { value: "local", label: "Local" },
+    { value: "detached", label: "Detached" },
   ];
+
+/**
+ * The filters the palette offers now. "Detached" is offered while there are detached
+ * sessions, or while it is the filter in use, so that it is not a choice that always
+ * lists nothing.
+ */
+export function connectFilters(
+  hasDetached: boolean,
+  current: ConnectFilter,
+): readonly { readonly value: ConnectFilter; readonly label: string }[] {
+  return CONNECT_FILTERS.filter(
+    (choice) => choice.value !== "detached" || hasDetached || current === "detached",
+  );
+}
 
 /** The groups, in the order they are listed, with their headings. */
 const GROUPS: readonly { readonly kind: ConnectKind; readonly label: string }[] = [
@@ -78,9 +94,24 @@ export const CONNECT_ACTIONS: readonly ConnectAction[] = [
   },
 ];
 
+/** The heading of the group of detached sessions. */
+export const DETACHED_LABEL = "Detached sessions";
+
+/** One detached session as the palette lists it. */
+export interface DetachedEntry {
+  readonly session: DetachedSession;
+  /** What the palette calls it: the title its program gave it, or the program. */
+  readonly name: string;
+  /** Which characters of the name the query matched. */
+  readonly indices: readonly number[];
+  /** The line under the name: where it is, whether it runs, and when it started. */
+  readonly line: string;
+}
+
 /** One row of the list the keyboard moves through. */
 export type ConnectRow =
   | { readonly type: "profile"; readonly entry: ConnectEntry }
+  | { readonly type: "session"; readonly entry: DetachedEntry }
   | { readonly type: "action"; readonly action: ConnectAction };
 
 /** Where a profile's terminal is. */
@@ -222,21 +253,111 @@ export function connectGroups(
   });
 }
 
-/** The rows the keyboard moves through: every profile listed, then the actions. */
-export function connectRows(groups: readonly ConnectGroup[]): ConnectRow[] {
+/** How long ago something started, as the palette says it: "started 5m ago". */
+export function startedAgo(startedMs: number, nowMs: number): string {
+  const seconds = Math.max(0, Math.floor((nowMs - startedMs) / 1000));
+  if (seconds < 60) return "started just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `started ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `started ${hours}h ago`;
+  return `started ${Math.floor(hours / 24)}d ago`;
+}
+
+/** What a detached session is called in the palette. */
+export function detachedName(session: DetachedSession): string {
+  const title = session.title?.trim() ?? "";
+  return title === "" ? baseName(session.program) : title;
+}
+
+/**
+ * The detached sessions to list. Without a query, in the order they are given; with
+ * one, those whose name matches, best first, then those that match by their program or
+ * directory. None under a filter of one kind of profile, and none before they are known.
+ * `place` says a directory the way the page shows it.
+ */
+export function detachedEntries(
+  sessions: readonly DetachedSession[] | null,
+  query: string,
+  filter: ConnectFilter,
+  nowMs: number,
+  place: (cwd: string) => string = (cwd) => cwd,
+): DetachedEntry[] {
+  if (!sessions || (filter !== "all" && filter !== "detached")) return [];
+  const entry = (session: DetachedSession, indices: readonly number[]): DetachedEntry => ({
+    session,
+    name: detachedName(session),
+    indices,
+    line: [
+      session.cwd === null || session.cwd === "" ? null : place(session.cwd),
+      session.exited ? "ended" : "running",
+      startedAgo(session.created_unix_ms, nowMs),
+    ]
+      .filter((part): part is string => part !== null)
+      .join(" · "),
+  });
+  let entries: DetachedEntry[];
+  if (query.trim() === "") {
+    entries = sessions.map((session) => entry(session, []));
+  } else {
+    const byName = rank(sessions, query, detachedName);
+    const named = new Set(byName.map((match) => match.item));
+    const byOther = rank(
+      sessions.filter((session) => !named.has(session)),
+      query,
+      (session) => [session.program, session.cwd ?? ""].join(" "),
+    );
+    entries = [
+      ...byName.map((match) => entry(match.item, match.indices)),
+      ...byOther.map((match) => entry(match.item, [])),
+    ];
+  }
+  return entries.slice(0, CONNECT_GROUP_MAX);
+}
+
+/**
+ * The rows the keyboard moves through: every profile listed, then the detached
+ * sessions, then the actions.
+ */
+export function connectRows(
+  groups: readonly ConnectGroup[],
+  detached: readonly DetachedEntry[] = [],
+): ConnectRow[] {
   return [
     ...groups.flatMap((group) =>
       group.entries.map((entry): ConnectRow => ({ type: "profile", entry })),
     ),
+    ...detached.map((entry): ConnectRow => ({ type: "session", entry })),
     ...CONNECT_ACTIONS.map((action): ConnectRow => ({ type: "action", action })),
   ];
 }
 
-/** The filter after `filter` when the palette's filters are stepped through, or before it. */
-export function stepFilter(filter: ConnectFilter, by: 1 | -1): ConnectFilter {
-  const at = CONNECT_FILTERS.findIndex((candidate) => candidate.value === filter);
-  const next = (at + by + CONNECT_FILTERS.length) % CONNECT_FILTERS.length;
-  return CONNECT_FILTERS[next]?.value ?? "all";
+/**
+ * The filter after `filter` when the palette's filters are stepped through, or before
+ * it, among `filters` (all of them, if not given).
+ */
+export function stepFilter(
+  filter: ConnectFilter,
+  by: 1 | -1,
+  filters: readonly { readonly value: ConnectFilter }[] = CONNECT_FILTERS,
+): ConnectFilter {
+  const at = filters.findIndex((candidate) => candidate.value === filter);
+  const next = (at + by + filters.length) % filters.length;
+  return filters[next]?.value ?? "all";
+}
+
+/** What attaching to a detached session asks the core for: a new tab, or a split. */
+export function reattachCommand(
+  session: DetachedSession,
+  how: "tab" | "split",
+): {
+  readonly id: string;
+  readonly args: { readonly session: string; readonly backend: string; readonly place: string };
+} {
+  return {
+    id: "lume.session.reattach",
+    args: { session: session.session, backend: session.backend, place: how },
+  };
 }
 
 /** What opening a profile asks the core for: a new tab, or a split beside the focused pane. */

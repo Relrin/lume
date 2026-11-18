@@ -122,6 +122,8 @@ impl From<SessionError> for CommandError {
             SessionError::Protocol(_) => "protocol_error",
             SessionError::CreditOverflow => "limit_exceeded",
             SessionError::UnknownBackend(_) => "not_found",
+            // As a closed connection is: the backend is not there to ask.
+            SessionError::Unreachable(_) => "disconnected",
         };
         Self::new(code, error.to_string())
     }

@@ -214,6 +214,31 @@ export interface ProfileList {
   readonly looks?: Readonly<Record<string, ProfileLook>>;
 }
 
+/**
+ * A session the session host runs that no pane of any workspace shows, as
+ * `sessions_detached` describes it.
+ */
+export interface DetachedSession {
+  readonly backend: string;
+  readonly session: string;
+  /** The program the session was started with. */
+  readonly program: string;
+  /** The title the program last gave the terminal, if it gave one. */
+  readonly title: string | null;
+  /** The directory its shell last said it was in, if it said. */
+  readonly cwd: string | null;
+  /** When the session started, in milliseconds since the Unix epoch. */
+  readonly created_unix_ms: number;
+  /** Whether its program has ended. Its last screen can still be shown. */
+  readonly exited: boolean;
+  readonly pid: number | null;
+}
+
+/** What `sessions_detached` returns. */
+export interface DetachedSessions {
+  readonly sessions: readonly DetachedSession[];
+}
+
 /** What a page knows of the machine it runs on. */
 export interface Machine {
   /** The machine's name, as the system gives it, where it does. */
@@ -301,6 +326,19 @@ export type Notice =
    * the window itself if the answer is yes.
    */
   | { readonly type: "close_requested" }
+  /**
+   * A command that would end programs was run from this page. The page asks, and runs
+   * `command` with `args` as given if the answer is yes.
+   */
+  | {
+      readonly type: "confirm_requested";
+      readonly title: string;
+      readonly message: string;
+      /** The label of the button that goes ahead. */
+      readonly confirm: string;
+      readonly command: string;
+      readonly args: Readonly<Record<string, unknown>>;
+    }
   /** The profiles changed: what was found on the machine, or what the user wrote. */
   | ({ readonly type: "profiles_changed" } & ProfileList)
   /** The settings window was asked for again: the page to show, if one was named. */

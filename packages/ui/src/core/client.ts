@@ -14,6 +14,7 @@ import type {
   CommandSpec,
   ConfigView,
   ControlMessage,
+  DetachedSessions,
   LayoutApplied,
   LayoutView,
   Notice,
@@ -93,6 +94,11 @@ export class CoreClient {
   /** Which of this window's `panes` run something that closing them would end. */
   panesBusy(panes: readonly PaneId[]): Promise<PaneId[]> {
     return this.transport.command("panes_busy", { panes });
+  }
+
+  /** The sessions the session host runs that no pane of any workspace shows. */
+  sessionsDetached(): Promise<DetachedSessions> {
+    return this.transport.command("sessions_detached");
   }
 
   /** The configuration in use. */

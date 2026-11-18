@@ -5,7 +5,7 @@
     "shortDescription": "A terminal",
     "longDescription": "Lume is a terminal emulator.",
     "licenseFile": "../../LICENSE",
-    "externalBin": ["../../target/dist/sidecar/lume"],
+    "externalBin": ["../../target/dist/sidecar/lume", "../../target/dist/sidecar/lume-host"],
     "windows": {
       "nsis": {
         "installMode": "currentUser"

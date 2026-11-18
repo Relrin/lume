@@ -21,6 +21,51 @@ pub const STATE_DIR_VARIABLE: &str = "LUME_STATE_DIR";
 /// What is added to the directories' names by a build for development.
 const DEVELOPMENT_SUFFIX: &str = "-dev";
 
+/// The variable that names the application's log file, in place of the one in the log
+/// directory.
+pub const LOG_FILE_VARIABLE: &str = "LUME_LOG_FILE";
+
+/// The application's log file's name in the log directory.
+const LOG_FILE_NAME: &str = "lume.log";
+
+/// The session host's log file's name in the log directory.
+const HOST_LOG_FILE_NAME: &str = "host.log";
+
+/// The user's directory for the application's logs, from the variables that place it.
+pub fn log_dir_with(variable: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
+    if cfg!(windows) {
+        Some(variable("LOCALAPPDATA")?.join("Lume").join("logs"))
+    } else if cfg!(target_os = "macos") {
+        Some(variable("HOME")?.join("Library/Logs/Lume"))
+    } else {
+        let state = variable("XDG_STATE_HOME")
+            .filter(|dir| dir.is_absolute())
+            .or_else(|| Some(variable("HOME")?.join(".local/state")))?;
+        Some(state.join("lume"))
+    }
+}
+
+fn environment(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// The file the application logs to: the one `LUME_LOG_FILE` names, or the default in
+/// the user's log directory.
+pub fn log_file() -> Option<PathBuf> {
+    environment(LOG_FILE_VARIABLE).or_else(|| Some(log_dir_with(environment)?.join(LOG_FILE_NAME)))
+}
+
+/// The file the session host that runs on its own logs to: beside the application's.
+/// When `LUME_LOG_FILE` names the application's, the host's is named after it.
+pub fn host_log_file() -> Option<PathBuf> {
+    match environment(LOG_FILE_VARIABLE) {
+        Some(file) => Some(file.with_extension(HOST_LOG_FILE_NAME)),
+        None => Some(log_dir_with(environment)?.join(HOST_LOG_FILE_NAME)),
+    }
+}
+
 /// An operating system, where its conventions differ.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Platform {
@@ -221,6 +266,24 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+
+    #[test]
+    fn the_log_directory_is_the_users_own() {
+        let home = |name: &str| match name {
+            "LOCALAPPDATA" => Some(PathBuf::from(r"C:\Users\u\AppData\Local")),
+            "HOME" => Some(PathBuf::from("/home/u")),
+            _ => None,
+        };
+        let dir = log_dir_with(home).unwrap();
+        if cfg!(windows) {
+            assert_eq!(dir, PathBuf::from(r"C:\Users\u\AppData\Local\Lume\logs"));
+        } else if cfg!(target_os = "macos") {
+            assert_eq!(dir, PathBuf::from("/home/u/Library/Logs/Lume"));
+        } else {
+            assert_eq!(dir, PathBuf::from("/home/u/.local/state/lume"));
+        }
+        assert_eq!(log_dir_with(|_| None), None);
+    }
 
     fn resolve(platform: Platform, development: bool, set: &[(&str, &str)]) -> Option<Dirs> {
         let variables: HashMap<String, PathBuf> = set

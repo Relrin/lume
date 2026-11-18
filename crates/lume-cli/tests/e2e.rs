@@ -57,6 +57,10 @@ impl Answer {
     }
 }
 
+/// Where the tests' applications run their sessions unless a test says otherwise:
+/// inside the application, so that a test's shells end when its application closes.
+const IN_PROCESS_HOST: &str = "\n[host]\nmode = \"in-process\"\n";
+
 /// A running application with an endpoint of its own.
 struct App {
     child: Option<Child>,
@@ -107,9 +111,14 @@ impl App {
         let home = std::env::temp_dir().join(format!("lume-e2e-{}-{number}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(home.join("config")).expect("a folder for the configuration");
+        let host = if settings.contains("[host]") {
+            ""
+        } else {
+            IN_PROCESS_HOST
+        };
         std::fs::write(
             home.join("config").join("config.toml"),
-            configuration() + settings,
+            configuration() + host + settings,
         )
         .expect("the configuration is written");
         Self::start_in(home, false)
@@ -118,7 +127,17 @@ impl App {
     /// Starts an application whose configuration and saved workspaces are in `home`.
     fn start_in(home: PathBuf, keep_home: bool) -> Self {
         let number = NEXT.fetch_add(1, Ordering::Relaxed);
-        let endpoint = format!("e2e-{}-{number}", std::process::id());
+        Self::start_on(
+            home,
+            keep_home,
+            format!("e2e-{}-{number}", std::process::id()),
+        )
+    }
+
+    /// Starts an application on `endpoint`, whose configuration and saved workspaces
+    /// are in `home`. An application on the endpoint of one before it uses the session
+    /// host that one used.
+    fn start_on(home: PathBuf, keep_home: bool, endpoint: String) -> Self {
         let log = std::env::temp_dir().join(format!("lume-{endpoint}.log"));
         let _ = std::fs::remove_file(&log);
         let child = Command::new(application())
@@ -316,9 +335,22 @@ impl App {
             .collect()
     }
 
+    /// Ends the application's process at once, as a crash would.
+    fn kill(mut self) {
+        let mut child = self.child.take().expect("the application is running");
+        child.kill().expect("the application can be ended");
+        let _ = child.wait();
+    }
+
     /// Asks the application to close and waits until its process has ended.
-    fn quit(mut self) -> PathBuf {
-        self.ctl(&["quit"]).ok("quit");
+    fn quit(self) -> PathBuf {
+        self.quit_with(&["quit"])
+    }
+
+    /// Asks the application to close with `request`, and waits until its process has
+    /// ended.
+    fn quit_with(mut self, request: &[&str]) -> PathBuf {
+        self.ctl(request).ok("quit");
         let mut child = self.child.take().expect("the application is running");
         let deadline = Instant::now() + START;
         loop {
@@ -353,6 +385,30 @@ impl Drop for App {
         }
         let _ = child.kill();
         let _ = child.wait();
+    }
+}
+
+/// What `lume host` says about the session host of the application on `endpoint`.
+fn host(endpoint: &str, command: &[&str]) -> Answer {
+    let output = Command::new(lume())
+        .args(["host", "--endpoint", endpoint])
+        .args(command)
+        .output()
+        .expect("lume runs");
+    let text = String::from_utf8_lossy(&output.stdout);
+    Answer {
+        status: output.status.code().unwrap_or(-1),
+        json: serde_json::from_str(text.trim()).unwrap_or(Value::String(text.into_owned())),
+    }
+}
+
+/// Stops the session host of a test whatever becomes of the test, so that a test that
+/// fails leaves no shell running in it.
+struct HostGuard(String);
+
+impl Drop for HostGuard {
+    fn drop(&mut self) {
+        let _ = host(&self.0, &["stop", "--end-sessions"]);
     }
 }
 
@@ -1605,4 +1661,104 @@ fn a_shell_at_its_prompt_runs_nothing_and_a_program_it_runs_is_something() {
     });
     app.until_busy(&pane, false, "the program to end");
     app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn the_shells_outlive_the_application_and_come_back_with_it() {
+    let shell = shells().into_iter().next().expect("a shell to test with");
+    let number = NEXT.fetch_add(1, Ordering::Relaxed);
+    let endpoint = format!("e2e-{}-{number}", std::process::id());
+    let _stops = HostGuard(endpoint.clone());
+    let home = std::env::temp_dir().join(format!("lume-e2e-{}-{number}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join("config")).expect("a folder for the configuration");
+    std::fs::write(
+        home.join("config").join("config.toml"),
+        configuration() + "\n[host]\nmode = \"daemon\"\nidle-exit = 2\n",
+    )
+    .expect("the configuration is written");
+
+    let app = App::start_on(home.clone(), true, endpoint.clone());
+    app.status_with_session();
+    let spawned = start_at(&app, &shell, MARK, &["--tab"]);
+    let pane = pane_of(&spawned);
+    let typed = format!("b3fore{}", std::process::id());
+    app.type_line_in(&pane, &(shell.say)(&typed));
+    app.wait_text_in(&pane, &format!("lume-{MARK}-{typed}"));
+    let pid = app.pid_of(&pane);
+    let pids = app.session_pids();
+    assert_eq!(pids.len(), 2, "two sessions are running");
+    let status = host(&endpoint, &["status"]).ok("host status");
+    assert_eq!(status["sessions"], 2, "{status}");
+    let host_pid = status["pid"].clone();
+
+    // The application is ended as a crash would end it. The shells carry on.
+    app.kill();
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(
+        pids.iter().all(|pid| process_alive(*pid)),
+        "a shell ended with the application"
+    );
+
+    // The next start shows the same shells, with what they showed.
+    let app = App::start_on(home.clone(), true, endpoint.clone());
+    app.status_with_session();
+    assert_eq!(app.pid_of(&pane), pid, "the pane started a new shell");
+    let screen = app.ctl(&["capture", "--pane", &pane]).ok("capture");
+    let shown = screen["lines"].to_string();
+    assert!(shown.contains(&format!("lume-{MARK}-{typed}")), "{shown}");
+    let more = format!("aft3r{}", std::process::id());
+    app.type_line_in(&pane, &(shell.say)(&more));
+    app.wait_text_in(&pane, &format!("lume-{MARK}-{more}"));
+
+    // Closing leaves them running too, in the same host.
+    app.quit();
+    assert!(
+        pids.iter().all(|pid| process_alive(*pid)),
+        "a shell ended with the application"
+    );
+    assert_eq!(
+        host(&endpoint, &["status"]).ok("host status")["pid"],
+        host_pid
+    );
+
+    // Quitting and ending the sessions ends them, and the host follows.
+    let app = App::start_on(home, false, endpoint.clone());
+    app.status_with_session();
+    assert_eq!(app.pid_of(&pane), pid);
+    let log = app.quit_with(&["command", "lume.app.quit-end-sessions"]);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while pids.iter().any(|pid| process_alive(*pid)) {
+        assert!(
+            Instant::now() < deadline,
+            "a shell outlived quitting with its session ended"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let status = host(&endpoint, &["status"]);
+        if status.status == 4 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the host stayed with nothing to do: {}",
+            status.json
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    // The host's log says what it did and nothing that passed through a terminal.
+    let host_log = log.with_extension("host.log");
+    let written = std::fs::read_to_string(&host_log).expect("the host wrote its log");
+    assert!(written.contains("the session host is serving"), "{written}");
+    for held in [&typed, &more] {
+        assert!(
+            !written.contains(held.as_str()),
+            "the host's log holds {held}"
+        );
+    }
+    let _ = std::fs::remove_file(&host_log);
 }

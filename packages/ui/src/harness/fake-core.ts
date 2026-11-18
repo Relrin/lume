@@ -18,6 +18,7 @@ import schemaText from "../../../../schemas/config.schema.json?raw";
 import type {
   CommandSpec,
   ConfigView,
+  DetachedSession,
   KeyBinding,
   Machine,
   Notice,
@@ -204,6 +205,8 @@ export interface FakeCoreOptions {
   readonly panes?: Readonly<Record<PaneId, FixturePane>>;
   /** The profiles there are. Left out, a shell, a distribution and a host. */
   readonly profiles?: ProfileList;
+  /** The sessions no pane shows. Left out, none. */
+  readonly detached?: readonly DetachedSession[];
   /** Settings of the page's own to lay over the fixture's, by section. */
   readonly settings?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
@@ -394,6 +397,8 @@ export class FakeCore implements Carrier {
   #receive: (frames: Uint8Array) => void = () => undefined;
   #revision = 1;
   #profiles: ProfileList;
+  /** The sessions no pane shows, less those a command has attached to or ended. */
+  #detached: DetachedSession[];
   /** The panes whose program has ended. */
   readonly #ended = new Set<PaneId>();
   /** Commands the page called that this core has no answer for. */
@@ -414,6 +419,7 @@ export class FakeCore implements Carrier {
     this.#focus = first?.panes[0] ?? "p1";
     this.#scheme = options.scheme ?? "dark";
     this.#profiles = options.profiles ?? PROFILES;
+    this.#detached = [...(options.detached ?? [])];
     this.#order = this.#fixture.tabs.map((tab) => tab.id);
     for (const tab of this.#order) {
       const look = options.tabLooks?.[tab];
@@ -656,6 +662,8 @@ export class FakeCore implements Carrier {
         return answer(SHELLS);
       case "profiles_list":
         return answer(this.#profiles);
+      case "sessions_detached":
+        return answer({ sessions: [...this.#detached] });
       case "font_families":
         return answer(FONTS);
       // No picture is behind the panes: no bytes.
@@ -814,6 +822,11 @@ export class FakeCore implements Carrier {
         this.#tabs(() => {
           for (const each of this.#facts.values()) if (each.group === group) each.group = null;
         });
+        return;
+      // A session that is shown again, or ended, is no longer one that no pane shows.
+      case "lume.session.reattach":
+      case "lume.session.end":
+        this.#detached = this.#detached.filter((found) => found.session !== given["session"]);
         return;
       default:
         return;

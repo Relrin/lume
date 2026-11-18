@@ -88,6 +88,13 @@ jobs:
         run: cargo xtask build
       - name: Test
         run: cargo xtask test
+      # An updated application finds the host the previous release left running. The
+      # step says so and passes while no release has such a host.
+      - name: Backend against the previous release's host
+        shell: bash
+        run: |
+          git fetch --tags --force --quiet || true
+          cargo xtask compat --latest-release
       # Start the app, let the page check the webview, print the report and exit.
       - name: Probe the webview (Linux)
         if: runner.os == 'Linux'

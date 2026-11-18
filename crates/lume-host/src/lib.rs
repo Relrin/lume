@@ -27,8 +27,9 @@ pub mod tuning;
 use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lume_proto::{
     BackendCaps, DecodeError, ErrorCode, HydrateKinds, ProtoError, Responder, SessionId,
@@ -36,6 +37,7 @@ use lume_proto::{
 };
 use lume_pty::{PtySize, PtySystem};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::watch;
 
 use crate::conn::Outbox;
 use crate::launch::Launch;
@@ -50,7 +52,13 @@ pub struct HostConfig {
     pub pty: Arc<dyn PtySystem>,
     /// Whether sessions outlive the connection that started them. A host serving one
     /// client for the life of that client's process ends them with the connection.
+    /// Only a persistent host can be asked to stop: one that is not stops with its
+    /// client.
     pub persistent: bool,
+    /// How long the host stays with no running session and no client before it exits,
+    /// as told to clients. Whoever runs the host does the waiting
+    /// ([`Host::idle_changes`]).
+    pub idle_exit: Option<Duration>,
     /// The most sessions the host runs at once.
     pub max_sessions: usize,
     /// A folder the host may write its shell scripts to. Without one, no shell is
@@ -64,6 +72,7 @@ impl Default for HostConfig {
         Self {
             pty: lume_pty::native(),
             persistent: false,
+            idle_exit: None,
             max_sessions: tuning::MAX_SESSIONS,
             shell_integration_dir: None,
         }
@@ -88,6 +97,18 @@ pub struct Host {
     scripts: OnceLock<Option<PathBuf>>,
     /// When the host started. Things sessions do at intervals are counted from here.
     started: Instant,
+    /// The same moment by the wall clock, for status.
+    started_unix_ms: u64,
+    /// How many clients are connected, besides command-line tools asking questions.
+    clients: AtomicUsize,
+    /// How many connections are open, whoever is on the other end and whether or not
+    /// it has said hello.
+    connections: AtomicUsize,
+    /// Bumped whenever a client comes or goes and whenever a session starts, ends or is
+    /// removed: whatever can make the host idle, or stop it being idle.
+    changes: watch::Sender<u64>,
+    /// Set once the host has been asked to stop. Connections close when it is.
+    stopping: watch::Sender<bool>,
 }
 
 impl Host {
@@ -97,7 +118,128 @@ impl Host {
             sessions: Mutex::new(HashMap::new()),
             scripts: OnceLock::new(),
             started: Instant::now(),
+            started_unix_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |since| {
+                    u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+                }),
+            clients: AtomicUsize::new(0),
+            connections: AtomicUsize::new(0),
+            changes: watch::Sender::new(0),
+            stopping: watch::Sender::new(false),
         })
+    }
+
+    /// Whether the host has nothing to do: no client is connected and no session's
+    /// program runs. A session whose program has ended and that waits for a client to
+    /// see it does not keep the host busy.
+    pub fn is_idle(&self) -> bool {
+        self.clients.load(Ordering::SeqCst) == 0
+            && self
+                .sessions()
+                .iter()
+                .all(|(id, handle)| handle.info(*id).exit.is_some())
+    }
+
+    /// Changes after which [`is_idle`](Self::is_idle) may say something else. The value
+    /// itself means nothing; wait for it to change.
+    pub fn idle_changes(&self) -> watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+
+    /// Resolves once the host has been asked to stop. By then every connection is
+    /// closing; whoever runs the host waits a moment for [`clients`](Self::clients) to
+    /// reach zero and exits.
+    pub async fn stopped(&self) {
+        let mut stopping = self.stopping.subscribe();
+        let _ = stopping.wait_for(|stopping| *stopping).await;
+    }
+
+    /// How many clients are connected, besides command-line tools asking questions.
+    pub fn clients(&self) -> usize {
+        self.clients.load(Ordering::SeqCst)
+    }
+
+    /// How many connections are open. One that has just been made may be a client that
+    /// has not said yet what it is, so a host does not exit while any is open.
+    pub fn connections(&self) -> usize {
+        self.connections.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn connection_opened(&self) {
+        self.connections.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn connection_closed(&self) {
+        self.connections.fetch_sub(1, Ordering::SeqCst);
+        self.touched();
+    }
+
+    pub(crate) fn stopping(&self) -> watch::Receiver<bool> {
+        self.stopping.subscribe()
+    }
+
+    /// Something that bears on whether the host is idle has changed.
+    pub(crate) fn touched(&self) {
+        self.changes
+            .send_modify(|count| *count = count.wrapping_add(1));
+    }
+
+    pub(crate) fn client_came(&self) {
+        self.clients.fetch_add(1, Ordering::SeqCst);
+        self.touched();
+    }
+
+    pub(crate) fn client_went(&self) {
+        self.clients.fetch_sub(1, Ordering::SeqCst);
+        self.touched();
+    }
+
+    /// Ends every session and waits, for a while, until their programs have gone.
+    /// Returns how many there were.
+    pub(crate) async fn end_all(&self) -> u32 {
+        let handles: Vec<SessionHandle> = self.sessions().values().cloned().collect();
+        let mut ended = Vec::new();
+        for handle in handles {
+            if handle.send(session::Command::Kill).await {
+                ended.push(handle);
+            }
+        }
+        let all_ended = async {
+            for session in &ended {
+                session.ended().await;
+            }
+        };
+        if tokio::time::timeout(tuning::ABANDON_WAIT, all_ended)
+            .await
+            .is_err()
+        {
+            tracing::warn!("sessions were still ending when the host stopped");
+        }
+        u32::try_from(ended.len()).unwrap_or(u32::MAX)
+    }
+
+    /// Asks every connection to close and whoever runs the host to exit. Sessions are
+    /// left as they are.
+    pub fn stop(&self) {
+        self.stopping.send_replace(true);
+        self.touched();
+    }
+
+    pub(crate) fn status(&self) -> lume_proto::ResponseBody {
+        let sessions = self.sessions().len();
+        lume_proto::ResponseBody::HostStatus {
+            host_version: env!("CARGO_PKG_VERSION").to_owned(),
+            pid: std::process::id(),
+            started_unix_ms: self.started_unix_ms,
+            persistent: self.config.persistent,
+            sessions: u32::try_from(sessions).unwrap_or(u32::MAX),
+            clients: u32::try_from(self.clients()).unwrap_or(u32::MAX),
+            idle_exit_ms: self
+                .config
+                .idle_exit
+                .map(|wait| u64::try_from(wait.as_millis()).unwrap_or(u64::MAX)),
+        }
     }
 
     /// The next moment after `now` at which sessions look up the program that has
@@ -128,11 +270,21 @@ impl Host {
     /// Serves one client until it disconnects. Unless the host is
     /// [`persistent`](HostConfig::persistent), sessions the client started end with the
     /// connection.
-    pub async fn serve<S>(self: Arc<Self>, io: S) -> Result<(), ServeError>
+    ///
+    /// The connection counts as open from the call, before the future is first polled.
+    pub fn serve<S>(
+        self: Arc<Self>,
+        io: S,
+    ) -> impl std::future::Future<Output = Result<(), ServeError>> + Send + 'static
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
-        conn::serve(self, io).await
+        self.connection_opened();
+        async move {
+            let result = conn::serve(Arc::clone(&self), io).await;
+            self.connection_closed();
+            result
+        }
     }
 
     /// What this host can and cannot do, as told to every client.
@@ -175,6 +327,7 @@ impl Host {
 
     pub(crate) fn remove(&self, id: SessionId) {
         self.sessions().remove(&id);
+        self.touched();
     }
 
     /// Starts a session. `owner` is the connection that asked for it, which is told when
@@ -235,6 +388,7 @@ impl Host {
         })
         .map_err(|error| ProtoError::new(ErrorCode::SpawnFailed, error.to_string()))?;
         self.sessions().insert(id, handle);
+        self.touched();
         tracing::debug!(session = %id, "session started");
         Ok(id)
     }

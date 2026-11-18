@@ -1,9 +1,10 @@
 //! `cargo xtask dist`: what a user is given to run.
 //!
-//! The release build of the application and of the console command, with the page
-//! inside the application and without the test harness, put together two ways:
+//! The release build of the application, of the session host and of the console
+//! command, with the page inside the application and without the test harness, put
+//! together two ways:
 //!
-//! - a portable archive holding the two programs, which runs from wherever it is
+//! - a portable archive holding the three programs, which runs from wherever it is
 //!   unpacked;
 //! - with `--installers`, the platform's installers as well, made by the Tauri bundler:
 //!   an installer on Windows, a disk image on macOS, an AppImage and a Debian package on
@@ -65,7 +66,14 @@ fn package_name() -> String {
     )
 }
 
-/// Packs the two programs and the licence into one archive beside the others.
+/// The programs that are shipped, each beside the others: the application looks for
+/// the session host there, and the console command for both.
+const PROGRAMS: [&str; 3] = ["lume-gui", "lume-host", "lume"];
+
+/// The programs the bundler ships beside the application, as it is given them.
+const SIDECARS: [&str; 2] = ["lume", "lume-host"];
+
+/// Packs the programs and the licence into one archive beside the others.
 fn portable() -> Result<PathBuf> {
     let name = package_name();
     let stage = dist_dir().join("stage");
@@ -73,7 +81,7 @@ fn portable() -> Result<PathBuf> {
     // What an earlier run staged is not part of this one.
     let _ = std::fs::remove_dir_all(&stage);
     std::fs::create_dir_all(&folder).with_context(|| format!("creating {}", folder.display()))?;
-    for program in [exe("lume-gui"), exe("lume")] {
+    for program in PROGRAMS.map(exe) {
         copy(&release_dir().join(&program), &folder.join(&program))?;
     }
     // The build leaves each library beside the programs that load it.
@@ -114,15 +122,18 @@ fn bundles() -> Result<&'static str> {
 
 /// Makes the platform's installers and copies them beside the portable archive.
 fn installers() -> Result<Vec<PathBuf>> {
-    // The bundler ships the console command beside the application. It looks for the
-    // file under the name it is given with the target's triple added.
+    // The bundler ships the console command and the session host beside the
+    // application. It looks for each file under the name it is given with the target's
+    // triple added.
     let sidecar = dist_dir().join("sidecar");
     std::fs::create_dir_all(&sidecar)?;
     let triple = paths::host_triple()?;
-    copy(
-        &release_dir().join(exe("lume")),
-        &sidecar.join(exe(&format!("lume-{triple}"))),
-    )?;
+    for program in SIDECARS {
+        copy(
+            &release_dir().join(exe(program)),
+            &sidecar.join(exe(&format!("{program}-{triple}"))),
+        )?;
+    }
 
     // The libraries go into the installation folder itself, beside the programs.
     let resources: serde_json::Map<String, serde_json::Value> = libraries()
@@ -180,6 +191,8 @@ pub fn run(with_installers: bool) -> Result<()> {
         "lume-app",
         "-p",
         "lume-cli",
+        "-p",
+        "lume-host",
         "--features",
         "lume-app/custom-protocol",
     ])?;

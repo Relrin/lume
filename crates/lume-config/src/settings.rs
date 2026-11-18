@@ -348,7 +348,7 @@ pub fn pages() -> [Page; 3] {
             icon: "general",
             group: APPLICATION,
             blurb: "How Lume starts, how it gets your attention, and what closing does.",
-            groups: &["Startup", "Windows", "Attention", "Closing"],
+            groups: &["Startup", "Windows", "Attention", "Closing", "Sessions"],
         },
         Page {
             id: "appearance",

@@ -20,11 +20,24 @@ export interface Closing {
   readonly running: number;
 }
 
+/** A question about something that cannot be taken back, put by the core. */
+export interface Confirmation {
+  readonly title: string;
+  readonly message: string;
+  /** The label of the button that goes ahead. */
+  readonly confirm: string;
+}
+
 /** One thing waiting for the user. */
 export type Prompt =
   | { readonly kind: "paste"; readonly preview: PastePreview; answer(ok: boolean): void }
   | { readonly kind: "link"; readonly target: string; answer(ok: boolean): void }
   | { readonly kind: "close"; readonly closing: Closing; answer(ok: boolean): void }
+  | {
+      readonly kind: "confirm";
+      readonly confirmation: Confirmation;
+      answer(ok: boolean): void;
+    }
   | { readonly kind: "notice"; readonly message: string; answer(ok: boolean): void };
 
 /** Holds the prompts in the order they were raised and shows them one at a time. */
@@ -54,6 +67,11 @@ export class PromptStore {
   /** Asks whether to close something that would end the programs running in it. */
   confirmClose(closing: Closing): Promise<boolean> {
     return this.#ask((answer) => ({ kind: "close", closing, answer }));
+  }
+
+  /** Asks whether to go ahead with something that cannot be taken back. */
+  confirm(confirmation: Confirmation): Promise<boolean> {
+    return this.#ask((answer) => ({ kind: "confirm", confirmation, answer }));
   }
 
   /** Tells the user something. It stays until dismissed. */

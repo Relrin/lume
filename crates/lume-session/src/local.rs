@@ -4,6 +4,15 @@
 //! Requests go out on the control stream and are matched to their responses by id; each
 //! attachment is a stream of its own. Two tasks do the I/O: one writes whatever is
 //! queued, one reads and hands each frame to the request or attachment it belongs to.
+//!
+//! The host is either a task in this process, which ends with it, or a process of its
+//! own that the backend starts when nothing serves its endpoint. A connection to the
+//! latter that is lost is made again on the next request; what was attached through
+//! the lost one has ended.
+//!
+//! The backend speaks the protocol's current version and the one before, so that an
+//! application can use a host that an older application left running. What the older
+//! version does not have is refused here, as a host that does not offer it would.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -15,19 +24,25 @@ use crate::backend::{ScreenText, TextFound};
 use async_trait::async_trait;
 use lume_host::{Host, HostConfig};
 use lume_proto::{
-    BackendCaps, Body, BytesKind, CellPx, ClientFacts, ClientKind, Control, FrameDecoder,
-    HydrateMode, HydratePayload, Message, Notification, PROTO_VERSION, ProtoError, ReceiveWindow,
-    Request, RequestBody, Response, ResponseBody, Role, SessionId, SessionInfo, SpawnSpec,
-    TermSize, encode, encode_bytes,
+    BackendCaps, Body, BytesKind, CellPx, ClientFacts, ClientKind, Control, ErrorCode,
+    FrameDecoder, HydrateMode, HydratePayload, Message, Notification, PROTO_VERSION,
+    PROTO_VERSION_MIN, ProtoError, ReceiveWindow, Request, RequestBody, Response, ResponseBody,
+    Role, SessionId, SessionInfo, SpawnSpec, TermSize, encode, encode_bytes,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{AbortHandle, JoinHandle};
 
 use crate::backend::Sink;
+use crate::daemon::Daemon;
 use crate::{
     Attachment, FrameStream, Hydrate, InputSink, OutputFrame, Result, SessionBackend, SessionError,
 };
+
+/// The first version of the protocol with the requests that read the screen, say what
+/// the host is doing and stop it, and the frame that starts an attachment again from
+/// the screen.
+const SCREEN_VERSION: u32 = 2;
 
 /// The size of the in-memory pipe between the backend and a host in the same process.
 const IN_PROCESS_PIPE_BYTES: usize = 256 * 1024;
@@ -40,15 +55,54 @@ const OUTGOING_PIECES: usize = 64;
 const READ_CHUNK: usize = 64 * 1024;
 
 /// How long [`LocalBackend::shutdown`] waits for a host in this process to end its
-/// sessions. A program gets a few seconds to end by itself before the host forces it.
+/// sessions, and [`LocalBackend::restart_host`] for a host on its own to stop. A
+/// program gets a few seconds to end by itself before the host forces it.
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(8);
+
+/// How often a connection that is closing, or an endpoint that is coming back, is
+/// looked at.
+const CLOSE_POLL: Duration = Duration::from_millis(20);
 
 /// The backend for sessions on this machine.
 pub struct LocalBackend {
-    connection: Arc<Connection>,
-    caps: BackendCaps,
+    current: Mutex<Current>,
+    /// Held while the connection is being made again, so that it is made once.
+    reconnecting: tokio::sync::Mutex<()>,
+    /// How to reach the host again once the connection is lost. A host in this process
+    /// cannot be reached again: it ended with its connection.
+    daemon: Option<Daemon>,
     /// The host, when it runs in this process.
     host: Mutex<Option<JoinHandle<()>>>,
+}
+
+/// The connection in use and what the host said about itself on it.
+struct Current {
+    connection: Arc<Connection>,
+    hello: HostHello,
+}
+
+/// What a host says about itself when a connection is made.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostHello {
+    /// The protocol version the two sides agreed on.
+    pub proto: u32,
+    /// The host's own version.
+    pub version: String,
+    /// The host's process.
+    pub pid: u32,
+    pub caps: BackendCaps,
+}
+
+/// What a host that runs on its own is doing, as it says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostStatus {
+    pub version: String,
+    pub pid: u32,
+    pub started_unix_ms: u64,
+    pub persistent: bool,
+    pub sessions: u32,
+    pub clients: u32,
+    pub idle_exit: Option<Duration>,
 }
 
 type Answer = std::result::Result<ResponseBody, ProtoError>;
@@ -58,6 +112,8 @@ struct Connection {
     next_request: AtomicU64,
     /// Stream ids are handed out in order and never reused on a connection.
     next_stream: AtomicU32,
+    /// The protocol version agreed on, once hello has been answered.
+    proto: AtomicU32,
 }
 
 struct State {
@@ -82,6 +138,15 @@ struct Stream {
 impl Connection {
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn is_open(&self) -> bool {
+        self.state().outgoing.is_some()
+    }
+
+    /// Whether the version agreed on has what `version` brought.
+    fn speaks(&self, version: u32) -> bool {
+        self.proto.load(Ordering::Relaxed) >= version
     }
 
     /// Closes the connection: nothing more is sent, every waiting request fails and
@@ -249,60 +314,140 @@ async fn read_loop<R: AsyncRead + Unpin>(mut reader: R, connection: Arc<Connecti
     connection.close();
 }
 
+/// Opens a connection over `io` and agrees a protocol version with the host.
+async fn handshake<S>(io: S) -> Result<(Arc<Connection>, HostHello)>
+where
+    S: AsyncRead + AsyncWrite + Send + 'static,
+{
+    let (reader, writer) = tokio::io::split(io);
+    let (outgoing, queued) = mpsc::channel(OUTGOING_PIECES);
+    let connection = Arc::new(Connection {
+        state: Mutex::new(State {
+            outgoing: Some(outgoing),
+            reading: None,
+            waiting: HashMap::new(),
+            streams: HashMap::new(),
+        }),
+        next_request: AtomicU64::new(1),
+        next_stream: AtomicU32::new(1),
+        proto: AtomicU32::new(0),
+    });
+    tokio::spawn(write_loop(writer, queued));
+    let reading = tokio::spawn(read_loop(reader, Arc::clone(&connection)));
+    connection.state().reading = Some(reading.abort_handle());
+
+    // The views run the same engine as the host, built from the same source, so they
+    // can start from the host's snapshots.
+    let hello = RequestBody::Hello {
+        proto: PROTO_VERSION,
+        proto_min: PROTO_VERSION_MIN,
+        vt_version: Some(lume_host::vt_version().to_owned()),
+        client_kind: ClientKind::App,
+    };
+    let answer = connection.request(hello).await;
+    let hello = match answer {
+        Ok(ResponseBody::HelloAck {
+            proto,
+            caps,
+            host_version,
+            pid,
+            ..
+        }) if (PROTO_VERSION_MIN..=PROTO_VERSION).contains(&proto) => HostHello {
+            proto,
+            version: host_version,
+            pid,
+            caps,
+        },
+        Ok(ResponseBody::HelloAck { proto, .. }) => {
+            connection.close();
+            return Err(SessionError::Protocol(format!(
+                "the host chose protocol version {proto}, which was not offered"
+            )));
+        }
+        Ok(_) => {
+            connection.close();
+            return Err(SessionError::Protocol(
+                "hello was answered with something else".into(),
+            ));
+        }
+        Err(error) => {
+            connection.close();
+            return Err(error);
+        }
+    };
+    connection.proto.store(hello.proto, Ordering::Relaxed);
+    if hello.proto < PROTO_VERSION {
+        tracing::info!(
+            proto = hello.proto,
+            host_version = hello.version,
+            "the session host speaks an older version of the protocol"
+        );
+    }
+    Ok((connection, hello))
+}
+
+/// A refusal for what the version agreed on does not have.
+fn too_old(what: &str) -> SessionError {
+    SessionError::Refused(ProtoError::new(
+        ErrorCode::Unsupported,
+        format!("the session host is too old to {what}"),
+    ))
+}
+
+/// Waits for `connection` to close, for `limit` at most.
+async fn until_closed(connection: &Connection, limit: Duration) -> bool {
+    let deadline = std::time::Instant::now() + limit;
+    while connection.is_open() {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(CLOSE_POLL).await;
+    }
+    true
+}
+
 impl LocalBackend {
     /// Connects to a host over `io` and agrees a protocol version with it.
     pub async fn connect<S>(io: S) -> Result<Self>
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
-        let (reader, writer) = tokio::io::split(io);
-        let (outgoing, queued) = mpsc::channel(OUTGOING_PIECES);
-        let connection = Arc::new(Connection {
-            state: Mutex::new(State {
-                outgoing: Some(outgoing),
-                reading: None,
-                waiting: HashMap::new(),
-                streams: HashMap::new(),
-            }),
-            next_request: AtomicU64::new(1),
-            next_stream: AtomicU32::new(1),
-        });
-        tokio::spawn(write_loop(writer, queued));
-        let reading = tokio::spawn(read_loop(reader, Arc::clone(&connection)));
-        connection.state().reading = Some(reading.abort_handle());
+        let (connection, hello) = handshake(io).await?;
+        Ok(Self::with(connection, hello, None))
+    }
 
-        // The views run the same engine as the host, built from the same source, so they
-        // can start from the host's snapshots.
-        let hello = RequestBody::Hello {
-            proto: PROTO_VERSION,
-            proto_min: PROTO_VERSION,
-            vt_version: Some(lume_host::vt_version().to_owned()),
-            client_kind: ClientKind::App,
-        };
-        let caps = match connection.request(hello).await {
-            Ok(ResponseBody::HelloAck { proto, caps, .. }) if proto == PROTO_VERSION => caps,
-            Ok(ResponseBody::HelloAck { proto, .. }) => {
-                connection.close();
-                return Err(SessionError::Protocol(format!(
-                    "the host chose protocol version {proto}, which was not offered"
-                )));
-            }
-            Ok(_) => {
-                connection.close();
-                return Err(SessionError::Protocol(
-                    "hello was answered with something else".into(),
-                ));
-            }
-            Err(error) => {
-                connection.close();
-                return Err(error);
-            }
-        };
-        Ok(Self {
-            connection,
-            caps,
+    fn with(connection: Arc<Connection>, hello: HostHello, daemon: Option<Daemon>) -> Self {
+        Self {
+            current: Mutex::new(Current { connection, hello }),
+            reconnecting: tokio::sync::Mutex::new(()),
+            daemon,
             host: Mutex::new(None),
-        })
+        }
+    }
+
+    /// Connects to the host that runs on its own, starting it if nothing serves its
+    /// endpoint. A connection that is lost later is made again, and the host started
+    /// again if it has gone, when the backend is next used.
+    pub async fn daemon(daemon: Daemon) -> Result<Self> {
+        let (connection, hello) = Self::reach(&daemon).await?;
+        Ok(Self::with(connection, hello, Some(daemon)))
+    }
+
+    async fn reach(daemon: &Daemon) -> Result<(Arc<Connection>, HostHello)> {
+        let (stream, started) = daemon.connect().await.map_err(|error| {
+            SessionError::Unreachable(format!(
+                "the session host on `{}` cannot be reached: {error}",
+                daemon.endpoint
+            ))
+        })?;
+        let (connection, hello) = handshake(stream).await?;
+        tracing::info!(
+            pid = hello.pid,
+            version = hello.version,
+            started,
+            "connected to the session host"
+        );
+        Ok((connection, hello))
     }
 
     /// Starts a host inside this process and connects to it over an in-memory pipe.
@@ -320,14 +465,133 @@ impl LocalBackend {
         Ok(backend)
     }
 
+    fn current(&self) -> MutexGuard<'_, Current> {
+        self.current.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// What the host said about itself on the connection in use.
+    pub fn hello(&self) -> HostHello {
+        self.current().hello.clone()
+    }
+
+    /// Whether the host runs on its own, as opposed to inside this process.
+    pub fn is_daemon(&self) -> bool {
+        self.daemon.is_some()
+    }
+
+    /// The connection to use: the one there is, or, if it has been lost and the host
+    /// can be reached again, a new one.
+    async fn connection(&self) -> Result<Arc<Connection>> {
+        let connection = Arc::clone(&self.current().connection);
+        let Some(daemon) = &self.daemon else {
+            return Ok(connection);
+        };
+        if connection.is_open() {
+            return Ok(connection);
+        }
+        let _one_at_a_time = self.reconnecting.lock().await;
+        let connection = Arc::clone(&self.current().connection);
+        if connection.is_open() {
+            return Ok(connection);
+        }
+        tracing::warn!("the connection to the session host was lost; making it again");
+        let (connection, hello) = Self::reach(daemon).await?;
+        *self.current() = Current {
+            connection: Arc::clone(&connection),
+            hello,
+        };
+        Ok(connection)
+    }
+
+    async fn request(&self, body: RequestBody) -> Result<ResponseBody> {
+        self.connection().await?.request(body).await
+    }
+
+    /// What the host is doing, for a host that can say.
+    pub async fn host_status(&self) -> Result<HostStatus> {
+        let connection = self.connection().await?;
+        if !connection.speaks(SCREEN_VERSION) {
+            return Err(too_old("say what it is doing"));
+        }
+        match connection.request(RequestBody::HostStatus {}).await? {
+            ResponseBody::HostStatus {
+                host_version,
+                pid,
+                started_unix_ms,
+                persistent,
+                sessions,
+                clients,
+                idle_exit_ms,
+            } => Ok(HostStatus {
+                version: host_version,
+                pid,
+                started_unix_ms,
+                persistent,
+                sessions,
+                clients,
+                idle_exit: idle_exit_ms.map(Duration::from_millis),
+            }),
+            _ => Err(unexpected("host_status")),
+        }
+    }
+
+    /// Ends every session the host that runs on its own has, stops it, and starts a new
+    /// one. Returns how many sessions were ended.
+    pub async fn restart_host(&self) -> Result<u32> {
+        let Some(daemon) = &self.daemon else {
+            return Err(SessionError::Refused(ProtoError::new(
+                ErrorCode::Unsupported,
+                "the session host runs inside the application",
+            )));
+        };
+        let _one_at_a_time = self.reconnecting.lock().await;
+        let connection = Arc::clone(&self.current().connection);
+        let ended = if !connection.is_open() {
+            0
+        } else if connection.speaks(SCREEN_VERSION) {
+            let request = RequestBody::Shutdown { end_sessions: true };
+            match connection.request(request).await? {
+                ResponseBody::Stopping { ended } => ended,
+                _ => return Err(unexpected("shutdown")),
+            }
+        } else {
+            // A host that cannot be asked to stop is left to stop by itself once its
+            // sessions have ended.
+            return Err(too_old("be stopped"));
+        };
+        // The host closes the connection on its way out, and its endpoint with it.
+        if !until_closed(&connection, SHUTDOWN_WAIT).await {
+            tracing::warn!("the session host did not close its connection when it stopped");
+        }
+        connection.close();
+        let (fresh, hello) = Self::reach_again(daemon).await?;
+        *self.current() = Current {
+            connection: fresh,
+            hello,
+        };
+        Ok(ended)
+    }
+
+    /// Reaches a host on an endpoint that may still be closing.
+    async fn reach_again(daemon: &Daemon) -> Result<(Arc<Connection>, HostHello)> {
+        let deadline = std::time::Instant::now() + SHUTDOWN_WAIT;
+        loop {
+            match Self::reach(daemon).await {
+                Ok(reached) => return Ok(reached),
+                Err(error) if std::time::Instant::now() >= deadline => return Err(error),
+                Err(_) => tokio::time::sleep(CLOSE_POLL).await,
+            }
+        }
+    }
+
     /// Closes the connection and, when the host runs in this process, waits for it to
-    /// end the sessions this backend started.
+    /// end the sessions this backend started. A host that runs on its own keeps them.
     ///
     /// Call this before the process exits. A program in a terminal can outlive a
-    /// process that exits without closing the terminal; the host closes them when its
-    /// connection closes, and this waits until it has.
+    /// process that exits without closing the terminal; a host in this process closes
+    /// them when its connection closes, and this waits until it has.
     pub async fn shutdown(&self) {
-        self.connection.close();
+        self.current().connection.close();
         let serving = self
             .host
             .lock()
@@ -343,32 +607,37 @@ impl LocalBackend {
 
 impl Drop for LocalBackend {
     fn drop(&mut self) {
-        self.connection.close();
+        self.current().connection.close();
     }
 }
 
 #[async_trait]
 impl SessionBackend for LocalBackend {
     fn caps(&self) -> BackendCaps {
-        self.caps
+        self.current().hello.caps
     }
 
     async fn list(&self) -> Result<Vec<SessionInfo>> {
-        match self.connection.request(RequestBody::List {}).await? {
+        match self.request(RequestBody::List {}).await? {
             ResponseBody::Sessions { sessions } => Ok(sessions),
             _ => Err(unexpected("list")),
         }
     }
 
-    async fn spawn(&self, spec: SpawnSpec) -> Result<SessionId> {
-        match self.connection.request(RequestBody::Spawn { spec }).await? {
+    async fn spawn(&self, mut spec: SpawnSpec) -> Result<SessionId> {
+        let connection = self.connection().await?;
+        if !connection.speaks(SCREEN_VERSION) {
+            // An older host keeps the scrollback it keeps and knows no other.
+            spec.scrollback_lines = None;
+        }
+        match connection.request(RequestBody::Spawn { spec }).await? {
             ResponseBody::Spawned { session } => Ok(session),
             _ => Err(unexpected("spawn")),
         }
     }
 
     async fn attach(&self, id: SessionId, facts: ClientFacts) -> Result<Attachment> {
-        let connection = &self.connection;
+        let connection = &self.connection().await?;
         let stream = connection.next_stream.fetch_add(1, Ordering::Relaxed);
         let (frames, received) = mpsc::unbounded_channel();
         let (hydrate, hydrated) = oneshot::channel();
@@ -435,19 +704,18 @@ impl SessionBackend for LocalBackend {
     }
 
     async fn kill(&self, id: SessionId) -> Result<()> {
-        match self
-            .connection
-            .request(RequestBody::Kill { session: id })
-            .await?
-        {
+        match self.request(RequestBody::Kill { session: id }).await? {
             ResponseBody::Killed {} => Ok(()),
             _ => Err(unexpected("kill")),
         }
     }
 
     async fn screen(&self, id: SessionId) -> Result<ScreenText> {
-        match self
-            .connection
+        let connection = self.connection().await?;
+        if !connection.speaks(SCREEN_VERSION) {
+            return Err(too_old("read a screen"));
+        }
+        match connection
             .request(RequestBody::Screen { session: id })
             .await?
         {
@@ -472,7 +740,11 @@ impl SessionBackend for LocalBackend {
             text: text.to_owned(),
             timeout_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
         };
-        match self.connection.request(request).await? {
+        let connection = self.connection().await?;
+        if !connection.speaks(SCREEN_VERSION) {
+            return Err(too_old("wait for text on a screen"));
+        }
+        match connection.request(request).await? {
             ResponseBody::Matched { row, line } => Ok(TextFound { row, line }),
             _ => Err(unexpected("wait_text")),
         }
@@ -548,6 +820,9 @@ impl Sink for LocalSink {
     }
 
     async fn rehydrate(&self) -> Result<()> {
+        if !self.connection.speaks(SCREEN_VERSION) {
+            return Err(too_old("send a screen again"));
+        }
         self.send(Body::Rehydrate).await
     }
 
