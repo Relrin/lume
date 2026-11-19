@@ -2514,6 +2514,124 @@ fn a_plugin_cannot_reach_past_what_it_was_given() {
     app.quit();
 }
 
+/// Installs a test plugin under another id, beside any install of its own id.
+fn install_plugin_as(home: &Path, package: &Path, id: &str) {
+    let installed = Command::new(lume())
+        .args(["plugin", "install"])
+        .arg(package)
+        .args(["--as", id, "--yes"])
+        .env("LUME_CONFIG_DIR", home.join("config"))
+        .env("LUME_STATE_DIR", home.join("state"))
+        .output()
+        .expect("lume runs");
+    assert!(
+        installed.status.success(),
+        "the plugin is installed as {id}: {}{}",
+        String::from_utf8_lossy(&installed.stdout),
+        String::from_utf8_lossy(&installed.stderr)
+    );
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn twenty_installed_plugins_that_do_not_run_are_not_read_before_the_first_output() {
+    let home = home_with_plugins(&[]);
+    for number in 0..20 {
+        install_plugin_as(&home, &fixture("hello"), &format!("test.many{number:02}"));
+    }
+    let app = App::start_in(home, false);
+    let status = app.status_with_session();
+    assert_eq!(status["marks"]["plugin_files_before_output"], 0, "{status}");
+    // All of them are read afterwards, and none of them runs: each waits for its
+    // command.
+    app.until_plugin("test.many19", "the last plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    let plugins = app.plugins();
+    assert_eq!(plugins.len(), 20);
+    for plugin in &plugins {
+        assert_eq!(plugin["state"], "ready", "{plugin}");
+        assert!(plugin["running"].is_null(), "{plugin}");
+        assert_eq!(plugin["starts"], 0, "{plugin}");
+    }
+    // Still nothing of them counted against the start, now that they are read.
+    let status = app.ctl(&["status"]).ok("status");
+    assert_eq!(status["marks"]["plugin_files_before_output"], 0, "{status}");
+    assert!(status["marks"]["plugins_ms"].is_number(), "{status}");
+
+    // One of them still does its work when asked, under its own name.
+    app.ctl(&["command", "test.many07.greet"]).ok("greet");
+    let plugin = app.until_plugin("test.many07", "the count to be shown", |plugin| {
+        plugin["status"][0]["value"]["text"] == "1"
+    });
+    assert_eq!(plugin["starts"], 1, "{plugin}");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_uses_a_service_a_watch_a_running_program_and_a_panes_figures() {
+    let home = home_with_plugins(&["provider", "worker"]);
+    let app = App::start_in(home, false);
+    let status = app.status_with_session();
+    let pane = status["focused"]["pane"].as_str().unwrap().to_owned();
+    app.until_plugin("test.worker", "the plugins to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    let provider = app.until_plugin("test.provider", "the provider to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    assert!(provider["running"].is_null(), "{provider}");
+
+    let args = serde_json::json!({ "pane": pane }).to_string();
+    app.ctl(&["command", "test.worker.work", &args])
+        .ok("the work");
+    let worker = app.until_plugin("test.worker", "its report", |plugin| {
+        logged(plugin, "service 42 from test.provider;")
+    });
+    assert!(logged(&worker, "watched true"), "{worker}");
+    assert!(logged(&worker, "sorted a,b exit 0"), "{worker}");
+    assert!(logged(&worker, "processes true memory true"), "{worker}");
+    // The provider was started to answer.
+    let provider = app.until_plugin("test.provider", "the provider to run", |plugin| {
+        plugin["running"]["started"] == true
+    });
+    assert_eq!(provider["starts"], 1, "{provider}");
+
+    // Bound to another install of the provider, the worker's next call is put to the
+    // user first, and then answered by that install.
+    install_plugin_as(&app.home, &fixture("provider"), "test.provider2");
+    let bound = Command::new(lume())
+        .args([
+            "plugin",
+            "bind",
+            "test.worker",
+            "test.provider=test.provider2",
+        ])
+        .env("LUME_CONFIG_DIR", app.home.join("config"))
+        .env("LUME_STATE_DIR", app.home.join("state"))
+        .output()
+        .expect("lume runs");
+    assert!(
+        bound.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&bound.stdout),
+        String::from_utf8_lossy(&bound.stderr)
+    );
+    app.until_plugin(
+        "test.provider2",
+        "the other provider to be read",
+        |plugin| plugin["state"] == "ready",
+    );
+    let again = app.ctl_in_background(&["command", "test.worker.work", &args]);
+    app.answer_prompt(true);
+    again.join().unwrap().ok("the work, bound anew");
+    app.until_plugin("test.worker", "its report", |plugin| {
+        logged(plugin, "service 42 from test.provider2;")
+    });
+    app.quit();
+}
+
 #[test]
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn a_plugin_asks_while_it_runs_and_the_user_answers_in_the_window() {

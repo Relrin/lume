@@ -1,0 +1,14 @@
+# A plugin for the end-to-end tests: it offers a service other plugins call, and is
+# started when one does.
+schema = 1
+id = "test.provider"
+name = "Provider"
+version = "1.0.0"
+description = "Doubles numbers for whoever asks."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-provider"
+activation = ["onService:double"]
+
+[[contributes.services]]
+name = "double"

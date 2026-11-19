@@ -37,6 +37,21 @@ const BEGIN_SYNC: &[u8] = b"\x1b[?2026h";
 /// The number of the mode that is set while it draws.
 const SYNC_MODE: u16 = 2026;
 
+/// Where in `bytes` a program says it begins such a screen, if it does. Every byte a
+/// program prints passes here, a flood's too, so only the escape bytes among them are
+/// looked at closely: plain text has none.
+fn begin_of_sync(bytes: &[u8]) -> Option<usize> {
+    let mut from = 0;
+    while let Some(found) = bytes[from..].iter().position(|byte| *byte == 0x1b) {
+        let at = from + found;
+        if bytes[at..].starts_with(BEGIN_SYNC) {
+            return Some(at);
+        }
+        from = at + 1;
+    }
+    None
+}
+
 /// The version of the terminal engine every session's screen runs.
 pub fn vt_version() -> &'static str {
     lume_vt::library_version()
@@ -243,9 +258,7 @@ impl State {
     /// before it is kept as text for whoever reads meanwhile.
     fn feed(&mut self, bytes: &[u8]) {
         let begins = if self.front.is_none() {
-            bytes
-                .windows(BEGIN_SYNC.len())
-                .position(|window| window == BEGIN_SYNC)
+            begin_of_sync(bytes)
         } else {
             None
         };
@@ -536,6 +549,15 @@ mod tests {
         state.feed(b"\x1b[?2026l");
         assert!(state.front.is_none());
         assert_eq!(first(&state), "new screen");
+    }
+
+    #[test]
+    fn the_beginning_of_a_screen_is_found_among_other_escapes() {
+        assert_eq!(begin_of_sync(b"plain text"), None);
+        assert_eq!(begin_of_sync(b""), None);
+        assert_eq!(begin_of_sync(b"\x1b[31mred\x1b[0m\x1b[?2026"), None);
+        assert_eq!(begin_of_sync(b"\x1b[?2026h"), Some(0));
+        assert_eq!(begin_of_sync(b"a\x1b[1m\x1b\x1b[?2026hrest"), Some(6));
     }
 
     #[test]

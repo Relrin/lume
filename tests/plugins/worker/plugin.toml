@@ -1,0 +1,26 @@
+# A plugin for the end-to-end tests: one command that calls another plugin's service,
+# watches its own folder, runs a program through its streams, and reads what a pane's
+# programs use of the machine.
+schema = 1
+id = "test.worker"
+name = "Worker"
+version = "1.0.0"
+description = "Uses what it was given."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-worker"
+activation = ["onCommand:work"]
+
+[dependencies]
+"test.provider" = "^1"
+
+[permissions]
+"fs.read" = ["${plugin-data}/**"]
+"fs.write" = ["${plugin-data}/**"]
+"process.run" = ["sort"]
+"panes.read" = true
+"services.use" = ["test.provider"]
+
+[[contributes.commands]]
+id = "work"
+title = "Do the work"

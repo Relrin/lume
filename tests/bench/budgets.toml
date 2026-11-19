@@ -39,6 +39,11 @@
 # From the start of the application to the first output of its shell reaching the page.
 # What follows, until the prompt, is the shell's own start and is recorded only.
 "startup.outputMs.p50" = { max = 1000.0, unit = "ms" }
+# What twenty installed plugins that do not run add to that: pairs of starts, one
+# without them and one with, and the top of the span the middle difference is sure
+# within. Nothing of a plugin is read before the first output.
+"startup.plugins.differenceMs.high" = { max = 25.0, unit = "ms" }
+"startup.plugins.filesBeforeOutput" = { max = 0.0, unit = "files" }
 
 # How often the window's components are drawn again because a terminal printed. A
 # terminal's output is drawn outside them, so the answer is never.
@@ -114,6 +119,8 @@
 "flood.framesPerSecond" = { min = 10.0, unit = "frames/s" }
 "flood.inputToFrame.p95" = { max = 500.0, unit = "ms" }
 "startup.outputMs.p50" = { max = 10000.0, unit = "ms" }
+"startup.plugins.differenceMs.high" = { max = 500.0, unit = "ms" }
+"startup.plugins.filesBeforeOutput" = { max = 0.0, unit = "files" }
 "chrome.outputCommits" = { max = 0.0, unit = "renders" }
 "panes16.webgpu.framesPerSecond" = { min = 10.0, unit = "frames/s", optional = true }
 "panes16.webgl2.framesPerSecond" = { min = 10.0, unit = "frames/s", optional = true }

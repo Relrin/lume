@@ -24,6 +24,16 @@ use crate::suites::{self, Profile};
 /// is not counted: the first start after a build reads everything from disk.
 const STARTS: usize = 5;
 
+/// How many plugins are installed for the starts that show what installed plugins
+/// cost a start, and how many pairs of starts, one without them and one with, are
+/// timed. None of the plugins runs: each waits for a command nobody gives.
+const PLUGINS_INSTALLED: usize = 20;
+const PLUGIN_PAIRS: usize = 21;
+
+/// How many times the pairs' differences are drawn again to say how sure their middle
+/// one is.
+const RESAMPLES: usize = 2000;
+
 /// How long one start may take before the measurement gives up.
 const START_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -195,6 +205,10 @@ struct Start {
     marks: Value,
     output_ms: f64,
     prompt_ms: f64,
+    /// When the installed plugins had been read, which is after the first output.
+    plugins_ms: Option<f64>,
+    /// How many of the plugins' files were read before the first output.
+    plugin_files_before_output: Option<f64>,
 }
 
 impl Start {
@@ -221,10 +235,11 @@ impl Start {
 /// Starts the application once and times its start: until the first output of its
 /// shell was handed to the page, by the application's own account, and until the
 /// screen showed a prompt, by the clock here.
-fn time_one_start(app: &Path, lume: &Path, endpoint: &str) -> Result<Start> {
+fn time_one_start(app: &Path, lume: &Path, endpoint: &str, plugins: usize) -> Result<Start> {
     // Each start is a first start: nothing of the user's is read, and no workspace is
     // there to be brought back.
     let dirs = paths::PrivateDirs::fresh(endpoint)?;
+    install_plugins(lume, &dirs, plugins)?;
     let mut command = Command::new(app);
     dirs.apply(&mut command);
     let started = Instant::now();
@@ -272,10 +287,24 @@ fn time_one_start(app: &Path, lume: &Path, endpoint: &str) -> Result<Start> {
         match &settling {
             Some((before, since)) if *before == lines => {
                 if seen.duration_since(*since) >= PROMPT_SETTLED {
+                    // The plugins are read after the first output: asked for now,
+                    // and waited for a little where there are some to read.
+                    let mut late = Value::Null;
+                    for _ in 0..if plugins > 0 { 150 } else { 1 } {
+                        if let Some(status) = ask(lume, endpoint, &["status"]) {
+                            late = status["marks"].clone();
+                        }
+                        if late["plugins_ms"].is_number() {
+                            break;
+                        }
+                        std::thread::sleep(POLL);
+                    }
                     break Ok(Start {
                         marks: marks.clone(),
                         output_ms: *output_ms,
                         prompt_ms: since.duration_since(started).as_secs_f64() * 1000.0,
+                        plugins_ms: late["plugins_ms"].as_f64(),
+                        plugin_files_before_output: late["plugin_files_before_output"].as_f64(),
                     });
                 }
             }
@@ -291,13 +320,118 @@ fn time_one_start(app: &Path, lume: &Path, endpoint: &str) -> Result<Start> {
     result
 }
 
+/// Installs `count` plugins into the folders of a start: the same small plugin under
+/// as many names, which waits for a command and so never runs.
+fn install_plugins(lume: &Path, dirs: &paths::PrivateDirs, count: usize) -> Result<()> {
+    let package = paths::root().join("tests").join("plugins").join("hello");
+    for number in 0..count {
+        let mut command = Command::new(lume);
+        dirs.apply(&mut command);
+        let output = command
+            .args(["plugin", "install"])
+            .arg(&package)
+            .args(["--as", &format!("bench.p{number:02}"), "--yes"])
+            .stdin(Stdio::null())
+            .output()
+            .context("installing a plugin for the measurement")?;
+        if !output.status.success() {
+            bail!(
+                "a plugin could not be installed for the measurement: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+    Ok(())
+}
+
+/// A number from 0 up to `below`, the next of a fixed row of them: the same row every
+/// run, so that a report can be made again.
+fn next_below(state: &mut u64, below: usize) -> usize {
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    usize::try_from(*state % below.max(1) as u64).unwrap_or(0)
+}
+
+/// The middle of `samples`, and the span the middle of 95 in a hundred redrawings of
+/// them lies in: how sure the middle is.
+fn middle_and_span(samples: &[f64]) -> (f64, f64, f64) {
+    let middle = median(samples.to_vec());
+    if samples.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut middles: Vec<f64> = (0..RESAMPLES)
+        .map(|_| {
+            let drawn: Vec<f64> = (0..samples.len())
+                .map(|_| samples[next_below(&mut state, samples.len())])
+                .collect();
+            median(drawn)
+        })
+        .collect();
+    middles.sort_by(f64::total_cmp);
+    let at = |share: f64| {
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss,
+            reason = "a place in a short list"
+        )]
+        let index = ((middles.len() - 1) as f64 * share).round() as usize;
+        middles[index]
+    };
+    (middle, at(0.025), at(0.975))
+}
+
+/// What installed plugins that do not run cost a start: pairs of starts, one with none
+/// installed and one with [`PLUGINS_INSTALLED`], taken in turn and in changing order so
+/// that whatever else the machine does falls on both alike. The difference of each pair
+/// is kept, and what is reported is their middle with the span it is sure within.
+fn time_plugin_starts(profile: Profile) -> Result<Value> {
+    let app = suites::app(profile)?;
+    let lume = suites::lume(profile)?;
+    let mut differences = Vec::new();
+    let mut read = Vec::new();
+    let mut before_output: f64 = 0.0;
+    for pair in 0..PLUGIN_PAIRS {
+        let mut output = [0.0, 0.0];
+        // Which of the two goes first changes with every pair.
+        let order = if pair % 2 == 0 { [0, 1] } else { [1, 0] };
+        for which in order {
+            let plugins = if which == 0 { 0 } else { PLUGINS_INSTALLED };
+            let endpoint = format!("bench-{}-p{pair}-{which}", std::process::id());
+            let start = time_one_start(&app, &lume, &endpoint, plugins)?;
+            output[which] = start.output_ms;
+            if which == 1 {
+                read.extend(start.plugins_ms.map(|at| at - start.output_ms));
+                before_output = before_output.max(start.plugin_files_before_output.unwrap_or(0.0));
+            }
+        }
+        differences.push(output[1] - output[0]);
+    }
+    let (middle, low, high) = middle_and_span(&differences);
+    println!(
+        "bench:   with {PLUGINS_INSTALLED} plugins installed the first output comes {middle:+.0} ms \
+         later (between {low:+.0} and {high:+.0}, {PLUGIN_PAIRS} pairs)"
+    );
+    Ok(json!({
+        "installed": PLUGINS_INSTALLED,
+        "pairs": PLUGIN_PAIRS,
+        "differenceMs": { "p50": middle, "low": low, "high": high, "all": differences },
+        // From the first output until the plugins had been read.
+        "readAfterOutputMs": { "p50": median(read.clone()), "all": read },
+        "filesBeforeOutput": before_output,
+    }))
+}
+
 fn time_starts(profile: Profile) -> Result<Value> {
     let app = suites::app(profile)?;
     let lume = suites::lume(profile)?;
     let mut starts = Vec::new();
     for run in 0..=STARTS {
         let endpoint = format!("bench-{}-{run}", std::process::id());
-        let start = time_one_start(&app, &lume, &endpoint)?;
+        let start = time_one_start(&app, &lume, &endpoint, 0)?;
         // Every start is shown, so that a slow one can be seen to be slow in the window,
         // the page or the shell. The first is the cold one and is not counted.
         let counted = if run > 0 { "" } else { " (cold, not counted)" };
@@ -373,6 +507,11 @@ pub fn run(profile: &str) -> Result<()> {
     merge_page(&mut report, &measure.json, &chrome.json);
     println!("bench: timing {STARTS} starts of the application");
     report["startup"] = time_starts(Profile::Release)?;
+    println!(
+        "bench: timing {PLUGIN_PAIRS} pairs of starts, without plugins and with \
+         {PLUGINS_INSTALLED} installed"
+    );
+    report["startup"]["plugins"] = time_plugin_starts(Profile::Release)?;
 
     let path = paths::root()
         .join("target")
@@ -427,6 +566,23 @@ mod tests {
 
     fn limits(text: &str) -> Limits {
         toml::from_str(text).unwrap()
+    }
+
+    #[test]
+    fn the_middle_of_differences_is_said_with_the_span_it_is_sure_within() {
+        // All alike: the span is the middle itself.
+        assert_eq!(middle_and_span(&[4.0; 21]), (4.0, 4.0, 4.0));
+        // Scattered round nothing: the span holds nothing, and is the same every time.
+        let scattered: Vec<f64> = (0..21).map(|at| f64::from(at % 7) - 3.0).collect();
+        let (middle, low, high) = middle_and_span(&scattered);
+        assert!(low <= middle && middle <= high, "{low} {middle} {high}");
+        assert!(low <= 0.0 && high >= 0.0, "{low} {high}");
+        assert!(high - low <= 4.0, "{low} {high}");
+        assert_eq!(middle_and_span(&scattered), (middle, low, high));
+        // A real cost is seen: every pair some 40 ms slower.
+        let slower: Vec<f64> = (0..21).map(|at| 40.0 + f64::from(at % 5)).collect();
+        assert!(middle_and_span(&slower).1 >= 40.0);
+        assert_eq!(middle_and_span(&[]), (0.0, 0.0, 0.0));
     }
 
     #[test]
