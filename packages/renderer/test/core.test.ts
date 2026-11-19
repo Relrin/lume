@@ -470,21 +470,49 @@ describe("underlined runs", () => {
 });
 
 describe("what reaches the tier", () => {
-  it("configures the surface and sends everything for the first frame", () => {
+  it("configures the surface and sends the first frame's records down to its last text", () => {
     const { renderer, backend } = setup();
-    renderer.draw(makeFrame(80, 24));
+    const frame = makeFrame(80, 24);
+    putText(frame, 0, 2, "hello");
+    renderer.draw(frame);
     expect(backend.configured).toEqual([[640, 384]]);
     expect(backend.planesSet).toBe(1);
-    const planes = backend.planes!;
-    for (const name of ["background", "underline", "glyph", "line"] as const) {
-      expect(backend.uploads).toContainEqual({
-        plane: name,
-        start: 0,
-        end: planes[name].bytes.byteLength,
-      });
+    const glyphRow = 80 * backend.planes!.glyph.layout.stride;
+    expect(backend.uploads.filter((u) => u.plane === "glyph")).toEqual([
+      { plane: "glyph", start: 0, end: 3 * glyphRow },
+    ]);
+    // Planes with nothing in them are neither sent nor drawn.
+    for (const name of ["background", "underline", "line"] as const) {
+      expect(backend.uploads.some((u) => u.plane === name)).toBe(false);
     }
     expect(backend.last).toMatchObject({ width: 640, height: 384, cols: 80, rows: 24 });
+    expect(backend.last.used).toEqual({ background: 0, underline: 0, glyph: 3 * 80, line: 0 });
     expect(backend.last.repaint).toBeUndefined();
+  });
+
+  it("clears what the tier holds below text that went away", () => {
+    const { renderer, backend } = setup();
+    const frame = makeFrame(80, 24);
+    for (let row = 0; row < 20; row++) putText(frame, 0, row, "x");
+    drawn(renderer, frame);
+    const glyphRow = 80 * backend.planes!.glyph.layout.stride;
+
+    // The text goes: the rows the tier had are sent once more, empty, and nothing is
+    // drawn of the plane.
+    for (let row = 0; row < 20; row++) putText(frame, 0, row, " ");
+    for (let row = 0; row < 24; row++) touchRow(frame, row);
+    backend.clear();
+    renderer.draw(frame);
+    expect(backend.uploads.filter((u) => u.plane === "glyph")).toEqual([
+      { plane: "glyph", start: 0, end: 20 * glyphRow },
+    ]);
+    expect(backend.last.used.glyph).toBe(0);
+
+    // After that the tier's copy is empty too, and nothing more is sent.
+    for (let row = 0; row < 24; row++) touchRow(frame, row);
+    backend.clear();
+    renderer.draw(frame);
+    expect(backend.uploads.filter((u) => u.plane === "glyph")).toEqual([]);
   });
 
   it("does nothing for a frame with no changes", () => {
@@ -532,12 +560,14 @@ describe("what reaches the tier", () => {
     const frame = makeFrame(80, 24);
     drawn(renderer, frame);
     backend.clear();
-    for (let row = 0; row < 20; row++) touchRow(frame, row);
+    for (let row = 0; row < 20; row++) {
+      putText(frame, 0, row, "x");
+      touchRow(frame, row);
+    }
     renderer.draw(frame);
     const glyphs = backend.uploads.filter((u) => u.plane === "glyph");
-    expect(glyphs).toEqual([
-      { plane: "glyph", start: 0, end: backend.planes!.glyph.bytes.byteLength },
-    ]);
+    const glyphRow = 80 * backend.planes!.glyph.layout.stride;
+    expect(glyphs).toEqual([{ plane: "glyph", start: 0, end: 20 * glyphRow }]);
   });
 
   it("redraws the rows a moving cursor leaves and enters, without rebuilding them", () => {

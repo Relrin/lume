@@ -203,6 +203,12 @@ export interface PresentInfo {
   /** How many records of the overlay planes are in use. */
   overlayRects: number;
   overlayGlyphs: number;
+  /**
+   * How many records from the first of each plane laid out by cell may be other than
+   * empty: the records of the rows down to the last that has any. A tier draws no more
+   * than these; the records after them are all empty.
+   */
+  used: Readonly<Record<"background" | "underline" | "glyph" | "line", number>>;
 }
 
 /**

@@ -1555,7 +1555,13 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
             // The last window closes the application, which keeps the layout as it
             // is; any other takes its tabs with it.
             if panes.workspace().windows.len() <= 1 {
-                context.shell.quit();
+                // Unless the application keeps running in the background, which keeps
+                // the window ready instead.
+                if context.config.current().config.app.keep_running {
+                    panes.keep_ready(window, context.shell);
+                } else {
+                    context.shell.quit();
+                }
                 return Ok(());
             }
             Intent::WindowClose { window }

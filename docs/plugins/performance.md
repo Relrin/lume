@@ -110,27 +110,40 @@ emptied a moment before it is filled again.
 Lume then tells the windows at most ten times a second. Everything a plugin showed since the last
 time arrives as one change.
 
-### An `await` on a call ends the turn
+### What shows something is not waited for
 
-The answer to a `lume` call arrives as a new piece of work, in a later turn. So does a timer. Code
-after such an `await` is in another turn, and what it shows is another step.
+The calls that only change what a plugin shows (`lume.status.set` and `clear`, `lume.context.set`,
+`lume.panels.set`, `clear` and `setChildren`) are not answered. Their promise is settled at once,
+in the same turn, and a call that fails says so in the plugin's log instead (`lume plugin logs`).
+Awaiting them is harmless and splits nothing:
+
+```js
+// One turn: both change together.
+await lume.status.set("cpu", { value: 0.42 });
+await lume.status.set("count", { text: "3" });
+```
+
+### An `await` on any other call ends the turn
+
+The answer to any other `lume` call arrives as a new piece of work, in a later turn. So does a
+timer. Code after such an `await` is in another turn, and what it shows is another step.
 
 This shows two steps, and the user may see the first without the second:
 
 ```js
-// Two turns: the meter changes, then the badge.
-await lume.status.set("cpu", { value: 0.42 });
-await lume.status.set("count", { text: "3" });
+// Two turns: the meter changes, then, once the value has been read, the badge.
+lume.status.set("cpu", { value: 0.42 });
+const count = await lume.kv.get("count");
+lume.status.set("count", { text: String(count) });
 ```
 
 This shows one:
 
 ```js
-// One turn: both change together.
-await Promise.all([
-  lume.status.set("cpu", { value: 0.42 }),
-  lume.status.set("count", { text: "3" }),
-]);
+// One turn: what is needed is read first, then everything is shown together.
+const count = await lume.kv.get("count");
+lume.status.set("cpu", { value: 0.42 });
+lume.status.set("count", { text: String(count) });
 ```
 
 The rule: gather first, then show. Do every read and every wait, and then make all the calls that

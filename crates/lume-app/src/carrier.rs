@@ -259,16 +259,18 @@ impl Link {
     /// Tells the page something it did not ask for. A notice for a page that has gone
     /// is dropped: its successor asks for the whole of whatever the notice was about.
     pub fn notify(&self, notice: &serde_json::Value) {
+        if let Some(frames) = encoded_notice(notice) {
+            self.notify_encoded(frames);
+        }
+    }
+
+    /// Tells the page a notice already put into frames by [`encoded_notice`]: a notice
+    /// for several pages is encoded once.
+    pub fn notify_encoded(&self, frames: Vec<u8>) {
         if self.state().retired {
             return;
         }
-        let mut frames = Vec::new();
-        match encode_notice(notice, &mut frames) {
-            Ok(()) => {
-                let _ = self.outgoing.send(Queued::Control(frames));
-            }
-            Err(error) => tracing::error!(%error, "a notice could not be encoded"),
-        }
+        let _ = self.outgoing.send(Queued::Control(frames));
     }
 
     /// The way to type into a session, if the page is attached to it.
@@ -509,6 +511,18 @@ async fn write_loop(mut queued: mpsc::UnboundedReceiver<Queued>, carrier: Arc<dy
         }
         if !batch.is_empty() && carrier.deliver(std::mem::take(&mut batch)).is_err() {
             return;
+        }
+    }
+}
+
+/// A notice put into the frames a page is sent, or nothing if it cannot be.
+pub fn encoded_notice(notice: &serde_json::Value) -> Option<Vec<u8>> {
+    let mut frames = Vec::new();
+    match encode_notice(notice, &mut frames) {
+        Ok(()) => Some(frames),
+        Err(error) => {
+            tracing::error!(%error, "a notice could not be encoded");
+            None
         }
     }
 }

@@ -480,6 +480,7 @@ impl Spawner for PaneSpawner {
         };
         let host = state.router().get(&backend).map_err(Self::failure)?;
         let session = host.spawn(spec).await.map_err(Self::failure)?;
+        state.marks().spawned();
         let key = SessionKey {
             backend: backend.clone(),
             session,
@@ -915,6 +916,106 @@ impl Panes {
         outcome
     }
 
+    /// Puts the last window away while the application keeps running in the
+    /// background: hidden, to be shown by the next launch, its panes given fresh shells
+    /// unless a host of its own keeps their programs for the next start anyway.
+    pub fn keep_ready(&self, window: WindowId, shell: &dyn Shell) {
+        shell.hide_window(window);
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        if state.locals().iter().any(|local| local.is_daemon()) {
+            return;
+        }
+        let Some(panes) = state.panes().cloned() else {
+            return;
+        };
+        state
+            .runtime()
+            .spawn(async move { panes.refresh_window(window).await });
+    }
+
+    /// Gives every terminal pane of `window` a fresh session of what it runs, at the
+    /// size its session has, as the next start of the application would; the sessions
+    /// they had are ended once they show the new ones, so no pane is closed by its old
+    /// program ending. This is what closing the last window does while the application
+    /// keeps running in the background.
+    pub async fn refresh_window(&self, window: WindowId) {
+        let _one_at_a_time = self.starting.lock().await;
+        let workspace = self.workspace();
+        let Some(shown) = workspace.window(window) else {
+            return;
+        };
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        let mut sizes: HashMap<BackendId, Vec<SessionInfo>> = HashMap::new();
+        for pane in shown.panes() {
+            let Some(terminal) = terminal_of(pane) else {
+                continue;
+            };
+            let backend = self.backend_of(terminal);
+            let old = terminal.session.map(|session| SessionKey {
+                backend: backend.clone(),
+                session,
+            });
+            let mut size = None;
+            if let Some(old) = &old {
+                if !sizes.contains_key(&backend) {
+                    let listed = match state.router().get(&backend) {
+                        Ok(host) => host.list().await.unwrap_or_default(),
+                        Err(_) => Vec::new(),
+                    };
+                    sizes.insert(backend.clone(), listed);
+                }
+                size = sizes[&backend]
+                    .iter()
+                    .find(|info| info.id == old.session)
+                    .map(|info| info.size);
+            }
+            let request = SpawnRequest {
+                backend: terminal.backend.clone(),
+                profile: terminal.profile.clone(),
+                launcher: terminal.launcher.clone(),
+                cwd: terminal.cwd.clone(),
+                env: terminal.env.clone(),
+                size,
+                session: None,
+            };
+            let started = match self.spawner.spawn(&request).await {
+                Ok(started) => started,
+                Err(failure) => {
+                    tracing::warn!(pane = %pane.id, message = %failure.message,
+                        "a pane's fresh session could not be started");
+                    continue;
+                }
+            };
+            let recorded = self
+                .layout
+                .apply_core(Intent::SessionSet {
+                    pane: pane.id,
+                    session: Some(started.session),
+                    backend: Some(started.backend.clone()),
+                    cwd: started.cwd.clone(),
+                })
+                .await;
+            if recorded.is_err() {
+                self.spawner.discard(&started).await;
+                continue;
+            }
+            if let Some(old) = old {
+                state.reports().forget(&old);
+                self.spawner
+                    .discard(&Started {
+                        backend: old.backend,
+                        session: old.session,
+                        cwd: None,
+                    })
+                    .await;
+            }
+        }
+    }
+
     async fn start_one(
         &self,
         window: WindowId,
@@ -1231,10 +1332,10 @@ impl Panes {
                 });
             }
             LayoutChange::Tabs { window, order, .. } if order.is_empty() => {
-                self.close_if_empty(*window).await;
+                self.close_if_empty(*window, shell).await;
             }
             LayoutChange::Floating { window, floating } if floating.is_empty() => {
-                self.close_if_empty(*window).await;
+                self.close_if_empty(*window, shell).await;
             }
             LayoutChange::WindowOpened { window } => {
                 shell.open_window(window.id, window.bounds);
@@ -1252,8 +1353,10 @@ impl Panes {
     }
 
     /// Closes a window that has nothing left in it: no tab, and no pane that floats
-    /// over where the tabs were or is put away at its corner.
-    async fn close_if_empty(&self, window: WindowId) {
+    /// over where the tabs were or is put away at its corner. The last window of an
+    /// application that keeps running in the background is given a new tab and hidden
+    /// instead, ready for the next launch.
+    async fn close_if_empty(&self, window: WindowId, shell: &dyn Shell) {
         if self.closing.load(Ordering::Relaxed)
             || !self.config.current().config.window.close_with_last_tab
         {
@@ -1264,6 +1367,26 @@ impl Panes {
             .window(window)
             .is_some_and(|found| found.centre.tabs.is_empty() && found.floating.is_empty());
         if !empty {
+            return;
+        }
+        let keep_running = self.config.current().config.app.keep_running;
+        if keep_running && self.workspace().windows.len() == 1 {
+            let opened = self
+                .layout
+                .apply_core(Intent::TabNew {
+                    window,
+                    content: NewContent::Terminal(SpawnRequest::default()),
+                    index: None,
+                    activate: true,
+                    group: None,
+                })
+                .await;
+            match opened {
+                Ok(_) => shell.hide_window(window),
+                Err(error) => {
+                    tracing::debug!(%window, %error, "the last window could not be made ready")
+                }
+            }
             return;
         }
         let closed = self.layout.apply_core(Intent::WindowClose { window }).await;
@@ -2091,6 +2214,23 @@ mod tests {
         app.panes.apply(Intent::Close { pane }).await.unwrap();
         let shell = app.shell.clone();
         until("the application to be told to close", || shell.quits() == 1).await;
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn kept_running_the_last_window_is_given_a_new_tab_and_hidden() {
+        let app = running("ready", "[app]\nkeep-running = true\n").await;
+        let pane = only_pane(&app);
+        app.panes.apply(Intent::Close { pane }).await.unwrap();
+        let shell = app.shell.clone();
+        let window = app.window;
+        until("the window to be hidden", || shell.hidden() == vec![window]).await;
+        assert_eq!(app.shell.quits(), 0);
+        assert!(app.shell.closed().is_empty());
+        let workspace = app.panes.workspace();
+        assert_eq!(workspace.windows.len(), 1);
+        let fresh = only_pane(&app);
+        assert_ne!(fresh, pane, "the window has a new pane");
         app.state.shutdown().await;
     }
 

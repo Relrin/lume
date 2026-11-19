@@ -154,3 +154,19 @@ pub const NOTIFY_INTERVAL: Duration = Duration::from_secs(5);
 /// How many processes under a shell's own name are taken for the shell itself at its
 /// prompt: the one the session started, and a child it starts as the real shell.
 pub const SHELL_ALIASES_MAX: usize = 2;
+
+/// The size, in logical pixels, of a window that has never been opened, as the
+/// application's configuration gives it: what a shell started before its window's page
+/// is there is sized for.
+pub const PLANNED_WINDOW_WIDTH_PX: f64 = 960.0;
+pub const PLANNED_WINDOW_HEIGHT_PX: f64 = 640.0;
+
+/// What of a window's width and height is not its panes' terminals: the bars, the
+/// panes' frames and their padding, as the standard look has them. Only an estimate:
+/// a terminal is resized to its real grid when its page attaches.
+pub const PLANNED_CHROME_WIDTH_PX: f64 = 24.0;
+pub const PLANNED_CHROME_HEIGHT_PX: f64 = 72.0;
+
+/// The width of a cell of a monospaced font as a share of its size: what the bundled
+/// terminal font and most others have.
+pub const PLANNED_CELL_WIDTH_EM: f64 = 0.6;

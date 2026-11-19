@@ -58,9 +58,16 @@ impl Known {
         else {
             return;
         };
-        let before_any_command = self.state.command.is_none();
+        // At its prompt the shell itself has the terminal: before any command, and once
+        // one has finished, which the shell says from its prompt. A shell first seen only
+        // after the first command has ended (typed before the prompt was looked at) is
+        // known then.
+        let at_prompt = matches!(
+            self.state.command,
+            None | Some(CommandState::Finished { .. })
+        );
         let shell_named = program_stem(&foreground.name) == program_stem(program);
-        if before_any_command
+        if at_prompt
             && shell_named
             && !self.shell_pids.contains(&foreground.pid)
             && self.shell_pids.len() < SHELL_ALIASES_MAX
@@ -470,8 +477,9 @@ mod tests {
         assert!(states.busy(&key(1), false));
         seen(1, 11, "bash");
         assert!(!states.busy(&key(1), false));
-        // Another bash started from a command line is a program the shell runs.
-        command(1);
+        // Another bash started from a command line is a program the shell runs: the
+        // command that started it has not finished.
+        states.on_event(&key(1), &SessionEvent::CommandStarted { command: None });
         seen(1, 13, "bash");
         assert!(states.busy(&key(1), false));
         assert!(!states.busy(&key(1), true));
@@ -483,6 +491,14 @@ mod tests {
         assert!(states.busy(&key(2), false));
         seen(2, 20, "bash");
         assert!(!states.busy(&key(2), false));
+
+        // A shell first seen only once the first command has finished, because the
+        // command was typed before the prompt was looked at, is known then.
+        states.started(key(4), program(r"C:\Program Files\Git\bin\bash.exe"), None);
+        states.set_pid(&key(4), 40);
+        command(4);
+        seen(4, 41, "bash");
+        assert!(!states.busy(&key(4), false));
 
         // What a whole state says counts as a report of the program too.
         states.started(key(3), shell(), None);

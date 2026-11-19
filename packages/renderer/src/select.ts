@@ -9,6 +9,9 @@
  * A canvas is tied for good to the first kind of context created on it, so each tier
  * gets a canvas of its own. That is why the renderer, not its caller, owns the canvas:
  * the caller provides a place to put one and never sees it replaced.
+ *
+ * A tier earlier in the order can also become available later, as a WebGPU device does
+ * once it has been granted: `upgrade` has the renderer move to it at its next frame.
  */
 
 import { GridRenderer } from "./core.ts";
@@ -84,6 +87,8 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
   #index: number;
   /** Why the tier in use stopped working, once it has. */
   #lost: string | undefined;
+  /** Whether a tier before the one in use may have become available. */
+  #upgrade = false;
   #disposed = false;
 
   constructor(
@@ -170,8 +175,23 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
     return this.#inner.origin(cols, rows);
   }
 
+  /**
+   * Has the renderer try, at its next frame, the tiers before the one it draws with:
+   * one of them may work now. It moves only once the earlier tier has drawn the frame,
+   * so the terminal is never seen empty. Asks for that frame.
+   */
+  upgrade(): void {
+    if (this.#disposed || this.#index === 0) return;
+    this.#upgrade = true;
+    this.#options.onInvalidate?.();
+  }
+
   draw(frame: RenderFrame): void {
     if (this.#disposed) return;
+    if (this.#upgrade && this.#lost === undefined) {
+      this.#upgrade = false;
+      if (this.#moveEarlier(frame)) return;
+    }
     if (this.#lost === undefined) {
       try {
         this.#inner.draw(frame);
@@ -229,6 +249,48 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
     return undefined;
   }
 
+  /**
+   * Starts the first tier before the one in use that works and draws `frame` with it.
+   * Whether it moved; when none works the tier in use carries on.
+   */
+  #moveEarlier(frame: RenderFrame): boolean {
+    let from = 0;
+    while (from < this.#index) {
+      const next = this.#start(from);
+      if (!next || next.index >= this.#index) {
+        if (next) {
+          next.inner.dispose();
+          this.#surface.remove(next.canvas);
+        }
+        return false;
+      }
+      try {
+        next.inner.draw(frame);
+      } catch {
+        next.inner.dispose();
+        this.#surface.remove(next.canvas);
+        from = next.index + 1;
+        continue;
+      }
+      this.#swap(next);
+      this.#options.onTierChange?.(next.inner.tier, "an earlier tier became available");
+      return true;
+    }
+    return false;
+  }
+
+  /** Shows a tier that has drawn its first frame in place of the one in use. */
+  #swap(next: { inner: GridRenderer; canvas: Canvas; index: number }): void {
+    const old = { inner: this.#inner, canvas: this.#canvas };
+    this.#inner = next.inner;
+    this.#canvas = next.canvas;
+    this.#index = next.index;
+    this.#lost = undefined;
+    this.#surface.show(next.canvas);
+    old.inner.dispose();
+    this.#surface.remove(old.canvas);
+  }
+
   /** Replace a lost tier with the next one and draw the frame with it. */
   #fallBack(frame: RenderFrame): void {
     const reason = this.#lost ?? "lost";
@@ -251,14 +313,7 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
         from = next.index + 1;
         continue;
       }
-      const old = { inner: this.#inner, canvas: this.#canvas };
-      this.#inner = next.inner;
-      this.#canvas = next.canvas;
-      this.#index = next.index;
-      this.#lost = undefined;
-      this.#surface.show(next.canvas);
-      old.inner.dispose();
-      this.#surface.remove(old.canvas);
+      this.#swap(next);
       this.#options.onTierChange?.(next.inner.tier, reason);
       return;
     }

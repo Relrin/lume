@@ -572,8 +572,15 @@ impl AppState {
     /// Tells every connected page something, the settings window's page as well.
     pub fn broadcast(&self, notice: &serde_json::Value) {
         let links: Vec<Arc<Link>> = lock(&self.links).values().cloned().collect();
+        if links.is_empty() {
+            return;
+        }
+        // Encoded once, whatever the number of pages.
+        let Some(frames) = crate::carrier::encoded_notice(notice) else {
+            return;
+        };
         for link in links {
-            link.notify(notice);
+            link.notify_encoded(frames.clone());
         }
     }
 

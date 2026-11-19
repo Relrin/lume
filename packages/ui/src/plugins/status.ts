@@ -208,11 +208,18 @@ export function followPluginStatus(
   config: ConfigStore,
 ): () => void {
   let held = new Map<string, string>();
+  // What the items were last made from: a change to anything else, a panel's rows say,
+  // leaves them as they are.
+  let from: readonly unknown[] = [];
   const sync = () => {
     const state = plugins.getState();
+    const view = config.getState().view;
+    const parts = [state.shown, state.values, state.contexts, state.problems, view];
+    if (parts.length === from.length && parts.every((part, index) => part === from[index])) return;
+    from = parts;
     const next = new Map<string, string>();
     const registry = status.getState();
-    for (const item of pluginStatusItems(state, config.getState().view)) {
+    for (const item of pluginStatusItems(state, view)) {
       const written = JSON.stringify(item);
       next.set(item.id, written);
       if (held.get(item.id) !== written) registry.register(item);

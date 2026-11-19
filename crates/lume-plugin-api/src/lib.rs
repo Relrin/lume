@@ -37,6 +37,18 @@ use types::{
 /// The major version of the API, which a manifest's `api` names.
 pub const API_MAJOR: u32 = 1;
 
+/// The calls that only change what a plugin shows. The code is not answered for each:
+/// its promise is settled at once, and a failure goes to the plugin's log. What they
+/// show is shown together at the end of the turn that made them in any case.
+pub const TOLD: &[&str] = &[
+    "status.set",
+    "status.clear",
+    "context.set",
+    "panels.set",
+    "panels.clear",
+    "panels.setChildren",
+];
+
 /// One call of the API.
 pub struct Method {
     /// Its name: the namespace and the function, as in `status.set`.

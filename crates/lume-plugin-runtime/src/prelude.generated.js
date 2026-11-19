@@ -47,6 +47,17 @@
     call(0, name, stringify(args ?? {}));
   }
 
+  // A call that only changes what the plugin shows: nothing waits for its answer, which
+  // comes only if it failed, and then in the plugin's log.
+  function told(name, args) {
+    try {
+      tell(name, args);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return Promise.resolve();
+  }
+
   function log(level, values) {
     tell("log.write", { level, message: values.map(text).join(" ") });
   }
@@ -238,7 +249,7 @@
     execute: (id, args) => request("commands.execute", { id, args }),
   });
   Object.assign(namespace(["context"]), {
-    set: (key, value) => request("context.set", { key, value }),
+    set: (key, value) => told("context.set", { key, value }),
   });
   Object.assign(namespace(["fs"]), {
     read: (path, options) => request("fs.read", { path, options }),
@@ -264,9 +275,9 @@
     fetchStream: (url, init) => request("net.fetchStream", { url, init }),
   });
   Object.assign(namespace(["panels"]), {
-    set: (id, rows) => request("panels.set", { id, rows }),
-    clear: (id) => request("panels.clear", { id }),
-    setChildren: (id, path, rows) => request("panels.setChildren", { id, path, rows }),
+    set: (id, rows) => told("panels.set", { id, rows }),
+    clear: (id) => told("panels.clear", { id }),
+    setChildren: (id, path, rows) => told("panels.setChildren", { id, path, rows }),
   });
   Object.assign(namespace(["panes"]), {
     list: () => request("panes.list", {}),
@@ -300,8 +311,8 @@
     get: (key) => request("settings.get", { key }),
   });
   Object.assign(namespace(["status"]), {
-    set: (id, value, pane) => request("status.set", { id, value, pane }),
-    clear: (id, pane) => request("status.clear", { id, pane }),
+    set: (id, value, pane) => told("status.set", { id, value, pane }),
+    clear: (id, pane) => told("status.clear", { id, pane }),
   });
   Object.assign(namespace(["streams"]), {
     read: (stream, options) => request("streams.read", { stream, options }),

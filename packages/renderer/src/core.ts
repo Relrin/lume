@@ -14,8 +14,8 @@ import { GlyphAtlas } from "./atlas/atlas.ts";
 import { FULL_UPLOAD_DIRTY_RATIO } from "./constants.ts";
 import { collectDirtyRows, rowRuns } from "./dirty.ts";
 import { HIGHLIGHT_STRIDE, NO_SELECTION, type Highlights, type RenderFrame } from "./frame.ts";
-import { buildOverlay, buildRow, type OverlayCounts } from "./instances.ts";
-import { createPlanes, type PlaneName, type Planes } from "./layout.ts";
+import { buildOverlay, buildRow, RowUse, type OverlayCounts } from "./instances.ts";
+import { createPlanes, type Planes } from "./layout.ts";
 import { fontKey, gridOrigin, gridSize, themeMetrics } from "./metrics.ts";
 import type {
   CellMetrics,
@@ -29,7 +29,16 @@ import type {
 } from "./types.ts";
 
 /** The planes with a fixed number of records per cell. */
-const CELL_PLANES: readonly PlaneName[] = ["background", "underline", "glyph", "line"];
+const CELL_PLANES = ["background", "underline", "glyph", "line"] as const;
+type CellPlane = (typeof CELL_PLANES)[number];
+
+/** The `RowUse` bit of each plane laid out by cell. */
+const USE_BIT: Readonly<Record<CellPlane, number>> = {
+  background: RowUse.Background,
+  underline: RowUse.Underline,
+  glyph: RowUse.Glyph,
+  line: RowUse.Line,
+};
 
 /** Draws frames through a tier backend. */
 export class GridRenderer implements CellRenderer {
@@ -61,6 +70,13 @@ export class GridRenderer implements CellRenderer {
   #rows = 0;
   #dirty = new Uint8Array(0);
   #repaint = new Uint8Array(0);
+  /** For each row, the `RowUse` bits of the planes it has records in. */
+  #rowUse = new Uint8Array(0);
+  /**
+   * For each plane laid out by cell, how many rows from the top the backend's copy may
+   * hold records in: below them it holds only empty ones.
+   */
+  #uploadedRows: Record<CellPlane, number> = { background: 0, underline: 0, glyph: 0, line: 0 };
   #selectionStart = new Int32Array(0);
   #selectionEnd = new Int32Array(0);
 
@@ -204,9 +220,10 @@ export class GridRenderer implements CellRenderer {
       this.#markRows,
     );
     const generation = atlas.generation;
+    const rowUse = this.#rowUse;
     for (let row = 0; row < rows; row++) {
       if (this.#dirty[row] === 1) {
-        buildRow(frame, row, planes, atlas, metrics, this.#theme, marks);
+        rowUse[row] = buildRow(frame, row, planes, atlas, metrics, this.#theme, marks);
       }
     }
     const buildOverlays = () =>
@@ -231,7 +248,7 @@ export class GridRenderer implements CellRenderer {
       count = rows;
       rebuiltAll = true;
       for (let row = 0; row < rows; row++) {
-        buildRow(frame, row, planes, atlas, metrics, this.#theme, marks);
+        rowUse[row] = buildRow(frame, row, planes, atlas, metrics, this.#theme, marks);
       }
       overlay = buildOverlays();
     }
@@ -252,7 +269,8 @@ export class GridRenderer implements CellRenderer {
     const overlayChanged = overlayKey !== this.#overlayKey;
     if (count === 0 && !overlayChanged && !rebuiltAll) return;
 
-    this.#upload(planes, frame.cols, count, rebuiltAll);
+    const used = this.#usedRows(rows);
+    this.#upload(planes, frame.cols, count, rebuiltAll, used);
     if (overlayChanged || rebuiltAll || count > 0) {
       this.#backend.upload("overlayRect", 0, planes.overlayRect.bytes.byteLength);
       this.#backend.upload("overlayGlyph", 0, planes.overlayGlyph.bytes.byteLength);
@@ -283,6 +301,12 @@ export class GridRenderer implements CellRenderer {
       repaint,
       overlayRects: overlay.rects,
       overlayGlyphs: overlay.glyphs,
+      used: {
+        background: used.background * frame.cols * planes.background.perCell,
+        underline: used.underline * frame.cols * planes.underline.perCell,
+        glyph: used.glyph * frame.cols * planes.glyph.perCell,
+        line: used.line * frame.cols * planes.line.perCell,
+      },
     });
   }
 
@@ -326,6 +350,9 @@ export class GridRenderer implements CellRenderer {
     this.#rows = frame.rows;
     this.#dirty = new Uint8Array(frame.rows);
     this.#repaint = new Uint8Array(frame.rows);
+    this.#rowUse = new Uint8Array(frame.rows);
+    // New planes start out empty in the backend too.
+    this.#uploadedRows = { background: 0, underline: 0, glyph: 0, line: 0 };
     this.#selectionStart = new Int32Array(frame.rows).fill(NO_SELECTION);
     this.#selectionEnd = new Int32Array(frame.rows);
     this.#marks = new Uint8Array(frame.cols * frame.rows);
@@ -374,20 +401,50 @@ export class GridRenderer implements CellRenderer {
   }
 
   /** Send the rows that were rebuilt to the tier. */
-  #upload(planes: Planes, cols: number, count: number, all: boolean): void {
+  /** For each plane laid out by cell, the rows down to the last that has records in it. */
+  #usedRows(rows: number): Record<CellPlane, number> {
+    const used = { background: 0, underline: 0, glyph: 0, line: 0 };
+    const rowUse = this.#rowUse;
+    let missing = RowUse.Background | RowUse.Underline | RowUse.Glyph | RowUse.Line;
+    for (let row = rows - 1; row >= 0 && missing !== 0; row--) {
+      const bits = rowUse[row]! & missing;
+      if (bits === 0) continue;
+      for (const name of CELL_PLANES) {
+        if ((bits & USE_BIT[name]) !== 0) used[name] = row + 1;
+      }
+      missing &= ~bits;
+    }
+    return used;
+  }
+
+  /**
+   * Hands the backend the records that changed. When most rows changed a plane goes in
+   * one piece, but only as far down as it has records, or had them in the backend's copy:
+   * the rest of it is empty on both sides.
+   */
+  #upload(
+    planes: Planes,
+    cols: number,
+    count: number,
+    all: boolean,
+    used: Readonly<Record<CellPlane, number>>,
+  ): void {
     if (count === 0) return;
     const whole = all || count > this.#rows * FULL_UPLOAD_DIRTY_RATIO;
     const runs = whole ? [] : rowRuns(this.#dirty, this.#rows);
     for (const name of CELL_PLANES) {
       const plane = planes[name];
+      const rowBytes = cols * plane.perCell * plane.layout.stride;
       if (whole) {
-        this.#backend.upload(name, 0, plane.bytes.byteLength);
+        const rows = Math.max(used[name], this.#uploadedRows[name]);
+        if (rows > 0) this.#backend.upload(name, 0, rows * rowBytes);
+        this.#uploadedRows[name] = used[name];
         continue;
       }
-      const rowBytes = cols * plane.perCell * plane.layout.stride;
       for (let i = 0; i < runs.length; i += 2) {
         this.#backend.upload(name, runs[i]! * rowBytes, runs[i + 1]! * rowBytes);
       }
+      this.#uploadedRows[name] = Math.max(this.#uploadedRows[name], used[name]);
     }
   }
 }

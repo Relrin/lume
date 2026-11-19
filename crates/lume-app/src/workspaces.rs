@@ -148,7 +148,8 @@ pub fn open_workspace(store: &Store, name: &str, first: Option<SpawnRequest>) ->
     };
     if workspace.windows.is_empty() {
         // A window that is only being opened has no page yet to say how large its pane
-        // is, so its pane gets its session once the page is there.
+        // is: its session is started at the size the pane is expected to have, and
+        // resized once the page is there.
         let opened = apply(
             &mut workspace,
             Intent::WindowNew {

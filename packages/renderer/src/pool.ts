@@ -122,6 +122,8 @@ class TrackedBackend implements TierBackend {
 
 /** Makes renderers and keeps count of what they hold. */
 export class RenderPool<Canvas> {
+  /** The renderers made here and not yet disposed. */
+  readonly #renderers = new Set<ManagedRenderer<Canvas>>();
   readonly #order: readonly Tier[];
   readonly #makers: TierMakers<Canvas>;
   readonly #fonts: FontBackend;
@@ -161,7 +163,22 @@ export class RenderPool<Canvas> {
       tier,
       create: (canvas) => this.#create(tier, canvas),
     }));
-    return new ManagedRenderer(surface, factories, this.#fonts, theme, options);
+    const renderer = new ManagedRenderer(surface, factories, this.#fonts, theme, options);
+    this.#renderers.add(renderer);
+    const dispose = renderer.dispose.bind(renderer);
+    renderer.dispose = () => {
+      this.#renderers.delete(renderer);
+      dispose();
+    };
+    return renderer;
+  }
+
+  /**
+   * Has every renderer made here try the tiers before its own at its next frame: one
+   * that was not available when it started may be now.
+   */
+  upgrade(): void {
+    for (const renderer of this.#renderers) renderer.upgrade();
   }
 
   /**

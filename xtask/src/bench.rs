@@ -190,12 +190,25 @@ fn ask(lume: &Path, endpoint: &str, args: &[&str]) -> Option<Value> {
 
 /// The points of a start the application reports, in the order they are reached, with
 /// the name each has in the report.
-const MARKS: [(&str, &str); 5] = [
+const MARKS: [(&str, &str); 18] = [
+    ("config_ms", "configMs"),
+    ("host_ms", "hostMs"),
+    ("panes_ms", "panesMs"),
+    ("setup_ms", "setupMs"),
     ("window_ms", "windowMs"),
+    ("spawned_ms", "spawnedMs"),
     ("page_ms", "pageMs"),
+    ("parsed_ms", "parsedMs"),
     ("carrier_ms", "carrierMs"),
+    ("vt_ms", "vtMs"),
+    ("gpu_ms", "gpuMs"),
+    ("fonts_ms", "fontsMs"),
+    ("layout_ms", "layoutMs"),
+    ("frame_ms", "frameMs"),
     ("attached_ms", "attachedMs"),
     ("output_ms", "outputMs"),
+    ("page_output_ms", "pageOutputMs"),
+    ("drawn_ms", "drawnMs"),
 ];
 
 /// How far one start had come when its shell's first output reached the page, and when
@@ -299,6 +312,9 @@ fn time_one_start(app: &Path, lume: &Path, endpoint: &str, plugins: usize) -> Re
                         }
                         std::thread::sleep(POLL);
                     }
+                    // The page tells of its drawing a moment after the output reached
+                    // it, so the marks read last hold every one.
+                    let marks = if late.is_object() { &late } else { marks };
                     break Ok(Start {
                         marks: marks.clone(),
                         output_ms: *output_ms,
@@ -493,6 +509,121 @@ fn merge_page(report: &mut Value, measure: &Value, chrome: &Value) {
     report["problems"] = Value::Array(problems);
 }
 
+/// How long a window put away while the application keeps running is given for its fresh
+/// shells to start before it is launched again.
+const READY_SETTLE: Duration = Duration::from_millis(2500);
+
+/// Milliseconds since the Unix epoch, the clock the application gives the times of a
+/// launch against it on.
+fn unix_ms() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |since| since.as_secs_f64() * 1000.0)
+}
+
+/// Times launches of an application that is kept running in the background: from the
+/// start of a second process, which hands the launch over to the running one, until
+/// the window that was kept ready has drawn its first frame on screen again.
+fn time_ready_starts(profile: Profile) -> Result<Value> {
+    let app = suites::app(profile)?;
+    let lume = suites::lume(profile)?;
+    let endpoint = format!("bench-{}-ready", std::process::id());
+    let dirs = paths::PrivateDirs::fresh(&endpoint)?;
+    std::fs::write(dirs.config_file(), "[app]\nkeep-running = true\n")
+        .context("writing the settings of a kept application")?;
+    let mut command = Command::new(&app);
+    dirs.apply(&mut command);
+    let mut child = command
+        .args(["--endpoint", &endpoint])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("starting the application")?;
+    let started = Instant::now();
+    let shown_drawn = |status: &Value| status["marks"]["shown_drawn_unix_ms"].as_f64();
+    let result = (|| -> Result<Vec<f64>> {
+        // The first start, and its shell, are done with first.
+        loop {
+            if started.elapsed() > START_TIMEOUT {
+                anyhow::bail!("the application did not start in time");
+            }
+            std::thread::sleep(POLL);
+            if ask(&lume, &endpoint, &["status"])
+                .is_some_and(|status| status["marks"]["drawn_ms"].is_number())
+            {
+                break;
+            }
+        }
+        std::thread::sleep(READY_SETTLE);
+        let mut times = Vec::new();
+        for run in 0..=STARTS {
+            ask(&lume, &endpoint, &["command", "lume.window.close"])
+                .context("putting the window away")?;
+            std::thread::sleep(READY_SETTLE);
+            let launched = unix_ms();
+            let mut second = Command::new(&app);
+            dirs.apply(&mut second);
+            let mut second = second
+                .args(["--endpoint", &endpoint])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("launching the application again")?;
+            let waiting = Instant::now();
+            let drawn = loop {
+                if waiting.elapsed() > START_TIMEOUT {
+                    anyhow::bail!("the window kept ready was not shown in time");
+                }
+                std::thread::sleep(Duration::from_millis(5));
+                if let Some(at) = ask(&lume, &endpoint, &["status"])
+                    .as_ref()
+                    .and_then(shown_drawn)
+                    .filter(|at| *at >= launched)
+                {
+                    break at;
+                }
+            };
+            let _ = second.wait();
+            let ms = drawn - launched;
+            let counted = if run > 0 { "" } else { " (first, not counted)" };
+            println!("bench:   launched while kept ready: drawn {ms:.0} ms{counted}");
+            if run > 0 {
+                times.push(ms);
+            }
+        }
+        Ok(times)
+    })();
+    if ask(&lume, &endpoint, &["command", "lume.app.quit-end-sessions"]).is_none() {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+    let times = result?;
+    Ok(json!({ "drawnMs": { "p50": median(times.clone()), "all": times } }))
+}
+
+/// Times the starts of the release build alone and prints the middle of each mark, for
+/// working on the start without the rest of the suite.
+pub fn startup_only() -> Result<()> {
+    println!("bench: timing launches of an application kept ready");
+    let ready = time_ready_starts(Profile::Release)?;
+    if let Some(p50) = ready["drawnMs"]["p50"].as_f64() {
+        println!("bench:   {:<12} {p50:>6.0} ms", "ready");
+    }
+    println!("bench: timing {STARTS} starts of the application");
+    let report = time_starts(Profile::Release)?;
+    for (_, key) in MARKS {
+        if let Some(p50) = report[key]["p50"].as_f64() {
+            println!("bench:   {key:<12} {p50:>6.0} ms");
+        }
+    }
+    if let Some(p50) = report["promptMs"]["p50"].as_f64() {
+        println!("bench:   {:<12} {p50:>6.0} ms", "promptMs");
+    }
+    Ok(())
+}
+
 /// Measures the release build and compares the numbers with the limits of `profile`.
 pub fn run(profile: &str) -> Result<()> {
     let limits = load_limits(profile)?;
@@ -512,6 +643,8 @@ pub fn run(profile: &str) -> Result<()> {
          {PLUGINS_INSTALLED} installed"
     );
     report["startup"]["plugins"] = time_plugin_starts(Profile::Release)?;
+    println!("bench: timing launches of an application kept running in the background");
+    report["startup"]["ready"] = time_ready_starts(Profile::Release)?;
 
     let path = paths::root()
         .join("target")

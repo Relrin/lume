@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-page-shown"
+description = "Enables the page_shown command without any pre-configured scope."
+commands.allow = ["page_shown"]
+
+[[permission]]
+identifier = "deny-page-shown"
+description = "Denies the page_shown command without any pre-configured scope."
+commands.deny = ["page_shown"]

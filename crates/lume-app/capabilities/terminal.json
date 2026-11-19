@@ -13,6 +13,8 @@
     "allow-open-link",
     "allow-font-families",
     "allow-page-reply",
+    "allow-page-marks",
+    "allow-page-shown",
     "allow-layout-view",
     "allow-layout-apply",
     "allow-sessions-start",

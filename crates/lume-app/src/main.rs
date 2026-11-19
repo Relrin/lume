@@ -40,6 +40,7 @@ mod commands_plugins;
 mod commands_window;
 mod configsvc;
 mod control;
+mod early;
 mod error;
 mod fonts;
 mod frames;
@@ -360,6 +361,7 @@ fn main() -> ExitCode {
         },
         Mode::Probe | Mode::Harness(_) => None,
     };
+    marks.config();
     let host_settings = user
         .as_ref()
         .map(|config| config.current().config.host.clone());
@@ -382,6 +384,7 @@ fn main() -> ExitCode {
             .collect(),
         Mode::Probe | Mode::Harness(_) => Vec::new(),
     };
+    marks.host();
     let runtime = tauri::async_runtime::handle().inner().clone();
     let state = AppState::new(
         runtime,
@@ -401,6 +404,11 @@ fn main() -> ExitCode {
         },
         None => None,
     };
+    marks.panes();
+    // The shells need nothing of the window, which takes the webview a while to make.
+    if let Some(terminals) = &terminals {
+        early::start(&terminals.panes, &terminals.config.current().config.font);
+    }
     if let (Some(terminals), Some(warning)) = (&terminals, host_warning) {
         terminals.panes.notice("warning", warning);
     }
@@ -426,6 +434,7 @@ fn main() -> ExitCode {
         .manage(clipboard)
         .manage(Fonts::default())
         .setup(move |app| {
+            marks.setup();
             if matches!(mode, Mode::Harness(_)) {
                 harness::start(app)?;
             }
@@ -445,6 +454,11 @@ fn main() -> ExitCode {
                 Arc::clone(&config),
             );
             app.manage(Arc::clone(&windows));
+            // The first window is filled with its theme's colour as it is made, and
+            // the theme may follow the system's scheme.
+            if let Some(scheme) = window::system_scheme() {
+                config.set_scheme(scheme);
+            }
             let shell: Arc<dyn Shell> = windows;
             // The layout says which windows there are and where each was.
             for window in &panes.workspace().windows {
@@ -552,6 +566,8 @@ fn main() -> ExitCode {
             commands::open_link,
             commands::font_families,
             commands::page_reply,
+            commands::page_marks,
+            commands::page_shown,
             commands_layout::layout_view,
             commands_layout::layout_apply,
             commands_layout::sessions_start,
@@ -678,6 +694,19 @@ fn main() -> ExitCode {
                     }
                     if let Some(windows) = windows {
                         windows.keep_place(&label);
+                    }
+                    // Kept running in the background, the application hides its only
+                    // window instead, ready to be shown at the next launch.
+                    let keep_running = config
+                        .as_ref()
+                        .is_some_and(|config| config.current().config.app.keep_running);
+                    if last
+                        && keep_running
+                        && let Some(windows) = windows
+                    {
+                        api.prevent_close();
+                        panes.keep_ready(window, windows.as_ref());
+                        return;
                     }
                     // The only window closes the application, and the layout stays as
                     // it is for the next start. Any other window is closed in the

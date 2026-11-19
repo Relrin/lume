@@ -768,6 +768,9 @@ impl Plugins {
     /// Lets go of what a plugin had open: its streams close, its watches stop, and the
     /// programs it started are stopped.
     pub(super) fn release(&self, local: &str) {
+        // Its stored values are read again from the file when it next runs: the file may
+        // change while it does not, as when it is removed with its data.
+        lock(&self.kv).remove(local);
         self.system.streams.close_all(local);
         lock(&self.system.watches).retain(|_, (owner, _)| owner != local);
         let ended: Vec<Started> = {

@@ -53,7 +53,8 @@ pub struct WebviewInfo {
     update: bool,
 }
 
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn webview_info(args: State<'_, Args>) -> WebviewInfo {
     let engine = if cfg!(windows) {
         "WebView2"
@@ -75,6 +76,21 @@ pub fn webview_info(args: State<'_, Args>) -> WebviewInfo {
         },
         update: args.update,
     }
+}
+
+/// Called once by a page when it has drawn its first output, with the steps of its start
+/// on its own clock and that clock's `now`. Only the first page's account is kept; the
+/// control endpoint reports it among the start's marks.
+#[tauri::command]
+pub fn page_marks(app: App<'_>, steps: crate::marks::PageSteps, now: f64) {
+    app.marks().page_steps(&steps, now);
+}
+
+/// Called by a page whose window was kept ready and shown again, at its first frame
+/// since.
+#[tauri::command]
+pub fn page_shown(app: App<'_>) {
+    app.marks().shown_drawn();
 }
 
 /// Called by the page when its checks are finished. In probe mode the report is printed

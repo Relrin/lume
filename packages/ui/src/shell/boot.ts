@@ -25,6 +25,7 @@ import { createConnectStore, type ConnectStore } from "../connect/store.ts";
 import { CoreClient } from "../core/client.ts";
 import type { ConfigView, Machine, Notice } from "../core/types.ts";
 import { checkFrameContract } from "../frame-contract.ts";
+import { shownAgain, startStep } from "../start-marks.ts";
 import { CardDrag } from "../drag/controller.ts";
 import { createPanelDragStore, type PanelDragStore } from "../drag/panels.ts";
 import { Shortcuts } from "../keys/shortcuts.ts";
@@ -232,10 +233,14 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   let onRequest = (message: unknown): void => void started.then(() => onRequest(message));
 
   // The graphics device is asked for before the configuration is known, since it is
-  // the slowest part of a start. A configuration that names one tier is rare.
-  const hostStarted = RenderHost.create();
+  // the slowest part of a start, and nothing waits for it: terminals are drawn with the
+  // next tier until it is granted. A configuration that names one tier is rare.
+  let host = RenderHost.start();
   const [vt, keyLayout, client] = await Promise.all([
-    Vt.instantiate(fetch(wasmUrl)),
+    Vt.instantiate(fetch(wasmUrl)).then((vt) => {
+      startStep("vt");
+      return vt;
+    }),
     keyboardLayout(),
     CoreClient.open(carrier, {
       notice: (notice) => onNotice(notice),
@@ -249,11 +254,11 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     client.configView(),
     client.commandsList(),
   ]);
-  let host = await hostStarted;
   if (configView.config.renderer.tier !== "auto") {
     host.dispose();
     host = await RenderHost.create({ tiers: tiersFor(configView) });
   }
+  void host.gpuSettled.then(() => startStep("gpu"));
 
   config.getState().set(configView);
   commandStore.getState().set(commandList);
@@ -276,6 +281,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   let look = appearance();
   // A terminal sizes its cells and draws its glyphs once: the font is there first.
   await loadTerminalFonts(look);
+  startStep("fonts");
 
   const area = new TabAreaController({
     layout,
@@ -336,6 +342,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
 
   // What the plugins add comes as the core has it; nothing waits for it.
   let contributionsRevision = -1;
+  // The newest revision the core has told of; one told of while a fetch is on its way
+  // is fetched once that one is in.
+  let contributionsAnnounced = -1;
   let fetchingContributions = false;
   const fetchContributions = (): void => {
     if (fetchingContributions) return;
@@ -343,11 +352,13 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     client.uiContributions().then(
       (shown) => {
         fetchingContributions = false;
-        if (shown.revision < contributionsRevision) return;
-        contributionsRevision = shown.revision;
-        plugins.getState().set(shown);
-        assets.retry();
-        configureCursorFx();
+        if (shown.revision >= contributionsRevision) {
+          contributionsRevision = shown.revision;
+          plugins.getState().set(shown);
+          assets.retry();
+          configureCursorFx();
+        }
+        if (contributionsAnnounced > contributionsRevision) fetchContributions();
       },
       (error: unknown) => {
         fetchingContributions = false;
@@ -504,6 +515,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       case "close_requested":
         void closeRequested({ layout, config, views, prompts, client, notices });
         break;
+      case "window_shown":
+        shownAgain();
+        break;
       case "confirm_requested":
         void confirmRequested({ prompts, views, commands }, notice);
         break;
@@ -515,6 +529,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         notices.push(notice.level, notice.message, notice.action);
         break;
       case "contributions_changed":
+        contributionsAnnounced = Math.max(contributionsAnnounced, notice.revision);
         if (notice.revision > contributionsRevision) fetchContributions();
         break;
       case "plugin_frame":
@@ -709,6 +724,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   );
 
   layout.getState().reset(layoutView);
+  startStep("layout");
   onNotice = follow;
   for (const notice of early ?? []) follow(notice);
   early = null;

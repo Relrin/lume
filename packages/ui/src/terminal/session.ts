@@ -17,6 +17,7 @@ import {
   type Vt,
 } from "@lume/vt";
 
+import { startOutput } from "../start-marks.ts";
 import { HISTORY_FULL_SHARE, LETTERBOX_SETTLE_MS } from "../tuning.ts";
 import {
   OSC52_WRITE_MAX_BYTES,
@@ -351,6 +352,7 @@ export class TerminalSession {
           break;
         }
         this.#terminal.write(frame.bytes);
+        startOutput();
         // Only now are the bytes out of the way, and more may come.
         this.#attachment.consumed(frame.bytes.length);
         this.#hooks.changed?.();

@@ -386,17 +386,44 @@ impl WindowShell {
     ) -> Result<WebviewWindow, Box<dyn std::error::Error>> {
         let mut described = described(&self.app)?;
         described.label = label_of(window);
-        // Shown once it is where it belongs, so it is not seen to jump there.
-        let builder = WebviewWindowBuilder::from_config(&self.app, &described)?
-            .on_document_title_changed(follow_title)
-            .visible(false);
-        let opened = self.with_title_bar(builder).build()?;
-        set_corners(&opened, self.config.current().config.window.corners);
-
         let restore = self.config.current().config.window.restore_bounds;
+        let screens = self.screens();
         let placement = bounds
             .filter(|_| restore)
-            .and_then(|bounds| clamp_bounds(&bounds, &self.screens()));
+            .and_then(|bounds| clamp_bounds(&bounds, &screens));
+        // Making the webview takes a while. A window that can be put where it belongs
+        // as it is made is shown at once, filled with the theme's colour, so that it is
+        // there while the webview starts; one that cannot is shown once it is placed,
+        // so that it is not seen to jump there.
+        let early = early_place(placement.as_ref(), &screens);
+        let mut builder = WebviewWindowBuilder::from_config(&self.app, &described)?
+            .on_document_title_changed(follow_title);
+        if let Some(color) = self.config.surface_color() {
+            builder =
+                builder.background_color(tauri::window::Color(color.r, color.g, color.b, 255));
+        }
+        builder = match early {
+            Some(Early::Default) => builder.visible(true),
+            Some(Early::At {
+                x,
+                y,
+                width,
+                height,
+                maximised,
+            }) => builder
+                .position(x, y)
+                .inner_size(width, height)
+                .maximized(maximised)
+                .visible(true),
+            None => builder.visible(false),
+        };
+        let opened = self.with_title_bar(builder).build()?;
+        set_corners(&opened, self.config.current().config.window.corners);
+        if early.is_some() {
+            opened.set_focus()?;
+            return Ok(opened);
+        }
+
         if let Some(placement) = placement {
             opened.set_size(PhysicalSize::new(placement.width, placement.height))?;
             opened.set_position(PhysicalPosition::new(placement.x, placement.y))?;
@@ -525,6 +552,10 @@ impl Shell for WindowShell {
         let Some(window) = self.front() else {
             return;
         };
+        let hidden = !window.is_visible().unwrap_or(true);
+        if hidden {
+            self.state.marks().shown();
+        }
         // A window that is minimised or hidden is not brought forward by being focused.
         let shown = window
             .unminimize()
@@ -532,6 +563,10 @@ impl Shell for WindowShell {
             .and_then(|()| window.set_focus());
         if let Err(error) = shown {
             tracing::debug!(%error, "the window could not be brought to the front");
+        }
+        // A page shown again draws what came while it was hidden; it says when.
+        if hidden && let Some(page) = self.state.page_of(window.label()) {
+            page.notify(&json!({ "type": "window_shown" }));
         }
     }
 
@@ -561,6 +596,18 @@ impl Shell for WindowShell {
                 tracing::warn!(%error, "the clipboard could not be written");
             }
         });
+    }
+
+    fn hide_window(&self, window: WindowId) {
+        let label = label_of(window);
+        self.keep_place(&label);
+        self.close_settings_with(&label);
+        let Some(shown) = self.app.get_webview_window(&label) else {
+            return;
+        };
+        if let Err(error) = shown.hide() {
+            tracing::warn!(%error, label, "the window could not be hidden");
+        }
     }
 
     fn close_window(&self, label: &str) {
@@ -735,6 +782,86 @@ fn window_title(asked: &str) -> String {
 /// characters can make a title read as something other than what it is.
 fn is_direction_mark(character: char) -> bool {
     matches!(character, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// How a window may be placed as it is made, so that it can be shown at once.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Early {
+    /// Where the system puts a new window, at the configured size.
+    Default,
+    /// At this place and size in logical pixels of the main screen.
+    At {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        maximised: bool,
+    },
+}
+
+/// Whether a window placed at `placement` (or where the system puts one) can be put
+/// there as it is made: only places on the main screen can, since a window is made at
+/// that screen's scale. A full-screen window is set so once it is made.
+fn early_place(placement: Option<&crate::bounds::Placement>, screens: &[Screen]) -> Option<Early> {
+    let Some(placement) = placement else {
+        return Some(Early::Default);
+    };
+    let main = screens.first()?;
+    if placement.fullscreen || !(main.scale.is_finite() && main.scale > 0.0) {
+        return None;
+    }
+    let inside = placement.x >= main.x
+        && placement.y >= main.y
+        && i64::from(placement.x) + i64::from(placement.width)
+            <= i64::from(main.x) + i64::from(main.width)
+        && i64::from(placement.y) + i64::from(placement.height)
+            <= i64::from(main.y) + i64::from(main.height);
+    inside.then(|| Early::At {
+        x: f64::from(placement.x) / main.scale,
+        y: f64::from(placement.y) / main.scale,
+        width: f64::from(placement.width) / main.scale,
+        height: f64::from(placement.height) / main.scale,
+        maximised: placement.maximised,
+    })
+}
+
+/// The colour scheme the system's apps are asked to use, where it can be read before a
+/// window exists: the first window is filled with its theme's colour as it is made.
+#[cfg(windows)]
+pub fn system_scheme() -> Option<lume_config::ColorScheme> {
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+
+    let key: Vec<u16> = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+        .encode_utf16()
+        .chain([0])
+        .collect();
+    let value: Vec<u16> = "AppsUseLightTheme".encode_utf16().chain([0]).collect();
+    let mut light: u32 = 0;
+    let mut size = u32::try_from(std::mem::size_of::<u32>()).ok()?;
+    // SAFETY: both names end in a zero, and the value is read into a u32 whose size is
+    // given; nothing else is written.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&raw mut light).cast(),
+            &raw mut size,
+        )
+    };
+    (status == 0).then_some(if light == 0 {
+        lume_config::ColorScheme::Dark
+    } else {
+        lume_config::ColorScheme::Light
+    })
+}
+
+/// Elsewhere the scheme is known once a window is there to ask.
+#[cfg(not(windows))]
+pub fn system_scheme() -> Option<lume_config::ColorScheme> {
+    None
 }
 
 #[cfg(test)]

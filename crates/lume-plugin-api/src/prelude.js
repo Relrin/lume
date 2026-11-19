@@ -45,6 +45,17 @@
     call(0, name, stringify(args ?? {}));
   }
 
+  // A call that only changes what the plugin shows: nothing waits for its answer, which
+  // comes only if it failed, and then in the plugin's log.
+  function told(name, args) {
+    try {
+      tell(name, args);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return Promise.resolve();
+  }
+
   function log(level, values) {
     tell("log.write", { level, message: values.map(text).join(" ") });
   }

@@ -289,6 +289,7 @@ export class WebGl2Backend implements TierBackend {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.#pages.placeholder("color"));
 
+    let current: WebGLProgram | undefined;
     for (const name of PLANE_ORDER) {
       const state = this.#state[name];
       if (!state) continue;
@@ -297,11 +298,15 @@ export class WebGl2Backend implements TierBackend {
           ? info.overlayRects
           : name === "overlayGlyph"
             ? info.overlayGlyphs
-            : state.capacity;
+            : Math.min(info.used[name], state.capacity);
       if (count === 0) continue;
       const glyphs = state.layout === GLYPH;
-      gl.useProgram(glyphs ? this.#glyph : this.#rect);
-      gl.uniform2f(glyphs ? this.#glyphSurface : this.#rectSurface, info.width, info.height);
+      const program = glyphs ? this.#glyph : this.#rect;
+      if (program !== current) {
+        current = program;
+        gl.useProgram(program);
+        gl.uniform2f(glyphs ? this.#glyphSurface : this.#rectSurface, info.width, info.height);
+      }
       gl.bindVertexArray(state.vertexArray);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
     }

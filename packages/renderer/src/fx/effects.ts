@@ -490,6 +490,21 @@ export class CursorEffects<Canvas> implements FrameView {
     return [canvas, this.#makers.canvas2d(canvas)];
   }
 
+  /**
+   * The GPU has answered after the effects began without it: WebGL2 is tried again, and
+   * the plugins' shaders, which only WebGL2 draws, are built. Called once, at the start
+   * of the page.
+   */
+  gpuAnswered(): void {
+    if (this.#disposed || !this.#webgl2Lost) return;
+    this.#webgl2Lost = false;
+    if (!this.#backend) return;
+    this.#stop();
+    this.#start();
+    this.#prepareCustoms();
+    if (this.playing) this.#requestFrame();
+  }
+
   /** WebGL2 was lost: go on with Canvas 2D on a new canvas, playing what was playing. */
   #replace(): void {
     if (this.#disposed) return;

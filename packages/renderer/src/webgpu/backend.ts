@@ -148,7 +148,7 @@ export class WebGpuBackend implements TierBackend {
           ? info.overlayRects
           : name === "overlayGlyph"
             ? info.overlayGlyphs
-            : plane.capacity;
+            : Math.min(info.used[name], plane.capacity);
       if (count === 0) continue;
       pass.setPipeline(
         plane.layout === GLYPH ? this.#shared.glyphPipeline : this.#shared.rectPipeline,

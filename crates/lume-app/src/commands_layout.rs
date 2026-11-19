@@ -28,7 +28,8 @@ fn window_for(webview: &Webview) -> Result<WindowId, CommandError> {
 
 /// The layout as it is now, and which of its windows the calling page is. A page calls
 /// this after opening its carrier, so no change can fall between the two.
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn layout_view(webview: Webview, services: Shared<'_>) -> Result<Value, CommandError> {
     let window = window_for(&webview)?;
     // What happened before there was a page to tell.
@@ -69,7 +70,8 @@ pub async fn sessions_start(
 
 /// Which of the calling window's `panes` run something that closing them would end.
 /// A pane that is not in the window runs nothing of the window's.
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn panes_busy(
     webview: Webview,
     services: Shared<'_>,
@@ -93,7 +95,8 @@ pub async fn sessions_detached(services: Shared<'_>) -> Result<Value, CommandErr
 }
 
 /// Every command there is.
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn commands_list(services: Shared<'_>) -> Vec<CommandSpec> {
     services.registry.list()
 }

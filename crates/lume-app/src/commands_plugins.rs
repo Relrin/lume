@@ -22,7 +22,8 @@ use crate::services::Services;
 type Shared<'a> = State<'a, Arc<Services>>;
 
 /// Everything the plugins add to a window, with what their code shows in it now.
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn ui_contributions(services: Shared<'_>, window: WebviewWindow) -> Value {
     services.plugins.snapshot(window.label())
 }
@@ -33,7 +34,8 @@ const ASSETS_AT_ONCE: usize = 64;
 /// The plugins' pictures, as the addresses a window draws them from, and the shaders
 /// of their cursor effects, by the hashes the window was told. One that is not there
 /// any more is left out.
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn ui_assets(services: Shared<'_>, hashes: Vec<String>) -> Value {
     let found: serde_json::Map<String, Value> = hashes
         .into_iter()
@@ -60,7 +62,8 @@ pub async fn ui_panel_expand(
 
 /// The plugins' things the calling window has on screen: status items and panels, by
 /// their full ids. A window that is minimised or hidden says it has none.
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn ui_visible(services: Shared<'_>, window: WebviewWindow, items: Vec<String>) {
     // A page says what it draws; a list without end is not that.
     let items: Vec<String> = items

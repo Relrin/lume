@@ -222,6 +222,8 @@ pub struct FakeShell {
     focused: Mutex<Vec<lume_layout::WindowId>>,
     /// The windows that asked for attention, in order.
     attention: Mutex<Vec<lume_layout::WindowId>>,
+    /// The windows that were hidden, in order.
+    hidden: Mutex<Vec<lume_layout::WindowId>>,
     /// The notifications shown, as title and body, in order.
     notified: Mutex<Vec<(String, String)>>,
     /// Whether the windows were asked for their own title bar or the system's, in order.
@@ -302,6 +304,14 @@ impl FakeShell {
         }
     }
 
+    /// The windows that were hidden, in order.
+    pub fn hidden(&self) -> Vec<lume_layout::WindowId> {
+        self.hidden
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// The windows that asked for attention, in order.
     pub fn attention(&self) -> Vec<lume_layout::WindowId> {
         self.attention
@@ -330,6 +340,13 @@ impl crate::control::Shell for FakeShell {
 
     fn bundled_ui(&self) -> bool {
         true
+    }
+
+    fn hide_window(&self, window: lume_layout::WindowId) {
+        self.hidden
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(window);
     }
 
     fn close_window(&self, label: &str) {

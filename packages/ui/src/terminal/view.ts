@@ -38,11 +38,14 @@ import {
   type KeyEncoder,
   type KeyInput,
   type MouseButton,
+  type Scrollbar,
   type SearchStatus,
+  type Terminal,
   type Vt,
 } from "@lume/vt";
 
 import { LINK_SCHEMES_TO_CONFIRM, PASTE_MAX_BYTES } from "../limits.ts";
+import { startDrawn } from "../start-marks.ts";
 import {
   cssColor,
   factsPalette,
@@ -309,6 +312,9 @@ export class TerminalView implements FrameView {
    * before it draws what it has, and what draws it then.
    */
   #restoreUntil = 0;
+  /** Whether a frame is being drawn, and where the viewport was when it began. */
+  #inFrame = false;
+  #frameBar: Scrollbar | undefined;
   #restoreTimer: number | undefined;
 
   #appearance: Appearance;
@@ -1030,6 +1036,27 @@ export class TerminalView implements FrameView {
     const renderer = this.#renderer;
     const session = this.#session;
     if (!renderer || !session) return;
+    this.#inFrame = true;
+    this.#frameBar = undefined;
+    try {
+      this.#drawFrame(renderer, session, now);
+    } finally {
+      this.#inFrame = false;
+      this.#frameBar = undefined;
+    }
+  }
+
+  /**
+   * Where the viewport sits in the scrollback. Nothing moves it while a frame is drawn,
+   * so a frame asks the terminal once and its parts share the answer.
+   */
+  #bar(terminal: Terminal): Scrollbar {
+    if (!this.#inFrame) return terminal.scrollbar();
+    this.#frameBar ??= terminal.scrollbar();
+    return this.#frameBar;
+  }
+
+  #drawFrame(renderer: CellRenderer, session: TerminalSession, now: number): void {
     const searched = this.#feedSearch(renderer, session);
     const frame = session.state.update();
     if (this.#hoverStale) {
@@ -1040,10 +1067,13 @@ export class TerminalView implements FrameView {
     this.#dirty = false;
     this.#syncBlink(frame.cursor);
     renderer.draw(frame);
+    startDrawn();
     session.state.markDrawn();
+    // The cursor's effects read where the pane is laid out: asked before anything of the
+    // pane's own is moved, so that reading it does not make the page lay itself out again.
+    this.#tellCursor(frame.cursor, `${frame.cols}x${frame.rows}`, now);
     this.#placeInput(frame.cursor);
     this.#updateScrollbar();
-    this.#tellCursor(frame.cursor, `${frame.cols}x${frame.rows}`, now);
     this.#watchHistory(session);
     if (searched) this.#services.searched();
   }
@@ -1056,7 +1086,7 @@ export class TerminalView implements FrameView {
    */
   #watchHistory(session: TerminalSession): void {
     if (!session.fetchesHistory) return;
-    const { total, offset, length } = session.terminal.scrollbar();
+    const { total, offset, length } = this.#bar(session.terminal);
     if (offset === 0 && total > length && session.historyCut) session.fetchHistory();
     const atNewest = offset + length >= total;
     if (!session.holdsAllHistory || !atNewest) {
@@ -1136,7 +1166,7 @@ export class TerminalView implements FrameView {
     if (!watch?.watching) return;
     const terminal = this.#session?.terminal;
     // A screen scrolled back shows an older part of the output: the cursor is not on it.
-    const bar = terminal?.scrollbar();
+    const bar = terminal && this.#bar(terminal);
     const atBottom = bar === undefined || bar.offset + bar.length >= bar.total;
     const reflowed = this.#remeasured || grid !== this.#cursorGrid;
     this.#remeasured = false;
@@ -1297,7 +1327,7 @@ export class TerminalView implements FrameView {
     const search = this.#search;
     if (!search || this.#searchHeld()) return false;
     const { terminal } = session;
-    const { total, offset } = terminal.scrollbar();
+    const { total, offset } = this.#bar(terminal);
     const stamp = `${terminal.revision},${total},${offset}`;
     if (!this.#searchTouched && stamp === this.#searchStamp) return false;
     this.#searchTouched = false;
@@ -1392,7 +1422,7 @@ export class TerminalView implements FrameView {
     const thumb = this.#elements?.scrollThumb;
     const terminal = this.#session?.terminal;
     if (!thumb || !terminal) return;
-    const { total, offset, length } = terminal.scrollbar();
+    const { total, offset, length } = this.#bar(terminal);
     const key = `${total},${offset},${length}`;
     if (key === this.#scrollbar) return;
     this.#scrollbar = key;

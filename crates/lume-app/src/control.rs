@@ -54,6 +54,9 @@ pub trait Shell: Send + Sync + 'static {
     fn bundled_ui(&self) -> bool;
     /// Closes the window with this label.
     fn close_window(&self, label: &str);
+    /// Hides the window that shows a window of the layout, keeping its page, to be
+    /// shown again by `activate`.
+    fn hide_window(&self, window: WindowId);
     /// Opens the window that shows a window of the layout, where it was kept if a
     /// place is given. A window that is open already is left as it is.
     fn open_window(&self, window: WindowId, bounds: Option<Bounds>);
@@ -597,7 +600,7 @@ impl Control {
                         bundled_ui: shell.bundled_ui(),
                         window: state.page().is_some(),
                         focused,
-                        marks: state.marks().read(),
+                        marks: Box::new(state.marks().read()),
                     },
                 )
             }

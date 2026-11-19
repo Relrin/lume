@@ -11,8 +11,16 @@
       "properties": {
         "keep-running": {
           "default": false,
-          "description": "Keep the application running when its last window closes.",
-          "type": "boolean"
+          "description": "Keep the application running when its last window closes: the window is hidden\nwith a fresh shell started in each of its panes, and opening Lume shows it again\nat once. Quitting ends it.",
+          "type": "boolean",
+          "x-lume-settings": {
+            "control": "switch",
+            "group": "Startup",
+            "help": "Closing the last window hides it with fresh shells, so Lume opens again at once",
+            "label": "Keep Lume ready in the background",
+            "order": 20,
+            "page": "general"
+          }
         },
         "start-workspace": {
           "default": "last",

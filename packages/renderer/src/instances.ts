@@ -38,8 +38,17 @@ function glyphSlot(frame: RenderFrame, index: number, atlas: GlyphAtlas): number
   return atlas.glyph(glyph, bold, italic, span);
 }
 
+/** Bits of what `buildRow` says a row uses: one for each plane laid out by cell. */
+export const RowUse = {
+  Background: 1,
+  Underline: 2,
+  Glyph: 4,
+  Line: 8,
+} as const;
+
 /**
- * Rebuild the records of one row of the grid.
+ * Rebuild the records of one row of the grid, and say which planes the row has records
+ * in, as `RowUse` bits.
  *
  * `marks` holds a `HighlightKind` for every cell of the grid that is highlighted, and
  * zero for the others.
@@ -52,8 +61,9 @@ export function buildRow(
   metrics: CellMetrics,
   theme: TerminalTheme,
   marks?: Uint8Array,
-): void {
+): number {
   const { cols, glyph, fg, bg, underlineColor, flags } = frame;
+  let used = 0;
   const { cellWidth, cellHeight, lineThickness, originX, originY } = metrics;
   const first = row * cols;
   const y = originY + row * cellHeight;
@@ -108,6 +118,7 @@ export function buildRow(
     // A fully transparent background is the default one, which is already there.
     if (background >>> 24 !== 0) {
       writeRect(planes.background, index, x, y, cellWidth, cellHeight, background);
+      used |= RowUse.Background;
     }
 
     const style = (cellFlags >> UNDERLINE_SHIFT) & UNDERLINE_MASK;
@@ -127,6 +138,7 @@ export function buildRow(
           0,
           underline,
         );
+        used |= RowUse.Underline;
       }
     }
 
@@ -146,6 +158,7 @@ export function buildRow(
           atlas.color[slot] === 1 ? GLYPH_FLAG_COLOR : 0,
           foreground,
         );
+        used |= RowUse.Glyph;
       }
     }
 
@@ -158,8 +171,10 @@ export function buildRow(
       if ((cellFlags & CellFlag.Overline) !== 0) {
         writeRect(planes.line, lines + 1, x, y, cellWidth, lineThickness, foreground);
       }
+      used |= RowUse.Line;
     }
   }
+  return used;
 }
 
 /** How many overlay records a frame uses. */

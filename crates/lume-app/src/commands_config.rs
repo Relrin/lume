@@ -26,7 +26,8 @@ type Shared<'a> = State<'a, Arc<Services>>;
 
 /// The configuration in use: the settings, where each came from, what was wrong in the
 /// files, every design token's value and the keys in effect.
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn config_view(services: Shared<'_>) -> Value {
     services.config.view()
 }
@@ -58,13 +59,15 @@ pub async fn config_unset(services: Shared<'_>, path: String) -> Result<(), Comm
 
 /// What can be set, as a JSON Schema: every setting with its kind, its limits and what
 /// it is for, and how the settings window shows the ones it shows.
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn config_schema(services: Shared<'_>) -> Value {
     services.config.schema()
 }
 
 /// The themes there are to choose from.
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn themes_list(services: Shared<'_>) -> Vec<ThemeEntry> {
     services.config.themes()
 }
@@ -96,7 +99,8 @@ pub async fn shells_list() -> Result<Vec<ShellEntry>, CommandError> {
 /// The profiles in effect: the ways there are to start a terminal, the id of the one
 /// new terminals use, and what there is to say about ones that are not there. A page
 /// reads this once and is told of every change from then on.
-#[tauri::command]
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
 pub fn profiles_list(services: Shared<'_>) -> Value {
     services.panes.profiles.view()
 }

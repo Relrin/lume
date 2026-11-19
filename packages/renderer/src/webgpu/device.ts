@@ -211,11 +211,14 @@ export class GpuShared {
  * Get a device, or `undefined` where WebGPU is missing, is turned off, or would be
  * emulated in software.
  */
-export async function acquireGpu(): Promise<GpuShared | undefined> {
+/** Whether the page has WebGPU to ask for a device at all. */
+export function gpuOffered(): boolean {
   // The type says `navigator.gpu` always exists. It does not.
-  if (typeof navigator === "undefined" || !("gpu" in navigator) || !navigator.gpu) {
-    return undefined;
-  }
+  return typeof navigator !== "undefined" && "gpu" in navigator && !!navigator.gpu;
+}
+
+export async function acquireGpu(): Promise<GpuShared | undefined> {
+  if (!gpuOffered()) return undefined;
   try {
     const adapter = await navigator.gpu.requestAdapter({
       powerPreference: WEBGPU_POWER_PREFERENCE,

@@ -23,6 +23,8 @@ const COMMANDS: &[&str] = &[
     "open_link",
     "font_families",
     "page_reply",
+    "page_marks",
+    "page_shown",
     "layout_view",
     "layout_apply",
     "sessions_start",

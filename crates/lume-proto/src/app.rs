@@ -28,7 +28,7 @@ use crate::frame::{Kind, encode_control_json};
 use crate::types::{BackendId, ExitStatus, Launcher, SessionId, SessionInfo, TermSize};
 
 /// The version of the control endpoint's messages this crate speaks.
-pub const APP_PROTO_VERSION: u32 = 8;
+pub const APP_PROTO_VERSION: u32 = 9;
 
 /// The name the control endpoint is served under, and looked for, when none is given.
 ///
@@ -407,8 +407,55 @@ impl AppError {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StartMarks {
+    /// The user's configuration was read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_ms: Option<u64>,
+    /// The host of this machine's sessions was ready.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_ms: Option<u64>,
+    /// The workspace to show was read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panes_ms: Option<u64>,
+    /// The application was built and began to set itself up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_ms: Option<u64>,
     /// The window was opened.
     pub window_ms: Option<u64>,
+    /// The first shell was started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawned_ms: Option<u64>,
+    /// The first page's code began to run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parsed_ms: Option<u64>,
+    /// The first page's terminal emulation was ready.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vt_ms: Option<u64>,
+    /// The first page's graphics card answered: its terminals may draw with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_ms: Option<u64>,
+    /// The first page's terminal fonts were loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fonts_ms: Option<u64>,
+    /// The first page laid out its panes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_ms: Option<u64>,
+    /// The first page drew a terminal's first frame, with or without output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_ms: Option<u64>,
+    /// The first output of a session reached the first page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_output_ms: Option<u64>,
+    /// The first output of a session was drawn in a page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawn_ms: Option<u64>,
+    /// When a window kept ready in the background was last shown, in milliseconds
+    /// since the Unix epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown_unix_ms: Option<u64>,
+    /// When that window's page drew its first frame after being shown, in milliseconds
+    /// since the Unix epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown_drawn_unix_ms: Option<u64>,
     /// The page finished loading.
     pub page_ms: Option<u64>,
     /// The page opened its carrier.
@@ -494,7 +541,7 @@ pub enum AppReplyBody {
         window: bool,
         /// The pane that has the keyboard.
         focused: Option<Focused>,
-        marks: StartMarks,
+        marks: Box<StartMarks>,
     },
     Spawned {
         session: SessionId,

@@ -518,6 +518,8 @@ export type Notice =
    * the window itself if the answer is yes.
    */
   | { readonly type: "close_requested" }
+  /** The window was kept ready in the background and has been shown again. */
+  | { readonly type: "window_shown" }
   /**
    * A command that would end programs was run from this page. The page asks, and runs
    * `command` with `args` as given if the answer is yes.

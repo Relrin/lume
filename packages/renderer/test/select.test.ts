@@ -478,3 +478,78 @@ describe("the frame loop", () => {
     expect(pending.size).toBe(0);
   });
 });
+
+describe("moving to an earlier tier", () => {
+  /** Factories whose WebGPU tier is unavailable until `grant` is called. */
+  function later() {
+    const all = tiers();
+    let granted = false;
+    const gpu = all.factories[0]!;
+    const factories: TierFactory<FakeCanvas>[] = [
+      {
+        tier: "webgpu",
+        create(canvas) {
+          if (!granted) throw new TierUnavailableError("webgpu", "not yet");
+          return gpu.create(canvas);
+        },
+      },
+      ...all.factories.slice(1),
+    ];
+    return { ...all, factories, grant: () => (granted = true) };
+  }
+
+  it("asks for a frame and moves once the earlier tier has drawn it", () => {
+    const surface = new FakeSurface();
+    const all = later();
+    const events: string[] = [];
+    let invalidated = 0;
+    const renderer = new ManagedRenderer(surface, all.factories, new FakeFonts(), TEST_THEME, {
+      onTierChange: (tier) => events.push(tier ?? "none"),
+      onInvalidate: () => invalidated++,
+    });
+    renderer.resize({ width: 320, height: 160 }, 1);
+    const f = frame();
+    renderer.draw(f);
+    expect(renderer.tier).toBe("webgl2");
+
+    all.grant();
+    renderer.upgrade();
+    expect(invalidated).toBe(1);
+    expect(renderer.tier).toBe("webgl2");
+
+    renderer.draw(f);
+    expect(renderer.tier).toBe("webgpu");
+    expect(all.made.webgpu[0]!.presents.length).toBe(1);
+    expect(surface.shown).toBe(all.canvases.webgpu[0]);
+    expect(all.made.webgl2[0]!.disposed).toBe(true);
+    expect(events).toEqual(["webgpu"]);
+  });
+
+  it("stays where it is when no earlier tier works yet", () => {
+    const surface = new FakeSurface();
+    const all = later();
+    const renderer = new ManagedRenderer(surface, all.factories, new FakeFonts(), TEST_THEME);
+    renderer.resize({ width: 320, height: 160 }, 1);
+    renderer.upgrade();
+    renderer.draw(frame());
+    expect(renderer.tier).toBe("webgl2");
+    expect(surface.shown).toBe(all.canvases.webgl2[0]);
+    expect(all.made.webgl2[0]!.disposed).toBe(false);
+  });
+
+  it("does nothing on the first tier", () => {
+    const { factories } = tiers();
+    let invalidated = 0;
+    const renderer = new ManagedRenderer(
+      new FakeSurface(),
+      factories,
+      new FakeFonts(),
+      TEST_THEME,
+      {
+        onInvalidate: () => invalidated++,
+      },
+    );
+    renderer.upgrade();
+    expect(invalidated).toBe(0);
+  });
+});

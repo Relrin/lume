@@ -67,6 +67,8 @@ type Written = HashMap<(String, Kind, Option<String>), Instant>;
 pub struct Broker {
     file: Option<PathBuf>,
     written: Mutex<Written>,
+    /// Whether lines go to the log's writing thread rather than being written at once.
+    soon: bool,
 }
 
 impl Broker {
@@ -75,6 +77,16 @@ impl Broker {
         Self {
             file,
             written: Mutex::new(HashMap::new()),
+            soon: false,
+        }
+    }
+
+    /// A broker whose audit log is written by the thread that writes logs, so that a
+    /// call is not kept waiting on the disk. [`crate::appender::flush`] waits for it.
+    pub fn writing_soon(file: Option<PathBuf>) -> Self {
+        Self {
+            soon: true,
+            ..Self::new(file)
         }
     }
 
@@ -126,7 +138,11 @@ impl Broker {
             "scope": scope.unwrap_or(""),
             "outcome": if allowed { "allowed" } else { "denied" },
         });
-        append(file, &line.to_string(), AUDIT_FILE_MAX);
+        if self.soon {
+            crate::appender::append_soon(file, line.to_string(), AUDIT_FILE_MAX);
+        } else {
+            append(file, &line.to_string(), AUDIT_FILE_MAX);
+        }
     }
 }
 

@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 
 use lume_config::Dirs;
 use lume_plugin::Store;
-use lume_plugin::broker::{Broker, allows, append, holds};
+use lume_plugin::broker::{Broker, allows, holds};
 use lume_plugin::contributions::{self, Commands, Contributions, Install, PanelDef};
 use lume_plugin::id::{check_name, full_id};
 use lume_plugin::manifest::{Activation, Manifest};
@@ -224,6 +224,9 @@ struct Inner {
     metrics: Metrics,
 }
 
+/// A plugin's stored values once read, changed one call at a time.
+type StoredValues = tokio::sync::Mutex<Option<Map<String, Value>>>;
+
 /// What the plugins add to the windows, and how many times that has changed.
 #[derive(Default)]
 struct Shown {
@@ -241,6 +244,8 @@ struct Pending {
     contexts: BTreeSet<(String, String)>,
     /// Whether something is on its way to tell them.
     telling: bool,
+    /// When pages were last told, which a change that follows soon after waits on.
+    told_at: Option<Instant>,
 }
 
 /// The machine's readings plugins asked for.
@@ -297,6 +302,13 @@ pub struct Plugins {
     /// What this run has found of the packages it hashed, so one is hashed again only
     /// when its files were touched.
     seen: Arc<Seen>,
+    /// Each running plugin's stored values as last read or written, by install: read
+    /// from the file once, and changed one call at a time.
+    kv: Mutex<HashMap<String, Arc<StoredValues>>>,
+    /// Held while what is installed is read again, so that reloads asked for together
+    /// (the lock file changed, a package was found changed, a plugin was turned off)
+    /// follow one another rather than overtake.
+    reloading: tokio::sync::Mutex<()>,
     /// What was read of the packages for what they add to the windows.
     read: Arc<Mutex<contributions::Read>>,
     /// The audit entries the settings window was last shown.
@@ -318,7 +330,7 @@ impl Plugins {
         config: Arc<ConfigService>,
     ) -> Arc<Self> {
         let store = Store::of(dirs);
-        let broker = Broker::new(Some(store.audit_file()));
+        let broker = Broker::writing_soon(Some(store.audit_file()));
         let (queue, received) = mpsc::unbounded_channel();
         let (samples, sampled) = mpsc::unbounded_channel();
         Arc::new(Self {
@@ -340,6 +352,8 @@ impl Plugins {
             told_workspace: Mutex::new(None),
             waiting: manage::Waiting::default(),
             seen: Arc::new(Seen::default()),
+            kv: Mutex::new(HashMap::new()),
+            reloading: tokio::sync::Mutex::new(()),
             read: Arc::new(Mutex::new(contributions::Read::default())),
             audited: Mutex::new(manage::Audited::default()),
             read_again: tokio::sync::Notify::new(),
@@ -414,6 +428,7 @@ impl Plugins {
     /// Reads what is installed again and follows it: plugins that went or changed stop,
     /// new ones add their commands, those that start at once start.
     pub async fn reload(self: &Arc<Self>) {
+        let one_at_a_time = self.reloading.lock().await;
         let store = self.store.clone();
         let marks_state = Arc::clone(&self.state);
         let seen = Arc::clone(&self.seen);
@@ -443,11 +458,20 @@ impl Plugins {
         self.rebuild().await;
         self.state.broadcast(&json!({ "type": "commands_changed" }));
         self.state.broadcast(&json!({ "type": "plugins_changed" }));
+        // Starting them may ask for another reload, which need not wait for them.
+        drop(one_at_a_time);
+        // They start side by side: one that is slow to start keeps none of the others
+        // waiting. Each starts what it depends on first.
+        let mut started = tokio::task::JoinSet::new();
         for local in starting {
-            if let Err(problem) = self.activate(&local).await {
-                tracing::warn!(plugin = %local, %problem, "a plugin that starts with the application did not start");
-            }
+            let this = Arc::clone(self);
+            started.spawn(async move {
+                if let Err(problem) = this.activate(&local).await {
+                    tracing::warn!(plugin = %local, %problem, "a plugin that starts with the application did not start");
+                }
+            });
         }
+        while started.join_next().await.is_some() {}
     }
 
     /// Works out again what the plugins that can be used add, from their manifests and
@@ -1084,7 +1108,29 @@ impl Plugins {
         }
         let file = self.store.log_file(local);
         for line in write {
-            append(&file, &line, LOG_FILE_MAX);
+            lume_plugin::appender::append_soon(&file, line, LOG_FILE_MAX);
+        }
+    }
+
+    /// Answers a call. A call the code asked no answer for (id 0) is answered only when
+    /// it failed, in the plugin's log: what shows something in the windows is sent so, and
+    /// the code is not given a turn of its own for each.
+    fn reply(
+        &self,
+        local: &str,
+        plugin: &Plugin,
+        id: u64,
+        name: &str,
+        result: Result<Value, ApiError>,
+    ) {
+        if id != 0 {
+            plugin.answer(id, result);
+        } else if let Err(error) = result {
+            self.log(
+                local,
+                Level::Error,
+                &format!("lume.{name} failed: {}", error.message),
+            );
         }
     }
 
@@ -1093,7 +1139,8 @@ impl Plugins {
         let call = match Call::decode(name, args) {
             Ok(call) => call,
             Err(error) => {
-                plugin.answer(id, Err(api_error(ErrorCode::Invalid, error.to_string())));
+                let invalid = Err(api_error(ErrorCode::Invalid, error.to_string()));
+                self.reply(local, &plugin, id, name, invalid);
                 return;
             }
         };
@@ -1119,7 +1166,13 @@ impl Plugins {
                 None => Err(format!("{permission} is not a permission")),
             };
             if let Err(message) = checked {
-                plugin.answer(id, Err(api_error(ErrorCode::Denied, message)));
+                self.reply(
+                    local,
+                    &plugin,
+                    id,
+                    name,
+                    Err(api_error(ErrorCode::Denied, message)),
+                );
                 return;
             }
         }
@@ -1127,16 +1180,17 @@ impl Plugins {
         // calls: it only changes what is held, and the turn's end shows it.
         let call = match self.show(local, call) {
             Ok(result) => {
-                plugin.answer(id, result);
+                self.reply(local, &plugin, id, name, result);
                 return;
             }
             Err(call) => *call,
         };
         let this = Arc::clone(self);
         let local = local.to_owned();
+        let name = name.to_owned();
         self.state.runtime().spawn(async move {
             let result = this.serve(&local, call).await;
-            plugin.answer(id, result);
+            this.reply(&local, &plugin, id, &name, result);
         });
     }
 
@@ -1492,20 +1546,34 @@ impl Plugins {
             }
             inner.pending.telling = true;
         }
+        // The first change after a quiet while is told at once; those that follow it
+        // closely wait, and go together.
+        let first_wait = self
+            .inner()
+            .pending
+            .told_at
+            .map_or(Duration::ZERO, |at| SHOW_EVERY.saturating_sub(at.elapsed()));
         let this = Arc::clone(self);
         self.state.runtime().spawn(async move {
+            let mut wait = first_wait;
             loop {
-                tokio::time::sleep(SHOW_EVERY).await;
+                if !wait.is_zero() {
+                    tokio::time::sleep(wait).await;
+                }
+                wait = SHOW_EVERY;
                 let (frames, visible) = {
                     let mut inner = this.inner();
+                    let told_at = inner.pending.told_at;
                     let pending = std::mem::take(&mut inner.pending);
                     if pending.status.is_empty()
                         && pending.panels.is_empty()
                         && pending.contexts.is_empty()
                     {
+                        inner.pending.told_at = told_at;
                         return;
                     }
                     inner.pending.telling = true;
+                    inner.pending.told_at = Some(Instant::now());
                     let mut frames: BTreeMap<String, Told> = BTreeMap::new();
                     for (local, item, pane) in pending.status {
                         let value = inner
@@ -1683,44 +1751,60 @@ impl Plugins {
             .map_err(|error| api_error(ErrorCode::Failed, error.message))
     }
 
-    /// Reads and changes a plugin's stored values, in one step.
+    /// Reads and changes a plugin's stored values, in one step. The calls of one plugin
+    /// are carried out one at a time, in the order they came, so that none is lost to
+    /// another made beside it. The file is read once while the plugin runs, and written
+    /// when a value changed.
     async fn kv(
         &self,
         local: &str,
         change: impl FnOnce(&mut Map<String, Value>) -> Result<Value, ApiError> + Send + 'static,
     ) -> Result<Value, ApiError> {
+        let failed = || api_error(ErrorCode::Failed, "the stored values could not be read");
+        let held = Arc::clone(
+            self.kv
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .entry(local.to_owned())
+                .or_default(),
+        );
+        let mut values = held.lock().await;
         let file = self.store.data_dir(local).join(KV_FILE);
-        tokio::task::spawn_blocking(move || {
-            let mut map: Map<String, Value> = match std::fs::read_to_string(&file) {
-                Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
-                Err(_) => Map::new(),
-            };
-            let before = Value::Object(map.clone());
-            let answer = change(&mut map)?;
-            let after = Value::Object(map);
-            if after != before {
-                let text = after.to_string();
-                if text.len() > KV_MAX_BYTES {
-                    return Err(api_error(
-                        ErrorCode::Failed,
-                        format!(
-                            "what a plugin stores may be {} KiB at most",
-                            KV_MAX_BYTES / 1024
-                        ),
-                    ));
-                }
-                lume_config::write::write_atomic(&file, &text)
-                    .map_err(|error| api_error(ErrorCode::Failed, error.to_string()))?;
-            }
-            Ok(answer)
-        })
-        .await
-        .unwrap_or_else(|_| {
-            Err(api_error(
+        if values.is_none() {
+            let reading = file.clone();
+            let read =
+                tokio::task::spawn_blocking(move || match std::fs::read_to_string(&reading) {
+                    Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
+                    Err(_) => Map::new(),
+                })
+                .await
+                .map_err(|_| failed())?;
+            *values = Some(read);
+        }
+        let Some(map) = values.as_mut() else {
+            return Err(failed());
+        };
+        let mut changed = map.clone();
+        let answer = change(&mut changed)?;
+        if changed == *map {
+            return Ok(answer);
+        }
+        let text = Value::Object(changed.clone()).to_string();
+        if text.len() > KV_MAX_BYTES {
+            return Err(api_error(
                 ErrorCode::Failed,
-                "the stored values could not be read",
-            ))
-        })
+                format!(
+                    "what a plugin stores may be {} KiB at most",
+                    KV_MAX_BYTES / 1024
+                ),
+            ));
+        }
+        tokio::task::spawn_blocking(move || lume_config::write::write_atomic(&file, &text))
+            .await
+            .map_err(|_| failed())?
+            .map_err(|error| api_error(ErrorCode::Failed, error.to_string()))?;
+        *map = changed;
+        Ok(answer)
     }
 
     /// A plugin's settings: what the user set, where the plugin takes it, over the
@@ -1900,6 +1984,22 @@ impl Plugins {
     /// Passes a session's report to the plugins that hear such reports, starting those
     /// whose activation events name it.
     async fn session_news(self: &Arc<Self>, news: News) {
+        // Sessions report often; with nobody to hear them nothing is made of it.
+        let anyone = self.inner().loaded.values().any(|loaded| {
+            loaded.is_ready()
+                && match &loaded.running {
+                    Some(running) => running.started && loaded.topics.contains(&Topic::Session),
+                    None => loaded.manifest().is_some_and(|manifest| {
+                        manifest
+                            .events
+                            .iter()
+                            .any(|event| matches!(event, Activation::SessionEvent(_)))
+                    }),
+                }
+        });
+        if !anyone {
+            return;
+        }
         let (kind, details) = match &news.what {
             SessionNews::Event(event) => {
                 let mut value = serde_json::to_value(event).unwrap_or(Value::Null);
@@ -2400,6 +2500,8 @@ impl Plugins {
         while Instant::now() < deadline && running.iter().any(|plugin| !plugin.stats().finished) {
             std::thread::sleep(Duration::from_millis(10));
         }
+        // What they and the broker wrote last is on disk before the process ends.
+        lume_plugin::appender::flush();
     }
 }
 
@@ -2579,6 +2681,57 @@ fn same_file(one: &Path, other: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stored_values_changed_together_are_all_kept() {
+        use crate::marks::Marks;
+        use crate::testing::TempDir;
+
+        let dir = TempDir::new("kv-together");
+        std::fs::create_dir_all(&dir.dirs().config).unwrap();
+        let state = AppState::new(
+            tokio::runtime::Handle::current(),
+            lume_session::Router::new(),
+            Vec::new(),
+            Duration::from_secs(600),
+            Arc::new(Marks::start()),
+        );
+        let config = ConfigService::load(dir.dirs(), None);
+        let plugins = Plugins::new(
+            config.dirs(),
+            Arc::new(crate::builtins::registry()),
+            state,
+            Arc::clone(&config),
+        );
+        // Two changes made in one turn are carried out side by side; neither is lost.
+        let set = |key: &'static str| {
+            let plugins = Arc::clone(&plugins);
+            tokio::spawn(async move {
+                plugins
+                    .kv("acme.kept", move |map| {
+                        map.insert(key.to_owned(), json!(true));
+                        Ok(Value::Null)
+                    })
+                    .await
+            })
+        };
+        let (one, other) = (set("one"), set("other"));
+        one.await.unwrap().unwrap();
+        other.await.unwrap().unwrap();
+        let keys = plugins
+            .kv("acme.kept", |map| {
+                Ok(json!(map.keys().cloned().collect::<Vec<_>>()))
+            })
+            .await
+            .unwrap();
+        assert_eq!(keys, json!(["one", "other"]));
+
+        // What is written is read back by the next run of the plugin.
+        plugins.release("acme.kept");
+        let file = plugins.store.data_dir("acme.kept").join(KV_FILE);
+        let written: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+        assert_eq!(written, json!({ "one": true, "other": true }));
+    }
 
     fn rows(value: Value) -> Vec<PanelRow> {
         serde_json::from_value(value).unwrap()

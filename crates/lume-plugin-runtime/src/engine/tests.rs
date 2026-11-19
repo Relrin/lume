@@ -486,3 +486,26 @@ fn only_the_newest_of_what_waits_on_a_topic_is_heard() {
         .collect();
     assert_eq!(heard, ["heard 3", "heard 4"]);
 }
+
+#[test]
+fn a_timer_that_is_due_fires_while_events_keep_coming() {
+    let (plugin, recorder) = start(spec(
+        r#"
+        lume.sessions.onEvent(() => { const until = Date.now() + 2; while (Date.now() < until) {} });
+        lume.timers.setTimeout(() => lume.log.info("fired"), 20);
+        "#,
+    ));
+    started(&recorder);
+    let report = json!({ "session": "s1", "kind": "bell", "details": {} });
+    // Each event keeps the code busy a little: a stream of them, sent faster than the
+    // code takes them, would always have one waiting.
+    let flooding = std::time::Instant::now();
+    while flooding.elapsed() < Duration::from_millis(400) {
+        plugin.event("session", report.clone());
+        std::thread::sleep(Duration::from_millis(1));
+        if recorder.logs().iter().any(|line| line == "fired") {
+            return;
+        }
+    }
+    panic!("the timer did not fire while events kept coming");
+}

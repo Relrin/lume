@@ -10,7 +10,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
@@ -20,7 +20,7 @@ use rquickjs::{
     CatchResultExt, CaughtError, Coerced, Context, Ctx, FromJs, Function, Object, Persistent,
     Runtime,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::sourcemap::SourceMap;
 use crate::{
@@ -42,6 +42,9 @@ struct Capped {
     used: usize,
     limit: usize,
     refused: Arc<AtomicBool>,
+    /// `used` as the engine's thread reads it after a turn: counting here is far cheaper
+    /// than asking the engine, which walks its whole heap to answer.
+    total: Arc<AtomicUsize>,
 }
 
 impl Capped {
@@ -68,6 +71,7 @@ unsafe impl Allocator for Capped {
         if !pointer.is_null() {
             // SAFETY: just allocated by the same allocator.
             self.used += unsafe { RustAllocator::usable_size(pointer) };
+            self.total.store(self.used, Ordering::Relaxed);
         }
         pointer
     }
@@ -84,6 +88,7 @@ unsafe impl Allocator for Capped {
         if !pointer.is_null() {
             // SAFETY: just allocated by the same allocator.
             self.used += unsafe { RustAllocator::usable_size(pointer) };
+            self.total.store(self.used, Ordering::Relaxed);
         }
         pointer
     }
@@ -97,6 +102,7 @@ unsafe impl Allocator for Capped {
             self.used = self
                 .used
                 .saturating_sub(RustAllocator::usable_size(pointer));
+            self.total.store(self.used, Ordering::Relaxed);
             self.inner.dealloc(pointer);
         }
     }
@@ -116,6 +122,7 @@ unsafe impl Allocator for Capped {
             // SAFETY: just allocated by the same allocator.
             let new = unsafe { RustAllocator::usable_size(moved) };
             self.used = self.used.saturating_sub(old) + new;
+            self.total.store(self.used, Ordering::Relaxed);
         }
         moved
     }
@@ -220,6 +227,8 @@ struct Engine {
     fired: Arc<AtomicBool>,
     /// Whether the allocator refused anything since the last look.
     refused: Arc<AtomicBool>,
+    /// What the engine holds of the allocator, as the allocator counts it.
+    allocated: Arc<AtomicUsize>,
     shared: Arc<Shared>,
     limits: Limits,
     file: String,
@@ -287,11 +296,13 @@ impl Engine {
         let failed =
             |error: rquickjs::Error| format!("the plugin's engine could not be made: {error}");
         let refused = Arc::new(AtomicBool::new(false));
+        let allocated = Arc::new(AtomicUsize::new(0));
         let runtime = Runtime::new_with_alloc(Capped {
             inner: RustAllocator,
             used: 0,
             limit: spec.limits.memory,
             refused: Arc::clone(&refused),
+            total: Arc::clone(&allocated),
         })
         .map_err(failed)?;
         runtime.set_max_stack_size(spec.limits.stack);
@@ -376,6 +387,7 @@ impl Engine {
             deadline,
             fired,
             refused,
+            allocated,
             shared: Arc::clone(shared),
             limits: spec.limits,
             file: spec.file.clone(),
@@ -396,12 +408,15 @@ impl Engine {
             .store(now.saturating_add(budget), Ordering::Relaxed);
         if self.shared.busy_since.load(Ordering::Relaxed) == 0 {
             self.shared.busy_since.store(now.max(1), Ordering::Release);
+            crate::turn_began();
         }
     }
 
     fn end_turn(&self) {
         self.deadline.store(NEVER, Ordering::Relaxed);
-        self.shared.busy_since.store(0, Ordering::Release);
+        if self.shared.busy_since.swap(0, Ordering::AcqRel) != 0 {
+            crate::turn_ended();
+        }
         self.shared
             .last_activity
             .store(self.shared.now_ns(), Ordering::Relaxed);
@@ -508,8 +523,7 @@ impl Engine {
                 format!("it ran out of its {} MiB", self.limits.memory / 1024 / 1024),
             ));
         }
-        let usage = self.runtime.memory_usage();
-        let used = usize::try_from(usage.memory_used_size).unwrap_or(0);
+        let used = self.allocated.load(Ordering::Relaxed);
         self.shared
             .memory_used
             .store(used as u64, Ordering::Relaxed);
@@ -604,9 +618,12 @@ impl Engine {
                         .host
                         .send(Outbound::CommandDone { invocation, result });
                 }
-                _ if id == 0 => {}
+                // Only what changes what the plugin shows is sent without an answer.
+                told if id == 0 && !lume_plugin_api::TOLD.contains(&told) => {}
                 _ => {
-                    self.waiting.borrow_mut().insert(id);
+                    if id != 0 {
+                        self.waiting.borrow_mut().insert(id);
+                    }
                     self.shared.host.send(Outbound::Call { id, name, args });
                     called = true;
                 }
@@ -658,6 +675,14 @@ impl Engine {
     /// Gives the code its work until it is told to stop or goes over a limit.
     fn serve(&self, inbound: &Receiver<Inbound>) -> Result<(), Stop> {
         loop {
+            // Timers that are due go first, so that a stream of messages does not keep
+            // them waiting.
+            let due = self.timers.borrow_mut().due(Instant::now());
+            for timer in due {
+                self.turn(|_, dispatch| {
+                    dispatch.call::<_, ()>(("timer", timer as f64, String::new()))
+                })?;
+            }
             let next = self.timers.borrow_mut().next_due();
             let message = match next {
                 Some(at) => inbound.recv_timeout(at.saturating_duration_since(Instant::now())),
@@ -680,7 +705,7 @@ impl Engine {
                     name,
                     args,
                 }) => {
-                    let json = json!({ "name": name, "args": args }).to_string();
+                    let json = named(&name, &args);
                     self.turn(|_, dispatch| {
                         dispatch.call::<_, ()>(("command", invocation as f64, json))
                     })?;
@@ -690,14 +715,14 @@ impl Engine {
                     name,
                     args,
                 }) => {
-                    let json = json!({ "name": name, "args": args }).to_string();
+                    let json = named(&name, &args);
                     self.turn(|_, dispatch| {
                         dispatch.call::<_, ()>(("service", invocation as f64, json))
                     })?;
                 }
                 Ok(Inbound::Event { topic, payload }) => {
                     self.shared.events_queued.fetch_sub(1, Ordering::AcqRel);
-                    let json = json!({ "topic": topic, "payload": payload }).to_string();
+                    let json = delivery(&topic, &payload);
                     self.turn(|_, dispatch| dispatch.call::<_, ()>(("event", 0.0, json)))?;
                 }
                 Ok(Inbound::Latest { topic }) => {
@@ -710,7 +735,7 @@ impl Engine {
                     let Some(payload) = payload else {
                         continue;
                     };
-                    let json = json!({ "topic": topic, "payload": payload }).to_string();
+                    let json = delivery(&topic, &payload);
                     self.turn(|_, dispatch| dispatch.call::<_, ()>(("event", 0.0, json)))?;
                 }
                 Ok(Inbound::Stop) | Err(RecvTimeoutError::Disconnected) => {
@@ -720,14 +745,8 @@ impl Engine {
                         .turn(|_, dispatch| dispatch.call::<_, ()>(("leave", 0.0, String::new())));
                     return Ok(());
                 }
-                Err(RecvTimeoutError::Timeout) => {
-                    let due = self.timers.borrow_mut().due(Instant::now());
-                    for timer in due {
-                        self.turn(|_, dispatch| {
-                            dispatch.call::<_, ()>(("timer", timer as f64, String::new()))
-                        })?;
-                    }
-                }
+                // The timers that fell due are fired at the top of the loop.
+                Err(RecvTimeoutError::Timeout) => {}
             }
         }
     }
@@ -756,5 +775,26 @@ impl Engine {
     }
 }
 
+/// A command or a service call as the code is handed it: `{"name", "args"}`, written
+/// from what is held without copying it first.
+fn named<A: serde::Serialize>(name: &str, args: &A) -> String {
+    #[derive(serde::Serialize)]
+    struct Named<'a, A> {
+        name: &'a str,
+        args: &'a A,
+    }
+    serde_json::to_string(&Named { name, args }).unwrap_or_default()
+}
+
+/// An event as the code is handed it: `{"topic", "payload"}`, written from what is held
+/// without copying it first.
+fn delivery<T: serde::Serialize + ?Sized, P: serde::Serialize>(topic: &T, payload: &P) -> String {
+    #[derive(serde::Serialize)]
+    struct Delivery<'a, T: ?Sized, P> {
+        topic: &'a T,
+        payload: &'a P,
+    }
+    serde_json::to_string(&Delivery { topic, payload }).unwrap_or_default()
+}
 #[cfg(test)]
 mod tests;

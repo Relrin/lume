@@ -6,6 +6,20 @@ use crate::{ApiError, ErrorCode};
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+/// What each byte stands for in base64, or `NOT_BASE64`.
+const VALUES: [u8; 256] = {
+    let mut values = [NOT_BASE64; 256];
+    let mut index = 0;
+    while index < ALPHABET.len() {
+        values[ALPHABET[index] as usize] = index as u8;
+        index += 1;
+    }
+    values
+};
+
+/// A byte that is not a letter of base64.
+const NOT_BASE64: u8 = 0xff;
+
 /// Bytes written as base64, with padding.
 pub fn to_base64(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -35,8 +49,11 @@ pub fn from_base64(text: &str) -> Option<Vec<u8>> {
     let mut buffer = 0u32;
     let mut bits = 0u32;
     for byte in text.bytes() {
-        let value = ALPHABET.iter().position(|letter| *letter == byte)?;
-        buffer = (buffer << 6) | u32::try_from(value).ok()?;
+        let value = VALUES[usize::from(byte)];
+        if value == NOT_BASE64 {
+            return None;
+        }
+        buffer = (buffer << 6) | u32::from(value);
         bits += 6;
         if bits >= 8 {
             bits -= 8;

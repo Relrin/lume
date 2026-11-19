@@ -31,7 +31,7 @@ pub mod sourcemap;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Sender, channel};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 pub use lume_plugin_api::{ApiError, ErrorCode};
@@ -431,8 +431,34 @@ impl Drop for Plugin {
     }
 }
 
-/// How often the watchdog looks.
+/// How often the watchdog looks while some plugin's code runs.
 const WATCH_EVERY: Duration = Duration::from_millis(20);
+
+/// How many plugins' code is in a turn now. While none is, the watchdog sleeps until one
+/// begins one, rather than looking every [`WATCH_EVERY`] for nothing.
+static IN_TURN: AtomicUsize = AtomicUsize::new(0);
+
+/// What wakes the watchdog when a turn begins.
+fn turns() -> &'static (Mutex<()>, Condvar) {
+    static TURNS: OnceLock<(Mutex<()>, Condvar)> = OnceLock::new();
+    TURNS.get_or_init(|| (Mutex::new(()), Condvar::new()))
+}
+
+/// A plugin's code began a turn.
+pub(crate) fn turn_began() {
+    if IN_TURN.fetch_add(1, Ordering::AcqRel) == 0 {
+        let (lock, woken) = turns();
+        let _held = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        woken.notify_one();
+    }
+}
+
+/// A plugin's code ended a turn it began.
+pub(crate) fn turn_ended() {
+    let _ = IN_TURN.try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+        count.checked_sub(1)
+    });
+}
 
 fn watched() -> &'static Mutex<Vec<Weak<Shared>>> {
     static WATCHED: OnceLock<Mutex<Vec<Weak<Shared>>>> = OnceLock::new();
@@ -441,6 +467,13 @@ fn watched() -> &'static Mutex<Vec<Weak<Shared>>> {
             .name("plugin watchdog".to_owned())
             .spawn(|| {
                 loop {
+                    {
+                        let (lock, woken) = turns();
+                        let held = lock.lock().unwrap_or_else(PoisonError::into_inner);
+                        let _held = woken
+                            .wait_while(held, |()| IN_TURN.load(Ordering::Acquire) == 0)
+                            .unwrap_or_else(PoisonError::into_inner);
+                    }
                     std::thread::sleep(WATCH_EVERY);
                     let list = watched()
                         .lock()

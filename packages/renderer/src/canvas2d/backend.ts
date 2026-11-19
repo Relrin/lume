@@ -80,7 +80,11 @@ export class Canvas2dBackend implements TierBackend {
 
   constructor(canvas: HTMLCanvasElement) {
     this.#canvas = canvas;
-    const context = canvas.getContext("2d", { alpha: false });
+    // The picture is put together in ordinary memory and only put on the canvas, so the
+    // canvas is kept there too. A canvas the graphics card holds would wait, while the
+    // page waits with it, for the browser's GPU process, which is still starting when the
+    // first frames of a window are drawn with this tier.
+    const context = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
     if (!context) throw new TierUnavailableError("canvas2d", "no 2D context");
     this.#context = context;
     canvas.addEventListener("contextlost", this.#onContextLost);

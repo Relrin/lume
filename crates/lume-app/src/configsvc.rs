@@ -217,6 +217,16 @@ impl ConfigService {
         problems
     }
 
+    /// The colour behind the panes under the theme in use: what a window is filled with
+    /// before its page has drawn anything.
+    pub fn surface_color(&self) -> Option<lume_config::Color> {
+        let resolved = self.store.current();
+        let scheme = *lock(&self.scheme);
+        let themes = self.all_themes(&resolved);
+        let (tokens, _) = resolve_tokens(&resolved.config, &resolved.sources, &themes, scheme);
+        tokens.color("color.surface")
+    }
+
     /// A view without its revision.
     fn body(&self) -> Value {
         let resolved = self.store.current();

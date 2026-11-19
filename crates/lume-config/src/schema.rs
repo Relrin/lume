@@ -104,7 +104,11 @@ impl Default for SshConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct AppConfig {
-    /// Keep the application running when its last window closes.
+    /// Keep the application running when its last window closes: the window is hidden
+    /// with a fresh shell started in each of its panes, and opening Lume shows it again
+    /// at once. Quitting ends it.
+    #[schemars(extend("x-lume-settings" = Shown::switch("general", "Startup", 20, "Keep Lume ready in the background")
+        .help("Closing the last window hides it with fresh shells, so Lume opens again at once")))]
     pub keep_running: bool,
     /// The workspace opened at start: a workspace's name, or `"last"` for the one
     /// that was open when the application closed.

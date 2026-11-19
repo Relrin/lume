@@ -1,9 +1,12 @@
 /**
  * The renderer's entry point for a window.
  *
- * A window has one `RenderHost`. Creating it does the one slow, asynchronous step, which
- * is asking for a WebGPU device. After that, renderers for panes are made at once, and a
- * pane that loses its tier can start the next one within the same frame.
+ * A window has one `RenderHost`. The one slow step is the browser's start of its GPU
+ * process, which asking for a WebGPU device waits for without blocking, and making a
+ * WebGL2 context waits for while blocking the page. `create` waits for it; `start` does
+ * not: its renderers begin with Canvas 2D and move to the GPU tiers once the GPU has
+ * answered. Renderers for panes are made at once, and
+ * a pane that loses its tier can start the next one within the same frame.
  *
  * The host also owns the window's frame loop, and keeps count of what its renderers
  * hold: a pane that would need one WebGL2 context more than a page may keep alive draws
@@ -23,7 +26,7 @@ import { TierUnavailableError, type RendererOptions, type Surface } from "./sele
 import type { CellMetrics, CellRenderer, Size, TerminalTheme, Tier } from "./types.ts";
 import { WebGl2Backend } from "./webgl2/backend.ts";
 import { WebGpuBackend } from "./webgpu/backend.ts";
-import { acquireGpu, type GpuShared } from "./webgpu/device.ts";
+import { acquireGpu, gpuOffered, type GpuShared } from "./webgpu/device.ts";
 
 /** Choices made when a host is created. */
 export interface RenderHostOptions {
@@ -87,6 +90,13 @@ export class RenderHost {
   readonly #order: readonly Tier[];
   readonly #pool: RenderPool<HTMLCanvasElement>;
   #gpu: GpuShared | undefined;
+  /**
+   * Whether the GPU tiers may be tried. A host made by `start` waits for the GPU to
+   * answer first, since until then a WebGL2 context would hold up the page.
+   */
+  #gpuAnswered = true;
+  /** Cursor effects made before the GPU answered, to be told when it has. */
+  readonly #effects = new Set<CursorEffects<HTMLCanvasElement>>();
   #disposed = false;
 
   private constructor(order: readonly Tier[], gpu: GpuShared | undefined) {
@@ -99,7 +109,10 @@ export class RenderHost {
           if (!this.#gpu) throw new TierUnavailableError("webgpu", "no device");
           return new WebGpuBackend(this.#gpu, canvas);
         },
-        webgl2: (canvas) => new WebGl2Backend(canvas),
+        webgl2: (canvas) => {
+          if (!this.#gpuAnswered) throw new TierUnavailableError("webgl2", "the GPU is starting");
+          return new WebGl2Backend(canvas);
+        },
         canvas2d: (canvas) => new Canvas2dBackend(canvas),
       },
       canvasFonts,
@@ -109,11 +122,45 @@ export class RenderHost {
     gpu?.onLost(() => (this.#gpu = undefined));
   }
 
-  /** Prepare a window for rendering. */
+  /** Prepare a window for rendering, once the WebGPU device has been asked for. */
   static async create(options: RenderHostOptions = {}): Promise<RenderHost> {
     const order = options.tiers ?? TIER_ORDER;
     const gpu = order.includes("webgpu") ? await acquireGpu() : undefined;
     return new RenderHost(order, gpu);
+  }
+
+  /**
+   * Prepare a window for rendering at once. Renderers made before the GPU has answered
+   * the request for a WebGPU device draw with Canvas 2D, and move to the first GPU tier
+   * that works at their next frame after it has; `gpuSettled` resolves then. Where there
+   * is no WebGPU to ask, the GPU tiers are tried at once, as `create` tries them.
+   */
+  static start(options: RenderHostOptions = {}): RenderHost {
+    const order = options.tiers ?? TIER_ORDER;
+    const host = new RenderHost(order, undefined);
+    if (order.includes("webgpu") && order.includes("canvas2d") && gpuOffered()) {
+      host.#gpuAnswered = false;
+      host.gpuSettled = acquireGpu().then((gpu) => host.#answered(gpu));
+    }
+    return host;
+  }
+
+  /** Resolves once the GPU has answered the request for a device, granted or not. */
+  gpuSettled: Promise<void> = Promise.resolve();
+
+  #answered(gpu: GpuShared | undefined): void {
+    if (this.#disposed) {
+      gpu?.dispose();
+      return;
+    }
+    this.#gpuAnswered = true;
+    if (gpu) {
+      this.#gpu = gpu;
+      gpu.onLost(() => (this.#gpu = undefined));
+    }
+    this.#pool.upgrade();
+    for (const effects of this.#effects) effects.gpuAnswered();
+    this.#effects.clear();
   }
 
   /**
@@ -164,6 +211,7 @@ export class RenderHost {
     if (this.#disposed) throw new Error("this render host has been disposed");
     const webgl2 = this.#order.includes("webgl2")
       ? (canvas: HTMLCanvasElement): FxBackend => {
+          if (!this.#gpuAnswered) throw new FxUnavailableError("the GPU is starting");
           const release = this.#pool.reserve("webgl2");
           if (!release) throw new FxUnavailableError("the window has no WebGL2 context to spare");
           try {
@@ -187,6 +235,7 @@ export class RenderHost {
       (): void => this.loop.remove(effects),
     );
     this.loop.add(effects, { after: true });
+    if (!this.#gpuAnswered) this.#effects.add(effects);
     return effects;
   }
 

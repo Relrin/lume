@@ -39,6 +39,9 @@ Commands:
   bench [--profile <name>]
                Build for release, measure, and hold the numbers to the limits in
                tests/bench/budgets.toml (profile `reference` unless another is named)
+  bench --startup
+               Build for release and time only the application's starts, printing
+               each start's marks and their middle values; nothing is judged
   latency [--label <name>] [--samples <n>] [--wait <seconds>]
                Time keys from the desktop to the screen in whichever terminal has the
                focus after the wait (Windows, and Linux under X11): run `cat` or
@@ -92,6 +95,10 @@ fn main() -> Result<()> {
         ["dist", "--installers"] => dist::run(true),
         ["bench"] => bench("reference"),
         ["bench", "--profile", profile] => bench(profile),
+        ["bench", "--startup"] => {
+            build_release_for_testing()?;
+            bench::startup_only()
+        }
         ["latency", rest @ ..] => latency::run(rest),
         ["schema"] => generate::write(GeneratedKind::Schema, "schema"),
         ["tokens"] => generate::write(GeneratedKind::Tokens, "tokens"),

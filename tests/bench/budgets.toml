@@ -36,9 +36,17 @@
 "flood.framesPerSecond" = { min = 60.0, unit = "frames/s" }
 "flood.inputToFrame.p95" = { max = 50.0, unit = "ms" }
 
-# From the start of the application to the first output of its shell reaching the page.
-# What follows, until the prompt, is the shell's own start and is recorded only.
+# From the start of the application to the first output of its shell reaching the page,
+# and to its being drawn there. Most of it is the webview's own start, which the shell
+# is started beside. What follows, until the prompt, is the shell's own start and is
+# recorded only.
 "startup.outputMs.p50" = { max = 1000.0, unit = "ms" }
+"startup.drawnMs.p50" = { max = 700.0, unit = "ms" }
+# The shell is started before the window's page is there to ask for it.
+"startup.spawnedMs.p50" = { max = 150.0, unit = "ms" }
+# A launch while the application is kept running in the background: from the start of
+# the second process until the window kept ready has drawn on screen again.
+"startup.ready.drawnMs.p50" = { max = 150.0, unit = "ms" }
 # What twenty installed plugins that do not run add to that: pairs of starts, one
 # without them and one with, and the top of the span the middle difference is sure
 # within. Nothing of a plugin is read before the first output.
@@ -119,6 +127,9 @@
 "flood.framesPerSecond" = { min = 10.0, unit = "frames/s" }
 "flood.inputToFrame.p95" = { max = 500.0, unit = "ms" }
 "startup.outputMs.p50" = { max = 10000.0, unit = "ms" }
+"startup.drawnMs.p50" = { max = 10000.0, unit = "ms" }
+"startup.spawnedMs.p50" = { max = 2000.0, unit = "ms" }
+"startup.ready.drawnMs.p50" = { max = 2000.0, unit = "ms" }
 "startup.plugins.differenceMs.high" = { max = 500.0, unit = "ms" }
 "startup.plugins.filesBeforeOutput" = { max = 0.0, unit = "files" }
 "chrome.outputCommits" = { max = 0.0, unit = "renders" }
