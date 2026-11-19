@@ -529,8 +529,52 @@ fn describe_installed(one: &Installed, state: Option<&State>) -> Value {
     value
 }
 
+/// The application's commands, as the command line knows them: by name only. Whether a
+/// plugin may run one of them is the running application's to say, so here every one
+/// is taken to be there and open.
+struct Unchecked;
+
+impl lume_plugin::contributions::Commands for Unchecked {
+    fn builtin(&self, id: &str) -> Option<(String, bool)> {
+        Some((id.to_owned(), true))
+    }
+}
+
+/// What could not be placed or read of what the plugins that can be used add, by
+/// install, as the application would find it.
+fn contribution_warnings(
+    store: &Store,
+    installed: &[Installed],
+    resolution: &lume_plugin::order::Resolution,
+) -> Vec<(String, String)> {
+    let empty = std::collections::BTreeMap::new();
+    let installs: Vec<lume_plugin::contributions::Install<'_>> = resolution
+        .order
+        .iter()
+        .filter(|local| resolution.is_ready(local))
+        .filter_map(|local| installed.iter().find(|one| one.entry.local == *local))
+        .filter_map(|one| {
+            let local = one.entry.local.as_str();
+            Some(lume_plugin::contributions::Install {
+                local,
+                name: one.name(),
+                manifest: one.manifest.as_ref().ok()?,
+                dir: store.package_dir(&one.entry),
+                rank: resolution
+                    .rank(local)
+                    .and_then(|rank| i64::try_from(rank).ok())
+                    .unwrap_or(i64::MAX),
+                bound: resolution.bound.get(local).unwrap_or(&empty),
+            })
+        })
+        .collect();
+    lume_plugin::contributions::build(&installs, &Unchecked).warnings
+}
+
 fn list(store: &Store, json: bool, out: &mut dyn Write) -> Result<Outcome, String> {
-    let (installed, resolution) = store.resolve(true).map_err(|error| error.to_string())?;
+    let (installed, mut resolution) = store.resolve(true).map_err(|error| error.to_string())?;
+    let added = contribution_warnings(store, &installed, &resolution);
+    resolution.warnings.extend(added);
     let by_id = |local: &str| installed.iter().find(|one| one.entry.local == local);
     if json {
         let plugins: Vec<Value> = resolution

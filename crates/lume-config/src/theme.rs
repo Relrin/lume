@@ -655,9 +655,15 @@ fn value_schema(kind: TokenKind, doc: &str) -> Value {
         }),
         TokenKind::Length => json!({ "description": doc, "type": "number", "minimum": 0 }),
         TokenKind::Number => json!({ "description": doc, "type": "number" }),
-        TokenKind::FontFamily | TokenKind::Shadow | TokenKind::Image => {
+        TokenKind::FontFamily | TokenKind::Shadow | TokenKind::Image | TokenKind::Easing => {
             json!({ "description": doc, "type": "string" })
         }
+        TokenKind::Duration => json!({
+            "description": doc,
+            "type": "number",
+            "minimum": 0,
+            "maximum": crate::tokens::DURATION_MAX_MS,
+        }),
         TokenKind::FontList => json!({
             "description": doc,
             "type": "array",

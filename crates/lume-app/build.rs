@@ -43,6 +43,8 @@ const COMMANDS: &[&str] = &[
     "window_control",
     "window_state",
     "workspaces_list",
+    "ui_contributions",
+    "ui_visible",
     "harness_done",
     "harness_save",
     "harness_read",

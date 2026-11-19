@@ -38,6 +38,10 @@ import { PaneReports } from "../events/store.ts";
 import { PaneLooks } from "../panes/looks.ts";
 import { PaneTitles } from "../panes/titles.ts";
 import { PaneViews } from "../panes/views.ts";
+import { setMotionSource } from "../motion/slots.ts";
+import { followPluginStatus } from "../plugins/status.ts";
+import { createPluginsStore, type PluginsStore } from "../plugins/store.ts";
+import { VisibleItems } from "../plugins/visible.ts";
 import { createProfilesStore, findProfile, type ProfilesStore } from "../profiles/store.ts";
 import { SearchController } from "../search/controller.ts";
 import { createStatusStore, type StatusStore } from "../status/registry.ts";
@@ -87,6 +91,10 @@ export interface ShellApp {
   readonly machine: Machine;
   /** The status items the window's bars show. */
   readonly status: StatusStore;
+  /** What the plugins add to the window, and what their code shows in it. */
+  readonly plugins: PluginsStore;
+  /** Which of the plugins' things the window has on screen. */
+  readonly visible: VisibleItems;
   /** What the window is doing on the desktop. */
   readonly windowState: WindowStateStore;
   /** Moves cards about the window by their headers. */
@@ -175,6 +183,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   const connect = createConnectStore();
   const profiles = createProfilesStore();
   const status = createStatusStore();
+  const plugins = createPluginsStore();
   const windowState = createWindowStateStore();
   // The user looks at the pane that has the keyboard, while the window is the one in use.
   const attended = (pane: PaneId): boolean => {
@@ -197,8 +206,19 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   };
   const panelDrag = createPanelDragStore();
 
+  // The window says which of the plugins' things it has on screen; none while it is
+  // out of sight.
+  const visible = new VisibleItems((items) => {
+    made.client?.uiVisible(items).catch(() => undefined);
+  });
+  const onVisibility = () => visible.setShown(document.visibilityState !== "hidden");
+  document.addEventListener("visibilitychange", onVisibility);
+  onVisibility();
+
   // What the core sends before the page has its first copies is kept and followed
   // once it has them; a change the copies already hold is passed over there.
+  // What is made further on, for what is called back before it is.
+  const made: { shell?: ShellApp; views?: PaneViews; client?: CoreClient } = {};
   let early: Notice[] | null = [];
   let onNotice = (notice: Notice): void => void early?.push(notice);
   let ready: () => void = () => undefined;
@@ -233,8 +253,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   commandStore.getState().set(commandList);
   applyConfig(configView);
   const machine = layoutView.machine ?? UNKNOWN_MACHINE;
-  // What is made further on, for what is called back before it is.
-  const made: { shell?: ShellApp; views?: PaneViews } = {};
+  made.client = client;
   // Looking at the machine takes the core a moment; nothing waits for it.
   client.profilesList().then(
     (list) => {
@@ -266,6 +285,12 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     return undefined;
   };
 
+  /** The contexts that hold where a key was pressed, with those the plugins set. */
+  const withPlugins = (contexts: ReadonlySet<string>): ReadonlySet<string> => {
+    const set = plugins.getState().contexts;
+    return set.size === 0 ? contexts : new Set([...contexts, ...set]);
+  };
+
   const platform = currentPlatform();
   // Running a command needs the views, and the views need the shortcuts.
   const shortcuts = new Shortcuts({ platform, layout: keyLayout }, (command, args) =>
@@ -277,7 +302,36 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   // one pane to another; the page gives them their element when it is rendered.
   const lessMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const cursorFx = new CursorFx((container) => host.createCursorEffects(container), lessMotion);
-  cursorFx.configure(cursorFxSettings(configView));
+  cursorFx.configure(cursorFxSettings(configView, plugins.getState().shown));
+  cursorFx.onProblem((id, message) => {
+    const named = plugins.getState().shown?.cursor_effects.find((effect) => effect.id === id);
+    notices.push(
+      "warning",
+      `The cursor effect ${named?.title ?? id} cannot be drawn, so none is: ${sentence(message)}`,
+    );
+  });
+
+  // What the plugins add comes as the core has it; nothing waits for it.
+  let contributionsRevision = -1;
+  let fetchingContributions = false;
+  const fetchContributions = (): void => {
+    if (fetchingContributions) return;
+    fetchingContributions = true;
+    client.uiContributions().then(
+      (shown) => {
+        fetchingContributions = false;
+        if (shown.revision < contributionsRevision) return;
+        contributionsRevision = shown.revision;
+        plugins.getState().set(shown);
+        cursorFx.configure(cursorFxSettings(config.getState().view, shown));
+      },
+      (error: unknown) => {
+        fetchingContributions = false;
+        notices.push("error", `What plugins add could not be read: ${reason(error)}`);
+      },
+    );
+  };
+  fetchContributions();
   const onLessMotion = () => cursorFx.configure();
   lessMotion.addEventListener("change", onLessMotion);
   const sizeCursorFx = () =>
@@ -324,7 +378,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       const contexts = new Set(["terminal"]);
       if (alternateScreen) contexts.add("alt-screen");
       if (layout.getState().floats[pane]) contexts.add("floating");
-      return shortcuts.handle(event, contexts);
+      return shortcuts.handle(event, withPlugins(contexts));
     },
     keyboard: (pane) => search.setKeyboard(pane, "terminal"),
     searched: (pane) => search.touched(pane),
@@ -398,7 +452,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         if (!config.getState().set(notice.view)) break;
         look = appearance();
         applyConfig(notice.view);
-        cursorFx.configure(cursorFxSettings(notice.view));
+        cursorFx.configure(cursorFxSettings(notice.view, plugins.getState().shown));
         shortcuts.setBindings(notice.view.keymap.bindings);
         {
           // The terminals are set up again once the font the configuration now names
@@ -434,6 +488,15 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         break;
       case "notice":
         notices.push(notice.level, notice.message, notice.action);
+        break;
+      case "contributions_changed":
+        if (notice.revision > contributionsRevision) fetchContributions();
+        break;
+      case "plugin_status":
+      case "plugin_panel":
+      case "plugin_context":
+      case "plugin_state":
+        plugins.getState().follow(notice);
         break;
       case "commands_changed":
         // Plugins came or went: the palette and the menus offer what there is now.
@@ -608,7 +671,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         contexts = new Set(["search", "floating"]);
       }
     }
-    if (shortcuts.handle(event, contexts)) {
+    if (shortcuts.handle(event, withPlugins(contexts))) {
       event.preventDefault();
       event.stopPropagation();
     }
@@ -635,6 +698,12 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   };
   ready();
 
+  const unfollowStatus = followPluginStatus(plugins, status, config);
+  setMotionSource({
+    view: () => config.getState().view,
+    shown: () => plugins.getState().shown,
+  });
+
   const shell: ShellApp = {
     layout,
     config,
@@ -652,6 +721,8 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     profiles,
     machine,
     status,
+    plugins,
+    visible,
     windowState,
     cardDrag,
     panelDrag,
@@ -662,6 +733,10 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     dispose: () => {
       window.removeEventListener("focus", onWindowFocus);
       window.removeEventListener("keydown", onWindowKey, true);
+      document.removeEventListener("visibilitychange", onVisibility);
+      unfollowStatus();
+      visible.dispose();
+      setMotionSource(null);
       onNotice = () => undefined;
       onRequest = () => undefined;
       search.reset();

@@ -47,9 +47,12 @@ pub mod write;
 
 pub use error::ConfigError;
 pub use import::{Imported, import_ghostty, theme_id};
-pub use keymap::{Binding, Keymap, Removed, default_bindings, resolve_keymap};
+pub use keymap::{
+    Binding, Dropped, Keymap, PluginBinding, Removed, default_bindings, resolve_keymap,
+    resolve_keymap_with,
+};
 pub use keys::{Chord, KeySequence, WhenTerm, parse_when, write_when};
-pub use layers::{LayerInput, LayerKind, Layered, resolve_layers};
+pub use layers::{LayerInput, LayerKind, Layered, check_value, resolve_layers};
 pub use paths::{Dirs, Platform, check_workspace_name, host_log_file, log_file};
 pub use profiles::{
     LauncherKind, Profile, ProfileEntry, ProfileOrigin, ShellIntegration, merge_profiles,

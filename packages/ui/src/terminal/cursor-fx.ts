@@ -10,11 +10,20 @@
  * when another tab is shown.
  *
  * The effects stop while the system asks for less motion.
+ *
+ * A trail or a pulse may be a plugin's, drawn by its shader. One whose plugin is not
+ * there, or whose shader could not be built, draws nothing.
  */
 
-import type { CursorEffectSettings, FxRect, PulseKind, TrailKind } from "@lume/renderer";
+import type {
+  CursorEffectSettings,
+  CustomEffect,
+  FxRect,
+  PulseKind,
+  TrailKind,
+} from "@lume/renderer";
 
-import type { ConfigView } from "../core/types.ts";
+import type { ConfigView, UiContributions } from "../core/types.ts";
 
 /** The window's effects, as far as this needs them. */
 export interface EffectsLike {
@@ -26,6 +35,8 @@ export interface EffectsLike {
   dispose(): void;
   /** How many trails and pulses have started. */
   readonly played?: { readonly trails: number; readonly pulses: number };
+  /** Told when a plugin's effect cannot be drawn. */
+  onProblem?(listener: (id: string, message: string) => void): void;
 }
 
 /** A view whose cursor the effects follow. */
@@ -68,6 +79,10 @@ export interface CursorFxSettings {
   readonly pulse: PulseKind;
   /** How long each effect lasts against its own length. Left out, 1. */
   readonly length?: number | undefined;
+  /** A plugin's shader for the trail, in place of the built-in one. */
+  readonly customTrail?: CustomEffect | undefined;
+  /** A plugin's shader for the pulse, in place of the built-in one. */
+  readonly customPulse?: CustomEffect | undefined;
 }
 
 interface Last {
@@ -79,15 +94,52 @@ interface Last {
 
 const OFF: CursorFxSettings = { trail: "none", pulse: "none" };
 
-/** The effects a configuration asks for. A core that does not say asks for none. */
-export function cursorFxSettings(view: ConfigView | null): CursorFxSettings {
+const TRAILS: readonly string[] = ["none", "warp", "sweep", "comet"];
+const PULSES: readonly string[] = ["none", "burst", "ripple", "box-burst", "box-ripple"];
+
+/** A plugin's effect of a kind, by the id the settings name it with. */
+function customOf(
+  shown: UiContributions | null | undefined,
+  id: string,
+  kind: "trail" | "pulse",
+): CustomEffect | undefined {
+  const found = shown?.cursor_effects.find((effect) => effect.id === id && effect.kind === kind);
+  return found
+    ? { id: found.id, source: found.source, duration: found.duration, reach: found.reach }
+    : undefined;
+}
+
+/**
+ * The effects a configuration asks for, with the plugins' effects it names. A core that
+ * does not say asks for none.
+ */
+export function cursorFxSettings(
+  view: ConfigView | null,
+  shown?: UiContributions | null,
+): CursorFxSettings {
   const terminal = view?.config.terminal;
   const length = terminal?.["cursor-effect-length"];
+  const trail = terminal?.["cursor-trail"] ?? "none";
+  const pulse = terminal?.["cursor-pulse"] ?? "none";
+  const customTrail = TRAILS.includes(trail) ? undefined : customOf(shown, trail, "trail");
+  const customPulse = PULSES.includes(pulse) ? undefined : customOf(shown, pulse, "pulse");
   return {
-    trail: terminal?.["cursor-trail"] ?? "none",
-    pulse: terminal?.["cursor-pulse"] ?? "none",
+    trail: TRAILS.includes(trail) ? (trail as TrailKind) : "none",
+    pulse: PULSES.includes(pulse) ? (pulse as PulseKind) : "none",
     ...(typeof length === "number" ? { length } : {}),
+    ...(customTrail ? { customTrail } : {}),
+    ...(customPulse ? { customPulse } : {}),
   };
+}
+
+/** Whether settings ask for any effect at all. */
+function anyEffect(settings: CursorFxSettings): boolean {
+  return (
+    settings.trail !== "none" ||
+    settings.pulse !== "none" ||
+    settings.customTrail !== undefined ||
+    settings.customPulse !== undefined
+  );
 }
 
 /** The window's cursor effects and what they follow. */
@@ -99,6 +151,7 @@ export class CursorFx implements CursorWatch {
   #size = { width: 0, height: 0 };
   #dpr = 1;
   #last: Last | undefined;
+  #problem: ((id: string, message: string) => void) | undefined;
 
   /**
    * `make` makes the effects inside the element the page gives them, and
@@ -121,10 +174,17 @@ export class CursorFx implements CursorWatch {
     return this.#effects?.played ?? { trails: 0, pulses: 0 };
   }
 
+  /** Told when a plugin's effect cannot be drawn: its id and why. */
+  onProblem(listener: (id: string, message: string) => void): void {
+    this.#problem = listener;
+    this.#effects?.onProblem?.(listener);
+  }
+
   /** The element the effects are drawn in, from the page. */
   attach(container: HTMLElement): void {
     this.detach();
     this.#effects = this.#make(container);
+    if (this.#problem) this.#effects.onProblem?.(this.#problem);
     this.#effects.resize(this.#size, this.#dpr);
     this.#effects.configure(this.#wanted());
   }
@@ -189,7 +249,7 @@ export class CursorFx implements CursorWatch {
 
   #wanted(): CursorFxSettings {
     if (this.#reducedMotion?.matches === true) return OFF;
-    if (this.#settings.trail === "none" && this.#settings.pulse === "none") return OFF;
+    if (!anyEffect(this.#settings)) return OFF;
     return this.#settings;
   }
 }

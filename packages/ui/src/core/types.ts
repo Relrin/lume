@@ -53,6 +53,9 @@ export interface KeyBinding {
   readonly source: unknown;
 }
 
+/** Something a plugin brings, by the id of the plugin as installed and its own name. */
+export type Contributed = `${string}/${string}`;
+
 /** How the mark of the tab on show moves from one tab to another. */
 export type TabHighlight = "instant" | "glide" | "stretch" | "spring" | "glow";
 
@@ -76,7 +79,9 @@ export interface ConfigSettings {
     /** Which program tiles are drawn in colour. A core that does not say means all of them. */
     readonly "tile-color"?: "always" | "active-pane" | "active-tab" | "never";
     /** How the mark of the tab on show moves to another. A core that does not say means glow. */
-    readonly "tab-highlight"?: TabHighlight;
+    readonly "tab-highlight"?: TabHighlight | Contributed;
+    /** The plugins' effects chosen for places in the window, by place. */
+    readonly motion?: Readonly<Record<string, Contributed | undefined>>;
     readonly [key: string]: unknown;
   };
   readonly terminal: {
@@ -94,9 +99,9 @@ export interface ConfigSettings {
     readonly "cursor-style": "block" | "bar" | "underline";
     readonly "cursor-blink": boolean;
     /** What the cursor leaves behind when it jumps. A core that does not say means none. */
-    readonly "cursor-trail"?: CursorTrail;
+    readonly "cursor-trail"?: CursorTrail | Contributed;
     /** What the cursor gives off when it changes shape. A core that does not say means none. */
-    readonly "cursor-pulse"?: CursorPulse;
+    readonly "cursor-pulse"?: CursorPulse | Contributed;
     /** How long both last against their own length. A core that does not say means 1. */
     readonly "cursor-effect-length"?: number;
     readonly [key: string]: unknown;
@@ -133,6 +138,11 @@ export interface ConfigView {
    * or the window system. Already decided for the platform.
    */
   readonly title_bar: TitleBar;
+  /**
+   * Counts the schemas of the settings there have been: it changes when plugins add to
+   * the settings or take from them. A core that does not say has one schema only.
+   */
+  readonly schema_revision?: number;
 }
 
 /** Who draws a window's title bar. */
@@ -169,6 +179,169 @@ export interface ThemeEntry {
   readonly scheme: Scheme;
   /** Whether the theme comes with the application, not from the user's folder. */
   readonly builtin: boolean;
+  /** The plugin it comes from, by the id it is installed under, if it does. */
+  readonly plugin?: string;
+}
+
+/** A picture a plugin's thing shows: one of the page's, by name, or one of the plugins'. */
+export type IconRef = { readonly glyph: string } | { readonly image: string };
+
+/** A picture of a plugin's, as a `data:` address, and whether it takes the colour around it. */
+export interface PluginImage {
+  readonly url: string;
+  readonly tint: boolean;
+}
+
+/** One node of a menu, in its place: the application's own (`lume:<key>`) or a plugin's. */
+export interface MenuNodeData {
+  readonly kind: "section" | "item" | "submenu";
+  readonly key: string;
+  /** The plugin that adds it, by the id it is installed under. */
+  readonly plugin?: string;
+  readonly title?: string;
+  /** The command an item runs, by its full id. */
+  readonly command?: string;
+  readonly args?: unknown;
+  readonly icon?: IconRef;
+  /** Conditions it is shown under, each perhaps after `!`; all must hold. */
+  readonly when?: readonly string[];
+  readonly children?: readonly MenuNodeData[];
+}
+
+/** A plugin's status item, as its manifest says it, in its place. */
+export interface StatusDef {
+  readonly id: string;
+  readonly plugin: string;
+  readonly slot: string;
+  readonly kind: string;
+  readonly order: number;
+  readonly label?: string;
+  readonly icon?: IconRef;
+  readonly tooltip?: string;
+  readonly command?: string;
+  /** The key of the submenu in `menu.status` it opens. */
+  readonly menu?: string;
+  readonly when?: readonly string[];
+  /** The plugin's switch that must be on for it to be shown, and the switch's default. */
+  readonly shown_when?: { readonly key: string; readonly default: boolean };
+}
+
+/** A plugin's list panel, as its manifest says it. */
+export interface PanelDef {
+  readonly id: string;
+  readonly plugin: string;
+  readonly view: string;
+  readonly title: string;
+  readonly kind: string;
+  readonly area: string;
+  readonly order: number;
+  readonly icon?: IconRef;
+}
+
+/** An easing as the core checked it. */
+export type MotionEasing =
+  | { readonly css: string }
+  | { readonly token: string }
+  | { readonly spring: readonly [number, number] };
+
+/** One keyframe of a plugin's effect, as the browser's animations take it. */
+export type MotionKeyframe = Readonly<Record<string, string | number>>;
+
+/** An effect a plugin brings for one of the window's places. */
+export interface MotionDef {
+  /** `<plugin>/<name>`, as the settings choose it. */
+  readonly id: string;
+  readonly plugin: string;
+  readonly title: string;
+  readonly slot: string;
+  readonly spec:
+    | {
+        readonly slot: string;
+        readonly keyframes: readonly MotionKeyframe[];
+        readonly duration: number;
+        readonly delay: number;
+        readonly easing: MotionEasing;
+      }
+    | {
+        readonly slot: "tab.highlight";
+        readonly highlight: {
+          readonly shape: "pill" | "underline" | "glow";
+          readonly lead: readonly [number, number];
+          readonly trail: readonly [number, number];
+          readonly slide: "spring" | { readonly duration: number; readonly easing: MotionEasing };
+          readonly enter: {
+            readonly keyframes: readonly MotionKeyframe[];
+            readonly duration?: number;
+            readonly spring?: readonly [number, number];
+          };
+          readonly renamed: readonly MotionKeyframe[] | null;
+        };
+      };
+}
+
+/** A cursor effect a plugin's shader draws. */
+export interface CursorEffectDef {
+  /** `<plugin>/<name>`, as the settings choose it. */
+  readonly id: string;
+  readonly plugin: string;
+  readonly title: string;
+  readonly kind: "trail" | "pulse";
+  readonly duration: number;
+  readonly reach: number;
+  /** The GLSL of `vec4 lume_effect(vec2 pixel)` and its helpers. */
+  readonly source: string;
+}
+
+/** A plugin that is installed, as a window is told of it. */
+export interface PluginEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly version: string;
+  /** Whether it can be used: installed, turned on, its package as installed. */
+  readonly ready: boolean;
+  /** What went wrong with it last, if anything did. */
+  readonly problem: string | null;
+}
+
+/** One row of a list panel, as a plugin gave it. */
+export interface PanelRowData {
+  readonly id: string;
+  readonly label: string;
+  readonly detail?: string;
+  readonly icon?: string;
+  readonly badge?: string;
+  readonly tone?: "neutral" | "info" | "success" | "warning" | "danger";
+  readonly children?: readonly PanelRowData[];
+  readonly expanded?: boolean;
+  readonly actions?: readonly {
+    readonly command: string;
+    readonly title: string;
+    readonly icon?: string;
+    readonly args?: unknown;
+  }[];
+}
+
+/** What the plugins add to a window, as `ui_contributions` returns it. */
+export interface UiContributions {
+  readonly revision: number;
+  readonly plugins: readonly PluginEntry[];
+  readonly menus: Readonly<Record<string, readonly MenuNodeData[]>>;
+  readonly status: readonly StatusDef[];
+  readonly panels: readonly PanelDef[];
+  readonly images: Readonly<Record<string, PluginImage>>;
+  readonly motions: readonly MotionDef[];
+  readonly cursor_effects: readonly CursorEffectDef[];
+  /** What the plugins' status items show now. */
+  readonly values: readonly {
+    readonly plugin: string;
+    readonly item: string;
+    readonly pane: string | null;
+    readonly value: Readonly<Record<string, unknown>>;
+  }[];
+  /** What the plugins' list panels show now, by panel. */
+  readonly rows: Readonly<Record<string, readonly PanelRowData[]>>;
+  /** The conditions plugins set, by name (`plugin:<id>.<key>`). */
+  readonly contexts: Readonly<Record<string, boolean>>;
 }
 
 /** A shell found on this machine, as `shells_list` describes it. */
@@ -349,6 +522,17 @@ export type Notice =
   | { readonly type: "commands_changed" }
   /** The plugins that are installed changed. */
   | { readonly type: "plugins_changed" }
+  /** What the plugins add to the windows changed: the page fetches it again. */
+  | { readonly type: "contributions_changed"; readonly revision: number }
+  /** A plugin's list panel shows other rows, or none (`rows` null). */
+  | {
+      readonly type: "plugin_panel";
+      readonly plugin: string;
+      readonly panel: string;
+      readonly rows: readonly PanelRowData[] | null;
+    }
+  /** How a plugin fares: what went wrong with its code, or nothing when all is well. */
+  | { readonly type: "plugin_state"; readonly plugin: string; readonly problem: string | null }
   /** A plugin's status item shows something else, or no longer anything (`value` null). */
   | {
       readonly type: "plugin_status";

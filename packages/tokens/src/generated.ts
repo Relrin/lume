@@ -14,7 +14,9 @@ export type TokenKind =
   | "font-family"
   | "font-list"
   | "shadow"
-  | "image";
+  | "image"
+  | "duration"
+  | "easing";
 
 /** The kind of every token, by the token's name. */
 export const TOKEN_KINDS = {
@@ -96,6 +98,13 @@ export const TOKEN_KINDS = {
   "shadow.popover": "shadow",
   "background.image": "image",
   "background.blur": "length",
+  "motion.duration.instant": "duration",
+  "motion.duration.fast": "duration",
+  "motion.duration.base": "duration",
+  "motion.duration.slow": "duration",
+  "motion.easing.standard": "easing",
+  "motion.easing.emphasized": "easing",
+  "motion.easing.exit": "easing",
 } as const satisfies Record<string, TokenKind>;
 
 /** The name of a token. */
@@ -184,6 +193,13 @@ export const CSS_VARIABLES: Readonly<Record<TokenName, string>> = {
   "shadow.popover": "--lume-shadow-popover",
   "background.image": "--lume-background-image",
   "background.blur": "--lume-background-blur",
+  "motion.duration.instant": "--lume-motion-duration-instant",
+  "motion.duration.fast": "--lume-motion-duration-fast",
+  "motion.duration.base": "--lume-motion-duration-base",
+  "motion.duration.slow": "--lume-motion-duration-slow",
+  "motion.easing.standard": "--lume-motion-easing-standard",
+  "motion.easing.emphasized": "--lume-motion-easing-emphasized",
+  "motion.easing.exit": "--lume-motion-easing-exit",
 };
 
 /** Every token with its value, as the application sends them. */
@@ -344,6 +360,20 @@ export interface Tokens {
   readonly "background.image": string | null;
   /** How much that picture is blurred. */
   readonly "background.blur": number;
+  /** The shortest wait, as before a hint appears. */
+  readonly "motion.duration.instant": number;
+  /** How long a control takes to answer the pointer. */
+  readonly "motion.duration.fast": number;
+  /** How long small things take to move: a mark, a chevron, a fold. */
+  readonly "motion.duration.base": number;
+  /** How long larger things take to come in: menus, panels, floating panes. */
+  readonly "motion.duration.slow": number;
+  /** The curve most of the interface eases along. */
+  readonly "motion.easing.standard": string;
+  /** A curve that overshoots a little, for what should be noticed. */
+  readonly "motion.easing.emphasized": string;
+  /** The curve of colours that change and of what goes away. */
+  readonly "motion.easing.exit": string;
 }
 
 /** The built-in dark theme with the default settings. */
@@ -426,6 +456,13 @@ export const DEFAULT_TOKENS: Tokens = {
   "shadow.popover": "0px 18px 50px 0px #00000080, 0px 2px 6px 0px #00000040",
   "background.image": null,
   "background.blur": 0.0,
+  "motion.duration.instant": 40.0,
+  "motion.duration.fast": 120.0,
+  "motion.duration.base": 160.0,
+  "motion.duration.slow": 220.0,
+  "motion.easing.standard": "cubic-bezier(0.23, 1, 0.32, 1)",
+  "motion.easing.emphasized": "cubic-bezier(0.34, 1.56, 0.64, 1)",
+  "motion.easing.exit": "ease-out",
 };
 
 /** The built-in light theme with the default settings. */
@@ -508,6 +545,13 @@ export const LIGHT_TOKENS: Tokens = {
   "shadow.popover": "0px 12px 32px 0px #1c1f2a4d",
   "background.image": null,
   "background.blur": 0.0,
+  "motion.duration.instant": 40.0,
+  "motion.duration.fast": 120.0,
+  "motion.duration.base": 160.0,
+  "motion.duration.slow": 220.0,
+  "motion.easing.standard": "cubic-bezier(0.23, 1, 0.32, 1)",
+  "motion.easing.emphasized": "cubic-bezier(0.34, 1.56, 0.64, 1)",
+  "motion.easing.exit": "ease-out",
 };
 
 /** Whether the built-in dark theme is a light or a dark one. */

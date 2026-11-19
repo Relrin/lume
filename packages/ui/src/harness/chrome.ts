@@ -36,6 +36,7 @@ import { FIXTURE_BINDINGS, FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import { readReference, saveFile, type HarnessInfo } from "./host.ts";
 import { CONNECT_SCENES } from "./connect-scenes.ts";
 import { PANE_SCENES } from "./pane-scenes.ts";
+import { PLUGIN_SCENES, PLUGIN_SETTINGS_SCENES } from "./plugin-scenes.ts";
 import { TAB_SCENES } from "./tab-scenes.ts";
 import type { Scene } from "./scene.ts";
 import { describePage, differences, plainColor, recordText, type Part } from "./structure.ts";
@@ -169,6 +170,7 @@ const SCENES: readonly Scene[] = [
   ...PANE_SCENES,
   ...CONNECT_SCENES,
   ...TAB_SCENES,
+  ...PLUGIN_SCENES,
 ];
 
 /** One state of the settings window to write down. */
@@ -178,12 +180,15 @@ interface SettingsScene {
   readonly page: string;
   /** What is typed into the field that searches the settings, if anything. */
   readonly query?: string;
+  /** What the core is like. Left out, the application's own settings and nothing more. */
+  readonly window?: FakeCoreOptions;
 }
 
 const SETTINGS_SCENES: readonly SettingsScene[] = [
   { name: "settings", page: "appearance" },
   { name: "settings-terminal", page: "terminal" },
   { name: "settings-search", page: "general", query: "cursor" },
+  ...PLUGIN_SETTINGS_SCENES,
 ];
 
 /** The tokens whose values are written down with a scene: the look's main numbers. */
@@ -300,7 +305,7 @@ export async function showScene(name: string, scheme: "light" | "dark"): Promise
   const settings = SETTINGS_SCENES.find((candidate) => candidate.name === name);
   if (settings) {
     // The settings window is written down in the dark look only, as it is shown here.
-    const mounted = await mountSettings(settings.page);
+    const mounted = await mountSettings(settings.page, settings.window);
     if (settings.query !== undefined) {
       const field = mounted.container.querySelector<HTMLInputElement>(".settings-search input");
       if (field) typeInto(field, settings.query);
@@ -322,8 +327,9 @@ export async function showScene(name: string, scheme: "light" | "dark"): Promise
  */
 async function mountSettings(
   page: string,
+  options: FakeCoreOptions = { titleBar: "custom" },
 ): Promise<Pick<Mounted, "core" | "container" | "unmount">> {
-  const core = new FakeCore({ titleBar: "custom" });
+  const core = new FakeCore(options);
   const app = await startSettings(core, `#${page}`);
   const container = document.createElement("div");
   container.style.setProperty("position", "fixed");
@@ -362,7 +368,7 @@ async function runSettingsScene(
   info: HarnessInfo | null,
   problems: string[],
 ): Promise<SceneResult> {
-  const mounted = await mountSettings(scene.page);
+  const mounted = await mountSettings(scene.page, scene.window);
   try {
     if (scene.query !== undefined) {
       const field = mounted.container.querySelector<HTMLInputElement>(".settings-search input");

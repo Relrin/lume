@@ -10,6 +10,7 @@ import { useRef } from "react";
 import { useStore } from "zustand";
 
 import { selectMinimised } from "../layout/selectors.ts";
+import { useSlotMotion } from "../motion/slots.ts";
 import type { PaneId } from "../layout/types.ts";
 import { useShell } from "./context.ts";
 import { ProgramTile } from "./icons.tsx";
@@ -22,6 +23,7 @@ const NONE: readonly PaneId[] = [];
 function MinimisedPill({ pane }: { pane: PaneId }) {
   const app = useShell();
   const pill = useRef<HTMLButtonElement>(null);
+  useSlotMotion("pill.enter", pill);
   const name = usePaneName(app, pane, pill);
   const icon = useProgramIcon(app, pane);
   return (

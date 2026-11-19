@@ -180,6 +180,60 @@
       "description": "The theme this one starts from. Left out, the built-in theme of its scheme.",
       "type": "string"
     },
+    "motion": {
+      "additionalProperties": false,
+      "properties": {
+        "duration": {
+          "additionalProperties": false,
+          "properties": {
+            "base": {
+              "description": "How long small things take to move: a mark, a chevron, a fold.",
+              "maximum": 10000.0,
+              "minimum": 0,
+              "type": "number"
+            },
+            "fast": {
+              "description": "How long a control takes to answer the pointer.",
+              "maximum": 10000.0,
+              "minimum": 0,
+              "type": "number"
+            },
+            "instant": {
+              "description": "The shortest wait, as before a hint appears.",
+              "maximum": 10000.0,
+              "minimum": 0,
+              "type": "number"
+            },
+            "slow": {
+              "description": "How long larger things take to come in: menus, panels, floating panes.",
+              "maximum": 10000.0,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "easing": {
+          "additionalProperties": false,
+          "properties": {
+            "emphasized": {
+              "description": "A curve that overshoots a little, for what should be noticed.",
+              "type": "string"
+            },
+            "exit": {
+              "description": "The curve of colours that change and of what goes away.",
+              "type": "string"
+            },
+            "standard": {
+              "description": "The curve most of the interface eases along.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "name": {
       "description": "What the theme is called.",
       "type": "string"

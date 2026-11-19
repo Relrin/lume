@@ -1,0 +1,344 @@
+{
+  "structure": {
+    "box": "settings-window",
+    "at": [0, 0, 1280, 800],
+    "parts": [
+      {
+        "box": "settings-titlebar",
+        "at": [0, 0, 1280, 40],
+        "parts": [
+          {
+            "role": "button",
+            "name": "Minimise"
+          },
+          {
+            "role": "button",
+            "name": "Maximise"
+          },
+          {
+            "role": "button",
+            "name": "Close window"
+          }
+        ]
+      },
+      {
+        "role": "complementary",
+        "box": "settings-side",
+        "at": [0, 40, 236, 760],
+        "parts": [
+          {
+            "role": "textbox",
+            "name": "Search settings"
+          },
+          {
+            "role": "navigation",
+            "name": "Settings sections",
+            "parts": [
+              {
+                "role": "heading",
+                "name": "Application"
+              },
+              {
+                "role": "button",
+                "name": "General"
+              },
+              {
+                "role": "button",
+                "name": "Appearance",
+                "state": {
+                  "current": "page"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Terminal"
+              },
+              {
+                "role": "heading",
+                "name": "Add-ons"
+              },
+              {
+                "role": "button",
+                "name": "Performance metricsv1.2.0"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "role": "main",
+        "box": "settings-main",
+        "at": [236, 40, 1044, 760],
+        "parts": [
+          {
+            "box": "settings-head",
+            "at": [236, 40, 1044, 46],
+            "parts": [
+              {
+                "role": "heading",
+                "name": "Appearance"
+              },
+              {
+                "role": "button",
+                "name": "Open config.toml"
+              }
+            ]
+          },
+          {
+            "role": "heading",
+            "name": "Theme"
+          },
+          {
+            "role": "combobox"
+          },
+          {
+            "role": "combobox"
+          },
+          {
+            "role": "combobox"
+          },
+          {
+            "role": "radiogroup",
+            "parts": [
+              {
+                "role": "radio",
+                "name": "Theme",
+                "state": {
+                  "checked": "true"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Mint",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Blue",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Lilac",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Amber",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Coral",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Graphite",
+                "state": {
+                  "checked": "false"
+                }
+              },
+              {
+                "role": "radio",
+                "name": "Your own colour",
+                "state": {
+                  "checked": "false"
+                }
+              }
+            ]
+          },
+          {
+            "role": "textbox",
+            "name": "Accent colour, as #rrggbb"
+          },
+          {
+            "role": "heading",
+            "name": "Type"
+          },
+          {
+            "role": "spinbutton"
+          },
+          {
+            "role": "combobox"
+          },
+          {
+            "role": "spinbutton"
+          },
+          {
+            "role": "spinbutton"
+          },
+          {
+            "role": "heading",
+            "name": "Panes"
+          },
+          {
+            "role": "spinbutton"
+          },
+          {
+            "role": "spinbutton"
+          },
+          {
+            "role": "group",
+            "parts": [
+              {
+                "role": "button",
+                "name": "Round",
+                "state": {
+                  "pressed": "true"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Small",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Square",
+                "state": {
+                  "pressed": "false"
+                }
+              }
+            ]
+          },
+          {
+            "role": "spinbutton"
+          },
+          {
+            "role": "group",
+            "parts": [
+              {
+                "role": "button",
+                "name": "Always",
+                "state": {
+                  "pressed": "true"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Auto",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Never",
+                "state": {
+                  "pressed": "false"
+                }
+              }
+            ]
+          },
+          {
+            "role": "spinbutton"
+          },
+          {
+            "role": "group",
+            "parts": [
+              {
+                "role": "button",
+                "name": "Top",
+                "state": {
+                  "pressed": "true"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Left",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Right",
+                "state": {
+                  "pressed": "false"
+                }
+              }
+            ]
+          },
+          {
+            "role": "combobox"
+          },
+          {
+            "role": "switch",
+            "state": {
+              "checked": "false"
+            }
+          },
+          {
+            "role": "heading",
+            "name": "Tabs"
+          },
+          {
+            "role": "combobox"
+          },
+          {
+            "role": "heading",
+            "name": "Background"
+          },
+          {
+            "role": "textbox"
+          },
+          {
+            "role": "spinbutton"
+          },
+          {
+            "role": "spinbutton"
+          }
+        ]
+      }
+    ]
+  },
+  "colors": {
+    "dark": {
+      "color.surface": "#121416",
+      "color.card": "#171a1e",
+      "color.card-header": "#171a1e",
+      "color.border": "#262b31",
+      "color.border-focus": "#7fe3b899",
+      "color.text": "#e6e8ea",
+      "color.text-muted": "#9aa3ab",
+      "color.accent": "#7fe3b8",
+      "terminal.bg": "#171a1e",
+      "terminal.fg": "#d7dadd",
+      "space.gap": "8px",
+      "radius.card": "10px",
+      "size.header": "34px",
+      "size.topbar": "44px",
+      "the window's text": "#e6e8ea"
+    },
+    "light": {
+      "color.surface": "#e6e9ef",
+      "color.card": "#ffffff",
+      "color.card-header": "#f6f7fa",
+      "color.border": "#cfd4df",
+      "color.border-focus": "#2f6fd0",
+      "color.text": "#1c1f2a",
+      "color.text-muted": "#5b6275",
+      "color.accent": "#2f6fd0",
+      "terminal.bg": "#ffffff",
+      "terminal.fg": "#1c1f2a",
+      "space.gap": "8px",
+      "radius.card": "10px",
+      "size.header": "34px",
+      "size.topbar": "44px",
+      "the window's text": "#1c1f2a"
+    }
+  }
+}

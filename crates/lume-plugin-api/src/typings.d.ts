@@ -52,6 +52,19 @@ export interface LumeBase {
     /** Hears when the plugin's settings change; the listener is given all of them. */
     onChange(listener: (settings: Record<string, Json>) => void): Disposable;
   };
+  readonly metrics: {
+    /**
+     * Reads the machine about once a second and gives the listener each reading, with
+     * the kinds asked for. With `while`, the machine is read only while one of those
+     * status items of the plugin's is on screen, in any window. Needs the
+     * `system.metrics` permission.
+     */
+    subscribe(
+      kinds: readonly MetricKind[],
+      listener: (sample: MetricsSample) => void,
+      options?: { readonly while?: readonly string[] },
+    ): Disposable;
+  };
   /** Writes to the plugin's log, which `lume plugin logs <id>` shows. */
   readonly log: {
     debug(...values: unknown[]): void;

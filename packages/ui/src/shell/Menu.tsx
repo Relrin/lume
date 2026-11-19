@@ -17,6 +17,7 @@
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
+import { useSlotMotion } from "../motion/slots.ts";
 import { CheckIcon, ChevronRightIcon } from "./icons.tsx";
 
 /** One swatch of a row of them. */
@@ -87,6 +88,7 @@ export function Menu({
 }) {
   const menu = useRef<HTMLDivElement>(null);
   const sub = useRef<HTMLDivElement>(null);
+  useSlotMotion("menu.enter", menu);
   const [open, setOpen] = useState<string | null>(null);
   // Whether the item's menu was opened from the keyboard, or by a press, and so takes it.
   const [keys, setKeys] = useState(false);

@@ -2204,6 +2204,51 @@ fn a_plugins_command_runs_its_code_and_what_it_shows_is_kept() {
 
 #[test]
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugins_meters_are_read_only_while_they_are_on_screen() {
+    let home = home_with_plugins(&["meters"]);
+    let app = App::start_in(home, false);
+    app.status_with_session();
+    // On screen, the meters start the plugin, which asks for readings and shows them.
+    let plugin = app.until_plugin("test.meters", "the meters to be read and shown", |plugin| {
+        plugin["metrics"]["reading"] == true
+            && plugin["status"].as_array().is_some_and(|status| {
+                status
+                    .iter()
+                    .any(|one| one["item"] == "cpu" && one["value"]["text"].is_string())
+            })
+    });
+    let visible = plugin["visible"].as_array().cloned().unwrap_or_default();
+    for item in ["cpu", "memory", "gpu", "network"] {
+        assert!(
+            visible.contains(&Value::from(format!("test.meters.{item}"))),
+            "{plugin}"
+        );
+    }
+    assert_eq!(plugin["warnings"], Value::Array(Vec::new()), "{plugin}");
+
+    // Turned off in the settings, they leave the screen without the plugin's code, and
+    // the machine is no longer read.
+    let file = app.home.join("config").join("config.toml");
+    let mut text = std::fs::read_to_string(&file).unwrap();
+    text.push_str(
+        "
+[plugins.\"test.meters\"]
+cpu = false
+memory = false
+gpu = false
+network = false
+",
+    );
+    std::fs::write(&file, text).unwrap();
+    app.until_plugin("test.meters", "the reading to stop", |plugin| {
+        plugin["metrics"]["reading"] == false
+            && plugin["visible"].as_array().is_some_and(Vec::is_empty)
+    });
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn a_plugin_that_runs_away_is_stopped_while_the_terminal_keeps_up() {
     let app = App::start();
     app.status_with_session();

@@ -28,6 +28,7 @@ import { FLOAT_EDGES } from "../layout/floats.ts";
 import { selectFocus } from "../layout/selectors.ts";
 import type { PaneId } from "../layout/types.ts";
 import { SearchBar } from "../search/SearchBar.tsx";
+import { playSlot } from "../motion/slots.ts";
 import { StatusSlotItems } from "../status/StatusItem.tsx";
 import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
@@ -374,6 +375,13 @@ export function PaneCard({
   const status = useRef<HTMLDivElement>(null);
   const focused = useStore(app.layout, (state) => state.ready && selectFocus(state) === pane);
   const headed = header || floating;
+
+  // A card that begins to float comes in as the settings choose.
+  useLayoutEffect(() => {
+    if (!floating) return undefined;
+    const animation = playSlot("float.enter", card.current);
+    return () => animation?.cancel();
+  }, [floating]);
 
   // A card without a header says how its program ended on the terminal's own line,
   // since there is nowhere else to say it.

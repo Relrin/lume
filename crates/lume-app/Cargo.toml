@@ -23,6 +23,7 @@ lume-layout.workspace = true
 lume-plugin.workspace = true
 lume-plugin-api.workspace = true
 lume-plugin-runtime.workspace = true
+lume-services.workspace = true
 lume-proto.workspace = true
 lume-pty.workspace = true
 lume-session.workspace = true

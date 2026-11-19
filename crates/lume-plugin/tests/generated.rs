@@ -1,13 +1,15 @@
-//! The manifest's JSON Schema in the repository is what the code generates.
+//! The manifest's JSON Schema and the window's list of places in the repository are what
+//! the code generates.
 //!
-//! Editors complete `plugin.toml` from it, so it is kept as a file. This test fails when
-//! the file is not what the code would write now. Run `cargo xtask schema` to write it
-//! again, or run this test with `UPDATE_GOLDEN=1`.
+//! Editors complete `plugin.toml` from the schema, and the window's build reads the
+//! places, so both are kept as files. This test fails when a file is not what the code
+//! would write now. Run `cargo xtask schema` and `cargo xtask api` to write them again,
+//! or run this test with `UPDATE_GOLDEN=1`.
 
 use std::fs;
 use std::path::PathBuf;
 
-use lume_plugin::manifest::generated_files;
+use lume_plugin::{manifest, places};
 
 fn repository() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -21,8 +23,11 @@ fn repository() -> PathBuf {
 fn the_generated_files_are_what_the_code_generates() {
     let root = repository();
     let update = std::env::var_os("UPDATE_GOLDEN").is_some();
-    let hint = "run `cargo xtask schema`, or this test with UPDATE_GOLDEN=1";
-    for file in generated_files() {
+    let hint = "run `cargo xtask schema` and `cargo xtask api`, or this test with UPDATE_GOLDEN=1";
+    for file in manifest::generated_files()
+        .into_iter()
+        .chain(places::generated_files())
+    {
         let path = root.join(file.path);
         if update {
             fs::create_dir_all(path.parent().expect("a generated file is in a directory")).unwrap();

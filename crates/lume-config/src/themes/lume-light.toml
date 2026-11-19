@@ -81,3 +81,16 @@ popover = "0 12 32 0 #1c1f2a4d"
 [background]
 image = ""
 blur = 0
+
+# How long motion takes, in milliseconds, and the curves it eases along. Lume sets
+# every duration to nought while the system asks for less motion.
+[motion.duration]
+instant = 40
+fast = 120
+base = 160
+slow = 220
+
+[motion.easing]
+standard = "cubic-bezier(0.23, 1, 0.32, 1)"
+emphasized = "cubic-bezier(0.34, 1.56, 0.64, 1)"
+exit = "ease-out"

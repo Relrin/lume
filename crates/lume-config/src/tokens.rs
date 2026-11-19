@@ -29,6 +29,10 @@ pub enum TokenKind {
     Shadow,
     /// The path of a picture, or none.
     Image,
+    /// A length of time, in milliseconds.
+    Duration,
+    /// A curve motion eases along: a name CSS knows, or `cubic-bezier(…)`.
+    Easing,
 }
 
 impl TokenKind {
@@ -42,14 +46,16 @@ impl TokenKind {
             Self::FontList => "font-list",
             Self::Shadow => "shadow",
             Self::Image => "image",
+            Self::Duration => "duration",
+            Self::Easing => "easing",
         }
     }
 
     /// The TypeScript type of a token of this kind.
     fn typescript(self) -> &'static str {
         match self {
-            Self::Color | Self::FontFamily | Self::Shadow => "string",
-            Self::Length | Self::Number => "number",
+            Self::Color | Self::FontFamily | Self::Shadow | Self::Easing => "string",
+            Self::Length | Self::Number | Self::Duration => "number",
             Self::FontList => "readonly string[]",
             Self::Image => "string | null",
         }
@@ -81,7 +87,10 @@ const fn token(name: &'static str, kind: TokenKind, doc: &'static str) -> TokenD
     TokenDef { name, kind, doc }
 }
 
-use TokenKind::{Color as C, FontFamily, FontList, Image, Length as L, Number as N, Shadow as S};
+use TokenKind::{
+    Color as C, Duration as D, Easing as E, FontFamily, FontList, Image, Length as L, Number as N,
+    Shadow as S,
+};
 
 /// The group whose tokens come from the `[font]` settings and never from a theme.
 pub const FONT_GROUP: &str = "font";
@@ -260,7 +269,69 @@ pub const TOKENS: &[TokenDef] = &[
     token("shadow.popover", S, "The shadow of a menu or dialog."),
     token("background.image", Image, "A picture behind the panes."),
     token("background.blur", L, "How much that picture is blurred."),
+    token(
+        "motion.duration.instant",
+        D,
+        "The shortest wait, as before a hint appears.",
+    ),
+    token(
+        "motion.duration.fast",
+        D,
+        "How long a control takes to answer the pointer.",
+    ),
+    token(
+        "motion.duration.base",
+        D,
+        "How long small things take to move: a mark, a chevron, a fold.",
+    ),
+    token(
+        "motion.duration.slow",
+        D,
+        "How long larger things take to come in: menus, panels, floating panes.",
+    ),
+    token(
+        "motion.easing.standard",
+        E,
+        "The curve most of the interface eases along.",
+    ),
+    token(
+        "motion.easing.emphasized",
+        E,
+        "A curve that overshoots a little, for what should be noticed.",
+    ),
+    token(
+        "motion.easing.exit",
+        E,
+        "The curve of colours that change and of what goes away.",
+    ),
 ];
+
+/// The longest a duration token may be, in milliseconds.
+pub const DURATION_MAX_MS: f64 = 10_000.0;
+
+/// The curves CSS names that a curve token may be.
+const EASING_NAMES: [&str; 5] = ["linear", "ease", "ease-in", "ease-out", "ease-in-out"];
+
+/// Reads a curve as a token holds it: a name CSS knows, or `cubic-bezier(x1, y1, x2, y2)`
+/// with both x between 0 and 1.
+fn parse_easing(written: &str) -> Option<String> {
+    let written = written.trim();
+    if EASING_NAMES.contains(&written) {
+        return Some(written.to_owned());
+    }
+    let inner = written.strip_prefix("cubic-bezier(")?.strip_suffix(')')?;
+    let numbers: Vec<f64> = inner
+        .split(',')
+        .map(|part| part.trim().parse::<f64>().ok().filter(|n| n.is_finite()))
+        .collect::<Option<Vec<f64>>>()?;
+    let [x1, y1, x2, y2] = numbers.as_slice() else {
+        return None;
+    };
+    if !(0.0..=1.0).contains(x1) || !(0.0..=1.0).contains(x2) {
+        return None;
+    }
+    Some(format!("cubic-bezier({x1}, {y1}, {x2}, {y2})"))
+}
 
 /// The token called `name`.
 pub fn token_def(name: &str) -> Option<&'static TokenDef> {
@@ -396,6 +467,10 @@ pub enum TokenValue {
     /// No shadows is no shadow at all.
     Shadow(Vec<Shadow>),
     Image(Option<String>),
+    /// Milliseconds.
+    Duration(f64),
+    /// A curve as CSS writes it.
+    Easing(String),
 }
 
 /// The font names CSS knows without quotes.
@@ -487,6 +562,22 @@ impl TokenValue {
                     Some(path.to_owned()).filter(|path| !path.is_empty()),
                 ))
             }
+            TokenKind::Duration => {
+                let ms = number("a length of time in milliseconds, as a number")?;
+                if !(0.0..=DURATION_MAX_MS).contains(&ms) {
+                    return Err(format!(
+                        "a length of time is from 0 to {DURATION_MAX_MS} milliseconds"
+                    ));
+                }
+                Ok(Self::Duration(ms))
+            }
+            TokenKind::Easing => {
+                let what = "a curve: linear, ease, ease-in, ease-out, ease-in-out or \
+                            cubic-bezier(x1, y1, x2, y2)";
+                parse_easing(text(what)?)
+                    .map(Self::Easing)
+                    .ok_or_else(|| format!("expected {what}"))
+            }
         }
     }
 
@@ -494,7 +585,10 @@ impl TokenValue {
     pub fn to_json(&self) -> Value {
         match self {
             Self::Color(color) => Value::String(color.to_string()),
-            Self::Length(number) | Self::Number(number) => Value::from(*number),
+            Self::Length(number) | Self::Number(number) | Self::Duration(number) => {
+                Value::from(*number)
+            }
+            Self::Easing(curve) => Value::String(curve.clone()),
             Self::FontFamily(family) => Value::String(family.clone()),
             Self::FontList(families) => Value::from(families.clone()),
             Self::Shadow(_) => Value::String(self.to_css()),
@@ -525,6 +619,8 @@ impl TokenValue {
                 "url(\"{}\")",
                 path.replace('\\', "\\\\").replace('"', "\\\"")
             ),
+            Self::Duration(ms) => format!("{ms}ms"),
+            Self::Easing(curve) => curve.clone(),
         }
     }
 }
@@ -633,7 +729,7 @@ pub fn typescript(defaults: &ResolvedTokens, light: &ResolvedTokens) -> String {
     let mut ts = String::from(GENERATED_NOTE_TS);
 
     ts.push_str("\n/** What kind of value a token holds. */\nexport type TokenKind =\n");
-    let kinds = [C, L, N, FontFamily, FontList, S, Image];
+    let kinds = [C, L, N, FontFamily, FontList, S, Image, D, E];
     for (index, kind) in kinds.iter().enumerate() {
         let end = if index + 1 == kinds.len() { ";" } else { "" };
         ts.push_str(&format!("  | \"{}\"{end}\n", kind.as_str()));

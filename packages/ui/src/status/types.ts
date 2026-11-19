@@ -4,9 +4,14 @@
  * An item is plain data. Whoever has something to show registers an item and updates
  * it; the window draws every item of a kind the same way, in the place the item names.
  * The shapes here are the ones a plugin sends: an item carries text and numbers, never
- * markup, and an icon is one of a fixed set of names.
+ * markup, and an icon is one of a fixed set of names or a picture of the plugin's.
+ *
+ * A plugin's item may be a button: it runs a command when clicked, or opens a menu of
+ * the plugin's. It may have a card, shown while the pointer rests on it: rows of a
+ * name and a value, each perhaps with a line through its latest values.
  */
 
+import type { IconRef } from "../core/types.ts";
 import type { PaneId } from "../layout/types.ts";
 
 /** Where status items are shown: the three parts of the top bar, and a pane's header. */
@@ -26,6 +31,15 @@ export type StatusTone = "neutral" | "info" | "success" | "warning" | "danger";
 /** The icons an item may show, by name. */
 export type StatusIconName = "terminal" | "branch" | "pulse" | "folder" | "dot" | "alert";
 
+/** One row of an item's card. */
+export interface StatusCardRow {
+  readonly label: string;
+  readonly value: string;
+  /** The latest values, from the oldest to the newest, drawn as a small line. */
+  readonly points?: readonly number[];
+  readonly tone?: StatusTone;
+}
+
 /** What every item has. */
 interface StatusBase {
   /** Names the item: dotted and lower case, beginning with its owner's id. */
@@ -38,6 +52,20 @@ interface StatusBase {
   readonly tooltip?: string;
   /** The pane whose header shows the item, for an item of the `pane.header` slot. */
   readonly pane?: PaneId;
+  /** The plugin that shows the item, by the id it is installed under. */
+  readonly plugin?: string;
+  /** A picture before what the item shows. */
+  readonly picture?: IconRef;
+  /** One of the theme's colours, by its token's name, drawn in place of the tone's. */
+  readonly color?: string;
+  /** A command the item runs when clicked, which makes it a button, and what it is given. */
+  readonly command?: string;
+  readonly args?: unknown;
+  /** The key of the plugin's menu the item opens when clicked. */
+  readonly menu?: string;
+  readonly card?: readonly StatusCardRow[];
+  /** What went wrong with the plugin's code, which the item shows it is held up by. */
+  readonly problem?: string;
 }
 
 /** A few words. */

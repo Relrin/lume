@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ui-contributions"
+description = "Enables the ui_contributions command without any pre-configured scope."
+commands.allow = ["ui_contributions"]
+
+[[permission]]
+identifier = "deny-ui-contributions"
+description = "Denies the ui_contributions command without any pre-configured scope."
+commands.deny = ["ui_contributions"]

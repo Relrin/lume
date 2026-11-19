@@ -60,7 +60,10 @@ Commands:
   tokens       Write the design tokens' TypeScript module and stylesheet into
                packages/tokens/src/
   api          Write the plugin API's typings (packages/plugin-api), the runtime's
-               prelude and the API reference (docs/plugins/api.md)
+               prelude, the API reference (docs/plugins/api.md) and the window's
+               list of places plugins add to
+  api --pack   The same, then pack @lume/plugin-api into target/plugin-api/ for a
+               plugin's own repository to install
   lint         Run format, clippy, licence and JS lint checks
   dev          Run the app with hot reload
 ";
@@ -93,6 +96,10 @@ fn main() -> Result<()> {
         ["schema"] => generate::write(GeneratedKind::Schema, "schema"),
         ["tokens"] => generate::write(GeneratedKind::Tokens, "tokens"),
         ["api"] => generate::write(GeneratedKind::Api, "api"),
+        ["api", "--pack"] => {
+            generate::write(GeneratedKind::Api, "api")?;
+            generate::pack_api()
+        }
         ["lint"] => lint(),
         ["dev"] => dev(),
         [] | ["help"] | ["--help"] | ["-h"] => {

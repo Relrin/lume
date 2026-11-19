@@ -16,6 +16,7 @@
 //! folder, reads and checks it and works out what is new; [`Store::commit`] puts it in
 //! place and writes the lock file. A prepared install that is dropped leaves nothing.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
@@ -29,7 +30,7 @@ use crate::package::{self, PackageError, Staged};
 use crate::permissions::{self, Item, Permissions, Request};
 
 /// The most an SVG picture in a package may hold.
-pub const ICON_MAX_BYTES: u64 = 16 * 1024;
+pub const ICON_MAX_BYTES: u64 = crate::assets::SVG_MAX_BYTES;
 
 /// How long a change waits for another one to finish before giving up, and how old a
 /// mark of a change in progress must be to be taken as left by a program that stopped.
@@ -815,17 +816,38 @@ fn check_contents(root: &Path, manifest: &Manifest) -> Result<(), StoreError> {
             icons.push((format!("contributes.panels[{index}].icon"), icon));
         }
     }
-    for (key, icon) in icons {
-        if !icon.to_ascii_lowercase().ends_with(".svg") {
-            continue;
+    let images: BTreeSet<&str> = contributes
+        .images
+        .iter()
+        .map(|image| image.id.as_str())
+        .collect();
+    let mut pictures: Vec<(String, &str)> = icons
+        .into_iter()
+        .filter(|(_, icon)| {
+            !images.contains(icon) && (icon.contains('/') || crate::assets::is_image_path(icon))
+        })
+        .collect();
+    for (index, image) in contributes.images.iter().enumerate() {
+        pictures.push((format!("contributes.images[{index}].file"), &image.file));
+    }
+    let mut total = 0u64;
+    for (key, path) in pictures {
+        match crate::assets::read_image(root, path) {
+            Ok(image) => total += image.bytes.len() as u64,
+            Err(problem) => problems.push(format!("{key}: {problem}")),
         }
-        if let Some(file) = need(&key, icon, &mut problems) {
-            let size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
-            if size > ICON_MAX_BYTES {
-                problems.push(format!(
-                    "{key}: {icon} holds {size} bytes; a picture may hold {ICON_MAX_BYTES}"
-                ));
-            }
+    }
+    if total > crate::assets::IMAGES_MAX_BYTES {
+        problems.push(format!(
+            "the pictures hold {total} bytes together; a plugin's may hold {}",
+            crate::assets::IMAGES_MAX_BYTES
+        ));
+    }
+    for (index, effect) in contributes.cursor_effects.iter().enumerate() {
+        if let Err(problem) = crate::assets::read_shader(root, &effect.shader) {
+            problems.push(format!(
+                "contributes.cursor-effects[{index}].shader: {problem}"
+            ));
         }
     }
     for (index, theme) in contributes.themes.iter().enumerate() {

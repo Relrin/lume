@@ -9,6 +9,13 @@
  */
 
 import { WEBGL_FAIL_IF_MAJOR_PERFORMANCE_CAVEAT } from "../constants.ts";
+import {
+  CUSTOM_UNIFORMS,
+  CustomEffectError,
+  customFragment,
+  type CustomDraw,
+  type CustomUniform,
+} from "./custom.ts";
 import { channels, type FxBackend, type FxShape } from "./shape.ts";
 import { FX_FRAGMENT, FX_UNIFORMS, FX_VERTEX, type FxUniform } from "./shaders.ts";
 import { FX_EDGE } from "./tuning.ts";
@@ -26,6 +33,17 @@ function compile(gl: GL, type: number, source: string): WebGLShader {
   return shader;
 }
 
+/** A plugin's effect, made into a program. */
+interface Custom {
+  readonly program: WebGLProgram;
+  readonly shaders: readonly WebGLShader[];
+  readonly at: Record<CustomUniform, WebGLUniformLocation | null>;
+  /** Whether it was looked at once the browser finished building it. */
+  checked: boolean;
+  /** Why it cannot be drawn with, once that is known. */
+  failed?: string;
+}
+
 export class WebGl2Fx implements FxBackend {
   readonly kind = "webgl2" as const;
   readonly #canvas: HTMLCanvasElement;
@@ -36,6 +54,7 @@ export class WebGl2Fx implements FxBackend {
   #checked = false;
   #lost: (() => void) | undefined;
   #disposed = false;
+  readonly #custom = new Map<string, Custom>();
   readonly #onContextLost = (event: Event) => {
     event.preventDefault();
     this.#lost?.();
@@ -121,12 +140,75 @@ export class WebGl2Fx implements FxBackend {
     this.#lost = listener;
   }
 
+  prepareCustom(id: string, source: string): void {
+    if (this.#custom.has(id)) return;
+    const gl = this.#gl;
+    const program = gl.createProgram();
+    if (!program) throw new CustomEffectError("could not create a program");
+    const shaders = [
+      compile(gl, gl.VERTEX_SHADER, FX_VERTEX),
+      compile(gl, gl.FRAGMENT_SHADER, customFragment(source)),
+    ];
+    for (const shader of shaders) gl.attachShader(program, shader);
+    gl.linkProgram(program);
+    this.#custom.set(id, {
+      program,
+      shaders,
+      at: {} as Record<CustomUniform, WebGLUniformLocation | null>,
+      checked: false,
+    });
+  }
+
+  drawCustom(id: string, frame: CustomDraw): void {
+    const gl = this.#gl;
+    const custom = this.#custom.get(id);
+    if (!custom || gl.isContextLost()) return;
+    if (!custom.checked) {
+      custom.checked = true;
+      if (!gl.getProgramParameter(custom.program, gl.LINK_STATUS)) {
+        const log = custom.shaders
+          .map((shader) => gl.getShaderInfoLog(shader) ?? "")
+          .join("\n")
+          .trim();
+        custom.failed = log === "" ? (gl.getProgramInfoLog(custom.program) ?? "") : log;
+      } else {
+        for (const name of CUSTOM_UNIFORMS) {
+          custom.at[name] = gl.getUniformLocation(custom.program, name);
+        }
+      }
+    }
+    if (custom.failed !== undefined) throw new CustomEffectError(custom.failed);
+    const at = custom.at;
+    gl.useProgram(custom.program);
+    gl.uniform2f(at.u_surface, this.#canvas.width, this.#canvas.height);
+    gl.uniform4f(at.u_bounds, ...frame.bounds);
+    gl.uniform2f(at.lume_resolution, this.#canvas.width, this.#canvas.height);
+    gl.uniform1f(at.lume_progress, frame.progress);
+    gl.uniform1f(at.lume_time, frame.time);
+    gl.uniform4f(at.lume_from, ...frame.from);
+    gl.uniform4f(at.lume_to, ...frame.to);
+    const [r, g, b] = channels(frame.color);
+    gl.uniform3f(at.lume_color, r, g, b);
+    gl.uniform4f(at.lume_hole, ...frame.hole);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  forgetCustom(id: string): void {
+    const custom = this.#custom.get(id);
+    if (!custom) return;
+    this.#custom.delete(id);
+    const gl = this.#gl;
+    for (const shader of custom.shaders) gl.deleteShader(shader);
+    gl.deleteProgram(custom.program);
+  }
+
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#canvas.removeEventListener("webglcontextlost", this.#onContextLost);
     this.#lost = undefined;
     const gl = this.#gl;
+    for (const id of [...this.#custom.keys()]) this.forgetCustom(id);
     for (const shader of this.#shaders) gl.deleteShader(shader);
     gl.deleteProgram(this.#program);
     // A page may keep only a few contexts alive: this one is given up at once.

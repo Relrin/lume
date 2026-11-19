@@ -84,4 +84,11 @@
   --lume-shadow-popover: 0px 18px 50px 0px #00000080, 0px 2px 6px 0px #00000040;
   --lume-background-image: none;
   --lume-background-blur: 0px;
+  --lume-motion-duration-instant: 40ms;
+  --lume-motion-duration-fast: 120ms;
+  --lume-motion-duration-base: 160ms;
+  --lume-motion-duration-slow: 220ms;
+  --lume-motion-easing-standard: cubic-bezier(0.23, 1, 0.32, 1);
+  --lume-motion-easing-emphasized: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --lume-motion-easing-exit: ease-out;
 }

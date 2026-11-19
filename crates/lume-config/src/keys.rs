@@ -251,6 +251,9 @@ pub const CONTEXTS: [&str; 6] = [
 /// What a context that names a panel begins with: `panel:lume.tabs`.
 pub const PANEL_CONTEXT: &str = "panel:";
 
+/// What a context a plugin sets begins with: `plugin:acme.tools.busy`.
+pub const PLUGIN_CONTEXT: &str = "plugin:";
+
 /// One condition on where a binding holds.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WhenTerm {
@@ -279,12 +282,14 @@ fn is_context(name: &str) -> bool {
     if CONTEXTS.contains(&name) {
         return true;
     }
-    name.strip_prefix(PANEL_CONTEXT).is_some_and(|panel| {
-        !panel.is_empty()
-            && panel
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-    })
+    name.strip_prefix(PANEL_CONTEXT)
+        .or_else(|| name.strip_prefix(PLUGIN_CONTEXT))
+        .is_some_and(|named| {
+            !named.is_empty()
+                && named
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        })
 }
 
 /// Reads where a binding holds: context names joined by `&&`. The terms come back in

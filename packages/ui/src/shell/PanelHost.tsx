@@ -6,17 +6,25 @@
  * is dragged by to another side. The list of tabs goes to the left or the right only,
  * and where it is belongs to the settings, so dropping it at the other side changes
  * the setting; any other panel is simply moved.
+ *
+ * A plugin's list panel shows the rows the plugin's code gives, and can be closed. A
+ * panel of a plugin that is not there, or cannot be used, says whose it is.
  */
 
 import { useRef } from "react";
+import { useStore } from "zustand";
 
+import type { PanelDef } from "../core/types.ts";
 import { panelDropArea, type SideArea } from "../drag/panels.ts";
 import { SIDE_AREAS, selectPanels, TAB_LIST_PANEL } from "../layout/selectors.ts";
 import type { Panel } from "../layout/types.ts";
+import { useSlotMotion } from "../motion/slots.ts";
+import { PluginIcon } from "../plugins/PluginIcon.tsx";
 import { DRAG_START_PX } from "../tuning.ts";
 import { useShell } from "./context.ts";
 import { useKeyHint } from "./hints.ts";
-import { CollapseIcon } from "./icons.tsx";
+import { CloseIcon, CollapseIcon } from "./icons.tsx";
+import { ListPanel } from "./ListPanel.tsx";
 import { PluginViewPlaceholder } from "./PluginViewPlaceholder.tsx";
 import { TabListPanel } from "./TabListPanel.tsx";
 
@@ -24,12 +32,12 @@ import { TabListPanel } from "./TabListPanel.tsx";
 const TAB_LIST_AREAS: readonly SideArea[] = ["left", "right"];
 
 /** What a panel is called in its header. */
-function titleOf(panel: Panel): string {
+function titleOf(panel: Panel, def: PanelDef | undefined): string {
   switch (panel.content.type) {
     case "tab_list":
       return "Tabs";
     case "plugin_view":
-      return panel.content.view;
+      return def?.title ?? panel.content.view;
     case "slot":
       return panel.id;
   }
@@ -44,7 +52,20 @@ export function PanelHost({ panel, area }: { panel: Panel; area: SideArea }) {
   const app = useShell();
   const hideHint = useKeyHint("lume.panel.toggle");
   const held = useRef<{ pointerId: number; x: number; y: number; dragging: boolean } | null>(null);
+  const element = useRef<HTMLElement>(null);
+  useSlotMotion("panel.enter", element);
   const allowed = panel.id === TAB_LIST_PANEL ? TAB_LIST_AREAS : SIDE_AREAS;
+  const def = useStore(app.plugins, (state) =>
+    panel.content.type === "plugin_view"
+      ? state.shown?.panels.find((one) => one.id === panel.id)
+      : undefined,
+  );
+  const ready = useStore(app.plugins, (state) =>
+    def === undefined
+      ? false
+      : (state.shown?.plugins.find((plugin) => plugin.id === def.plugin)?.ready ?? false),
+  );
+  const images = useStore(app.plugins, (state) => state.shown?.images);
 
   /** The side of the window the pointer holds the panel over. */
   const targetAt = (event: React.PointerEvent<HTMLElement>): SideArea | null => {
@@ -92,8 +113,12 @@ export function PanelHost({ panel, area }: { panel: Panel; area: SideArea }) {
     if (target !== null) moveTo(target);
   };
 
+  const closePanel = () => {
+    app.commands.run("lume.panel.close", { panel: panel.id });
+  };
+
   return (
-    <section className="panel" data-panel={panel.id} aria-label={titleOf(panel)}>
+    <section ref={element} className="panel" data-panel={panel.id} aria-label={titleOf(panel, def)}>
       <header
         className="panel-header"
         onPointerDown={(event) => {
@@ -124,7 +149,25 @@ export function PanelHost({ panel, area }: { panel: Panel; area: SideArea }) {
         onPointerUp={(event) => letGo(event, true)}
         onPointerCancel={(event) => letGo(event, false)}
       >
-        <span className="panel-title">{titleOf(panel)}</span>
+        {def?.icon !== undefined && (
+          <span className="panel-icon">
+            <PluginIcon icon={def.icon} images={images} size={13} />
+          </span>
+        )}
+        <span className="panel-title">{titleOf(panel, def)}</span>
+        {panel.content.type === "plugin_view" && (
+          <button
+            type="button"
+            className="control panel-button"
+            aria-label="Close this panel"
+            title="Close this panel"
+            tabIndex={-1}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={closePanel}
+          >
+            <CloseIcon size={11} />
+          </button>
+        )}
         <button
           type="button"
           className="control panel-button"
@@ -139,9 +182,12 @@ export function PanelHost({ panel, area }: { panel: Panel; area: SideArea }) {
       </header>
       <div className="panel-body">
         {panel.content.type === "tab_list" && <TabListPanel />}
-        {panel.content.type === "plugin_view" && (
-          <PluginViewPlaceholder plugin={panel.content.plugin} view={panel.content.view} />
-        )}
+        {panel.content.type === "plugin_view" &&
+          (def !== undefined && ready && def.kind === "list" ? (
+            <ListPanel panel={def} />
+          ) : (
+            <PluginViewPlaceholder plugin={panel.content.plugin} view={panel.content.view} />
+          ))}
       </div>
     </section>
   );

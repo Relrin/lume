@@ -22,6 +22,10 @@
             }
           },
           {
+            "role": "img",
+            "name": "main"
+          },
+          {
             "role": "tablist",
             "name": "Tabs",
             "parts": [
@@ -41,6 +45,18 @@
           {
             "role": "button",
             "name": "New tab"
+          },
+          {
+            "role": "meter",
+            "name": "CPU"
+          },
+          {
+            "role": "meter",
+            "name": "RAM"
+          },
+          {
+            "role": "img",
+            "name": "Load: 0.8"
           }
         ]
       },

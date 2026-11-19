@@ -11,6 +11,7 @@
 
 import type { FrameView } from "../loop.ts";
 import type { Size } from "../types.ts";
+import { CustomEffectError, type CustomEffect } from "./custom.ts";
 import {
   cornersOf,
   farEnough,
@@ -44,7 +45,26 @@ export interface CursorEffectSettings {
   readonly pulse: PulseKind;
   /** How long each lasts against its own length: 2 is twice as long. Left out, 1. */
   readonly length?: number | undefined;
+  /** A plugin's shader drawn as the trail, in place of the built-in one. */
+  readonly customTrail?: CustomEffect | undefined;
+  /** A plugin's shader drawn as the pulse, in place of the built-in one. */
+  readonly customPulse?: CustomEffect | undefined;
 }
+
+/** A plugin's effect that is playing: what it is, where, and since when. */
+interface PlayingCustom {
+  readonly effect: CustomEffect;
+  readonly from: FxRect;
+  readonly to: FxRect;
+  readonly start: number;
+  readonly duration: number;
+  readonly color: number;
+  /** Whether the cursor's cell is left for its pane to draw, as a trail leaves it. */
+  readonly hole: boolean;
+}
+
+/** How long after a plugin's effect played the loss of WebGL is laid at its door. */
+const CUSTOM_BLAME_MS = 2000;
 
 /** Where the effects' canvas goes in the page. */
 export interface FxSurface<Canvas> {
@@ -100,6 +120,13 @@ export class CursorEffects<Canvas> implements FrameView {
   readonly #shapes = [new FxShape(), new FxShape()];
   readonly #played = { trails: 0, pulses: 0 };
   #disposed = false;
+  #customTrail: PlayingCustom | undefined;
+  #customPulse: PlayingCustom | undefined;
+  /** The plugins' effects that could not be drawn with, which are not tried again. */
+  readonly #failed = new Set<string>();
+  /** When a plugin's effect last played. */
+  #customAt = -Infinity;
+  #problem: ((id: string, message: string) => void) | undefined;
 
   /**
    * `requestFrame` asks the window's loop for a frame, and `onDispose` is told when
@@ -129,7 +156,33 @@ export class CursorEffects<Canvas> implements FrameView {
 
   /** Whether an effect is playing. */
   get playing(): boolean {
-    return this.#trail !== undefined || this.#pulse !== undefined;
+    return (
+      this.#trail !== undefined ||
+      this.#pulse !== undefined ||
+      this.#customTrail !== undefined ||
+      this.#customPulse !== undefined
+    );
+  }
+
+  /** Told when a plugin's effect cannot be drawn: its id and why. It is not tried again. */
+  onProblem(listener: (id: string, message: string) => void): void {
+    this.#problem = listener;
+  }
+
+  /** Whether a plugin's effect can be drawn here, as far as is known. */
+  #usable(effect: CustomEffect | undefined): effect is CustomEffect {
+    return (
+      effect !== undefined &&
+      !this.#failed.has(effect.id) &&
+      this.#backend?.prepareCustom !== undefined
+    );
+  }
+
+  #fail(id: string, message: string): void {
+    if (this.#failed.has(id)) return;
+    this.#failed.add(id);
+    this.#backend?.forgetCustom?.(id);
+    this.#problem?.(id, message);
   }
 
   /**
@@ -142,9 +195,30 @@ export class CursorEffects<Canvas> implements FrameView {
     this.#settings = settings;
     if (settings.trail === "none") this.#endTrail();
     if (settings.pulse === "none") this.#pulse = undefined;
-    const wanted = settings.trail !== "none" || settings.pulse !== "none";
+    if (settings.customTrail?.id !== this.#customTrail?.effect.id) this.#customTrail = undefined;
+    if (settings.customPulse?.id !== this.#customPulse?.effect.id) this.#customPulse = undefined;
+    const wanted =
+      settings.trail !== "none" ||
+      settings.pulse !== "none" ||
+      settings.customTrail !== undefined ||
+      settings.customPulse !== undefined;
     if (wanted && !this.#backend) this.#start();
     if (!wanted && this.#backend) this.#stop();
+    this.#prepareCustoms();
+  }
+
+  /** Builds the plugins' shaders now, so the first effect does not wait for them. */
+  #prepareCustoms(): void {
+    const backend = this.#backend;
+    if (!backend?.prepareCustom) return;
+    for (const effect of [this.#settings.customTrail, this.#settings.customPulse]) {
+      if (!effect || this.#failed.has(effect.id)) continue;
+      try {
+        backend.prepareCustom(effect.id, effect.source);
+      } catch (error) {
+        this.#fail(effect.id, error instanceof Error ? error.message : String(error));
+      }
+    }
   }
 
   /** The window's size in CSS pixels, and its device pixel ratio. */
@@ -160,6 +234,22 @@ export class CursorEffects<Canvas> implements FrameView {
    * a trail still under way has got to. Says whether one started.
    */
   move(from: FxRect, to: FxRect, color: number, now: number): boolean {
+    const custom = this.#settings.customTrail;
+    if (this.#usable(custom)) {
+      if (!farEnough(cornersOf(from), to)) return false;
+      this.#customTrail = {
+        effect: custom,
+        from,
+        to,
+        start: now - FX_FIRST_FRAME_MS,
+        duration: custom.duration * this.#length(),
+        color,
+        hole: true,
+      };
+      this.#played.trails++;
+      this.#requestFrame();
+      return true;
+    }
     const kind = this.#settings.trail;
     if (kind === "none" || !this.#backend) return false;
     // Whether the cursor itself went far, not where a trail under way has got to:
@@ -188,6 +278,21 @@ export class CursorEffects<Canvas> implements FrameView {
 
   /** The cursor changed shape, or landed in another pane, at `at`. */
   pulse(at: FxRect, color: number, now: number): boolean {
+    const custom = this.#settings.customPulse;
+    if (this.#usable(custom)) {
+      this.#customPulse = {
+        effect: custom,
+        from: at,
+        to: at,
+        start: now - FX_FIRST_FRAME_MS,
+        duration: custom.duration * this.#length(),
+        color,
+        hole: false,
+      };
+      this.#played.pulses++;
+      this.#requestFrame();
+      return true;
+    }
     const kind = this.#settings.pulse;
     if (kind === "none" || !this.#backend) return false;
     this.#pulse = {
@@ -206,6 +311,8 @@ export class CursorEffects<Canvas> implements FrameView {
   cancel(): void {
     this.#endTrail();
     this.#pulse = undefined;
+    this.#customTrail = undefined;
+    this.#customPulse = undefined;
     this.#hide();
   }
 
@@ -225,11 +332,13 @@ export class CursorEffects<Canvas> implements FrameView {
       const shape = this.#shapes[count] as FxShape;
       if (this.#fillPulse(shape, this.#pulse, now)) count++;
     }
-    if (count === 0) {
+    const customs = this.#playingCustoms(now);
+    if (count === 0 && customs.length === 0) {
       this.#hide();
       return;
     }
     backend.draw(this.#shapes, count);
+    for (const custom of customs) this.#drawCustom(backend, custom, now);
     if (!this.#visible) {
       this.#visible = true;
       this.#surface.setVisible(this.#canvas, true);
@@ -247,6 +356,69 @@ export class CursorEffects<Canvas> implements FrameView {
   #length(): number {
     const length = this.#settings.length;
     return length !== undefined && Number.isFinite(length) && length > 0 ? length : 1;
+  }
+
+  /** The plugins' effects still playing at `now`. Those that are over end. */
+  #playingCustoms(now: number): PlayingCustom[] {
+    const playing: PlayingCustom[] = [];
+    for (const which of ["#customTrail", "#customPulse"] as const) {
+      const custom = which === "#customTrail" ? this.#customTrail : this.#customPulse;
+      if (!custom) continue;
+      if (now - custom.start >= custom.duration || this.#failed.has(custom.effect.id)) {
+        if (which === "#customTrail") this.#customTrail = undefined;
+        else this.#customPulse = undefined;
+        continue;
+      }
+      playing.push(custom);
+    }
+    return playing;
+  }
+
+  #drawCustom(backend: FxBackend, custom: PlayingCustom, now: number): void {
+    const dpr = this.#dpr;
+    const rect = (r: FxRect): [number, number, number, number] => [
+      r.x * dpr,
+      r.y * dpr,
+      r.width * dpr,
+      r.height * dpr,
+    ];
+    const reach = custom.effect.reach * dpr;
+    const left = Math.min(custom.from.x, custom.to.x) * dpr - reach;
+    const top = Math.min(custom.from.y, custom.to.y) * dpr - reach;
+    const right =
+      Math.max(custom.from.x + custom.from.width, custom.to.x + custom.to.width) * dpr + reach;
+    const bottom =
+      Math.max(custom.from.y + custom.from.height, custom.to.y + custom.to.height) * dpr + reach;
+    const width = Math.max(1, Math.round(this.#size.width * dpr));
+    const height = Math.max(1, Math.round(this.#size.height * dpr));
+    const to = custom.to;
+    try {
+      this.#customAt = now;
+      backend.drawCustom?.(custom.effect.id, {
+        progress: Math.min(1, Math.max(0, (now - custom.start) / custom.duration)),
+        time: Math.max(0, now - custom.start) / 1000,
+        from: rect(custom.from),
+        to: rect(custom.to),
+        color: custom.color,
+        bounds: [
+          Math.max(0, Math.floor(left)),
+          Math.max(0, Math.floor(top)),
+          Math.min(width, Math.ceil(right)),
+          Math.min(height, Math.ceil(bottom)),
+        ],
+        hole: custom.hole
+          ? [
+              Math.round(to.x * dpr) - FX_EDGE,
+              Math.round(to.y * dpr) - FX_EDGE,
+              Math.round((to.x + to.width) * dpr) + FX_EDGE,
+              Math.round((to.y + to.height) * dpr) + FX_EDGE,
+            ]
+          : [0, 0, 0, 0],
+      });
+    } catch (error) {
+      if (!(error instanceof CustomEffectError)) throw error;
+      this.#fail(custom.effect.id, error.message);
+    }
   }
 
   #start(): void {
@@ -279,6 +451,14 @@ export class CursorEffects<Canvas> implements FrameView {
   /** WebGL2 was lost: go on with Canvas 2D on a new canvas, playing what was playing. */
   #replace(): void {
     if (this.#disposed) return;
+    // A plugin's shader that played just before is taken to have cost the window it.
+    if (performance.now() - this.#customAt < CUSTOM_BLAME_MS) {
+      for (const custom of [this.#settings.customTrail, this.#settings.customPulse]) {
+        if (custom) this.#fail(custom.id, "the graphics card stopped while it drew");
+      }
+    }
+    this.#customTrail = undefined;
+    this.#customPulse = undefined;
     this.#webgl2Lost = true;
     this.#stop();
     if (this.#settings.trail !== "none" || this.#settings.pulse !== "none") this.#start();
@@ -288,6 +468,8 @@ export class CursorEffects<Canvas> implements FrameView {
   #stop(): void {
     this.#endTrail();
     this.#pulse = undefined;
+    this.#customTrail = undefined;
+    this.#customPulse = undefined;
     this.#backend?.dispose();
     this.#backend = undefined;
     if (this.#canvas !== undefined) this.#surface.remove(this.#canvas);

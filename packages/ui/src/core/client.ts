@@ -23,6 +23,7 @@ import type {
   SessionsStarted,
   ShellEntry,
   ThemeEntry,
+  UiContributions,
   WindowAction,
   WindowState,
   WorkspaceList,
@@ -157,6 +158,16 @@ export class CoreClient {
   /** Every command there is. */
   commandsList(): Promise<CommandSpec[]> {
     return this.transport.command("commands_list");
+  }
+
+  /** What the plugins add to the window, with what their code shows in it now. */
+  uiContributions(): Promise<UiContributions> {
+    return this.transport.command("ui_contributions");
+  }
+
+  /** Says which of the plugins' things this window has on screen, by their ids. */
+  uiVisible(items: readonly string[]): Promise<void> {
+    return this.transport.command("ui_visible", { items });
   }
 
   /** Runs a command that is carried out in the core. */

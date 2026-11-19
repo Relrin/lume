@@ -33,9 +33,17 @@ pub struct StatusValue {
     pub points: Option<Vec<f64>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tone: Option<Tone>,
+    /// One of the theme's colours, by its token's name, as `color.tab.purple`: what
+    /// the item draws is drawn in it, in place of the tone's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     /// What the pointer is told when it rests on the item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<String>,
+    /// The picture beside it: one of the plugin's own, by the name its manifest gives
+    /// it, or one of the application's, by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     /// The rows of the card shown when the pointer rests on the item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub card: Option<Vec<CardRow>>,
@@ -55,12 +63,156 @@ pub enum Tone {
     Danger,
 }
 
-/// One row of a status item's card: a name and what it is.
+/// One row of a status item's card: a name and what it is, perhaps with a line through
+/// its latest values.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CardRow {
     pub label: String,
     pub value: String,
+    /// The latest values, from the oldest to the newest, drawn as a small line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tone: Option<Tone>,
+}
+
+/// One row of a list panel. Rows hold rows of their own, which open beneath them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PanelRow {
+    /// Names the row among its siblings, for the actions run on it.
+    pub id: String,
+    pub label: String,
+    /// A few words after the label, in a quieter colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// One of the plugin's pictures, by the name its manifest gives it, or one of the
+    /// application's, by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// A count or a word at the row's end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub badge: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tone: Option<Tone>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<PanelRow>>,
+    /// Whether its rows are open beneath it at first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<bool>,
+    /// What can be done with the row: each runs one of the plugin's commands, given
+    /// `{ panel, row, path }` (the panel's name, the row's id and the ids from the top
+    /// down to it) and the action's own arguments. The first is what choosing the row
+    /// does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actions: Option<Vec<RowAction>>,
+}
+
+/// Something that can be done with a row of a list panel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RowAction {
+    /// One of the plugin's commands, by the name its manifest gives it.
+    pub command: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PanelsSet {
+    /// The panel, by the name the manifest gives it.
+    pub id: String,
+    pub rows: Vec<PanelRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PanelId {
+    pub id: String,
+}
+
+/// What the machine is doing, as one reading has it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricsSample {
+    /// How busy the processor is, from 0 to 1, over all its cores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<f64>,
+    /// How much memory is used, in bytes, of how much there is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryUsage>,
+    /// What the graphics card is doing, where it can be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<GpuReading>,
+    /// How fast the network goes, in bytes a second, over the hardware interfaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<NetworkRates>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MemoryUsage {
+    pub used: u64,
+    pub total: u64,
+}
+
+/// What the graphics card is doing: `unavailable` where there is no way to read it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GpuReading {
+    /// `read` or `unavailable`.
+    pub state: String,
+    /// How busy its busiest engine is, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub busy: Option<f64>,
+    /// How much of its own memory is used, in bytes; the whole is not known for a card
+    /// that shares the system's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<GpuMemoryUsage>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GpuMemoryUsage {
+    pub used: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct NetworkRates {
+    pub received: f64,
+    pub sent: f64,
+}
+
+/// What a reading of the machine can be asked for.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum MetricKind {
+    Cpu,
+    Memory,
+    Gpu,
+    Network,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsSubscribe {
+    pub kinds: Vec<MetricKind>,
+    /// The plugin's status items, by name, the readings are for: the machine is read
+    /// only while one of them is on screen. Left empty, it is read all the while.
+    #[serde(default)]
+    pub visible: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsUnsubscribe {
+    pub subscription: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]

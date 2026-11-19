@@ -421,7 +421,108 @@ pub struct AppearanceConfig {
             ("spring", "Spring"),
             ("instant", "Instant"),
         ])))]
-    pub tab_highlight: TabHighlight,
+    pub tab_highlight: OrPlugin<TabHighlight>,
+    /// Effects plugins bring for places in the window, each as `<plugin>/<effect>`.
+    /// A place left out moves as Lume's own does.
+    pub motion: MotionChoices,
+}
+
+/// The value of [`crate::accent::FORMAT_KEY`] for something a plugin brings, written
+/// `<plugin>/<name>`.
+pub const CONTRIBUTED_FORMAT: &str = "contributed";
+
+/// Checks the name of something a plugin brings: `<plugin>/<name>`, the plugin's id as
+/// installed and the name its manifest gives the thing.
+pub fn check_contributed(text: &str) -> Result<(), String> {
+    let word = |part: &str| {
+        part.starts_with(|c: char| c.is_ascii_lowercase())
+            && part
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    };
+    let fits = text.split_once('/').is_some_and(|(plugin, name)| {
+        !plugin.is_empty() && plugin.split('.').all(word) && word(name)
+    });
+    if fits {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{text}` is not one of Lume's choices, nor a plugin's written as <plugin>/<name>"
+        ))
+    }
+}
+
+/// Something a plugin brings, by its name: `<plugin>/<name>`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
+pub struct Contributed(pub String);
+
+impl<'de> Deserialize<'de> for Contributed {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        check_contributed(&text).map_err(serde::de::Error::custom)?;
+        Ok(Self(text))
+    }
+}
+
+impl JsonSchema for Contributed {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Contributed".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "description": "Something a plugin brings, as <plugin>/<name>",
+            (crate::accent::FORMAT_KEY): CONTRIBUTED_FORMAT,
+        })
+    }
+}
+
+/// One of Lume's own choices, or one a plugin brings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum OrPlugin<T> {
+    Own(T),
+    Plugin(Contributed),
+}
+
+impl<T: Default> Default for OrPlugin<T> {
+    fn default() -> Self {
+        Self::Own(T::default())
+    }
+}
+
+/// The effects plugins bring for the places in the window, by place. Each is
+/// `<plugin>/<effect>`; a place left out, or whose plugin is not there, moves as Lume's
+/// own does. Every one moves at once while the system asks for less motion.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct MotionChoices {
+    /// How menus open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub menu_enter: Option<Contributed>,
+    /// How a notice appears.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toast_enter: Option<Contributed>,
+    /// How a notice leaves.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub toast_exit: Option<Contributed>,
+    /// How the command palette opens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub palette_enter: Option<Contributed>,
+    /// How a docked panel comes in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub panel_enter: Option<Contributed>,
+    /// How a floating pane appears.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub float_enter: Option<Contributed>,
+    /// How the pill of a pane put away appears.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pill_enter: Option<Contributed>,
+    /// How a status item shows that it changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_change: Option<Contributed>,
 }
 
 /// How the mark on the tab on show moves to another tab. Each moves at once when the
@@ -797,7 +898,8 @@ impl Default for AppearanceConfig {
             tokens: BTreeMap::new(),
             program_icons: BTreeMap::new(),
             tile_color: TileColor::Always,
-            tab_highlight: TabHighlight::Glow,
+            tab_highlight: OrPlugin::Own(TabHighlight::Glow),
+            motion: MotionChoices::default(),
         }
     }
 }
@@ -986,7 +1088,7 @@ pub struct TerminalConfig {
             ("sweep", "Sweep"),
             ("comet", "Comet"),
         ])))]
-    pub cursor_trail: CursorTrail,
+    pub cursor_trail: OrPlugin<CursorTrail>,
     /// What the cursor gives off when it changes shape or moves to another pane. Off
     /// while the system asks for less motion.
     #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Cursor", 40, "Cursor pulse")
@@ -998,7 +1100,7 @@ pub struct TerminalConfig {
             ("box-burst", "Box burst"),
             ("box-ripple", "Box ripple"),
         ])))]
-    pub cursor_pulse: CursorPulse,
+    pub cursor_pulse: OrPlugin<CursorPulse>,
     /// How long the cursor's trail and pulse last, as a share of each effect's own
     /// length: 1 is as designed, 2 twice as long.
     #[schemars(range(min = CURSOR_EFFECT_LENGTH_MIN, max = CURSOR_EFFECT_LENGTH_MAX))]
@@ -1054,8 +1156,8 @@ impl Default for TerminalConfig {
             hidden_release_seconds: HIDDEN_RELEASE_SECONDS_DEFAULT,
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
-            cursor_trail: CursorTrail::None,
-            cursor_pulse: CursorPulse::None,
+            cursor_trail: OrPlugin::Own(CursorTrail::None),
+            cursor_pulse: OrPlugin::Own(CursorPulse::None),
             cursor_effect_length: 1.0,
             padding: None,
             close_on_exit: CloseOnExit::Clean,

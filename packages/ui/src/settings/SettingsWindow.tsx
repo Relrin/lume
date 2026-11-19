@@ -22,6 +22,7 @@ import {
 import { useStore } from "zustand";
 
 import type { KeyBinding } from "../core/types.ts";
+import { Glyph } from "../icons/Glyph.tsx";
 import { chordOf } from "../keys/chord.ts";
 import {
   AppearanceIcon,
@@ -53,11 +54,17 @@ const OPEN_COMMAND = "lume.settings.open";
 /** The parts of the title bar a press is meant for, and so does not move the window. */
 const BAR_CONTROLS = "button, input, select, a";
 
+/** For a window whose schema does not change. */
+const noSubscribe = () => () => undefined;
+
 /** The fields a key is typed into: Escape there is the field's, not the window's. */
 const FIELDS = "input, select, textarea";
 
 /** The drawing for a page's name in the list of pages. */
-function PageIcon({ name }: { name: string }) {
+function PageIcon({ name, image }: { name: string; image?: string | undefined }) {
+  if (image !== undefined) {
+    return <img className="settings-nav-image" src={image} width={15} height={15} alt="" />;
+  }
   switch (name) {
     case "general":
       return <GeneralIcon />;
@@ -65,6 +72,8 @@ function PageIcon({ name }: { name: string }) {
       return <AppearanceIcon />;
     case "terminal":
       return <TerminalIcon size={15} />;
+    case "plugin":
+      return <Glyph name="puzzle" size={15} />;
     default:
       return <CollapseIcon size={15} />;
   }
@@ -140,9 +149,16 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
     app.registry.current,
   );
 
+  // Plugins change what can be set; the window is given the schema again when they do.
+  const readSchema = () => app.schemaStore?.getState().schema ?? app.schema;
+  const schema = useSyncExternalStore(
+    app.schemaStore?.subscribe ?? noSubscribe,
+    readSchema,
+    readSchema,
+  );
   const pages = useMemo(
-    () => (view ? allPages(settingsPages(app.schema, view, lists), registered) : []),
-    [app.schema, view, lists, registered],
+    () => (view ? allPages(settingsPages(schema, view, lists), registered) : []),
+    [schema, view, lists, registered],
   );
   const nav = useMemo(() => navOf(pages), [pages]);
 
@@ -283,7 +299,7 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
                   tabIndex={entry.page.id === current?.id ? 0 : -1}
                   onClick={() => go(entry.page.id)}
                 >
-                  <PageIcon name={entry.page.icon} />
+                  <PageIcon name={entry.page.icon} image={entry.page.image} />
                   <span className="settings-nav-label">{entry.page.label}</span>
                   {entry.page.meta !== undefined && (
                     <span className="settings-nav-meta">{entry.page.meta}</span>

@@ -318,9 +318,151 @@ pub fn resolve_keymap(
     sources: &BTreeMap<String, Source>,
     platform: Platform,
 ) -> Keymap {
+    resolve_keymap_with(config, sources, platform, &[]).0
+}
+
+/// A key a plugin binds by default, as its manifest gives it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PluginBinding {
+    /// The plugin, as installed.
+    pub plugin: String,
+    /// The keys, and the keys on a Mac where they differ.
+    pub keys: String,
+    pub macos: Option<String>,
+    pub command: String,
+    pub args: Value,
+    pub when: Option<String>,
+}
+
+/// A plugin's binding that was left out, and why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Dropped {
+    pub plugin: String,
+    pub message: String,
+}
+
+/// Whether a chord is one a plugin's binding may begin with: with a modifier other than
+/// Shift alone, or a function key, and not one a shell or an editor expects.
+fn fit_for_plugin(chord: &Chord) -> bool {
+    let function = chord
+        .key
+        .strip_prefix('f')
+        .and_then(|number| number.parse::<u8>().ok())
+        .is_some_and(|number| (1..=24).contains(&number));
+    let modified = chord.ctrl || chord.alt || chord.logo;
+    (modified || function) && (!is_shell_key(chord) || function)
+}
+
+/// Whether one sequence of keys is the other or begins it.
+fn shares_keys(one: &KeySequence, other: &KeySequence) -> bool {
+    let (one, other) = (&one.0, &other.0);
+    let shorter = one.len().min(other.len());
+    one[..shorter] == other[..shorter]
+}
+
+/// The defaults of `platform`, the plugins' defaults over them, and the user's bindings
+/// over both. A plugin's binding is left out when its keys are, or begin, or are begun
+/// by, keys the application or the user binds; when they have no modifier and are no
+/// function key; and when a shell or an editor expects them. The second value says
+/// which were left out, and why.
+pub fn resolve_keymap_with(
+    config: &Config,
+    sources: &BTreeMap<String, Source>,
+    platform: Platform,
+    plugins: &[PluginBinding],
+) -> (Keymap, Vec<Dropped>) {
     let mut bindings = default_bindings(platform);
     let mut removed = Vec::new();
     let mut problems = Vec::new();
+    let mut dropped = Vec::new();
+
+    // The keys the user binds, on this platform, for the plugins' to keep clear of.
+    let mut users: Vec<KeySequence> = config
+        .keybindings
+        .all
+        .keys()
+        .chain(config.keybindings.on(platform).keys())
+        .filter_map(|written| KeySequence::parse(written).ok())
+        .collect();
+    users.dedup();
+    let defaults: Vec<KeySequence> = bindings
+        .iter()
+        .map(|binding| binding.keys.clone())
+        .collect();
+    let mut taken: Vec<KeySequence> = Vec::new();
+    for plugin in plugins {
+        let written = match (&plugin.macos, platform) {
+            (Some(macos), Platform::Macos) => macos,
+            _ => &plugin.keys,
+        };
+        let drop = |message: String, dropped: &mut Vec<Dropped>| {
+            dropped.push(Dropped {
+                plugin: plugin.plugin.clone(),
+                message,
+            });
+        };
+        let keys = match KeySequence::parse(written) {
+            Ok(keys) => keys,
+            Err(problem) => {
+                drop(
+                    format!("the key {written} is not bound: {problem}"),
+                    &mut dropped,
+                );
+                continue;
+            }
+        };
+        let when = match plugin.when.as_deref().map(parse_when).transpose() {
+            Ok(when) => when.unwrap_or_default(),
+            Err(problem) => {
+                drop(
+                    format!("the key {written} is not bound: {problem}"),
+                    &mut dropped,
+                );
+                continue;
+            }
+        };
+        if !keys.first().is_some_and(fit_for_plugin) {
+            drop(
+                format!(
+                    "the key {written} is not bound: a plugin's keys begin with Ctrl+Shift, \
+                     the logo key or a function key; programs in a terminal expect the rest"
+                ),
+                &mut dropped,
+            );
+            continue;
+        }
+        if let Some(clash) = defaults.iter().find(|other| shares_keys(&keys, other)) {
+            drop(
+                format!("the key {written} is not bound: Lume binds {clash}"),
+                &mut dropped,
+            );
+            continue;
+        }
+        if let Some(clash) = users.iter().find(|other| shares_keys(&keys, other)) {
+            drop(
+                format!("the key {written} is not bound: you bind {clash}"),
+                &mut dropped,
+            );
+            continue;
+        }
+        if let Some(clash) = taken.iter().find(|other| shares_keys(&keys, other)) {
+            drop(
+                format!("the key {written} is not bound: a plugin before it binds {clash}"),
+                &mut dropped,
+            );
+            continue;
+        }
+        taken.push(keys.clone());
+        bindings.push(Binding {
+            keys,
+            command: plugin.command.clone(),
+            args: plugin.args.clone(),
+            when,
+            source: Source::Plugin {
+                id: plugin.plugin.clone(),
+            },
+        });
+    }
 
     // Everywhere first, then this platform's own. The other platforms' tables change
     // nothing here, but what is wrong in them is said on every platform.
@@ -389,11 +531,14 @@ pub fn resolve_keymap(
             }
         }
     }
-    Keymap {
-        bindings,
-        removed,
-        problems,
-    }
+    (
+        Keymap {
+            bindings,
+            removed,
+            problems,
+        },
+        dropped,
+    )
 }
 
 #[cfg(test)]
@@ -692,6 +837,83 @@ mod tests {
                 "when": ["terminal"],
                 "source": { "layer": "default" },
             })
+        );
+    }
+
+    #[test]
+    fn plugins_bind_keys_between_the_defaults_and_the_users_and_only_keys_no_one_has() {
+        let layered = resolve_layers(&[LayerInput {
+            kind: LayerKind::User,
+            file: PathBuf::from("config.toml"),
+            text: "[keybindings]
+\"ctrl+shift+u\" = \"lume.tab.new\"
+\"ctrl+shift+j\" = \"unbound\"
+"
+            .to_owned(),
+        }]);
+        let binding = |keys: &str| PluginBinding {
+            plugin: "acme.x".to_owned(),
+            keys: keys.to_owned(),
+            macos: Some("cmd+shift+y".to_owned()),
+            command: "acme.x.go".to_owned(),
+            args: Value::Null,
+            when: Some("plugin:acme.x.busy && terminal".to_owned()),
+        };
+        let plugins = [
+            binding("ctrl+shift+y"),
+            binding("ctrl+shift+t"),
+            binding("ctrl+shift+u"),
+            binding("ctrl+shift+j"),
+            binding("ctrl+alt+m"),
+            binding("m"),
+            binding("f7"),
+            binding("ctrl+shift+y ctrl+shift+z"),
+        ];
+        let (keymap, dropped) = resolve_keymap_with(
+            &layered.config,
+            &layered.sources,
+            Platform::Windows,
+            &plugins,
+        );
+        let ours: Vec<String> = keymap
+            .bindings
+            .iter()
+            .filter(|binding| binding.command == "acme.x.go")
+            .map(|binding| binding.keys.to_string())
+            .collect();
+        assert_eq!(ours, ["ctrl+shift+y", "f7"]);
+        let first = keymap
+            .bindings
+            .iter()
+            .find(|binding| binding.command == "acme.x.go")
+            .unwrap();
+        assert_eq!(
+            first.source,
+            Source::Plugin {
+                id: "acme.x".to_owned()
+            }
+        );
+        assert_eq!(write_when(&first.when), "plugin:acme.x.busy && terminal");
+        let why: Vec<&str> = dropped.iter().map(|one| one.message.as_str()).collect();
+        assert_eq!(why.len(), 6, "{why:#?}");
+        assert!(why[0].contains("Lume binds ctrl+shift+t"), "{why:#?}");
+        assert!(why[1].contains("you bind ctrl+shift+u"), "{why:#?}");
+        // A key the user unbinds is the user's too.
+        assert!(why[2].contains("you bind ctrl+shift+j"), "{why:#?}");
+        assert!(why[3].contains("Ctrl+Shift"), "{why:#?}");
+        assert!(why[5].contains("a plugin before it binds"), "{why:#?}");
+        let (mac, dropped) = resolve_keymap_with(
+            &layered.config,
+            &layered.sources,
+            Platform::Macos,
+            &plugins[..1],
+        );
+        let wanted = KeySequence::parse("cmd+shift+y").unwrap();
+        assert!(
+            mac.bindings
+                .iter()
+                .any(|binding| binding.command == "acme.x.go" && binding.keys == wanted),
+            "{dropped:#?}"
         );
     }
 }

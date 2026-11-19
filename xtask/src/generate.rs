@@ -9,7 +9,7 @@
 
 use std::fs;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use lume_config::generate::{GeneratedKind, generated_files};
 
 use crate::paths;
@@ -21,6 +21,7 @@ pub fn write(kind: GeneratedKind, command: &str) -> Result<()> {
     for file in generated_files()
         .into_iter()
         .chain(lume_plugin::manifest::generated_files())
+        .chain(lume_plugin::places::generated_files())
         .chain(lume_plugin_api::generate::generated_files())
         .filter(|file| file.kind == kind)
     {
@@ -40,5 +41,32 @@ pub fn write(kind: GeneratedKind, command: &str) -> Result<()> {
         fs::write(&path, &file.text).with_context(|| format!("writing {}", path.display()))?;
         println!("{command}: wrote {}", file.path);
     }
+    Ok(())
+}
+
+/// Packs `@lume/plugin-api` into `target/plugin-api/`, as a tarball a plugin's own
+/// repository installs its typings from. The typings are the ones generated now.
+pub fn pack_api() -> Result<()> {
+    let root = paths::root();
+    let out = root.join("target").join("plugin-api");
+    fs::create_dir_all(&out).with_context(|| format!("creating {}", out.display()))?;
+    let package = root.join("packages").join("plugin-api");
+    let mut cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.arg("/C").arg("npm");
+        c
+    } else {
+        std::process::Command::new("npm")
+    };
+    cmd.args(["pack", "--pack-destination"])
+        .arg(&out)
+        .current_dir(&package);
+    let status = cmd
+        .status()
+        .context("starting npm, which comes with Node")?;
+    if !status.success() {
+        bail!("npm pack failed in {}", package.display());
+    }
+    println!("api: packed @lume/plugin-api into {}", out.display());
     Ok(())
 }

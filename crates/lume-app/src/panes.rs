@@ -1357,6 +1357,99 @@ impl Panes {
         self.saving.lock().await
     }
 
+    /// Shows a plugin's panel in a window: where it is, if the window has it, or else at
+    /// the end of `area`, the first time. The dock area it is in is opened.
+    pub async fn show_plugin_panel(
+        &self,
+        window: WindowId,
+        id: &str,
+        plugin: &str,
+        view: &str,
+        area: Area,
+    ) -> Result<(), CommandError> {
+        let panel = PanelId::new(id)
+            .map_err(|why| CommandError::bad_request(format!("`{id}` is not a panel id: {why}")))?;
+        let workspace = self.workspace();
+        let dock = &workspace
+            .window(window)
+            .ok_or_else(|| CommandError::not_found(format!("there is no window {window}")))?
+            .dock;
+        let have = [Area::Left, Area::Right, Area::Bottom]
+            .into_iter()
+            .find(|side| {
+                dock.area(*side)
+                    .panels
+                    .iter()
+                    .any(|found| found.id == panel)
+            });
+        let area = match have {
+            Some(side) => side,
+            None => {
+                let index = u32::try_from(dock.area(area).panels.len()).unwrap_or(u32::MAX);
+                self.layout
+                    .apply_core(Intent::PanelSet {
+                        window,
+                        panel,
+                        content: PanelContent::PluginView {
+                            plugin: plugin.to_owned(),
+                            view: view.to_owned(),
+                        },
+                        area: Some(area),
+                        index,
+                    })
+                    .await?;
+                area
+            }
+        };
+        self.layout
+            .apply_core(Intent::PanelToggle {
+                window,
+                area,
+                on: Some(true),
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Takes a plugin's panel out of a window. The list of tabs and the top bar's
+    /// places are not taken out this way.
+    pub async fn close_panel(&self, window: WindowId, id: &str) -> Result<(), CommandError> {
+        let panel = PanelId::new(id)
+            .map_err(|why| CommandError::bad_request(format!("`{id}` is not a panel id: {why}")))?;
+        let workspace = self.workspace();
+        let found = workspace.window(window).and_then(|window| {
+            [Area::Left, Area::Right, Area::Bottom]
+                .into_iter()
+                .find_map(|side| {
+                    window
+                        .dock
+                        .area(side)
+                        .panels
+                        .iter()
+                        .find(|found| found.id == panel)
+                        .cloned()
+                })
+        });
+        let Some(found) = found else {
+            return Ok(());
+        };
+        if !matches!(found.content, PanelContent::PluginView { .. }) {
+            return Err(CommandError::bad_request(
+                "only a plugin's panel is closed this way",
+            ));
+        }
+        self.layout
+            .apply_core(Intent::PanelSet {
+                window,
+                panel,
+                content: found.content,
+                area: None,
+                index: 0,
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Puts the list of tabs where the configuration says it goes, in every window: in
     /// a panel at the left or the right, or in no panel when the tabs are in the bar at
     /// the top.

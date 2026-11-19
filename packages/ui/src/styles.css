@@ -200,7 +200,8 @@
   .app-menu-fold {
     display: grid;
     grid-template-columns: 0fr;
-    transition: grid-template-columns 220ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition: grid-template-columns var(--lume-motion-duration-slow)
+      var(--lume-motion-easing-standard);
   }
 
   .app-menu-fold[data-open="true"] {
@@ -216,13 +217,13 @@
     height: 30px;
     opacity: 0;
     white-space: nowrap;
-    transition: opacity 140ms ease-out;
+    transition: opacity var(--lume-motion-duration-base) var(--lume-motion-easing-exit);
   }
 
   .app-menu-fold[data-open="true"] > .app-menu-bar {
     padding: 0 2px 0 6px;
     opacity: 1;
-    transition-delay: 40ms;
+    transition-delay: var(--lume-motion-duration-instant);
   }
 
   .app-menu-name {
@@ -234,8 +235,8 @@
     font-size: 12.5px;
     cursor: pointer;
     transition:
-      background-color 120ms ease,
-      color 120ms ease;
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .app-menu-name:hover,
@@ -264,7 +265,7 @@
     padding: 5px;
     border-radius: var(--lume-radius-card);
     transform-origin: 16px 0;
-    animation: menu-in 200ms cubic-bezier(0.23, 1, 0.32, 1);
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
   }
 
   .app-menu-drop .menu-item {
@@ -288,7 +289,7 @@
     top: -5px;
     padding: 5px;
     border-radius: var(--lume-radius-card);
-    animation: menu-in 200ms cubic-bezier(0.23, 1, 0.32, 1);
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
   }
 
   @keyframes menu-in {
@@ -329,7 +330,7 @@
     border: var(--lume-size-border) solid var(--lume-color-border);
     border-radius: var(--lume-radius-control);
     cursor: pointer;
-    transition: background-color 120ms ease;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .switcher-button:hover,
@@ -586,8 +587,8 @@
     border-radius: calc(var(--lume-radius-control) - 2px);
     cursor: pointer;
     transition:
-      background-color 120ms ease,
-      color 120ms ease;
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .control:hover,
@@ -601,6 +602,146 @@
   .empty-action:focus-visible {
     outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
     outline-offset: 1px;
+  }
+
+  /* A plugin's motion plays in place of the element's own animation. */
+  [data-motion="plugin"] {
+    animation: none !important;
+  }
+
+  /* The room a picture would take in a menu whose other rows have one. */
+  .menu-icon-blank {
+    display: block;
+    width: 14px;
+    height: 14px;
+  }
+
+  /* A picture a plugin's thing shows. */
+  .plugin-icon-image {
+    display: block;
+    flex-shrink: 0;
+    object-fit: contain;
+  }
+
+  .plugin-icon-mask {
+    display: inline-block;
+    flex-shrink: 0;
+    background-color: currentColor;
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: contain;
+  }
+
+  .plugin-icon-dot {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    margin: 0 4px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* A plugin's status item that runs a command or opens a menu. */
+  .status-button {
+    height: 24px;
+    margin: 0 -6px;
+    padding: 0 6px;
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    cursor: pointer;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .status-button:hover,
+  .status-button[aria-expanded="true"] {
+    @apply bg-control-hover;
+  }
+
+  .status-button:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
+
+  .status-picture {
+    display: flex;
+    color: var(--status-tone);
+  }
+
+  /* An item of a plugin whose code was stopped is held up, and says why when asked. */
+  .status-item[data-problem] {
+    opacity: 0.6;
+  }
+
+  .status-problem {
+    display: flex;
+    color: var(--lume-color-status-warning);
+  }
+
+  /* The card of a status item, under it while the pointer rests on the item. */
+  .status-card {
+    position: fixed;
+    z-index: 50;
+    display: grid;
+    gap: 5px;
+    width: 240px;
+    padding: 9px 11px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-card);
+    background: var(--lume-color-popover);
+    box-shadow: var(--lume-shadow-popover);
+    font-size: 12px;
+    pointer-events: none;
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  .status-card-title {
+    @apply text-ink;
+    margin-bottom: 2px;
+    font-weight: 600;
+  }
+
+  .status-card-row {
+    @apply text-ink-muted;
+    --status-tone: var(--lume-color-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-card-row[data-tone="info"] {
+    --status-tone: var(--lume-color-status-info);
+  }
+
+  .status-card-row[data-tone="success"] {
+    --status-tone: var(--lume-color-status-success);
+  }
+
+  .status-card-row[data-tone="warning"] {
+    --status-tone: var(--lume-color-status-warning);
+  }
+
+  .status-card-row[data-tone="danger"] {
+    --status-tone: var(--lume-color-status-danger);
+  }
+
+  .status-card-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .status-card-value {
+    @apply text-ink;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .status-card {
+      animation: none;
+    }
   }
 
   /* The tabs. */
@@ -637,7 +778,7 @@
     height: var(--lume-size-tab);
     border-radius: var(--lume-radius-control);
     touch-action: pan-y;
-    transition: background-color 120ms ease;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .tab:hover {
@@ -922,12 +1063,12 @@
    */
   .tab {
     transition:
-      background-color 120ms ease,
-      scale 140ms cubic-bezier(0.23, 1, 0.32, 1),
-      max-width 220ms cubic-bezier(0.23, 1, 0.32, 1),
-      min-width 220ms cubic-bezier(0.23, 1, 0.32, 1),
-      opacity 180ms cubic-bezier(0.23, 1, 0.32, 1),
-      margin 160ms cubic-bezier(0.23, 1, 0.32, 1);
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      scale var(--lume-motion-duration-base) var(--lume-motion-easing-standard),
+      max-width var(--lume-motion-duration-slow) var(--lume-motion-easing-standard),
+      min-width var(--lume-motion-duration-slow) var(--lume-motion-easing-standard),
+      opacity var(--lume-motion-duration-base) var(--lume-motion-easing-standard),
+      margin var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
   }
 
   .tab[data-folded="true"] {
@@ -937,7 +1078,10 @@
     overflow: hidden;
     opacity: 0;
     pointer-events: none;
-    transition-duration: 140ms, 140ms, 220ms, 220ms, 120ms, 160ms;
+    transition-duration:
+      var(--lume-motion-duration-base), var(--lume-motion-duration-base),
+      var(--lume-motion-duration-slow), var(--lume-motion-duration-slow),
+      var(--lume-motion-duration-fast), var(--lume-motion-duration-base);
   }
 
   /* The line in a group's colour under its label and its tabs. */
@@ -950,9 +1094,9 @@
     background-color: var(--group-color);
     pointer-events: none;
     transition:
-      opacity 150ms ease,
-      height 150ms ease,
-      bottom 150ms ease;
+      opacity var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      height var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      bottom var(--lume-motion-duration-base) var(--lume-motion-easing-exit);
   }
 
   .tab[data-group-last] > .tab-group-line {
@@ -983,12 +1127,12 @@
     touch-action: pan-y;
     cursor: pointer;
     transition:
-      background-color 150ms ease,
-      color 150ms ease,
-      scale 120ms cubic-bezier(0.23, 1, 0.32, 1),
-      margin 160ms cubic-bezier(0.23, 1, 0.32, 1),
-      box-shadow 150ms ease,
-      opacity 150ms ease;
+      background-color var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      color var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard),
+      margin var(--lume-motion-duration-base) var(--lume-motion-easing-standard),
+      box-shadow var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      opacity var(--lume-motion-duration-base) var(--lume-motion-easing-exit);
   }
 
   .tab-group-label:hover {
@@ -1047,7 +1191,8 @@
   .tab-group-count {
     display: grid;
     grid-template-columns: 0fr;
-    transition: grid-template-columns 220ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition: grid-template-columns var(--lume-motion-duration-slow)
+      var(--lume-motion-easing-standard);
   }
 
   .tab-group-label[data-collapsed] .tab-group-count {
@@ -1199,7 +1344,7 @@
     border-radius: var(--lume-radius-control);
     pointer-events: none;
     will-change: transform;
-    transition: --mark-press 140ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition: --mark-press var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
   }
 
   .tab-list:not([data-moving]) .tab-mark {
@@ -1337,7 +1482,7 @@
     max-width: none;
     max-height: var(--anchored-room);
     transform-origin: var(--anchored-origin);
-    animation: menu-in 200ms cubic-bezier(0.23, 1, 0.32, 1);
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -1387,7 +1532,7 @@
     flex-shrink: 0;
     border-radius: 50%;
     cursor: pointer;
-    transition: scale 120ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition: scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
   }
 
   .menu-swatch:active {
@@ -1471,8 +1616,8 @@
     color: var(--group-color);
     cursor: pointer;
     transition:
-      border-color 150ms ease,
-      scale 120ms cubic-bezier(0.23, 1, 0.32, 1);
+      border-color var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
   }
 
   .group-editor-picture:active {
@@ -1521,7 +1666,8 @@
   .group-editor-workspaces {
     display: grid;
     grid-template-rows: 0fr;
-    transition: grid-template-rows 180ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition: grid-template-rows var(--lume-motion-duration-base)
+      var(--lume-motion-easing-standard);
   }
 
   .group-editor-icons[data-open="true"],
@@ -1571,7 +1717,7 @@
     flex-shrink: 0;
     border-radius: 50%;
     cursor: pointer;
-    transition: scale 120ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition: scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
   }
 
   .group-editor-color:active {
@@ -1611,7 +1757,7 @@
   }
 
   .group-editor-chevron {
-    transition: rotate 180ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition: rotate var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
   }
 
   .group-editor-row[aria-expanded="true"] .group-editor-chevron {
@@ -1731,7 +1877,7 @@
     position: absolute;
     border-radius: min(2px, var(--lume-radius-control));
     background: transparent;
-    transition: background-color 120ms ease;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .dock-area[data-area="left"] > .dock-resize::after,
@@ -1834,6 +1980,163 @@
   .panel-button {
     width: 24px;
     height: 24px;
+  }
+
+  .panel-icon {
+    @apply text-ink-muted;
+    display: flex;
+  }
+
+  /* A plugin's list panel: rows in a tree, only those in sight made. */
+  .list-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .list-panel-rows {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    outline: none;
+  }
+
+  .list-panel-space {
+    position: relative;
+  }
+
+  .list-panel-empty,
+  .list-panel-problem {
+    @apply text-ink-muted;
+    padding: 10px 8px;
+    font-size: 12px;
+  }
+
+  .list-panel-problem {
+    color: var(--lume-color-status-warning);
+  }
+
+  .list-row {
+    @apply text-ink;
+    --status-tone: var(--lume-color-text-muted);
+    position: absolute;
+    right: 0;
+    left: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding-right: 6px;
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    font-size: 12.5px;
+    white-space: nowrap;
+    cursor: default;
+  }
+
+  .list-row:hover {
+    @apply bg-control-hover;
+  }
+
+  .list-row[data-active] {
+    background: color-mix(in srgb, var(--lume-color-accent) 14%, transparent);
+  }
+
+  .list-panel-rows:focus-visible .list-row[data-active] {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: -1px;
+  }
+
+  .list-row[data-tone="info"] {
+    --status-tone: var(--lume-color-status-info);
+  }
+
+  .list-row[data-tone="success"] {
+    --status-tone: var(--lume-color-status-success);
+  }
+
+  .list-row[data-tone="warning"] {
+    --status-tone: var(--lume-color-status-warning);
+  }
+
+  .list-row[data-tone="danger"] {
+    --status-tone: var(--lume-color-status-danger);
+  }
+
+  .list-row-fold {
+    display: flex;
+    flex-shrink: 0;
+    width: 14px;
+  }
+
+  .list-row-chevron {
+    @apply text-ink-muted;
+    display: flex;
+    transition: rotate var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
+  }
+
+  .list-row-chevron[data-open] {
+    rotate: 90deg;
+  }
+
+  .list-row-icon {
+    display: flex;
+    color: var(--status-tone);
+  }
+
+  .list-row-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .list-row-detail {
+    @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+  }
+
+  .list-row-badge {
+    flex-shrink: 0;
+    padding: 0 5px;
+    border-radius: min(5px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--status-tone) 14%, transparent);
+    color: var(--status-tone);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .list-row-actions {
+    display: none;
+    flex-shrink: 0;
+    gap: 2px;
+    margin-left: auto;
+  }
+
+  .list-row:hover .list-row-actions,
+  .list-row[data-active] .list-row-actions {
+    display: flex;
+  }
+
+  .list-row-action {
+    height: 20px;
+    min-width: 20px;
+    padding: 0 4px;
+  }
+
+  .list-row-action-text {
+    font-size: 11.5px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .list-row-chevron {
+      transition: none;
+    }
   }
 
   .panel-body {
@@ -2302,7 +2605,7 @@
 
   /* A card that begins to float, or comes back from the corner, grows into its place. */
   .pane-card[data-floating="true"] {
-    animation: float-in 220ms cubic-bezier(0.23, 1, 0.32, 1);
+    animation: float-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
   }
 
   @keyframes float-in {
@@ -2345,10 +2648,10 @@
     cursor: pointer;
     pointer-events: auto;
     transform-origin: 100% 100%;
-    animation: pill-in 200ms cubic-bezier(0.23, 1, 0.32, 1);
+    animation: pill-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
     transition:
-      border-color 120ms ease,
-      scale 140ms cubic-bezier(0.23, 1, 0.32, 1);
+      border-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      scale var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
   }
 
   .pane-pill:hover {
@@ -2394,7 +2697,7 @@
   @media (prefers-reduced-motion: reduce) {
     .pane-card[data-floating="true"],
     .pane-pill {
-      animation: fade-in 150ms ease-out;
+      animation: fade-in var(--lume-motion-duration-base) var(--lume-motion-easing-exit);
     }
   }
 
@@ -2508,7 +2811,7 @@
     position: absolute;
     border-radius: min(2px, var(--lume-radius-control));
     background: transparent;
-    transition: background-color 120ms ease;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .divider[data-axis="row"]::after {
@@ -2681,7 +2984,7 @@
     border: var(--lume-size-border) solid var(--lume-color-border);
     border-radius: var(--lume-radius-control);
     box-shadow: var(--lume-shadow-popover);
-    animation: search-in 140ms cubic-bezier(0.23, 1, 0.32, 1);
+    animation: search-in var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
   }
 
   .search-bar:focus-within {
@@ -3155,7 +3458,7 @@
     font-size: 12.5px;
     text-align: left;
     cursor: pointer;
-    transition: background-color 120ms ease;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .settings-nav-item > svg {
@@ -3206,7 +3509,7 @@
     height: 46px;
     padding: 10px 22px 5px;
     border-bottom: var(--lume-size-border) solid transparent;
-    transition: border-color 120ms ease-out;
+    transition: border-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   /* A line under the name once something has scrolled beneath it. */
@@ -3321,7 +3624,8 @@
 
   /* The row a search led to is marked for a moment. */
   .settings-row[data-flash="true"] {
-    animation: settings-flash 1100ms ease-out;
+    animation: settings-flash calc(var(--lume-motion-duration-slow) * 5)
+      var(--lume-motion-easing-exit);
   }
 
   @keyframes settings-flash {
@@ -3338,6 +3642,28 @@
   .settings-label {
     flex: 1;
     min-width: 0;
+  }
+
+  .settings-label > div:first-child {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  /* Which plugin a row among the application's own comes from. */
+  .settings-from {
+    @apply text-ink-muted;
+    padding: 0 5px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: min(5px, var(--lume-radius-control));
+    font-size: 10.5px;
+    font-weight: 400;
+    white-space: nowrap;
+  }
+
+  .settings-nav-image {
+    flex-shrink: 0;
+    object-fit: contain;
   }
 
   .settings-label > div:first-child {
@@ -3371,7 +3697,7 @@
     border-radius: min(10px, var(--lume-radius-control));
     background: var(--settings-off);
     cursor: pointer;
-    transition: background-color 160ms ease-out;
+    transition: background-color var(--lume-motion-duration-base) var(--lume-motion-easing-exit);
   }
 
   .settings-switch::after {
@@ -3384,7 +3710,7 @@
     height: 16px;
     border-radius: min(50%, var(--lume-radius-control));
     box-shadow: 0 1px 2px var(--lume-color-overlay);
-    transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition: transform var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
   }
 
   .settings-switch[aria-checked="true"] {
@@ -3498,7 +3824,7 @@
     border-radius: 50%;
     background: var(--swatch);
     cursor: pointer;
-    transition: scale 120ms cubic-bezier(0.23, 1, 0.32, 1);
+    transition: scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
   }
 
   /* The user's own colour before one is chosen: a ring of the hues it may be. */
@@ -3615,7 +3941,7 @@
     height: 24px;
     border-radius: min(6px, var(--lume-radius-control));
     cursor: pointer;
-    transition: background-color 120ms ease-out;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .settings-reset:hover {
@@ -3637,7 +3963,7 @@
     font-size: 12.5px;
     white-space: nowrap;
     cursor: pointer;
-    transition: background-color 120ms ease-out;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .settings-button:hover {
@@ -3831,8 +4157,8 @@
     font-size: 11px;
     cursor: pointer;
     transition:
-      background-color 120ms ease,
-      color 120ms ease;
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .connect-chip:hover {
@@ -4101,8 +4427,8 @@
     border-radius: calc(var(--lume-radius-control) - 1px);
     cursor: pointer;
     transition:
-      background-color 120ms ease,
-      filter 120ms ease;
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      filter var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
   .connect-primary {

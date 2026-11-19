@@ -10,15 +10,24 @@
 //! application, and when the operating system changes between its light and dark
 //! schemes. Each of these ends in the same place: the view is made again and, if it
 //! came out different, every page is told.
+//!
+//! Plugins add to the configuration too: themes to choose from, keys between the
+//! application's and the user's, and the tables of their own settings, which become a
+//! part of the schema the settings window draws from. Those come from the plugins'
+//! manager whenever what is installed changes, and make the view again like any other
+//! change.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use lume_config::schema::TitleBar;
+use lume_config::source::{join_path, split_path};
 use lume_config::{
-    ColorScheme, ConfigError, ConfigStore, Dirs, Platform, Problem, Resolved, TokenValue,
-    WatchEvent, Watcher, resolve_tokens,
+    ColorScheme, ConfigError, ConfigStore, Dirs, Dropped, Keymap, Platform, PluginBinding, Problem,
+    ProblemKind, Resolved, Theme, Themes, TokenValue, WatchEvent, Watcher, check_value,
+    resolve_keymap_with, resolve_tokens,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -38,6 +47,22 @@ pub struct ThemeEntry {
     pub scheme: ColorScheme,
     /// Whether it comes with the application, not from a file of the user's.
     pub builtin: bool,
+    /// The plugin it comes from, by the id it is installed under, if it does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+}
+
+/// What the plugins add to the configuration.
+#[derive(Clone, Debug, Default)]
+pub struct PluginConfig {
+    pub themes: Vec<Theme>,
+    pub keys: Vec<PluginBinding>,
+    /// The schema of each one's table of settings, by install.
+    pub fragments: BTreeMap<String, serde_json::Value>,
+    /// The configuration's schema with the plugins' parts in it.
+    pub schema: Option<Arc<Value>>,
+    /// The installs that are turned on, whose settings' problems are said.
+    pub enabled: BTreeSet<String>,
 }
 
 /// Takes what pages are to be told.
@@ -55,6 +80,12 @@ pub struct ConfigService {
     told: Mutex<Value>,
     tell: OnceLock<Tell>,
     watcher: Mutex<Option<Watcher>>,
+    plugins: Mutex<PluginConfig>,
+    /// Counts the schemas the settings window has been given: it reads the schema again
+    /// when this changes.
+    schema_revision: AtomicU64,
+    /// The plugins' keys that were left out when the keys were last worked out.
+    dropped: Mutex<Vec<Dropped>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -101,6 +132,9 @@ impl ConfigService {
             told: Mutex::new(Value::Null),
             tell: OnceLock::new(),
             watcher: Mutex::new(None),
+            plugins: Mutex::new(PluginConfig::default()),
+            schema_revision: AtomicU64::new(1),
+            dropped: Mutex::new(Vec::new()),
         };
         *lock(&service.told) = service.body();
         Arc::new(service)
@@ -116,17 +150,88 @@ impl ConfigService {
         self.store.dirs()
     }
 
+    /// The themes there are: the configuration's and the plugins'.
+    fn all_themes(&self, resolved: &Resolved) -> Themes {
+        let plugins = lock(&self.plugins);
+        if plugins.themes.is_empty() {
+            return resolved.themes.clone();
+        }
+        let mut themes = resolved.themes.clone();
+        for theme in &plugins.themes {
+            themes.insert(theme.clone());
+        }
+        themes
+    }
+
+    /// The keys in effect: the application's, the plugins', the user's.
+    fn keymap(&self, resolved: &Resolved) -> Keymap {
+        let keys = lock(&self.plugins).keys.clone();
+        let (keymap, dropped) =
+            resolve_keymap_with(&resolved.config, &resolved.sources, self.platform, &keys);
+        *lock(&self.dropped) = dropped;
+        keymap
+    }
+
+    /// What is wrong with the settings of plugins that are turned on: a key a plugin
+    /// does not have, or a value it does not take. An installed plugin's table is used
+    /// for what is right in it; a table of a plugin that is not installed is kept as it
+    /// is, and nothing is said of it.
+    fn plugin_problems(&self, resolved: &Resolved) -> Vec<Problem> {
+        let plugins = lock(&self.plugins);
+        let mut problems = Vec::new();
+        for (local, table) in &resolved.config.plugins {
+            let Some(fragment) = plugins.fragments.get(local) else {
+                continue;
+            };
+            if !plugins.enabled.contains(local) {
+                continue;
+            }
+            let Some(table) = table.as_object() else {
+                continue;
+            };
+            for (key, value) in table {
+                let path = join_path(&["plugins", local.as_str(), key.as_str()]);
+                let source = resolved.sources.get(&path);
+                let (file, line) = source
+                    .and_then(|source| source.location())
+                    .map_or((None, 0), |(file, line)| (Some(file.clone()), line));
+                let (kind, message) = match fragment.pointer(&format!("/properties/{key}")) {
+                    None => (ProblemKind::UnknownKey, format!("unknown key `{path}`")),
+                    Some(schema) => match check_value(value, schema) {
+                        Ok(()) => continue,
+                        Err(message) => (ProblemKind::InvalidValue, format!("`{path}`: {message}")),
+                    },
+                };
+                problems.push(Problem {
+                    kind,
+                    path,
+                    file,
+                    line,
+                    column: 0,
+                    message,
+                    suggestion: None,
+                });
+            }
+        }
+        problems.sort_by(|one, other| one.path.cmp(&other.path));
+        problems
+    }
+
     /// A view without its revision.
     fn body(&self) -> Value {
         let resolved = self.store.current();
         let scheme = *lock(&self.scheme);
-        let (tokens, token_problems) = resolved.tokens(scheme);
-        let keymap = resolved.keymap(self.platform);
+        let themes = self.all_themes(&resolved);
+        let (tokens, token_problems) =
+            resolve_tokens(&resolved.config, &resolved.sources, &themes, scheme);
+        let keymap = self.keymap(&resolved);
+        let plugin_problems = self.plugin_problems(&resolved);
         let problems: Vec<&Problem> = resolved
             .problems
             .iter()
             .chain(&token_problems)
             .chain(&keymap.problems)
+            .chain(&plugin_problems)
             .collect();
         let title_bar = resolved.config.window.title_bar_on(self.platform);
         json!({
@@ -139,6 +244,7 @@ impl ConfigService {
             "problems": problems,
             "tokens": tokens.to_json(),
             "keymap": { "bindings": keymap.bindings },
+            "schema_revision": self.schema_revision.load(Ordering::Relaxed),
         })
     }
 
@@ -167,7 +273,14 @@ impl ConfigService {
             let mut changed = Vec::new();
             differing("", &told["config"], &body["config"], &mut changed);
             // What is not a setting but changes what a page draws.
-            for part in ["scheme", "theme", "tokens", "keymap", "problems"] {
+            for part in [
+                "scheme",
+                "theme",
+                "tokens",
+                "keymap",
+                "problems",
+                "schema_revision",
+            ] {
                 if told[part] != body[part] {
                     changed.push(part.to_owned());
                 }
@@ -253,11 +366,92 @@ impl ConfigService {
         }
     }
 
-    /// Sets one setting in the user's file.
+    /// Sets one setting in the user's file. A setting of an installed plugin is held
+    /// to what the plugin's manifest says of it.
     pub fn set(&self, path: &str, value: &Value) -> Result<(), ConfigError> {
+        self.check_plugin_setting(path, value)?;
         self.store.set(path, value)?;
         self.announce();
         Ok(())
+    }
+
+    fn check_plugin_setting(&self, path: &str, value: &Value) -> Result<(), ConfigError> {
+        let Ok(segments) = split_path(path) else {
+            return Ok(());
+        };
+        let [section, local, key] = segments.as_slice() else {
+            return Ok(());
+        };
+        if section != "plugins" {
+            return Ok(());
+        }
+        let plugins = lock(&self.plugins);
+        let Some(fragment) = plugins.fragments.get(local) else {
+            return Ok(());
+        };
+        let Some(schema) = fragment.pointer(&format!("/properties/{key}")) else {
+            return Err(ConfigError::UnknownKey {
+                path: path.to_owned(),
+                suggestion: None,
+            });
+        };
+        check_value(value, schema).map_err(|message| ConfigError::InvalidValue {
+            path: path.to_owned(),
+            message,
+        })
+    }
+
+    /// Takes in what the plugins add, and tells the pages if the view changes.
+    pub fn set_plugins(&self, config: PluginConfig) {
+        {
+            let mut plugins = lock(&self.plugins);
+            let schema_changed = plugins.schema != config.schema;
+            *plugins = config;
+            if schema_changed {
+                self.schema_revision.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        self.announce();
+    }
+
+    /// The schema of the settings, with the plugins' parts in it.
+    pub fn schema(&self) -> Value {
+        match &lock(&self.plugins).schema {
+            Some(schema) => (**schema).clone(),
+            None => lume_config::config_schema().clone(),
+        }
+    }
+
+    /// The plugins' keys that were left out, and why.
+    pub fn dropped_keys(&self) -> Vec<Dropped> {
+        lock(&self.dropped).clone()
+    }
+
+    /// A plugin's settings as they stand: what the user set where it is a value the
+    /// plugin takes, over the defaults its manifest gives.
+    pub fn plugin_settings(&self, local: &str) -> Value {
+        let fragment = lock(&self.plugins).fragments.get(local).cloned();
+        let Some(fragment) = fragment else {
+            return Value::Object(Map::new());
+        };
+        let mut settings = Map::new();
+        let properties = fragment
+            .get("properties")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let current = self.current();
+        let set = current.config.plugins.get(local).and_then(Value::as_object);
+        for (key, schema) in &properties {
+            let chosen = set
+                .and_then(|set| set.get(key))
+                .filter(|value| check_value(value, schema).is_ok())
+                .or_else(|| schema.get("default"));
+            if let Some(value) = chosen {
+                settings.insert(key.clone(), value.clone());
+            }
+        }
+        Value::Object(settings)
     }
 
     /// Takes one setting out of the user's file, so its default holds again.
@@ -277,14 +471,23 @@ impl ConfigService {
     /// The themes there are: the ones that come with the application and the user's
     /// own, in the order of their ids.
     pub fn themes(&self) -> Vec<ThemeEntry> {
-        self.current()
+        let resolved = self.current();
+        let plugins: BTreeMap<String, String> = lock(&self.plugins)
             .themes
+            .iter()
+            .filter_map(|theme| {
+                let (local, _) = theme.id.split_once('/')?;
+                Some((theme.id.clone(), local.to_owned()))
+            })
+            .collect();
+        self.all_themes(&resolved)
             .iter()
             .map(|theme| ThemeEntry {
                 id: theme.id.clone(),
                 name: theme.name.clone(),
                 scheme: theme.scheme,
                 builtin: theme.file.is_none(),
+                plugin: plugins.get(&theme.id).cloned(),
             })
             .collect()
     }
@@ -294,18 +497,26 @@ impl ConfigService {
     /// theme's colour scheme, as a page is told them. `None` when there is no such theme.
     pub fn look_with_theme(&self, id: &str) -> Option<Value> {
         let resolved = self.current();
-        resolved.themes.get(id)?;
+        let themes = self.all_themes(&resolved);
+        themes.get(id)?;
         let mut config = resolved.config.clone();
         config.appearance.theme = Some(id.to_owned());
         let scheme = *lock(&self.scheme);
-        let (tokens, _) = resolve_tokens(&config, &resolved.sources, &resolved.themes, scheme);
+        let (tokens, _) = resolve_tokens(&config, &resolved.sources, &themes, scheme);
         Some(json!({ "scheme": tokens.scheme, "tokens": tokens.to_json() }))
     }
 
     /// The file of the picture shown behind the panes, if the theme in use or the
     /// settings name one.
     pub fn background_file(&self) -> Option<PathBuf> {
-        let (tokens, _) = self.current().tokens(*lock(&self.scheme));
+        let resolved = self.current();
+        let themes = self.all_themes(&resolved);
+        let (tokens, _) = resolve_tokens(
+            &resolved.config,
+            &resolved.sources,
+            &themes,
+            *lock(&self.scheme),
+        );
         match tokens.get(BACKGROUND_IMAGE)? {
             TokenValue::Image(Some(written)) => {
                 Some(background::resolve(&self.dirs().config, written))
@@ -368,6 +579,96 @@ mod tests {
             serde_json::to_value(&listed[2]).unwrap(),
             json!({ "id": "lume-light", "name": listed[2].name, "scheme": "light", "builtin": true })
         );
+    }
+
+    #[test]
+    fn what_plugins_add_is_in_the_view_and_their_settings_are_held_to_their_schema() {
+        let dir = TempDir::new("plugins");
+        std::fs::create_dir_all(&dir.dirs().config).unwrap();
+        std::fs::write(
+            dir.dirs().config_file(),
+            "[plugins.\"acme.meters\"]\nrate = 9\ncpu = false\nbogus = 1\n\n[plugins.\"gone.x\"]\nkept = true\n",
+        )
+        .unwrap();
+        let service = ConfigService::load(dir.dirs(), None);
+        let fragment = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "cpu": { "type": "boolean", "default": true },
+                "rate": { "type": "integer", "default": 2, "enum": [1, 2, 5] },
+            },
+        });
+        let (theme, _) = lume_config::parse_theme(
+            "acme.meters/night",
+            "name = \"Night\"\ninherits = \"lume-dark\"\n",
+            None,
+        )
+        .unwrap();
+        let mut fragments = BTreeMap::new();
+        fragments.insert("acme.meters".to_owned(), fragment);
+        let before = service.view()["schema_revision"].clone();
+        service.set_plugins(PluginConfig {
+            themes: vec![theme],
+            keys: vec![PluginBinding {
+                plugin: "acme.meters".to_owned(),
+                keys: "ctrl+shift+y".to_owned(),
+                macos: None,
+                command: "acme.meters.refresh".to_owned(),
+                args: Value::Null,
+                when: None,
+            }],
+            fragments,
+            schema: Some(Arc::new(json!({ "composed": true }))),
+            enabled: ["acme.meters".to_owned()].into_iter().collect(),
+        });
+        let view = service.view();
+        assert_ne!(view["schema_revision"], before);
+        assert_eq!(service.schema(), json!({ "composed": true }));
+        assert!(
+            view["keymap"]["bindings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|binding| binding["command"] == "acme.meters.refresh")
+        );
+        let problems: Vec<&str> = view["problems"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|problem| problem["path"].as_str())
+            .collect();
+        assert_eq!(
+            problems,
+            [
+                "plugins.\"acme.meters\".bogus",
+                "plugins.\"acme.meters\".rate"
+            ]
+        );
+        // A value the plugin does not take falls back to its default.
+        assert_eq!(
+            service.plugin_settings("acme.meters"),
+            json!({ "cpu": false, "rate": 2 })
+        );
+        assert!(
+            service
+                .themes()
+                .iter()
+                .any(|theme| theme.id == "acme.meters/night"
+                    && theme.plugin.as_deref() == Some("acme.meters"))
+        );
+        assert!(matches!(
+            service.set("plugins.\"acme.meters\".rate", &json!(3)),
+            Err(ConfigError::InvalidValue { .. })
+        ));
+        assert!(matches!(
+            service.set("plugins.\"acme.meters\".nope", &json!(3)),
+            Err(ConfigError::UnknownKey { .. })
+        ));
+        service
+            .set("plugins.\"acme.meters\".rate", &json!(5))
+            .unwrap();
+        assert_eq!(service.plugin_settings("acme.meters")["rate"], 5);
     }
 
     #[test]

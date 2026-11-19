@@ -8,8 +8,9 @@
  * knows: its themes, fonts, shells, workspaces and profiles.
  *
  * A page is plain data, so a page that does not come from the schema can be drawn by
- * the same window. Nothing here touches the page, so all of it is tested with plain
- * objects.
+ * the same window. Plugins' settings come the same way: their rows on the plugins' own
+ * pages, and among the application's rows with the name of the plugin they are from.
+ * Nothing here touches the page, so all of it is tested with plain objects.
  */
 
 import type { ComponentType } from "react";
@@ -56,6 +57,8 @@ export interface SettingAnnotation {
   readonly platform?: string;
   /** The colours a swatch row offers, as the schema says them. */
   readonly swatches?: readonly SwatchAnnotation[];
+  /** The plugin the setting is from, by what the user calls it. */
+  readonly plugin?: string;
 }
 
 /** A colour a swatch row offers: its value, its name and how it looks on each scheme. */
@@ -95,6 +98,10 @@ export interface PageAnnotation {
   readonly blurb: string;
   /** The page's headings, in the order they are shown. */
   readonly groups: readonly string[];
+  /** A version, or a word or two, beside the page's name. */
+  readonly meta?: string;
+  /** A picture for the page's name, as a `data:` address. */
+  readonly image?: string;
 }
 
 /** One thing a setting can be set to. `null` takes the setting out of the file. */
@@ -132,6 +139,8 @@ export interface SettingRow {
   readonly problem?: string;
   /** Whether the row is shown, given what other settings are. */
   readonly shown: boolean;
+  /** The plugin the setting is from, on a page of the application's. */
+  readonly plugin?: string;
 }
 
 /** The rows under one heading. */
@@ -150,6 +159,8 @@ export interface SettingsPage {
   readonly group: string;
   /** A version, or another word or two shown beside the page's name. */
   readonly meta?: string;
+  /** A picture for the page's name, as a `data:` address, for a plugin's page. */
+  readonly image?: string;
   readonly blurb: string;
   readonly groups: readonly SettingsGroup[];
   /** What the page shows in the column beside its rows, if it shows anything there. */
@@ -209,6 +220,50 @@ function text(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/** Whether a key is written as it is in a setting's path, without quotes. */
+function isBare(segment: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(segment);
+}
+
+/**
+ * A setting's path from its keys, as the core writes it: joined by dots, a key that
+ * holds anything else quoted, as in `plugins."acme.metrics".rate`.
+ */
+export function joinPath(segments: readonly string[]): string {
+  return segments
+    .map((segment) =>
+      isBare(segment) ? segment : `"${segment.replace(/["\\]/g, (found) => `\\${found}`)}"`,
+    )
+    .join(".");
+}
+
+/** The keys of a setting's path, as `joinPath` writes it. */
+export function splitPath(path: string): string[] {
+  const segments: string[] = [];
+  let at = 0;
+  while (at <= path.length) {
+    let segment = "";
+    if (path[at] === '"') {
+      at++;
+      while (at < path.length && path[at] !== '"') {
+        if (path[at] === "\\") at++;
+        segment += path[at] ?? "";
+        at++;
+      }
+      at++;
+    } else {
+      while (at < path.length && path[at] !== ".") {
+        segment += path[at];
+        at++;
+      }
+    }
+    segments.push(segment);
+    if (path[at] !== ".") break;
+    at++;
+  }
+  return segments;
+}
+
 function finite(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -264,6 +319,7 @@ function annotationOf(raw: unknown): SettingAnnotation | undefined {
   const step = finite(raw["step"]);
   const scale = finite(raw["scale"]);
   const platform = text(raw["platform"]);
+  const plugin = text(raw["plugin"]);
   return {
     page,
     group,
@@ -280,6 +336,7 @@ function annotationOf(raw: unknown): SettingAnnotation | undefined {
     ...(scale === undefined ? {} : { scale }),
     ...(platform === undefined ? {} : { platform }),
     ...(swatches === undefined ? {} : { swatches }),
+    ...(plugin === undefined ? {} : { plugin }),
     ...(isObject(when) &&
     typeof when["path"] === "string" &&
     (when["is"] === "unset" || when["is"] === "set" || when["is"] === "on")
@@ -294,6 +351,8 @@ function pageOf(raw: unknown): PageAnnotation | undefined {
   if (typeof id !== "string" || typeof label !== "string" || typeof group !== "string") {
     return undefined;
   }
+  const meta = text(raw["meta"]);
+  const image = text(raw["image"]);
   return {
     id,
     label,
@@ -301,6 +360,9 @@ function pageOf(raw: unknown): PageAnnotation | undefined {
     icon: typeof icon === "string" ? icon : id,
     blurb: typeof blurb === "string" ? blurb : "",
     groups: Array.isArray(groups) ? groups.filter((name) => typeof name === "string") : [],
+    ...(meta === undefined ? {} : { meta }),
+    // A picture is drawn only from a `data:` address, which can load nothing else.
+    ...(image?.startsWith("data:image/") ? { image } : {}),
   };
 }
 
@@ -312,15 +374,15 @@ interface Found {
 }
 
 /** Every setting of a schema that a person is shown, wherever in it the setting is. */
-function annotated(schema: Json, prefix: string, found: Found[]): Found[] {
+function annotated(schema: Json, prefix: readonly string[], found: Found[]): Found[] {
   const properties = schema["properties"];
   if (!isObject(properties)) return found;
   for (const [key, child] of Object.entries(properties)) {
     if (!isObject(child)) continue;
-    const path = prefix === "" ? key : `${prefix}.${key}`;
+    const segments = [...prefix, key];
     const annotation = annotationOf(child["x-lume-settings"]);
-    if (annotation) found.push({ path, schema: child, annotation });
-    else annotated(child, path, found);
+    if (annotation) found.push({ path: joinPath(segments), schema: child, annotation });
+    else annotated(child, segments, found);
   }
   return found;
 }
@@ -328,7 +390,7 @@ function annotated(schema: Json, prefix: string, found: Found[]): Found[] {
 /** What a setting is set to in a configuration, or `null` when it is left out. */
 function valueAt(config: unknown, path: string): SettingValue | null {
   let at: unknown = config;
-  for (const part of path.split(".")) {
+  for (const part of splitPath(path)) {
     if (!isObject(at)) return null;
     at = at[part];
   }
@@ -474,6 +536,7 @@ function rowOf(found: Found, view: ConfigView, lists: SettingsLists): SettingRow
     overridden: source === "workspace" || source === "profile",
     ...(problem === undefined ? {} : { problem: describeProblem(problem) }),
     shown,
+    ...(annotation.plugin === undefined ? {} : { plugin: annotation.plugin }),
   };
 }
 
@@ -517,7 +580,7 @@ export function settingsPages(
   if (!isObject(schema)) return [];
   const described = schema["x-lume-pages"];
   const pages = Array.isArray(described) ? described.flatMap((raw) => pageOf(raw) ?? []) : [];
-  const settings = annotated(schema, "", []);
+  const settings = annotated(schema, [], []);
 
   return pages.map((page) => {
     const own = settings
@@ -537,13 +600,27 @@ export function settingsPages(
           .map((setting) => rowOf(setting, view, lists)),
       }))
       .filter((group) => group.rows.length > 0);
+    // On a plugin's own page every row is the plugin's: the name is said only on the
+    // application's pages.
+    const addon = page.group === "Add-ons";
     return {
       id: page.id,
       label: page.label,
       icon: page.icon,
       group: page.group,
       blurb: page.blurb,
-      groups,
+      groups: addon
+        ? groups.map((group) => ({
+            ...group,
+            rows: group.rows.map((row) => {
+              const mine: { -readonly [Key in keyof SettingRow]: SettingRow[Key] } = { ...row };
+              delete mine.plugin;
+              return mine;
+            }),
+          }))
+        : groups,
+      ...(page.meta === undefined ? {} : { meta: page.meta }),
+      ...(page.image === undefined ? {} : { image: page.image }),
     };
   });
 }

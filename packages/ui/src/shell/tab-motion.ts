@@ -115,6 +115,11 @@ export const MOTION_STYLES: Readonly<Record<TabHighlight, MotionStyle | null>> =
   },
 };
 
+/** A style by its name, or a plugin's as it is. */
+function styleOf(style: TabHighlight | MotionStyle): MotionStyle | null {
+  return typeof style === "string" ? MOTION_STYLES[style] : style;
+}
+
 /** The spring tabs slide along when a style slides along one. */
 const SLIDE_SPRING: Spring = [520, 0.8];
 
@@ -350,7 +355,8 @@ interface LitBox {
 
 /** How the row of tabs is to be brought up to date with what it now shows. */
 export interface SyncOptions {
-  readonly style: TabHighlight;
+  /** One of the window's own styles, by name, or a plugin's. */
+  readonly style: TabHighlight | MotionStyle;
   /** The tab on show. */
   readonly active: string | null;
   /** Whether this change may move: the pointer made it, and the system allows motion. */
@@ -369,7 +375,7 @@ export class TabMotion {
   #places = new Map<string, number>();
   #slides = new Map<string, Slide>();
   #exits: Animation[] = [];
-  #style: TabHighlight | null = null;
+  #style: TabHighlight | MotionStyle | null = null;
   #lastPointer = Number.NEGATIVE_INFINITY;
   // The mark.
   #ends: Ends | null = null;
@@ -419,7 +425,7 @@ export class TabMotion {
     this.#options = options;
     for (const exit of this.#exits) exit.cancel();
     this.#exits = [];
-    const style = MOTION_STYLES[options.style];
+    const style = styleOf(options.style);
     if (this.#style !== options.style) this.#restyle(options.style);
     const items = this.#items();
     const now = performance.now();
@@ -482,14 +488,14 @@ export class TabMotion {
       const items = this.#items();
       this.#places = new Map(items.map((item) => [item.dataset["tabId"] ?? "", item.offsetLeft]));
       // A mark that is travelling goes on to the new place; one at rest stays on its tab.
-      this.#placeMark(MOTION_STYLES[options.style], this.#frame !== 0, items);
+      this.#placeMark(styleOf(options.style), this.#frame !== 0, items);
       this.#follow = performance.now() < end ? requestAnimationFrame(step) : 0;
     };
     this.#follow = requestAnimationFrame(step);
   }
 
   /** Clears what the last style painted, when another is chosen. */
-  #restyle(style: TabHighlight): void {
+  #restyle(style: TabHighlight | MotionStyle): void {
     this.#style = style;
     if (this.#frame !== 0) cancelAnimationFrame(this.#frame);
     this.#frame = 0;
@@ -604,7 +610,7 @@ export class TabMotion {
 
   #paint(): void {
     const ends = this.#ends;
-    const style = this.#options ? MOTION_STYLES[this.#options.style] : null;
+    const style = this.#options ? styleOf(this.#options.style) : null;
     if (!ends || !style) return;
     const mark = this.#mark;
     const speed = Math.max(Math.abs(ends.vLeft), Math.abs(ends.vRight));

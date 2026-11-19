@@ -10,7 +10,7 @@ use lume_config::generate::{Generated, GeneratedKind};
 use schemars::SchemaGenerator;
 use serde_json::Value;
 
-use crate::types::{ErrorCode, SessionReport};
+use crate::types::{ErrorCode, MetricKind, MetricsSample, SessionReport};
 use crate::{METHODS, Method, ts};
 
 /// The hand-written parts.
@@ -42,6 +42,8 @@ fn schemas() -> Schemas {
     // Types the hand-written parts name.
     generator.subschema_for::<SessionReport>();
     generator.subschema_for::<ErrorCode>();
+    generator.subschema_for::<MetricsSample>();
+    generator.subschema_for::<MetricKind>();
     let definitions = generator
         .take_definitions(true)
         .into_iter()
@@ -195,8 +197,9 @@ pub fn reference() -> Result<String, String> {
          returns a promise; a call that fails rejects it with a `LumeError`, whose `code`\n\
          says why (`denied`, `invalid`, `not_found`, `busy`, `failed`, `stopped`).\n\n\
          Besides the calls below, the API has `lume.self`, `lume.commands.register`,\n\
-         `lume.timers`, `lume.sessions.onEvent`, `lume.settings.onChange`, `lume.log`,\n\
-         `lume.onDeactivate` and `console`; the typings describe them.\n\n",
+         `lume.timers`, `lume.sessions.onEvent`, `lume.settings.onChange`,\n\
+         `lume.metrics.subscribe`, `lume.log`, `lume.onDeactivate` and `console`; the\n\
+         typings describe them.\n\n",
     );
     for (namespace, methods) in namespaces() {
         out.push_str(&format!("## lume.{namespace}\n\n"));

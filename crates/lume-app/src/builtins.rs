@@ -431,6 +431,14 @@ const COMMANDS: &[Row] = &[
         Runs::Core,
         true,
     ),
+    ("lume.panel.show", "Show Panel", "Panel", Runs::Core, false),
+    (
+        "lume.panel.close",
+        "Close Panel",
+        "Panel",
+        Runs::Core,
+        false,
+    ),
     (
         "lume.workspace.switch",
         "Switch Workspace",
@@ -736,6 +744,13 @@ fn arguments(id: &str) -> Option<Value> {
                 "description": "The side to fold away or open; the one with the tabs if left out.",
             } }),
             &[],
+        )),
+        "lume.panel.show" | "lume.panel.close" => Some(object(
+            json!({ "panel": {
+                "type": "string",
+                "description": "A plugin's panel, by its id: the plugin's and the panel's name, as in acme.tools.processes.",
+            } }),
+            &["panel"],
         )),
         "lume.workspace.switch" => Some(object(
             json!({ "name": {

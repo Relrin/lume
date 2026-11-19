@@ -68,6 +68,20 @@
           },
           "type": "array"
         },
+        "cursor-effects": {
+          "description": "Effects the cursor plays, drawn by shaders in the package.",
+          "items": {
+            "$ref": "#/$defs/CursorEffect"
+          },
+          "type": "array"
+        },
+        "images": {
+          "description": "Pictures in the package, which the plugin's other things and its code name.",
+          "items": {
+            "$ref": "#/$defs/ImageDef"
+          },
+          "type": "array"
+        },
         "keybindings": {
           "items": {
             "$ref": "#/$defs/Keybinding"
@@ -77,6 +91,13 @@
         "menus": {
           "items": {
             "$ref": "#/$defs/MenuItem"
+          },
+          "type": "array"
+        },
+        "motions": {
+          "description": "Effects for fixed places in the window.",
+          "items": {
+            "$ref": "#/$defs/Motion"
           },
           "type": "array"
         },
@@ -125,6 +146,54 @@
       },
       "type": "object"
     },
+    "CursorEffect": {
+      "additionalProperties": false,
+      "description": "An effect the cursor plays, drawn by a shader in the package.",
+      "properties": {
+        "duration": {
+          "default": null,
+          "description": "How long the effect lasts, in milliseconds: 1500 at most, 400 if not given.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "description": "`trail`, drawn when the cursor jumps, or `pulse`, drawn when it changes shape or\nlands in another pane.",
+          "type": "string"
+        },
+        "reach": {
+          "default": null,
+          "description": "How far from the cursor's cells the effect may draw, in pixels: 256 at most,\n48 if not given.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "shader": {
+          "description": "A GLSL file in the package that defines `vec4 lume_effect(vec2 pixel)`.",
+          "type": "string"
+        },
+        "title": {
+          "description": "What the settings call it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "kind",
+        "shader"
+      ],
+      "type": "object"
+    },
     "Dependency": {
       "anyOf": [
         {
@@ -153,6 +222,123 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "Enter": {
+      "additionalProperties": false,
+      "description": "How a new tab comes in.",
+      "properties": {
+        "duration": {
+          "default": null,
+          "description": "How long it takes, for one that is not moved by a spring.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "keyframes": {
+          "items": {
+            "$ref": "#/$defs/Keyframe"
+          },
+          "type": "array"
+        },
+        "spring": {
+          "default": null,
+          "description": "The spring it is moved by: its stiffness and damping.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "keyframes"
+      ],
+      "type": "object"
+    },
+    "Highlight": {
+      "additionalProperties": false,
+      "description": "How the mark of the tab on show moves, as the window's own styles do.",
+      "properties": {
+        "enter": {
+          "$ref": "#/$defs/Enter"
+        },
+        "lead": {
+          "description": "The spring of the end that leads: its stiffness and damping.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "renamed": {
+          "description": "How a renamed label settles; nothing if not given.",
+          "items": {
+            "$ref": "#/$defs/Keyframe"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "shape": {
+          "description": "`pill`, `underline` or `glow`.",
+          "type": "string"
+        },
+        "slide": {
+          "$ref": "#/$defs/Slide"
+        },
+        "trail": {
+          "description": "The spring of the end that trails.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "shape",
+        "lead",
+        "trail",
+        "slide",
+        "enter"
+      ],
+      "type": "object"
+    },
+    "ImageDef": {
+      "additionalProperties": false,
+      "description": "A picture in the package, by the name the plugin's things and code give it.",
+      "properties": {
+        "file": {
+          "description": "An SVG, PNG, JPEG, WebP or GIF file in the package.",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "tint": {
+          "default": false,
+          "description": "Whether the picture is drawn in the colour of what it stands beside, as the\napplication's own icons are: only its shape is used.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "file"
+      ],
       "type": "object"
     },
     "Keybinding": {
@@ -191,6 +377,63 @@
         "key",
         "command"
       ],
+      "type": "object"
+    },
+    "Keyframe": {
+      "additionalProperties": false,
+      "description": "One keyframe, as a manifest writes it.",
+      "properties": {
+        "background": {
+          "default": null,
+          "description": "The background's colour, as a colour token.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color": {
+          "default": null,
+          "description": "The text's colour, as a colour token: `token(color.accent)`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filter": {
+          "default": null,
+          "description": "`blur(2px)`, `brightness(1.4)`, or both.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "offset": {
+          "default": null,
+          "description": "Where in the effect the keyframe is, from 0 to 1; spread evenly if not given.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "opacity": {
+          "default": null,
+          "description": "From 0, unseen, to 1.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "transform": {
+          "default": null,
+          "description": "Moves, scales, turns or slants: `translateY(-4px) scale(0.96)`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "Limits": {
@@ -318,6 +561,74 @@
       "required": [
         "id",
         "location"
+      ],
+      "type": "object"
+    },
+    "Motion": {
+      "additionalProperties": false,
+      "description": "One effect a plugin offers for one of the window's places.",
+      "properties": {
+        "delay": {
+          "default": null,
+          "description": "How long it waits before it starts, in milliseconds: 500 at most.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "duration": {
+          "default": null,
+          "description": "How long it takes, in milliseconds: 1000 at most.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "easing": {
+          "default": null,
+          "description": "Its curve: `linear`, `ease-out`, one of the application's (`standard`,\n`emphasized`, `exit`), `cubic-bezier(…)`, `steps(…)` or `spring(stiffness,\ndamping)`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "highlight": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Highlight"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For `tab.highlight`: how the mark moves."
+        },
+        "id": {
+          "type": "string"
+        },
+        "keyframes": {
+          "items": {
+            "$ref": "#/$defs/Keyframe"
+          },
+          "type": "array"
+        },
+        "slot": {
+          "description": "The place it plays in: `tab.highlight`, `menu.enter`, `toast.enter`,\n`toast.exit`, `palette.enter`, `panel.enter`, `float.enter`, `pill.enter` or\n`status.change`.",
+          "type": "string"
+        },
+        "title": {
+          "description": "What the settings call it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "slot"
       ],
       "type": "object"
     },
@@ -631,6 +942,36 @@
       ],
       "type": "object"
     },
+    "Slide": {
+      "anyOf": [
+        {
+          "description": "`\"spring\"`.",
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/SlideCurve"
+        }
+      ],
+      "description": "How tabs slide to their new places: along a spring, or along a curve for a time."
+    },
+    "SlideCurve": {
+      "additionalProperties": false,
+      "properties": {
+        "duration": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "easing": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "duration",
+        "easing"
+      ],
+      "type": "object"
+    },
     "StatusItem": {
       "additionalProperties": false,
       "description": "A status item: a small piece of information, or a button, in a bar.",
@@ -695,6 +1036,14 @@
           "format": "int32",
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "shown-when": {
+          "default": null,
+          "description": "One of the plugin's boolean settings that must be on for the item to be shown.\nThe window reads it itself, so an item the user turns on is shown, and starts\nthe plugin that waits for it to be seen, without the plugin's code.",
+          "type": [
+            "string",
             "null"
           ]
         },

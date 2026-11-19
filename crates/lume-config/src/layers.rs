@@ -304,6 +304,12 @@ fn none_of(value: &Value, options: &[Value]) -> String {
 
 /// Checks a value against a schema: the part of JSON Schema the settings' schema uses.
 /// The error says what was expected, in words a person would use.
+/// Checks a value against a schema, as the files' settings are checked: with the
+/// keywords the configuration's schemas use.
+pub fn check_value(value: &Value, schema: &Value) -> Result<(), String> {
+    check(value, schema)
+}
+
 pub(crate) fn check(value: &Value, schema: &Value) -> Result<(), String> {
     let schema = match schema {
         Value::Bool(false) => return Err("nothing is allowed here".to_owned()),
@@ -340,10 +346,12 @@ pub(crate) fn check(value: &Value, schema: &Value) -> Result<(), String> {
     {
         return Err(format!("expected {}", quoted(only)));
     }
-    if let (Some(format), Value::String(text)) = (schema.get(FORMAT_KEY), value)
-        && format == ACCENT_FORMAT
-    {
-        check_accent(text)?;
+    if let (Some(format), Value::String(text)) = (schema.get(FORMAT_KEY), value) {
+        if format == ACCENT_FORMAT {
+            check_accent(text)?;
+        } else if format == crate::schema::CONTRIBUTED_FORMAT {
+            crate::schema::check_contributed(text)?;
+        }
     }
     if let Some(number) = value.as_f64() {
         if let Some(minimum) = schema.get("minimum").and_then(Value::as_f64)

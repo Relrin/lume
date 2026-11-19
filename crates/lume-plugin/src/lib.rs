@@ -10,15 +10,20 @@
 //! Nothing here runs a plugin's code. This crate knows what is installed and what each
 //! plugin asks for and adds.
 
+pub mod assets;
 pub mod broker;
+pub mod contributions;
 pub mod hash;
 pub mod id;
 pub mod lock;
 pub mod manifest;
+pub mod motion;
 pub mod order;
 pub mod package;
 pub mod permissions;
+pub mod placement;
 pub mod places;
+pub mod shader;
 pub mod store;
 
 pub use manifest::{MANIFEST_FILE, Manifest, Problem};

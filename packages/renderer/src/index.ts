@@ -34,6 +34,12 @@ export {
   type FxSurface,
 } from "./fx/effects.ts";
 export type { FxRect, PulseKind, TrailKind } from "./fx/geometry.ts";
+export {
+  CustomEffectError,
+  customFragment,
+  type CustomEffect,
+  type CustomDraw,
+} from "./fx/custom.ts";
 export { Canvas2dFx } from "./fx/canvas2d.ts";
 export { FxShape, ShapeKind, type FxBackend } from "./fx/shape.ts";
 export { WebGl2Fx } from "./fx/webgl2.ts";

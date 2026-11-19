@@ -39,6 +39,7 @@ import {
 } from "../layout/selectors.ts";
 import type { Group, GroupId, TabId } from "../layout/types.ts";
 import { DRAG_SETTLE_TIMEOUT_MS, DRAG_START_PX } from "../tuning.ts";
+import { tabStyle } from "../motion/tab.ts";
 import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
 import { describeTabNow, followTab, mark } from "./describing.ts";
@@ -680,10 +681,14 @@ export function TabStrip() {
   const app = useShell();
   const items = useStripItems(app);
   const active = useStore(app.layout, (state) => (state.ready ? selectActiveTab(state) : null));
-  const style = useStore(
+  const setting = useStore(
     app.config,
     (state) => state.view?.config.appearance["tab-highlight"] ?? "glow",
   );
+  const motions = useStore(app.plugins, (state) => state.shown?.motions);
+  // A plugin's style is made once for each time the plugins change, so that the row is
+  // restyled only when the style is another.
+  const style = useMemo(() => tabStyle(setting, motions), [setting, motions]);
   const drag = useStore(app.tabUi, (state) => state.drag);
   const renaming = useStore(app.tabUi, (state) => state.renaming);
   const list = useRef<HTMLDivElement>(null);

@@ -59,8 +59,8 @@ pub async fn config_unset(services: Shared<'_>, path: String) -> Result<(), Comm
 /// What can be set, as a JSON Schema: every setting with its kind, its limits and what
 /// it is for, and how the settings window shows the ones it shows.
 #[tauri::command]
-pub fn config_schema() -> Value {
-    lume_config::config_schema().clone()
+pub fn config_schema(services: Shared<'_>) -> Value {
+    services.config.schema()
 }
 
 /// The themes there are to choose from.

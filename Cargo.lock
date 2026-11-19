@@ -2340,6 +2340,7 @@ dependencies = [
  "lume-plugin-runtime",
  "lume-proto",
  "lume-pty",
+ "lume-services",
  "lume-session",
  "notify",
  "serde",

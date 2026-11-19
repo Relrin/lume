@@ -16,8 +16,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer};
 
 use crate::id::{Reference, check_name, check_plugin_id};
+use crate::motion::Motion;
 use crate::permissions::{Permissions, parse_table};
-use crate::places;
+use crate::{assets, motion, places};
 
 /// The manifest's file name.
 pub const MANIFEST_FILE: &str = "plugin.toml";
@@ -275,6 +276,15 @@ pub struct Contributes {
     pub panels: Vec<Panel>,
     #[serde(default)]
     pub services: Vec<Service>,
+    /// Pictures in the package, which the plugin's other things and its code name.
+    #[serde(default)]
+    pub images: Vec<ImageDef>,
+    /// Effects for fixed places in the window.
+    #[serde(default)]
+    pub motions: Vec<Motion>,
+    /// Effects the cursor plays, drawn by shaders in the package.
+    #[serde(default)]
+    pub cursor_effects: Vec<CursorEffect>,
 }
 
 /// Where a thing goes among its neighbours. `before` and `after` name a neighbour; the
@@ -439,6 +449,11 @@ pub struct StatusItem {
     pub tooltip: Option<String>,
     #[serde(default)]
     pub when: Option<String>,
+    /// One of the plugin's boolean settings that must be on for the item to be shown.
+    /// The window reads it itself, so an item the user turns on is shown, and starts
+    /// the plugin that waits for it to be seen, without the plugin's code.
+    #[serde(default)]
+    pub shown_when: Option<String>,
 }
 
 /// One of the plugin's settings, under `[plugins."<id>"]` in the configuration.
@@ -555,6 +570,57 @@ pub struct Panel {
     pub order: Option<i32>,
 }
 
+/// A picture in the package, by the name the plugin's things and code give it.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct ImageDef {
+    pub id: String,
+    /// An SVG, PNG, JPEG, WebP or GIF file in the package.
+    pub file: String,
+    /// Whether the picture is drawn in the colour of what it stands beside, as the
+    /// application's own icons are: only its shape is used.
+    #[serde(default)]
+    pub tint: bool,
+}
+
+/// An effect the cursor plays, drawn by a shader in the package.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct CursorEffect {
+    pub id: String,
+    /// What the settings call it.
+    pub title: String,
+    /// `trail`, drawn when the cursor jumps, or `pulse`, drawn when it changes shape or
+    /// lands in another pane.
+    pub kind: String,
+    /// A GLSL file in the package that defines `vec4 lume_effect(vec2 pixel)`.
+    pub shader: String,
+    /// How long the effect lasts, in milliseconds: 1500 at most, 400 if not given.
+    #[serde(default)]
+    pub duration: Option<u32>,
+    /// How far from the cursor's cells the effect may draw, in pixels: 256 at most,
+    /// 48 if not given.
+    #[serde(default)]
+    pub reach: Option<u32>,
+}
+
+/// How long a cursor effect lasts and how far it reaches when its manifest does not
+/// say, and the most it may.
+pub const CURSOR_EFFECT_MS_DEFAULT: u32 = 400;
+pub const CURSOR_EFFECT_MS_MAX: u32 = 1500;
+pub const CURSOR_EFFECT_REACH_DEFAULT: u32 = 48;
+pub const CURSOR_EFFECT_REACH_MAX: u32 = 256;
+
+impl CursorEffect {
+    pub fn duration_ms(&self) -> u32 {
+        self.duration.unwrap_or(CURSOR_EFFECT_MS_DEFAULT)
+    }
+
+    pub fn reach_px(&self) -> u32 {
+        self.reach.unwrap_or(CURSOR_EFFECT_REACH_DEFAULT)
+    }
+}
+
 /// A function other plugins may call.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
@@ -649,7 +715,7 @@ impl Manifest {
             ));
         }
         if let Some(icon) = &self.icon {
-            p.file("icon", icon, &["svg"]);
+            p.file("icon", icon, &assets::IMAGE_KINDS);
         }
         if let Some(main) = &self.main {
             p.file("main", main, &["js"]);
@@ -888,6 +954,9 @@ struct Own<'a> {
     groups: BTreeSet<&'a str>,
     panels: BTreeSet<&'a str>,
     services: BTreeSet<&'a str>,
+    images: BTreeSet<&'a str>,
+    /// The submenus that status items can open: those in `menu.status`.
+    status_menus: BTreeSet<&'a str>,
 }
 
 impl<'a> Own<'a> {
@@ -918,6 +987,13 @@ impl<'a> Own<'a> {
                 .services
                 .iter()
                 .map(|s| s.name.as_str())
+                .collect(),
+            images: contributes.images.iter().map(|i| i.id.as_str()).collect(),
+            status_menus: contributes
+                .menus
+                .iter()
+                .filter(|m| m.submenu && m.location == "menu.status")
+                .map(|m| m.id.as_str())
                 .collect(),
         }
     }
@@ -1100,7 +1176,7 @@ impl Contributes {
                 dependencies,
             );
             if let Some(icon) = &item.icon {
-                check_icon(p, &format!("{key}.icon"), icon);
+                check_icon(p, &format!("{key}.icon"), icon, own);
             }
             p.when(&key, item.when.as_ref());
         }
@@ -1154,9 +1230,15 @@ impl Contributes {
                     Builtin::None,
                     dependencies,
                 );
+                if own.submenus.contains(menu.as_str()) && !own.status_menus.contains(menu.as_str())
+                {
+                    p.say(format!(
+                        "{key}.menu: the submenu `{menu}` a status item opens is in menu.status"
+                    ));
+                }
             }
             if let Some(icon) = &item.icon {
-                check_icon(p, &format!("{key}.icon"), icon);
+                check_icon(p, &format!("{key}.icon"), icon, own);
             }
             p.placement(
                 &key,
@@ -1166,6 +1248,17 @@ impl Contributes {
                 dependencies,
             );
             p.when(&key, item.when.as_ref());
+            if let Some(setting) = &item.shown_when {
+                let switch = self
+                    .settings
+                    .iter()
+                    .any(|candidate| candidate.key == *setting && candidate.kind == "boolean");
+                if !switch {
+                    p.say(format!(
+                        "{key}.shown-when: `{setting}` is not one of the plugin's boolean settings"
+                    ));
+                }
+            }
         }
 
         let mut seen = BTreeSet::new();
@@ -1343,7 +1436,7 @@ impl Contributes {
                 ));
             }
             if let Some(icon) = &panel.icon {
-                check_icon(p, &format!("{key}.icon"), icon);
+                check_icon(p, &format!("{key}.icon"), icon, own);
             }
             p.placement(
                 &key,
@@ -1367,17 +1460,75 @@ impl Contributes {
                 );
             }
         }
+
+        let mut seen = BTreeSet::new();
+        for (index, image) in self.images.iter().enumerate() {
+            let key = format!("contributes.images[{index}]");
+            p.name(&format!("{key}.id"), &image.id, &mut seen);
+            p.file(&format!("{key}.file"), &image.file, &assets::IMAGE_KINDS);
+        }
+
+        let mut seen = BTreeSet::new();
+        for (index, motion) in self.motions.iter().enumerate() {
+            let key = format!("contributes.motions[{index}]");
+            p.name(&format!("{key}.id"), &motion.id, &mut seen);
+            p.text(
+                &format!("{key}.title"),
+                &motion.title,
+                LABEL_MAX_CHARS,
+                true,
+            );
+            if let Err(problem) = motion::check(motion, &key) {
+                p.say(problem);
+            }
+        }
+
+        let mut seen = BTreeSet::new();
+        for (index, effect) in self.cursor_effects.iter().enumerate() {
+            let key = format!("contributes.cursor-effects[{index}]");
+            p.name(&format!("{key}.id"), &effect.id, &mut seen);
+            p.text(
+                &format!("{key}.title"),
+                &effect.title,
+                LABEL_MAX_CHARS,
+                true,
+            );
+            if !places::CURSOR_EFFECT_KINDS.contains(&effect.kind.as_str()) {
+                p.say(format!(
+                    "{key}.kind: `{}` is not a kind of cursor effect; they are {}",
+                    effect.kind,
+                    places::CURSOR_EFFECT_KINDS.join(", ")
+                ));
+            }
+            p.file(&format!("{key}.shader"), &effect.shader, &["glsl"]);
+            if effect
+                .duration
+                .is_some_and(|ms| ms == 0 || ms > CURSOR_EFFECT_MS_MAX)
+            {
+                p.say(format!(
+                    "{key}.duration: from 1 to {CURSOR_EFFECT_MS_MAX} milliseconds"
+                ));
+            }
+            if effect.reach.is_some_and(|px| px > CURSOR_EFFECT_REACH_MAX) {
+                p.say(format!(
+                    "{key}.reach: {CURSOR_EFFECT_REACH_MAX} pixels at most"
+                ));
+            }
+        }
     }
 }
 
-/// Checks an icon: a name of one of the application's pictures, or an SVG file in the
-/// package.
-fn check_icon(p: &mut Checker, key: &str, icon: &str) {
-    if icon.contains('/') || icon.to_ascii_lowercase().ends_with(".svg") {
-        p.file(key, icon, &["svg"]);
+/// Checks an icon: one of the plugin's own pictures by name, the name of one of the
+/// application's, or a picture file in the package.
+fn check_icon(p: &mut Checker, key: &str, icon: &str, own: &Own<'_>) {
+    if own.images.contains(icon) {
+        return;
+    }
+    if icon.contains('/') || assets::is_image_path(icon) {
+        p.file(key, icon, &assets::IMAGE_KINDS);
     } else if check_name(icon).is_err() {
         p.say(format!(
-            "{key}: `{icon}` is neither the name of a picture nor an SVG file in the package"
+            "{key}: `{icon}` is neither the name of a picture nor a picture file in the package"
         ));
     }
 }
@@ -1577,12 +1728,18 @@ location = "menu.app"
 parent = "tools"
 command = "acme.core:open"
 
+[[contributes.menus]]
+id = "cpu-menu"
+location = "menu.status"
+title = "CPU"
+submenu = true
+
 [[contributes.status]]
 id = "cpu"
 slot = "topbar.right"
 kind = "meter"
 label = "CPU"
-menu = "tools"
+menu = "cpu-menu"
 
 [[contributes.setting-groups]]
 id = "sampling"

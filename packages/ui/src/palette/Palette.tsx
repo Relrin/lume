@@ -13,6 +13,7 @@ import { useStore } from "zustand";
 
 import { keyLabel } from "../commands/store.ts";
 import type { CommandSpec } from "../core/types.ts";
+import { useSlotMotion } from "../motion/slots.ts";
 import { useShell } from "../shell/context.ts";
 import { SearchIcon } from "../shell/icons.tsx";
 import { PALETTE_RESULTS_MAX } from "../tuning.ts";
@@ -143,6 +144,8 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   const profiles = useStore(app.profiles, (state) => state.list);
   const field = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  useSlotMotion("palette.enter", box);
   const storage = useMemo(pageStorage, []);
   const recents = useMemo(() => readRecents(storage), [storage]);
 
@@ -274,6 +277,7 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   return (
     <div className="palette-backdrop" onPointerDown={close}>
       <div
+        ref={box}
         className="palette"
         role="dialog"
         aria-modal="true"

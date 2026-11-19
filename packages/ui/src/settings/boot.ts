@@ -34,8 +34,10 @@ export interface ShownPage {
 export interface SettingsApp {
   readonly config: ConfigStore;
   readonly client: CoreClient;
-  /** The configuration's schema, as the core sent it. */
+  /** The configuration's schema, as the core sent it first. */
   readonly schema: unknown;
+  /** The schema as the core sends it again when plugins change what can be set. */
+  readonly schemaStore?: StoreApi<{ readonly schema: unknown }>;
   /** The machine's themes, fonts, shells, workspaces and profiles. */
   readonly lists: StoreApi<SettingsLists>;
   /** The pages that do not come from the schema. */
@@ -122,6 +124,7 @@ export async function startSettings(
     lists.setState({ ...lists.getState(), profiles: list.profiles });
   };
 
+  let schemaRevision = 0;
   const follow = (notice: Notice): void => {
     switch (notice.type) {
       case "profiles_changed":
@@ -130,6 +133,13 @@ export async function startSettings(
       case "config_changed":
         if (!config.getState().set(notice.view)) break;
         applyConfig(notice.view);
+        if ((notice.view.schema_revision ?? 0) !== schemaRevision) {
+          schemaRevision = notice.view.schema_revision ?? 0;
+          client.configSchema().then(
+            (schema) => schemaStore.setState({ schema }),
+            () => undefined,
+          );
+        }
         // A theme may have been added to the folder the change came from.
         relist();
         break;
@@ -157,6 +167,8 @@ export async function startSettings(
   };
 
   const [view, schema] = await Promise.all([client.configView(), client.configSchema()]);
+  schemaRevision = view.schema_revision ?? 0;
+  const schemaStore = createStore<{ readonly schema: unknown }>()(() => ({ schema }));
   config.getState().set(view);
   applyConfig(view);
 
@@ -192,6 +204,7 @@ export async function startSettings(
     config,
     client,
     schema,
+    schemaStore,
     lists,
     registry,
     notices,

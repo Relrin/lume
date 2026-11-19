@@ -25,6 +25,8 @@ pub enum Source {
     },
     /// A profile's overrides.
     Profile { id: String },
+    /// A plugin's defaults, as its manifest gives them.
+    Plugin { id: String },
 }
 
 impl Source {
@@ -32,7 +34,7 @@ impl Source {
     pub fn location(&self) -> Option<(&PathBuf, u32)> {
         match self {
             Self::User { file, line } | Self::Workspace { file, line, .. } => Some((file, *line)),
-            Self::Default | Self::Profile { .. } => None,
+            Self::Default | Self::Profile { .. } | Self::Plugin { .. } => None,
         }
     }
 }
@@ -46,6 +48,7 @@ impl fmt::Display for Source {
                 write!(f, "workspace {name}:{}:{line}", file.display())
             }
             Self::Profile { id } => write!(f, "profile {id}"),
+            Self::Plugin { id } => write!(f, "plugin {id}"),
         }
     }
 }

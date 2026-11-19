@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lume_layout::{Intent, NewContent, PaneId, SpawnRequest, WindowId};
+use lume_layout::{Area, Intent, NewContent, PaneId, SpawnRequest, WindowId};
 use lume_proto::app::{AppReplyBody, PageRequestBody};
 use lume_session::Launcher;
 use serde_json::Value;
@@ -59,6 +59,34 @@ pub fn exec_request(exec: &[String], cwd: Option<String>) -> Option<SpawnRequest
 }
 
 impl Services {
+    /// Shows a plugin's panel in a window, putting it in the dock area its manifest
+    /// names the first time; or takes it out of the window.
+    async fn plugin_panel(
+        &self,
+        window: WindowId,
+        show: bool,
+        args: &Value,
+    ) -> Result<(), CommandError> {
+        let id = args
+            .get("panel")
+            .and_then(Value::as_str)
+            .ok_or_else(|| CommandError::bad_request("which panel is not said"))?;
+        if !show {
+            return self.panes.close_panel(window, id).await;
+        }
+        let panel = self.plugins.panel(id).ok_or_else(|| {
+            CommandError::not_found(format!("no plugin that can be used adds the panel {id}"))
+        })?;
+        let area = match panel.area.as_str() {
+            "left" => Area::Left,
+            "bottom" => Area::Bottom,
+            _ => Area::Right,
+        };
+        self.panes
+            .show_plugin_panel(window, &panel.id, &panel.plugin, &panel.view, area)
+            .await
+    }
+
     /// Does what starting the application again asks for: its window comes to the
     /// front, the workspace named is put on show, begun if there is none of that
     /// name, and the program named is run in a new tab. Returns the pane the program
@@ -118,6 +146,11 @@ impl Services {
             .registry
             .get(id)
             .ok_or_else(|| CommandError::not_found(format!("there is no command called `{id}`")))?;
+        if matches!(id, "lume.panel.show" | "lume.panel.close") {
+            return self
+                .plugin_panel(window, id == "lume.panel.show", args)
+                .await;
+        }
         match (spec.runs, asker) {
             (Runs::Core, _) => {
                 let context = builtins::Context {

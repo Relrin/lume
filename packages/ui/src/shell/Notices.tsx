@@ -7,8 +7,9 @@
  * a command and takes the notice away.
  */
 
-import { useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
 
+import { leaveSlot, useSlotMotion } from "../motion/slots.ts";
 import { CloseIcon } from "./icons.tsx";
 import type { NoticeStore, ShownNotice } from "./notices.ts";
 
@@ -25,12 +26,18 @@ function Notice({
   run: RunAction | undefined;
 }) {
   const action = run === undefined ? undefined : notice.action;
+  const element = useRef<HTMLDivElement>(null);
+  useSlotMotion("toast.enter", element);
+  const leave = () => {
+    void leaveSlot("toast.exit", element.current).then(dismiss);
+  };
   return (
     <div
+      ref={element}
       className="notice"
       data-level={notice.level}
       role={notice.level === "info" ? "status" : "alert"}
-      onClick={dismiss}
+      onClick={leave}
     >
       <p className="notice-message">{notice.message}</p>
       {action && (
@@ -39,7 +46,7 @@ function Notice({
           className="control notice-action"
           onClick={(event) => {
             event.stopPropagation();
-            dismiss();
+            leave();
             run?.(action.command, action.args ?? null);
           }}
         >
@@ -53,7 +60,7 @@ function Notice({
         title="Dismiss"
         onClick={(event) => {
           event.stopPropagation();
-          dismiss();
+          leave();
         }}
       >
         <CloseIcon size={11} />

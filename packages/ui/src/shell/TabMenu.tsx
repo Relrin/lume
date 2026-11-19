@@ -5,6 +5,9 @@
  *
  * "Move into another tab" shows, in the menu's place, the tabs the tab's panes can be
  * moved into, with a row that goes back.
+ *
+ * Plugins may add items and sections among the menu's own, where their manifests ask;
+ * a plugin's command is given the tab.
  */
 
 import { useState } from "react";
@@ -17,12 +20,14 @@ import {
   selectTabPanes,
 } from "../layout/selectors.ts";
 import { TAB_COLORS, type TabId } from "../layout/types.ts";
+import { PluginIcon } from "../plugins/PluginIcon.tsx";
 import { AnchoredMenu } from "./AnchoredMenu.tsx";
 import { useShell } from "./context.ts";
 import { describeTabNow } from "./describing.ts";
 import { menuHint } from "./hints.ts";
 import { GroupGlyph, MenuGlyph } from "./icons.tsx";
 import { Menu, type MenuItem } from "./Menu.tsx";
+import { menuRows, nodesOf } from "./menus.ts";
 import { TAB_COLOR_NAMES, tabColorValue, UNNAMED_GROUP } from "./tab-looks.ts";
 import type { Anchor } from "./tab-ui.ts";
 
@@ -52,6 +57,9 @@ export function TabMenu({
   const app = useShell();
   const [step, setStep] = useState<"options" | "move">("options");
   const view = useStore(app.config, (state) => state.view);
+  const shown = useStore(app.plugins, (plugins) => plugins.shown);
+  const contexts = useStore(app.plugins, (plugins) => plugins.contexts);
+  const known = useStore(app.commandStore, (commands) => commands.byId);
   // The menu says what is so as it opens, and again whenever the layout changes.
   const state = useStore(app.layout, (layout) => layout);
   const entry = state.tabs[tab];
@@ -73,58 +81,67 @@ export function TabMenu({
   const own = groups.find((group) => group.id === entry.group);
   const others = groups.filter((group) => group.id !== entry.group);
 
-  const options: MenuItem[] = [
-    {
-      key: "rename",
-      label: "Rename tab…",
-      icon: <MenuGlyph name="pencil" />,
-      hint: hint("lume.tab.rename-start"),
-      choose: () => ui.startRename(tab),
-    },
-    {
-      key: "color",
-      kind: "swatches",
-      label: "Color",
-      icon: <MenuGlyph name="palette" />,
-      swatches: [
-        {
-          key: "none",
-          label: "No color",
-          color: null,
-          checked: entry.color === null,
-          choose: () => run("lume.tab.color", { tab, color: null }),
-        },
-        ...TAB_COLORS.map((color) => ({
-          key: color,
-          label: TAB_COLOR_NAMES[color],
-          color: tabColorValue(color),
-          checked: entry.color === color,
-          choose: () => run("lume.tab.color", { tab, color }),
-        })),
-      ],
-      choose: () => undefined,
-    },
-    {
-      key: "new-group",
-      label: own ? "Move to new group" : "Add tab to new group",
-      icon: <MenuGlyph name="square-plus" />,
-      separated: true,
-      choose: () => {
-        // The new group's editor opens once its label is on show.
-        ui.awaitEditor(tab);
-        run("lume.group.new");
+  // The menu's own rows, by the key of their place.
+  const ownRows: Record<string, MenuItem[]> = {
+    rename: [
+      {
+        key: "rename",
+        label: "Rename tab…",
+        icon: <MenuGlyph name="pencil" />,
+        hint: hint("lume.tab.rename-start"),
+        choose: () => ui.startRename(tab),
       },
-    },
-  ];
+    ],
+    color: [
+      {
+        key: "color",
+        kind: "swatches",
+        label: "Color",
+        icon: <MenuGlyph name="palette" />,
+        swatches: [
+          {
+            key: "none",
+            label: "No color",
+            color: null,
+            checked: entry.color === null,
+            choose: () => run("lume.tab.color", { tab, color: null }),
+          },
+          ...TAB_COLORS.map((color) => ({
+            key: color,
+            label: TAB_COLOR_NAMES[color],
+            color: tabColorValue(color),
+            checked: entry.color === color,
+            choose: () => run("lume.tab.color", { tab, color }),
+          })),
+        ],
+        choose: () => undefined,
+      },
+    ],
+    "new-group": [
+      {
+        key: "new-group",
+        label: own ? "Move to new group" : "Add tab to new group",
+        icon: <MenuGlyph name="square-plus" />,
+        choose: () => {
+          // The new group's editor opens once its label is on show.
+          ui.awaitEditor(tab);
+          run("lume.group.new");
+        },
+      },
+    ],
+    "to-group": [],
+    "remove-from-group": [],
+  };
+  const toGroup = ownRows["to-group"] ?? [];
   if (others.length > 0) {
-    options.push({
+    toGroup.push({
       key: "to-group",
       kind: "heading",
       label: own ? "Move to group" : "Add to group",
       choose: () => undefined,
     });
     for (const group of others) {
-      options.push({
+      toGroup.push({
         key: `group:${group.id}`,
         label: group.name ?? UNNAMED_GROUP,
         icon:
@@ -142,7 +159,7 @@ export function TabMenu({
   }
   if (own) {
     const alone = selectGroupTabs(state, own.id, entry.window).length === 1;
-    options.push({
+    ownRows["remove-from-group"]?.push({
       key: "remove-from-group",
       label: "Remove from group",
       icon: <MenuGlyph name="ungroup" />,
@@ -155,13 +172,12 @@ export function TabMenu({
       },
     });
   }
-  options.push(
+  const more: MenuItem[] = [
     {
       key: "new-tab",
       label: "New tab",
       icon: <MenuGlyph name="plus" />,
       hint: hint("lume.tab.new"),
-      separated: true,
       choose: () => run("lume.tab.new", null),
     },
     {
@@ -193,7 +209,6 @@ export function TabMenu({
       key: "lock",
       label: entry.locked ? "Unlock session" : "Lock session",
       icon: <MenuGlyph name="lock" />,
-      separated: true,
       choose: () => run("lume.tab.lock"),
     },
     {
@@ -220,7 +235,33 @@ export function TabMenu({
       hint: hint("lume.tab.close"),
       choose: () => run("lume.tab.close"),
     },
-  );
+  ];
+  for (const row of more) ownRows[row.key] = [row];
+  const options = menuRows(nodesOf(shown?.menus, "menu.tab"), {
+    contexts,
+    builtin: (key) => ownRows[key] ?? [],
+    plugin: (node) => {
+      const command = node.command;
+      if (command === undefined || !known.has(command)) return undefined;
+      // A plugin's own command is told which tab; one of the application's takes
+      // only what the manifest gives it.
+      const args = command.startsWith("lume.")
+        ? (node.args ?? null)
+        : { ...(node.args as Record<string, unknown> | undefined), tab };
+      return {
+        key: node.key,
+        label: node.title ?? known.get(command)?.title ?? command,
+        hint: hint(command),
+        // Every row of this menu has a picture: one without stands in line with them.
+        icon: node.icon ? (
+          <PluginIcon icon={node.icon} images={shown?.images} />
+        ) : (
+          <span className="menu-icon-blank" aria-hidden="true" />
+        ),
+        choose: () => run(command, args),
+      };
+    },
+  });
 
   const title = describeTabNow(app, tab).label;
   const moving: MenuItem[] = [

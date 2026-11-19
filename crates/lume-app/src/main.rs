@@ -36,6 +36,7 @@ mod clipboard;
 mod commands;
 mod commands_config;
 mod commands_layout;
+mod commands_plugins;
 mod commands_window;
 mod configsvc;
 mod control;
@@ -566,6 +567,8 @@ fn main() -> ExitCode {
             commands_window::window_control,
             commands_window::window_state,
             commands_window::workspaces_list,
+            commands_plugins::ui_contributions,
+            commands_plugins::ui_visible,
             harness::harness_done,
             harness::harness_save,
             harness::harness_read,
@@ -580,6 +583,9 @@ fn main() -> ExitCode {
             match event {
                 WindowEvent::Destroyed => {
                     state.retire(&label);
+                    if let Some(services) = app.try_state::<Arc<Services>>() {
+                        services.plugins.window_gone(&label);
+                    }
                     if let Some(windows) = windows {
                         windows.forget(&label);
                         // The settings do not outlive the last window with terminals.
@@ -611,6 +617,14 @@ fn main() -> ExitCode {
                     if let Some(windows) = windows {
                         windows.tell_state(&label);
                         windows.moved(&label);
+                    }
+                    // Minimising a window resizes it; what it shows is not seen then.
+                    if let (Some(services), Some(window)) = (
+                        app.try_state::<Arc<Services>>(),
+                        app.get_webview_window(&label),
+                    ) {
+                        let minimised = window.is_minimized().unwrap_or(false);
+                        services.plugins.window_minimised(&label, minimised);
                     }
                 }
                 WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. } => {

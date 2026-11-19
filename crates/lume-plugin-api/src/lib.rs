@@ -24,8 +24,8 @@ pub mod types;
 
 pub use types::{ApiError, ErrorCode};
 use types::{
-    CommandExecute, ContextSet, KvKey, KvSet, Nothing, SettingsGet, StatusClear, StatusSet,
-    Subscribe,
+    CommandExecute, ContextSet, KvKey, KvSet, MetricsSample, MetricsSubscribe, MetricsUnsubscribe,
+    Nothing, PanelId, PanelsSet, SettingsGet, StatusClear, StatusSet, Subscribe,
 };
 
 /// The major version of the API, which a manifest's `api` names.
@@ -157,6 +157,19 @@ api! {
     ContextSet = "context.set"(key, value): ContextSet => ();
     /// Starts hearing about a topic.
     EventsSubscribe = "events.subscribe"(topic): Subscribe => (), needs "workspace.read", internal = true;
+    /// Shows rows in one of the plugin's list panels, in place of those it showed. A
+    /// panel holds 5000 rows at most, eight deep.
+    PanelsSet = "panels.set"(id, rows): PanelsSet => ();
+    /// Takes away the rows a list panel shows.
+    PanelsClear = "panels.clear"(id): PanelId => ();
+    /// The latest reading of the machine, or null before the first: how busy the
+    /// processor and the graphics card are, how much memory is used, how fast the
+    /// network goes.
+    MetricsSnapshot = "metrics.snapshot"(): Nothing => Option<MetricsSample>, needs "system.metrics";
+    /// Starts readings of the machine for the plugin's code.
+    MetricsSubscribe = "metrics.subscribe"(kinds, visible): MetricsSubscribe => u64, needs "system.metrics", internal = true;
+    /// Stops them.
+    MetricsUnsubscribe = "metrics.unsubscribe"(subscription): MetricsUnsubscribe => (), needs "system.metrics", internal = true;
 }
 
 /// The call of this name.

@@ -475,7 +475,10 @@ export function Row({
       onAnimationEnd={flashed}
     >
       <div className="settings-label">
-        <div id={label}>{row.label}</div>
+        <div id={label}>
+          {row.label}
+          {row.plugin !== undefined && <span className="settings-from">from {row.plugin}</span>}
+        </div>
         {row.help !== undefined && <div>{row.help}</div>}
         {row.overridden && <div className="settings-note">{overriddenNote(row)}</div>}
         {wrong !== undefined && (

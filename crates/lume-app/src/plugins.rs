@@ -11,6 +11,14 @@
 //! wanted. Three times in a minute and it is turned off until the user turns it on.
 //! Changes made with `lume plugin` reach the application through the lock file, which is
 //! watched.
+//!
+//! What the plugins add to the windows (menus, status items, panels, pictures, motion,
+//! cursor effects) is worked out here from their manifests, without their code, and
+//! pages fetch it whole and are told when it changes. What their code shows in those
+//! (a status item's value, a panel's rows) reaches pages at most ten times a second.
+//! Pages say which of the plugins' items they have on screen: that starts a plugin
+//! whose manifest waits for one of its items to be seen, and the machine is read for a
+//! plugin's meters only while they are seen.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::Path;
@@ -21,19 +29,21 @@ use std::time::{Duration, Instant};
 use lume_config::Dirs;
 use lume_plugin::Store;
 use lume_plugin::broker::{Broker, allows, append};
-use lume_plugin::id::full_id;
+use lume_plugin::contributions::{self, Commands, Contributions, Install, PanelDef};
+use lume_plugin::id::{check_name, full_id};
 use lume_plugin::manifest::{Activation, Manifest};
 use lume_plugin::order::{Resolution, State};
 use lume_plugin::permissions::{Kind, Permissions};
 use lume_plugin::store::{Check, Installed};
-use lume_plugin_api::types::{StatusValue, Topic};
+use lume_plugin_api::types::{PanelRow, StatusValue, Topic};
 use lume_plugin_api::{ApiError, Call, ErrorCode};
 use lume_plugin_runtime::{Breach, Host, Level, Limits, Outbound, Plugin, Spec};
+use lume_services::metrics::{Hold, Listening, Sampler};
 use notify::{RecursiveMode, Watcher};
 use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::configsvc::ConfigService;
+use crate::configsvc::{ConfigService, PluginConfig};
 use crate::error::CommandError;
 use crate::registry::{CommandSpec, Owner, PluginAccess, Registry, Runs, plugin_access};
 use crate::services::{Asker, Services};
@@ -73,6 +83,14 @@ const KV_KEY_MAX: usize = 256;
 /// The file `lume.kv` keeps in a plugin's data folder.
 const KV_FILE: &str = "kv.json";
 
+/// How often what plugins' code shows is told to pages, at most.
+const SHOW_EVERY: Duration = Duration::from_millis(100);
+
+/// How many rows a list panel may hold, how deep, and how long a row's words may be.
+const PANEL_ROWS_MAX: usize = 5000;
+const PANEL_DEPTH_MAX: usize = 8;
+const PANEL_TEXT_MAX: usize = 200;
+
 /// A message a plugin's thread sent, with which run of its code sent it.
 struct Message {
     local: String,
@@ -111,6 +129,9 @@ struct Health {
     breaches: VecDeque<Instant>,
     last_problem: Option<String>,
     starts: u32,
+    /// What of its manifest could not be done as it asks: a thing left out, a key not
+    /// bound, an anchor not found.
+    warnings: Vec<String>,
 }
 
 /// The rate a plugin's log is written at.
@@ -135,6 +156,8 @@ struct Loaded {
     rate: LogRate,
     /// The settings it was last told of.
     told_settings: Option<Value>,
+    /// What each of its list panels shows, by the panel's name.
+    panels: BTreeMap<String, Value>,
 }
 
 impl Loaded {
@@ -159,6 +182,59 @@ struct Inner {
     invocations: HashMap<u64, Invocation>,
     /// The hashes of packages the user has been told were changed.
     told_modified: HashSet<String>,
+    /// What the plugins add to the windows, as pages fetch it.
+    shown: Arc<Shown>,
+    /// The plugins' things each window has on screen, by the window's label.
+    visible: HashMap<String, BTreeSet<String>>,
+    /// The windows that are minimised, whose things nobody sees.
+    minimised: HashSet<String>,
+    /// What waits to be told to pages.
+    pending: Pending,
+    metrics: Metrics,
+}
+
+/// What the plugins add to the windows, and how many times that has changed.
+#[derive(Default)]
+struct Shown {
+    revision: u64,
+    contributions: Contributions,
+}
+
+/// What plugins' code showed that pages have not been told yet: status items' values by
+/// (install, item, pane), panels' rows by (install, panel).
+#[derive(Default)]
+struct Pending {
+    status: BTreeSet<(String, String, Option<String>)>,
+    panels: BTreeSet<(String, String)>,
+    /// Whether something is on its way to tell them.
+    telling: bool,
+}
+
+/// The machine's readings plugins asked for.
+#[derive(Default)]
+struct Metrics {
+    sampler: Option<Sampler>,
+    hold: Option<Hold>,
+    listening: Option<Listening>,
+    subscriptions: BTreeMap<u64, Subscription>,
+}
+
+/// One plugin's wish for readings: the run of its code that asked, and the status items
+/// of its own, by full id, they are for.
+struct Subscription {
+    local: String,
+    generation: u64,
+    visible: Vec<String>,
+}
+
+/// The application's commands, as what the plugins add needs to know of them.
+struct Known<'a>(&'a Registry);
+
+impl Commands for Known<'_> {
+    fn builtin(&self, id: &str) -> Option<(String, bool)> {
+        let spec = self.0.get(id)?;
+        Some((spec.title, plugin_access(id) == PluginAccess::Open))
+    }
 }
 
 /// The installed plugins and their running code.
@@ -174,6 +250,9 @@ pub struct Plugins {
     received: Mutex<Option<mpsc::UnboundedReceiver<Message>>>,
     next: AtomicU64,
     watcher: Mutex<Option<notify::RecommendedWatcher>>,
+    /// The machine's readings, from the sampler's thread.
+    samples: mpsc::UnboundedSender<Value>,
+    sampled: Mutex<Option<mpsc::UnboundedReceiver<Value>>>,
 }
 
 fn api_error(code: ErrorCode, message: impl Into<String>) -> ApiError {
@@ -190,6 +269,7 @@ impl Plugins {
         let store = Store::of(dirs);
         let broker = Broker::new(Some(store.audit_file()));
         let (queue, received) = mpsc::unbounded_channel();
+        let (samples, sampled) = mpsc::unbounded_channel();
         Arc::new(Self {
             store,
             broker,
@@ -202,6 +282,8 @@ impl Plugins {
             received: Mutex::new(Some(received)),
             next: AtomicU64::new(1),
             watcher: Mutex::new(None),
+            samples,
+            sampled: Mutex::new(Some(sampled)),
         })
     }
 
@@ -242,6 +324,14 @@ impl Plugins {
             {
                 tokio::spawn(Arc::clone(&this).follow_messages(received));
             }
+            if let Some(sampled) = this
+                .sampled
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+            {
+                tokio::spawn(Arc::clone(&this).follow_samples(sampled));
+            }
             this.reload().await;
             this.state.marks().plugins();
             this.watch_lock();
@@ -278,6 +368,7 @@ impl Plugins {
             Err(_) => return,
         };
         let starting = self.apply(installed, resolution);
+        self.rebuild().await;
         self.state.broadcast(&json!({ "type": "commands_changed" }));
         self.state.broadcast(&json!({ "type": "plugins_changed" }));
         for local in starting {
@@ -285,6 +376,126 @@ impl Plugins {
                 tracing::warn!(plugin = %local, %problem, "a plugin that starts with the application did not start");
             }
         }
+    }
+
+    /// Works out again what the plugins that can be used add, from their manifests and
+    /// packages, off the async threads; gives the configuration its part; tells pages.
+    async fn rebuild(self: &Arc<Self>) {
+        struct Owned {
+            local: String,
+            name: String,
+            manifest: Manifest,
+            dir: std::path::PathBuf,
+            rank: i64,
+            bound: BTreeMap<String, String>,
+        }
+        let (owned, enabled): (Vec<Owned>, BTreeSet<String>) = {
+            let inner = self.inner();
+            let owned = inner
+                .resolution
+                .order
+                .iter()
+                .filter_map(|local| inner.loaded.get(local).map(|loaded| (local, loaded)))
+                .filter(|(_, loaded)| loaded.is_ready())
+                .filter_map(|(local, loaded)| {
+                    Some(Owned {
+                        local: local.clone(),
+                        name: loaded.installed.name(),
+                        manifest: loaded.manifest()?.clone(),
+                        dir: self.store.package_dir(&loaded.installed.entry),
+                        rank: inner
+                            .resolution
+                            .rank(local)
+                            .and_then(|rank| i64::try_from(rank).ok())
+                            .unwrap_or(i64::MAX),
+                        bound: inner
+                            .resolution
+                            .bound
+                            .get(local)
+                            .cloned()
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect();
+            let enabled = inner
+                .loaded
+                .iter()
+                .filter(|(_, loaded)| loaded.installed.entry.enabled)
+                .map(|(local, _)| local.clone())
+                .collect();
+            (owned, enabled)
+        };
+        let registry = Arc::clone(&self.registry);
+        let built = tokio::task::spawn_blocking(move || {
+            let installs: Vec<Install<'_>> = owned
+                .iter()
+                .map(|one| Install {
+                    local: &one.local,
+                    name: one.name.clone(),
+                    manifest: &one.manifest,
+                    dir: one.dir.clone(),
+                    rank: one.rank,
+                    bound: &one.bound,
+                })
+                .collect();
+            contributions::build(&installs, &Known(&registry))
+        })
+        .await;
+        let Ok(built) = built else {
+            return;
+        };
+        let schema = contributions::compose_schema(lume_config::config_schema(), &built);
+        let config = PluginConfig {
+            themes: built.themes.clone(),
+            keys: built
+                .keys
+                .iter()
+                .map(|key| lume_config::PluginBinding {
+                    plugin: key.plugin.clone(),
+                    keys: key.key.clone(),
+                    macos: key.macos.clone(),
+                    command: key.command.clone(),
+                    args: key.args.clone(),
+                    when: key.when.clone(),
+                })
+                .collect(),
+            fragments: built.settings.fragments.clone(),
+            schema: Some(Arc::new(schema)),
+            enabled,
+        };
+        let revision = {
+            let mut inner = self.inner();
+            for loaded in inner.loaded.values_mut() {
+                loaded.health.warnings.clear();
+            }
+            for (local, warning) in &built.warnings {
+                if let Some(loaded) = inner.loaded.get_mut(local) {
+                    loaded.health.warnings.push(warning.clone());
+                }
+            }
+            let revision = inner.shown.revision + 1;
+            inner.shown = Arc::new(Shown {
+                revision,
+                contributions: built,
+            });
+            revision
+        };
+        self.config.set_plugins(config);
+        // The keys the configuration could not bind for them.
+        let dropped = self.config.dropped_keys();
+        {
+            let mut inner = self.inner();
+            for key in dropped {
+                if let Some(loaded) = inner.loaded.get_mut(&key.plugin) {
+                    loaded.health.warnings.push(key.message);
+                }
+            }
+        }
+        self.state.broadcast(&json!({
+            "type": "contributions_changed",
+            "revision": revision,
+        }));
+        self.update_metrics();
     }
 
     /// Puts what was read in place of what was there. Returns the plugins to start now.
@@ -343,6 +554,7 @@ impl Plugins {
                             left_out: 0,
                         },
                         told_settings: None,
+                        panels: BTreeMap::new(),
                     }
                 }
             };
@@ -587,6 +799,7 @@ impl Plugins {
                 let name = self.ended(&local, generation, &message);
                 if let Some(name) = name {
                     self.notice("error", format!("{name} could not start: {message}"));
+                    self.tell_state(&local);
                 }
             }
             Outbound::Breached { breach, detail } => {
@@ -629,7 +842,28 @@ impl Plugins {
         if why != "its code stopped" {
             loaded.health.last_problem = Some(why.to_owned());
         }
-        Some(loaded.installed.name())
+        let name = loaded.installed.name();
+        // Its wishes for readings ended with the run that made them.
+        inner.metrics.subscriptions.retain(|_, subscription| {
+            subscription.local != local || subscription.generation != generation
+        });
+        drop(inner);
+        self.update_metrics();
+        Some(name)
+    }
+
+    /// Tells pages how a plugin fares, so that its things can show it.
+    fn tell_state(&self, local: &str) {
+        let problem = self
+            .inner()
+            .loaded
+            .get(local)
+            .and_then(|loaded| loaded.health.last_problem.clone());
+        self.state.broadcast(&json!({
+            "type": "plugin_state",
+            "plugin": local,
+            "problem": problem,
+        }));
     }
 
     fn breached(self: &Arc<Self>, local: &str, generation: u64, breach: Breach, detail: &str) {
@@ -658,6 +892,7 @@ impl Plugins {
             loaded.health.breaches.len() >= BREACHES_TO_TURN_OFF
         };
         self.log(local, Level::Error, &format!("stopped: {detail}"));
+        self.tell_state(local);
         if turn_off {
             self.notice(
                 "error",
@@ -811,6 +1046,7 @@ impl Plugins {
                 })
             }
             Call::ContextSet(set) => {
+                check_name(&set.key).map_err(|problem| api_error(ErrorCode::Invalid, problem))?;
                 let mut inner = self.inner();
                 if let Some(loaded) = inner.loaded.get_mut(local) {
                     loaded.contexts.insert(set.key.clone(), set.value);
@@ -831,18 +1067,229 @@ impl Plugins {
                 }
                 Ok(Value::Null)
             }
+            Call::PanelsSet(set) => self.panel_set(local, &set.id, Some(&set.rows)),
+            Call::PanelsClear(clear) => self.panel_set(local, &clear.id, None),
+            Call::MetricsSnapshot(_) => {
+                let latest = self
+                    .inner()
+                    .metrics
+                    .sampler
+                    .as_ref()
+                    .and_then(Sampler::latest);
+                Ok(latest.map_or(Value::Null, |sample| {
+                    serde_json::to_value(sample).unwrap_or(Value::Null)
+                }))
+            }
+            Call::MetricsSubscribe(subscribe) => {
+                let id = self.next();
+                {
+                    let mut inner = self.inner();
+                    let Some(loaded) = inner.loaded.get(local) else {
+                        return Err(api_error(ErrorCode::Stopped, "the plugin is not installed"));
+                    };
+                    let declared: BTreeSet<&str> = loaded
+                        .manifest()
+                        .map(|manifest| {
+                            manifest
+                                .contributes
+                                .status
+                                .iter()
+                                .map(|item| item.id.as_str())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if let Some(unknown) = subscribe
+                        .visible
+                        .iter()
+                        .find(|item| !declared.contains(item.as_str()))
+                    {
+                        return Err(api_error(
+                            ErrorCode::NotFound,
+                            format!("the plugin's manifest has no status item {unknown}"),
+                        ));
+                    }
+                    let generation = loaded
+                        .running
+                        .as_ref()
+                        .map_or(0, |running| running.generation);
+                    let visible = subscribe
+                        .visible
+                        .iter()
+                        .map(|item| full_id(local, item))
+                        .collect();
+                    inner.metrics.subscriptions.insert(
+                        id,
+                        Subscription {
+                            local: local.to_owned(),
+                            generation,
+                            visible,
+                        },
+                    );
+                }
+                self.update_metrics();
+                Ok(json!(id))
+            }
+            Call::MetricsUnsubscribe(unsubscribe) => {
+                {
+                    let mut inner = self.inner();
+                    let owned = inner
+                        .metrics
+                        .subscriptions
+                        .get(&unsubscribe.subscription)
+                        .is_some_and(|subscription| subscription.local == local);
+                    if owned {
+                        inner
+                            .metrics
+                            .subscriptions
+                            .remove(&unsubscribe.subscription);
+                    }
+                }
+                self.update_metrics();
+                Ok(Value::Null)
+            }
         }
+    }
+
+    /// Shows rows in one of a plugin's list panels, or takes them away.
+    fn panel_set(
+        self: &Arc<Self>,
+        local: &str,
+        panel: &str,
+        rows: Option<&[PanelRow]>,
+    ) -> Result<Value, ApiError> {
+        let rows = {
+            let inner = self.inner();
+            let loaded = inner
+                .loaded
+                .get(local)
+                .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
+            let manifest = loaded
+                .manifest()
+                .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
+            if !manifest
+                .contributes
+                .panels
+                .iter()
+                .any(|known| known.id == panel)
+            {
+                return Err(api_error(
+                    ErrorCode::NotFound,
+                    format!("the plugin's manifest has no panel {panel}"),
+                ));
+            }
+            let commands: BTreeSet<&str> = manifest
+                .contributes
+                .commands
+                .iter()
+                .map(|command| command.id.as_str())
+                .collect();
+            match rows {
+                None => None,
+                Some(rows) => {
+                    let mut count = 0;
+                    check_rows(rows, 1, &mut count, &commands)
+                        .map_err(|problem| api_error(ErrorCode::Invalid, problem))?;
+                    let mut value = serde_json::to_value(rows).unwrap_or(Value::Null);
+                    full_commands(&mut value, local);
+                    Some(value)
+                }
+            }
+        };
+        {
+            let mut inner = self.inner();
+            if let Some(loaded) = inner.loaded.get_mut(local) {
+                match rows {
+                    Some(rows) => {
+                        loaded.panels.insert(panel.to_owned(), rows);
+                    }
+                    None => {
+                        loaded.panels.remove(panel);
+                    }
+                }
+            }
+            inner
+                .pending
+                .panels
+                .insert((local.to_owned(), panel.to_owned()));
+        }
+        self.tell_soon();
+        Ok(Value::Null)
+    }
+
+    /// Tells pages, soon, what waits to be told: at most once every [`SHOW_EVERY`].
+    fn tell_soon(self: &Arc<Self>) {
+        {
+            let mut inner = self.inner();
+            if inner.pending.telling {
+                return;
+            }
+            inner.pending.telling = true;
+        }
+        let this = Arc::clone(self);
+        self.state.runtime().spawn(async move {
+            loop {
+                tokio::time::sleep(SHOW_EVERY).await;
+                let (status, panels) = {
+                    let mut inner = this.inner();
+                    let status = std::mem::take(&mut inner.pending.status);
+                    let panels = std::mem::take(&mut inner.pending.panels);
+                    if status.is_empty() && panels.is_empty() {
+                        inner.pending.telling = false;
+                        return;
+                    }
+                    let status: Vec<Value> = status
+                        .into_iter()
+                        .map(|(local, item, pane)| {
+                            let value = inner
+                                .loaded
+                                .get(&local)
+                                .and_then(|loaded| loaded.status.get(&(item.clone(), pane.clone())))
+                                .cloned()
+                                .unwrap_or(Value::Null);
+                            json!({
+                                "type": "plugin_status",
+                                "plugin": local,
+                                "item": full_id(&local, &item),
+                                "pane": pane,
+                                "value": value,
+                            })
+                        })
+                        .collect();
+                    let panels: Vec<Value> = panels
+                        .into_iter()
+                        .map(|(local, panel)| {
+                            let rows = inner
+                                .loaded
+                                .get(&local)
+                                .and_then(|loaded| loaded.panels.get(&panel))
+                                .cloned()
+                                .unwrap_or(Value::Null);
+                            json!({
+                                "type": "plugin_panel",
+                                "plugin": local,
+                                "panel": full_id(&local, &panel),
+                                "rows": rows,
+                            })
+                        })
+                        .collect();
+                    (status, panels)
+                };
+                for notice in status.iter().chain(&panels) {
+                    this.state.broadcast(notice);
+                }
+            }
+        });
     }
 
     /// Shows a value in one of a plugin's status items, or takes it back.
     fn status_set(
-        &self,
+        self: &Arc<Self>,
         local: &str,
         item: &str,
         pane: Option<String>,
         value: Option<StatusValue>,
     ) -> Result<Value, ApiError> {
-        let merged = {
+        {
             let mut inner = self.inner();
             let loaded = inner
                 .loaded
@@ -861,11 +1308,20 @@ impl Plugins {
                     format!("the plugin's manifest has no status item {item}"),
                 ));
             }
+            if let Some(color) = value.as_ref().and_then(|value| value.color.as_deref()) {
+                let named = lume_config::tokens::token_def(color)
+                    .is_some_and(|token| token.kind == lume_config::TokenKind::Color);
+                if !named {
+                    return Err(api_error(
+                        ErrorCode::Invalid,
+                        format!("`{color}` is not one of the theme's colours, as color.tab.purple"),
+                    ));
+                }
+            }
             let key = (item.to_owned(), pane.clone());
             match value {
                 None => {
                     loaded.status.remove(&key);
-                    Value::Null
                 }
                 Some(value) => {
                     let fresh = serde_json::to_value(value).unwrap_or(Value::Null);
@@ -875,17 +1331,14 @@ impl Plugins {
                             old.insert(field.clone(), value.clone());
                         }
                     }
-                    entry.clone()
                 }
             }
-        };
-        self.state.broadcast(&json!({
-            "type": "plugin_status",
-            "plugin": local,
-            "item": full_id(local, item),
-            "pane": pane,
-            "value": merged,
-        }));
+            inner
+                .pending
+                .status
+                .insert((local.to_owned(), item.to_owned(), pane));
+        }
+        self.tell_soon();
         Ok(Value::Null)
     }
 
@@ -996,8 +1449,14 @@ impl Plugins {
         })
     }
 
-    /// A plugin's settings: what the user set, over the defaults its manifest gives.
+    /// A plugin's settings: what the user set, where the plugin takes it, over the
+    /// defaults its manifest gives.
     fn settings_of(&self, local: &str) -> Value {
+        let settings = self.config.plugin_settings(local);
+        if settings.as_object().is_some_and(|set| !set.is_empty()) {
+            return settings;
+        }
+        // Before the configuration has the plugin's schema: its manifest's defaults.
         let defaults: Map<String, Value> = self
             .inner()
             .loaded
@@ -1016,16 +1475,7 @@ impl Plugins {
                     .collect()
             })
             .unwrap_or_default();
-        let mut settings = defaults;
-        let current = self.config.current();
-        if let Some(Value::Object(set)) = current.config.plugins.get(local) {
-            for (key, value) in set {
-                if settings.contains_key(key) {
-                    settings.insert(key.clone(), value.clone());
-                }
-            }
-        }
-        Value::Object(settings)
+        Value::Object(defaults)
     }
 
     /// Tells running plugins whose settings changed.
@@ -1298,6 +1748,21 @@ impl Plugins {
     /// The plugins, as `lume ctl plugins` lists them.
     pub fn describe(&self) -> Value {
         let inner = self.inner();
+        let visible = seen(&inner);
+        let held = inner.metrics.hold.is_some();
+        let reading: BTreeSet<&str> = if held {
+            inner
+                .metrics
+                .subscriptions
+                .values()
+                .filter(|one| {
+                    one.visible.is_empty() || one.visible.iter().any(|id| visible.contains(id))
+                })
+                .map(|one| one.local.as_str())
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
         let plugins: Vec<Value> = inner
             .resolution
             .order
@@ -1331,11 +1796,216 @@ impl Plugins {
                         "item": item, "pane": pane, "value": value,
                     })).collect::<Vec<_>>(),
                     "contexts": loaded.contexts,
+                    "warnings": loaded.health.warnings,
+                    "panels": loaded.panels.keys().collect::<Vec<_>>(),
+                    "visible": visible.iter().filter(|id| {
+                        id.strip_prefix(local.as_str()).is_some_and(|rest| rest.starts_with('.'))
+                    }).collect::<Vec<_>>(),
+                    "metrics": {
+                        "subscriptions": inner.metrics.subscriptions.values().filter(|one| one.local == *local).count(),
+                        "reading": reading.contains(local.as_str()),
+                    },
                     "log": loaded.log.iter().rev().take(20).rev().cloned().collect::<Vec<_>>(),
                 })
             })
             .collect();
         json!(plugins)
+    }
+
+    /// What the plugins add to the windows, with what their code shows in it now: what
+    /// a page fetches when it starts and whenever it is told this changed.
+    pub fn snapshot(&self) -> Value {
+        let inner = self.inner();
+        let mut snapshot = inner.shown.contributions.to_json();
+        let plugins: Vec<Value> = inner
+            .resolution
+            .order
+            .iter()
+            .filter_map(|local| inner.loaded.get(local).map(|loaded| (local, loaded)))
+            .map(|(local, loaded)| {
+                json!({
+                    "id": local,
+                    "name": loaded.installed.name(),
+                    "version": loaded.installed.entry.version,
+                    "ready": loaded.is_ready(),
+                    "problem": loaded.health.last_problem,
+                })
+            })
+            .collect();
+        let mut values = Vec::new();
+        let mut panels = Map::new();
+        let mut contexts = Map::new();
+        for (local, loaded) in &inner.loaded {
+            for ((item, pane), value) in &loaded.status {
+                values.push(json!({
+                    "plugin": local,
+                    "item": full_id(local, item),
+                    "pane": pane,
+                    "value": value,
+                }));
+            }
+            for (panel, rows) in &loaded.panels {
+                panels.insert(full_id(local, panel), rows.clone());
+            }
+            for (key, value) in &loaded.contexts {
+                contexts.insert(format!("plugin:{local}.{key}"), json!(value));
+            }
+        }
+        if let Some(object) = snapshot.as_object_mut() {
+            object.insert("revision".to_owned(), json!(inner.shown.revision));
+            object.insert("plugins".to_owned(), Value::Array(plugins));
+            object.insert("values".to_owned(), Value::Array(values));
+            object.insert("rows".to_owned(), Value::Object(panels));
+            object.insert("contexts".to_owned(), Value::Object(contexts));
+        }
+        snapshot
+    }
+
+    /// The list panel of a plugin, by its full id.
+    pub fn panel(&self, id: &str) -> Option<PanelDef> {
+        self.inner()
+            .shown
+            .contributions
+            .panels
+            .iter()
+            .find(|panel| panel.id == id)
+            .cloned()
+    }
+
+    /// The plugins' things a window has on screen now. Things newly on screen start the
+    /// plugins that wait for them, and the readings of the machine follow what is seen.
+    pub fn visible(self: &Arc<Self>, window: &str, items: Vec<String>) {
+        self.recount(window, items);
+    }
+
+    fn recount(self: &Arc<Self>, window: &str, items: Vec<String>) {
+        let appeared: Vec<String> = {
+            let mut inner = self.inner();
+            let before = seen(&inner);
+            if items.is_empty() {
+                inner.visible.remove(window);
+            } else {
+                inner
+                    .visible
+                    .insert(window.to_owned(), items.into_iter().collect());
+            }
+            let after = seen(&inner);
+            after.difference(&before).cloned().collect()
+        };
+        for id in appeared {
+            let wanted = {
+                let inner = self.inner();
+                inner.loaded.iter().find_map(|(local, loaded)| {
+                    let name = id.strip_prefix(local.as_str())?.strip_prefix('.')?;
+                    let waits = loaded.is_ready()
+                        && loaded.running.is_none()
+                        && loaded.manifest().is_some_and(|manifest| {
+                            manifest.events.contains(&Activation::View(name.to_owned()))
+                        });
+                    waits.then(|| local.clone())
+                })
+            };
+            if let Some(local) = wanted {
+                let this = Arc::clone(self);
+                self.state.runtime().spawn(async move {
+                    if let Err(problem) = this.activate(&local).await {
+                        tracing::debug!(plugin = %local, %problem, "a plugin whose item came on screen did not start");
+                    }
+                });
+            }
+        }
+        self.update_metrics();
+    }
+
+    /// A window closed: what it had on screen is not seen any more.
+    pub fn window_gone(self: &Arc<Self>, window: &str) {
+        self.inner().minimised.remove(window);
+        self.visible(window, Vec::new());
+    }
+
+    /// A window was minimised, or brought back: while it is minimised, nothing it has
+    /// on screen is seen. A page cannot always tell itself.
+    pub fn window_minimised(self: &Arc<Self>, window: &str, minimised: bool) {
+        let changed = {
+            let mut inner = self.inner();
+            if minimised {
+                inner.minimised.insert(window.to_owned())
+            } else {
+                inner.minimised.remove(window)
+            }
+        };
+        if changed {
+            let items: Vec<String> = self
+                .inner()
+                .visible
+                .get(window)
+                .map(|items| items.iter().cloned().collect())
+                .unwrap_or_default();
+            // Told again what it has, the window's things count or not as it now is.
+            self.recount(window, items);
+        }
+    }
+
+    /// Reads the machine while a plugin that asked for readings has one of the items
+    /// they are for on screen, and stops reading when none has.
+    fn update_metrics(&self) {
+        let mut inner = self.inner();
+        let visible = seen(&inner);
+        let running: BTreeMap<String, u64> = inner
+            .loaded
+            .iter()
+            .filter_map(|(local, loaded)| {
+                let running = loaded.running.as_ref()?;
+                Some((local.clone(), running.generation))
+            })
+            .collect();
+        let wanted = inner.metrics.subscriptions.values().any(|one| {
+            running.get(&one.local) == Some(&one.generation)
+                && (one.visible.is_empty() || one.visible.iter().any(|id| visible.contains(id)))
+        });
+        let metrics = &mut inner.metrics;
+        if !wanted {
+            metrics.listening = None;
+            metrics.hold = None;
+            return;
+        }
+        if metrics.hold.is_some() {
+            return;
+        }
+        let sampler = metrics.sampler.get_or_insert_with(Sampler::start);
+        let samples = self.samples.clone();
+        metrics.listening = Some(sampler.listen(move |sample| {
+            let _ = samples.send(serde_json::to_value(sample).unwrap_or(Value::Null));
+        }));
+        metrics.hold = Some(sampler.hold());
+    }
+
+    /// Gives each reading of the machine to the plugins whose wishes for it hold now.
+    async fn follow_samples(self: Arc<Self>, mut sampled: mpsc::UnboundedReceiver<Value>) {
+        while let Some(sample) = sampled.recv().await {
+            let deliver: Vec<(Arc<Plugin>, Vec<u64>)> = {
+                let inner = self.inner();
+                let visible = seen(&inner);
+                let mut by_plugin: BTreeMap<&str, Vec<u64>> = BTreeMap::new();
+                for (id, one) in &inner.metrics.subscriptions {
+                    if one.visible.is_empty()
+                        || one.visible.iter().any(|item| visible.contains(item))
+                    {
+                        by_plugin.entry(one.local.as_str()).or_default().push(*id);
+                    }
+                }
+                by_plugin
+                    .into_iter()
+                    .filter_map(|(local, ids)| {
+                        let running = inner.loaded.get(local)?.running.as_ref()?;
+                        running.started.then(|| (Arc::clone(&running.plugin), ids))
+                    })
+                    .collect()
+            };
+            for (plugin, ids) in deliver {
+                plugin.event("metrics", json!({ "to": ids, "sample": sample }));
+            }
+        }
     }
 
     /// Stops every plugin's code, as the application closes.
@@ -1348,11 +2018,92 @@ impl Plugins {
                 running.push(run.plugin);
             }
         }
+        inner.metrics = Metrics::default();
         drop(inner);
         // A moment for their code to hear it is stopping.
         let deadline = Instant::now() + Duration::from_millis(250);
         while Instant::now() < deadline && running.iter().any(|plugin| !plugin.stats().finished) {
             std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+/// Everything the windows that are not minimised have on screen.
+fn seen(inner: &Inner) -> BTreeSet<String> {
+    inner
+        .visible
+        .iter()
+        .filter(|(window, _)| !inner.minimised.contains(*window))
+        .flat_map(|(_, items)| items.iter().cloned())
+        .collect()
+}
+
+/// Checks the rows a plugin gives a list panel: how many, how deep, how long their
+/// words, and that their actions run the plugin's own commands.
+fn check_rows(
+    rows: &[PanelRow],
+    depth: usize,
+    count: &mut usize,
+    commands: &BTreeSet<&str>,
+) -> Result<(), String> {
+    if depth > PANEL_DEPTH_MAX {
+        return Err(format!("a panel's rows go {PANEL_DEPTH_MAX} deep at most"));
+    }
+    let mut ids = BTreeSet::new();
+    for row in rows {
+        *count += 1;
+        if *count > PANEL_ROWS_MAX {
+            return Err(format!("a panel holds {PANEL_ROWS_MAX} rows at most"));
+        }
+        if !ids.insert(row.id.as_str()) {
+            return Err(format!("two rows beside each other are called {}", row.id));
+        }
+        for text in [
+            Some(&row.id),
+            Some(&row.label),
+            row.detail.as_ref(),
+            row.badge.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if text.chars().count() > PANEL_TEXT_MAX || text.chars().any(char::is_control) {
+                return Err(format!(
+                    "a row's words are one line of {PANEL_TEXT_MAX} characters at most"
+                ));
+            }
+        }
+        for action in row.actions.iter().flatten() {
+            if !commands.contains(action.command.as_str()) {
+                return Err(format!(
+                    "an action runs {}, which is not one of the plugin's commands",
+                    action.command
+                ));
+            }
+        }
+        if let Some(children) = &row.children {
+            check_rows(children, depth + 1, count, commands)?;
+        }
+    }
+    Ok(())
+}
+
+/// Gives the actions of rows their commands' full ids.
+fn full_commands(rows: &mut Value, local: &str) {
+    let Some(rows) = rows.as_array_mut() else {
+        return;
+    };
+    for row in rows {
+        if let Some(actions) = row.get_mut("actions").and_then(Value::as_array_mut) {
+            for action in actions {
+                if let Some(command) = action.get("command").and_then(Value::as_str) {
+                    let full = full_id(local, command);
+                    action["command"] = json!(full);
+                }
+            }
+        }
+        if let Some(children) = row.get_mut("children") {
+            full_commands(children, local);
         }
     }
 }
@@ -1363,4 +2114,75 @@ fn same_file(one: &Path, other: &Path) -> bool {
     one == other
         || one.file_name() == other.file_name()
             && one.parent().map(Path::file_name) == other.parent().map(Path::file_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rows(value: Value) -> Vec<PanelRow> {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn a_panels_rows_are_held_to_their_limits_and_run_the_plugins_own_commands() {
+        let commands: BTreeSet<&str> = ["open"].into_iter().collect();
+        let good = rows(json!([
+            { "id": "a", "label": "A", "children": [
+                { "id": "a1", "label": "A1", "actions": [{ "command": "open", "title": "Open" }] }
+            ] },
+            { "id": "b", "label": "B" },
+        ]));
+        let mut count = 0;
+        assert_eq!(check_rows(&good, 1, &mut count, &commands), Ok(()));
+        assert_eq!(count, 3);
+
+        let foreign = rows(json!([
+            { "id": "a", "label": "A", "actions": [{ "command": "lume.app.quit", "title": "Quit" }] }
+        ]));
+        assert!(
+            check_rows(&foreign, 1, &mut 0, &commands)
+                .unwrap_err()
+                .contains("lume.app.quit")
+        );
+        let twice = rows(json!([{ "id": "a", "label": "A" }, { "id": "a", "label": "B" }]));
+        assert!(
+            check_rows(&twice, 1, &mut 0, &commands)
+                .unwrap_err()
+                .contains("called a")
+        );
+        let long = rows(json!([{ "id": "a", "label": "x".repeat(PANEL_TEXT_MAX + 1) }]));
+        assert!(check_rows(&long, 1, &mut 0, &commands).is_err());
+        let mut deep = json!({ "id": "leaf", "label": "leaf" });
+        for level in 0..PANEL_DEPTH_MAX {
+            deep = json!({ "id": format!("l{level}"), "label": "x", "children": [deep] });
+        }
+        assert!(
+            check_rows(&rows(json!([deep])), 1, &mut 0, &commands)
+                .unwrap_err()
+                .contains("deep")
+        );
+        let many: Vec<Value> = (0..=PANEL_ROWS_MAX)
+            .map(|at| json!({ "id": format!("r{at}"), "label": "r" }))
+            .collect();
+        assert!(
+            check_rows(&rows(Value::Array(many)), 1, &mut 0, &commands)
+                .unwrap_err()
+                .contains("rows at most")
+        );
+    }
+
+    #[test]
+    fn a_rows_actions_name_the_plugins_commands_in_full() {
+        let mut value = json!([
+            { "id": "a", "label": "A", "actions": [{ "command": "open", "title": "Open" }],
+              "children": [{ "id": "b", "label": "B", "actions": [{ "command": "stop", "title": "Stop" }] }] }
+        ]);
+        full_commands(&mut value, "acme.tools");
+        assert_eq!(value[0]["actions"][0]["command"], "acme.tools.open");
+        assert_eq!(
+            value[0]["children"][0]["actions"][0]["command"],
+            "acme.tools.stop"
+        );
+    }
 }

@@ -5,8 +5,9 @@ returns a promise; a call that fails rejects it with a `LumeError`, whose `code`
 says why (`denied`, `invalid`, `not_found`, `busy`, `failed`, `stopped`).
 
 Besides the calls below, the API has `lume.self`, `lume.commands.register`,
-`lume.timers`, `lume.sessions.onEvent`, `lume.settings.onChange`, `lume.log`,
-`lume.onDeactivate` and `console`; the typings describe them.
+`lume.timers`, `lume.sessions.onEvent`, `lume.settings.onChange`,
+`lume.metrics.subscribe`, `lume.log`, `lume.onDeactivate` and `console`; the
+typings describe them.
 
 ## lume.commands
 
@@ -75,6 +76,42 @@ The keys the plugin has stored values under.
 
 Gives `string[]`.
 
+## lume.metrics
+
+### `lume.metrics.snapshot()`
+
+The latest reading of the machine, or null before the first: how busy the
+ processor and the graphics card are, how much memory is used, how fast the
+ network goes.
+
+Needs the `system.metrics` permission.
+
+Gives `MetricsSample \| null`.
+
+## lume.panels
+
+### `lume.panels.set(id, rows)`
+
+Shows rows in one of the plugin's list panels, in place of those it showed. A
+ panel holds 5000 rows at most, eight deep.
+
+| Argument | Type | |
+|---|---|---|
+| `id` | `string` | The panel, by the name the manifest gives it. |
+| `rows` | `PanelRow[]` |  |
+
+Gives `void`.
+
+### `lume.panels.clear(id)`
+
+Takes away the rows a list panel shows.
+
+| Argument | Type | |
+|---|---|---|
+| `id` | `string` |  |
+
+Gives `void`.
+
 ## lume.settings
 
 ### `lume.settings.get(key?)`
@@ -118,11 +155,14 @@ Gives `void`.
 
 ### `CardRow`
 
-One row of a status item's card: a name and what it is.
+One row of a status item's card: a name and what it is, perhaps with a line through
+its latest values.
 
 | Field | Type | |
 |---|---|---|
 | `label` | `string` |  |
+| `points` | `number[]` | optional. The latest values, from the oldest to the newest, drawn as a small line. |
+| `tone` | `Tone` | optional.  |
 | `value` | `string` |  |
 
 ### `CommandExecute`
@@ -145,6 +185,23 @@ The kinds of failure a call can have.
 
 `"denied" \| "invalid" \| "not_found" \| "busy" \| "failed" \| "stopped" \| "unhandled"`
 
+### `GpuMemoryUsage`
+
+| Field | Type | |
+|---|---|---|
+| `total` | `number` | optional.  |
+| `used` | `number` |  |
+
+### `GpuReading`
+
+What the graphics card is doing: `unavailable` where there is no way to read it.
+
+| Field | Type | |
+|---|---|---|
+| `busy` | `number` | optional. How busy its busiest engine is, from 0 to 1. |
+| `memory` | `GpuMemoryUsage` | optional. How much of its own memory is used, in bytes; the whole is not known for a card that shares the system's. |
+| `state` | `string` | `read` or `unavailable`. |
+
 ### `KvKey`
 
 | Field | Type | |
@@ -158,11 +215,95 @@ The kinds of failure a call can have.
 | `key` | `string` |  |
 | `value` | `Json` |  |
 
+### `MemoryUsage`
+
+| Field | Type | |
+|---|---|---|
+| `total` | `number` |  |
+| `used` | `number` |  |
+
+### `MetricKind`
+
+What a reading of the machine can be asked for.
+
+`"cpu" \| "memory" \| "gpu" \| "network"`
+
+### `MetricsSample`
+
+What the machine is doing, as one reading has it.
+
+| Field | Type | |
+|---|---|---|
+| `cpu` | `number` | optional. How busy the processor is, from 0 to 1, over all its cores. |
+| `gpu` | `GpuReading` | optional. What the graphics card is doing, where it can be read. |
+| `memory` | `MemoryUsage` | optional. How much memory is used, in bytes, of how much there is. |
+| `network` | `NetworkRates` | optional. How fast the network goes, in bytes a second, over the hardware interfaces. |
+
+### `MetricsSubscribe`
+
+| Field | Type | |
+|---|---|---|
+| `kinds` | `MetricKind[]` |  |
+| `visible` | `string[]` | optional. The plugin's status items, by name, the readings are for: the machine is read only while one of them is on screen. Left empty, it is read all the while. |
+
+### `MetricsUnsubscribe`
+
+| Field | Type | |
+|---|---|---|
+| `subscription` | `number` |  |
+
+### `NetworkRates`
+
+| Field | Type | |
+|---|---|---|
+| `received` | `number` |  |
+| `sent` | `number` |  |
+
 ### `Nothing`
 
 Nothing: what a call that takes no arguments is sent.
 
 `Record<string, never>`
+
+### `PanelId`
+
+| Field | Type | |
+|---|---|---|
+| `id` | `string` |  |
+
+### `PanelRow`
+
+One row of a list panel. Rows hold rows of their own, which open beneath them.
+
+| Field | Type | |
+|---|---|---|
+| `actions` | `RowAction[]` | optional. What can be done with the row: each runs one of the plugin's commands, given `{ panel, row, path }` (the panel's name, the row's id and the ids from the top down to it) and the action's own arguments. The first is what choosing the row does. |
+| `badge` | `string` | optional. A count or a word at the row's end. |
+| `children` | `PanelRow[]` | optional.  |
+| `detail` | `string` | optional. A few words after the label, in a quieter colour. |
+| `expanded` | `boolean` | optional. Whether its rows are open beneath it at first. |
+| `icon` | `string` | optional. One of the plugin's pictures, by the name its manifest gives it, or one of the application's, by name. |
+| `id` | `string` | Names the row among its siblings, for the actions run on it. |
+| `label` | `string` |  |
+| `tone` | `Tone` | optional.  |
+
+### `PanelsSet`
+
+| Field | Type | |
+|---|---|---|
+| `id` | `string` | The panel, by the name the manifest gives it. |
+| `rows` | `PanelRow[]` |  |
+
+### `RowAction`
+
+Something that can be done with a row of a list panel.
+
+| Field | Type | |
+|---|---|---|
+| `args` | `Json` | optional.  |
+| `command` | `string` | One of the plugin's commands, by the name its manifest gives it. |
+| `icon` | `string` | optional.  |
+| `title` | `string` |  |
 
 ### `SessionReport`
 
@@ -204,7 +345,9 @@ the manifest says what kind of item it is.
 | Field | Type | |
 |---|---|---|
 | `card` | `CardRow[]` | optional. The rows of the card shown when the pointer rests on the item. |
+| `color` | `string` | optional. One of the theme's colours, by its token's name, as `color.tab.purple`: what the item draws is drawn in it, in place of the tone's. |
 | `hidden` | `boolean` | optional. Whether the item is out of sight for now. |
+| `icon` | `string` | optional. The picture beside it: one of the plugin's own, by the name its manifest gives it, or one of the application's, by name. |
 | `label` | `string` | optional. What the item stands for, read out and shown beside a meter. |
 | `points` | `number[]` | optional. A sparkline's values, from the oldest to the newest. |
 | `text` | `string` | optional. The words of a text or badge item, or the amount written out beside a meter or a sparkline. |

@@ -5,6 +5,7 @@
  * anew, so drawing an effect makes nothing for the garbage collector.
  */
 
+import type { CustomDraw } from "./custom.ts";
 import { FX_POLYGON_MAX } from "./tuning.ts";
 
 /** What a shape is: a trail's outline, or one of the pulses. */
@@ -67,6 +68,18 @@ export interface FxBackend {
   /** Told once if the backend can no longer draw. */
   onLost(listener: () => void): void;
   dispose(): void;
+  /**
+   * Readies a plugin's shader to be drawn with. Only WebGL2 has these; with Canvas 2D a
+   * plugin's effect is not drawn.
+   */
+  prepareCustom?(id: string, source: string): void;
+  /**
+   * Draws a frame of a plugin's effect over what `draw` drew. Throws a
+   * `CustomEffectError` when the shader could not be built.
+   */
+  drawCustom?(id: string, frame: CustomDraw): void;
+  /** Lets go of a plugin's shader. */
+  forgetCustom?(id: string): void;
 }
 
 /** The red, green and blue of a packed colour, from 0 to 1. */

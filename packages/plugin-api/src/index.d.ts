@@ -7,10 +7,16 @@
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 /**
- * One row of a status item's card: a name and what it is.
+ * One row of a status item's card: a name and what it is, perhaps with a line through
+ * its latest values.
  */
 export interface CardRow {
   label: string;
+  /**
+   * The latest values, from the oldest to the newest, drawn as a small line.
+   */
+  points?: number[];
+  tone?: Tone;
   value: string;
 }
 
@@ -65,6 +71,30 @@ export type ErrorCode =
    */
   | "unhandled";
 
+export interface GpuMemoryUsage {
+  total?: number;
+  used: number;
+}
+
+/**
+ * What the graphics card is doing: `unavailable` where there is no way to read it.
+ */
+export interface GpuReading {
+  /**
+   * How busy its busiest engine is, from 0 to 1.
+   */
+  busy?: number;
+  /**
+   * How much of its own memory is used, in bytes; the whole is not known for a card
+   * that shares the system's.
+   */
+  memory?: GpuMemoryUsage;
+  /**
+   * `read` or `unavailable`.
+   */
+  state: string;
+}
+
 export interface KvKey {
   key: string;
 }
@@ -74,10 +104,122 @@ export interface KvSet {
   value: Json;
 }
 
+export interface MemoryUsage {
+  total: number;
+  used: number;
+}
+
+/**
+ * What a reading of the machine can be asked for.
+ */
+export type MetricKind = "cpu" | "memory" | "gpu" | "network";
+
+/**
+ * What the machine is doing, as one reading has it.
+ */
+export interface MetricsSample {
+  /**
+   * How busy the processor is, from 0 to 1, over all its cores.
+   */
+  cpu?: number;
+  /**
+   * What the graphics card is doing, where it can be read.
+   */
+  gpu?: GpuReading;
+  /**
+   * How much memory is used, in bytes, of how much there is.
+   */
+  memory?: MemoryUsage;
+  /**
+   * How fast the network goes, in bytes a second, over the hardware interfaces.
+   */
+  network?: NetworkRates;
+}
+
+export interface MetricsSubscribe {
+  kinds: MetricKind[];
+  /**
+   * The plugin's status items, by name, the readings are for: the machine is read
+   * only while one of them is on screen. Left empty, it is read all the while.
+   */
+  visible?: string[];
+}
+
+export interface MetricsUnsubscribe {
+  subscription: number;
+}
+
+export interface NetworkRates {
+  received: number;
+  sent: number;
+}
+
 /**
  * Nothing: what a call that takes no arguments is sent.
  */
 export type Nothing = Record<string, never>;
+
+export interface PanelId {
+  id: string;
+}
+
+/**
+ * One row of a list panel. Rows hold rows of their own, which open beneath them.
+ */
+export interface PanelRow {
+  /**
+   * What can be done with the row: each runs one of the plugin's commands, given
+   * `{ panel, row, path }` (the panel's name, the row's id and the ids from the top
+   * down to it) and the action's own arguments. The first is what choosing the row
+   * does.
+   */
+  actions?: RowAction[];
+  /**
+   * A count or a word at the row's end.
+   */
+  badge?: string;
+  children?: PanelRow[];
+  /**
+   * A few words after the label, in a quieter colour.
+   */
+  detail?: string;
+  /**
+   * Whether its rows are open beneath it at first.
+   */
+  expanded?: boolean;
+  /**
+   * One of the plugin's pictures, by the name its manifest gives it, or one of the
+   * application's, by name.
+   */
+  icon?: string;
+  /**
+   * Names the row among its siblings, for the actions run on it.
+   */
+  id: string;
+  label: string;
+  tone?: Tone;
+}
+
+export interface PanelsSet {
+  /**
+   * The panel, by the name the manifest gives it.
+   */
+  id: string;
+  rows: PanelRow[];
+}
+
+/**
+ * Something that can be done with a row of a list panel.
+ */
+export interface RowAction {
+  args?: Json;
+  /**
+   * One of the plugin's commands, by the name its manifest gives it.
+   */
+  command: string;
+  icon?: string;
+  title: string;
+}
 
 /**
  * Something a session reported, as a plugin hears it.
@@ -137,9 +279,19 @@ export interface StatusValue {
    */
   card?: CardRow[];
   /**
+   * One of the theme's colours, by its token's name, as `color.tab.purple`: what
+   * the item draws is drawn in it, in place of the tone's.
+   */
+  color?: string;
+  /**
    * Whether the item is out of sight for now.
    */
   hidden?: boolean;
+  /**
+   * The picture beside it: one of the plugin's own, by the name its manifest gives
+   * it, or one of the application's, by name.
+   */
+  icon?: string;
   /**
    * What the item stands for, read out and shown beside a meter.
    */
@@ -226,6 +378,19 @@ export interface LumeBase {
     /** Hears when the plugin's settings change; the listener is given all of them. */
     onChange(listener: (settings: Record<string, Json>) => void): Disposable;
   };
+  readonly metrics: {
+    /**
+     * Reads the machine about once a second and gives the listener each reading, with
+     * the kinds asked for. With `while`, the machine is read only while one of those
+     * status items of the plugin's is on screen, in any window. Needs the
+     * `system.metrics` permission.
+     */
+    subscribe(
+      kinds: readonly MetricKind[],
+      listener: (sample: MetricsSample) => void,
+      options?: { readonly while?: readonly string[] },
+    ): Disposable;
+  };
   /** Writes to the plugin's log, which `lume plugin logs <id>` shows. */
   readonly log: {
     debug(...values: unknown[]): void;
@@ -271,6 +436,27 @@ export interface LumeCalls {
      * The keys the plugin has stored values under.
      */
     list(): Promise<string[]>;
+  };
+  readonly metrics: {
+    /**
+     * The latest reading of the machine, or null before the first: how busy the
+     *  processor and the graphics card are, how much memory is used, how fast the
+     *  network goes.
+     *
+     * Needs the `system.metrics` permission.
+     */
+    snapshot(): Promise<MetricsSample | null>;
+  };
+  readonly panels: {
+    /**
+     * Shows rows in one of the plugin's list panels, in place of those it showed. A
+     *  panel holds 5000 rows at most, eight deep.
+     */
+    set(id: string, rows: PanelRow[]): Promise<void>;
+    /**
+     * Takes away the rows a list panel shows.
+     */
+    clear(id: string): Promise<void>;
   };
   readonly settings: {
     /**

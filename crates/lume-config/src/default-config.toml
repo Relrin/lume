@@ -81,8 +81,13 @@
 # "never". The others are drawn in the theme's muted ink.
 # tile-color = "always"
 # How the highlight moves when another tab is shown: "glow", "glide", "stretch",
-# "spring" or "instant". It moves at once for the keyboard and with reduced motion.
+# "spring" or "instant", or a plugin's, written "<plugin>/<motion>". It moves at once
+# for the keyboard and with reduced motion.
 # tab-highlight = "glow"
+# Motion plugins bring for other places in the window, each "<plugin>/<motion>":
+# menu-enter, toast-enter, toast-exit, palette-enter, panel-enter, float-enter,
+# pill-enter and status-change. A place left out moves as Lume's own does.
+#   motion = { menu-enter = "acme.motion/pop" }
 #
 # Any design token can be set over the theme's, in a table named after its group:
 #
@@ -126,8 +131,8 @@
 # cursor-blink = true
 # What the cursor leaves behind when it jumps or moves to another pane: "none", "warp",
 # "sweep" or "comet"; and what it gives off when it changes shape or moves to another
-# pane: "none", "burst", "ripple", "box-burst" or "box-ripple". Both are off while the
-# system asks for less motion. How long they last against their own length, from 0.25
+# pane: "none", "burst", "ripple", "box-burst" or "box-ripple". A plugin's effect is
+# written "<plugin>/<effect>". Both are off while the system asks for less motion. How long they last against their own length, from 0.25
 # to 3.
 # cursor-trail = "none"
 # cursor-pulse = "none"

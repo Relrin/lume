@@ -45,6 +45,14 @@ function panesOf(node: Node): string[] {
 describe("the stand-in core's window when nothing is asked of it", () => {
   it("is one window with two panes side by side in one tab and one pane in another", async () => {
     const dock = { panels: [], size: 240, collapsed: false };
+    // The top bar has its three places for status items, as the core gives every window.
+    const top = {
+      ...dock,
+      panels: (["topbar.left", "topbar.center", "topbar.right"] as const).map((slot) => ({
+        id: `lume.${slot}`,
+        content: { type: "slot", slot },
+      })),
+    };
     expect(await workspace(new FakeCore())).toEqual({
       id: "00000000000000aa",
       name: "fixture",
@@ -52,7 +60,7 @@ describe("the stand-in core's window when nothing is asked of it", () => {
         {
           id: "w1",
           bounds: null,
-          dock: { top: dock, left: dock, right: dock, bottom: dock },
+          dock: { top, left: dock, right: dock, bottom: dock },
           centre: {
             tabs: [
               {

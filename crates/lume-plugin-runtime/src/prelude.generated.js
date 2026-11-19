@@ -99,6 +99,33 @@
     if (timers.delete(id)) tell("timers.clear", { id });
   }
 
+  const readings = new Map();
+
+  function subscribeMetrics(kinds, listener, options) {
+    if (typeof listener !== "function") throw new TypeError("a listener is a function");
+    const wanted = [...(kinds ?? [])].map(String);
+    const visible = [...(options?.while ?? [])].map(String);
+    const held = { kinds: wanted, listener, id: null, gone: false };
+    request("metrics.subscribe", { kinds: wanted, visible }).then(
+      (id) => {
+        if (held.gone) request("metrics.unsubscribe", { subscription: id }).catch(() => {});
+        else {
+          held.id = id;
+          readings.set(id, held);
+        }
+      },
+      (error) => log("error", [error]),
+    );
+    return freeze({
+      dispose: () => {
+        held.gone = true;
+        if (held.id === null) return;
+        readings.delete(held.id);
+        request("metrics.unsubscribe", { subscription: held.id }).catch(() => {});
+      },
+    });
+  }
+
   const lume = {
     self: freeze({ ...info }),
     commands: {
@@ -120,6 +147,9 @@
     },
     settings: {
       onChange: (listener) => listen("settings", listener, false),
+    },
+    metrics: {
+      subscribe: subscribeMetrics,
     },
     log: {
       debug: (...values) => log("debug", values),
@@ -154,6 +184,13 @@
     set: (key, value) => request("kv.set", { key, value }),
     delete: (key) => request("kv.delete", { key }),
     list: () => request("kv.list", {}),
+  });
+  Object.assign(namespace(["metrics"]), {
+    snapshot: () => request("metrics.snapshot", {}),
+  });
+  Object.assign(namespace(["panels"]), {
+    set: (id, rows) => request("panels.set", { id, rows }),
+    clear: (id) => request("panels.clear", { id }),
   });
   Object.assign(namespace(["settings"]), {
     get: (key) => request("settings.get", { key }),
@@ -239,6 +276,23 @@
         return;
       }
       case "event": {
+        if (data.topic === "metrics") {
+          const reading = data.payload.sample ?? {};
+          for (const id of data.payload.to ?? []) {
+            const held = readings.get(id);
+            if (!held) continue;
+            const sample = {};
+            for (const kind of held.kinds) {
+              if (reading[kind] !== undefined) sample[kind] = reading[kind];
+            }
+            try {
+              held.listener(freeze(sample));
+            } catch (error) {
+              report(error);
+            }
+          }
+          return;
+        }
         const set = listeners.get(data.topic);
         if (!set) return;
         for (const listener of [...set]) {
@@ -265,6 +319,7 @@
         timers.clear();
         listeners.clear();
         handlers.clear();
+        readings.clear();
         return;
       }
       default:

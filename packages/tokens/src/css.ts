@@ -65,8 +65,11 @@ export function cssValue<Name extends TokenName>(name: Name, value: Tokens[Name]
       return Array.isArray(held) ? held.map(cssFamily).join(", ") : "";
     case "image":
       return typeof held === "string" && held !== "" ? `url(${quoted(held)})` : "none";
+    case "duration":
+      return `${String(held)}ms`;
     case "color":
     case "shadow":
+    case "easing":
       return String(held);
   }
 }

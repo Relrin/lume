@@ -199,6 +199,10 @@
                     "parts": [
                       {
                         "role": "button",
+                        "name": "Close this panel"
+                      },
+                      {
+                        "role": "button",
                         "name": "Hide this side's panels"
                       }
                     ]

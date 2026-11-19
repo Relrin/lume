@@ -26,6 +26,8 @@
     "allow-config-open",
     "allow-profiles-list",
     "allow-background-image",
+    "allow-ui-contributions",
+    "allow-ui-visible",
     "allow-window-drag",
     "allow-window-control",
     "allow-window-state",

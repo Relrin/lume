@@ -1,0 +1,106 @@
+# A plugin for the end-to-end tests: meters of the machine in the top bar, read only
+# while they are on screen. Its settings take meters away without its code.
+schema = 1
+id = "test.meters"
+name = "Meters"
+version = "1.0.0"
+description = "The processor, memory, graphics card and network, in the top bar."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-meters"
+activation = ["onView:cpu", "onView:memory", "onView:gpu", "onView:network"]
+
+[permissions]
+"system.metrics" = true
+
+[[contributes.commands]]
+id = "refresh"
+title = "Refresh meters"
+
+[[contributes.menus]]
+id = "cpu-menu"
+location = "menu.status"
+title = "Processor"
+submenu = true
+
+[[contributes.menus]]
+id = "refresh-item"
+location = "menu.status"
+parent = "cpu-menu"
+command = "refresh"
+
+[[contributes.sections]]
+id = "meters"
+location = "menu.app.view"
+title = "Meters"
+after = "lume:zoom"
+
+[[contributes.menus]]
+id = "view-refresh"
+location = "menu.app.view"
+section = "meters"
+command = "refresh"
+
+[[contributes.status]]
+id = "cpu"
+slot = "topbar.right"
+kind = "meter"
+label = "CPU"
+menu = "cpu-menu"
+shown-when = "cpu"
+
+[[contributes.status]]
+id = "memory"
+slot = "topbar.right"
+kind = "meter"
+label = "RAM"
+after = "cpu"
+shown-when = "memory"
+
+[[contributes.status]]
+id = "gpu"
+slot = "topbar.right"
+kind = "meter"
+label = "GPU"
+after = "memory"
+shown-when = "gpu"
+
+[[contributes.status]]
+id = "network"
+slot = "topbar.right"
+kind = "sparkline"
+label = "NET"
+after = "gpu"
+shown-when = "network"
+
+[[contributes.setting-groups]]
+id = "meters"
+title = "Status bar meters"
+
+[[contributes.settings]]
+key = "cpu"
+type = "boolean"
+default = true
+label = "CPU"
+group = "meters"
+
+[[contributes.settings]]
+key = "memory"
+type = "boolean"
+default = true
+label = "Memory"
+group = "meters"
+
+[[contributes.settings]]
+key = "gpu"
+type = "boolean"
+default = true
+label = "GPU"
+group = "meters"
+
+[[contributes.settings]]
+key = "network"
+type = "boolean"
+default = true
+label = "Network"
+group = "meters"

@@ -9,6 +9,7 @@ import { useStore } from "zustand";
 import { ConnectPalette } from "../connect/ConnectPalette.tsx";
 import { Palette } from "../palette/Palette.tsx";
 import { Prompts } from "../Prompts.tsx";
+import { tabStyle, tabStyleName } from "../motion/tab.ts";
 import { Background } from "./Background.tsx";
 import { CursorFxLayer } from "./CursorFxLayer.tsx";
 import type { ShellApp } from "./boot.ts";
@@ -27,10 +28,12 @@ export function Shell({ app }: { app: ShellApp }) {
     (state) => state.view?.config.appearance["tile-color"] ?? "always",
   );
   // How the mark of the tab on show moves: the style sheet and the row of tabs read it.
-  const tabHighlight = useStore(
+  const setting = useStore(
     app.config,
     (state) => state.view?.config.appearance["tab-highlight"] ?? "glow",
   );
+  const motions = useStore(app.plugins, (state) => state.shown?.motions);
+  const tabHighlight = tabStyleName(tabStyle(setting, motions));
   return (
     <ShellContext value={app}>
       <div className="shell" data-tile-color={tileColor} data-tab-highlight={tabHighlight}>

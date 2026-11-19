@@ -27,6 +27,7 @@ import type {
   ShellEntry,
   ThemeEntry,
   TitleBar,
+  UiContributions,
 } from "../core/types.ts";
 import type { ExitStatus, Launcher, SessionEvent } from "../transport/types.ts";
 import type {
@@ -209,7 +210,33 @@ export interface FakeCoreOptions {
   readonly detached?: readonly DetachedSession[];
   /** Settings of the page's own to lay over the fixture's, by section. */
   readonly settings?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /** What plugins add to the window. Left out, nothing. */
+  readonly contributions?: UiContributions;
+  /** A plugin's panel docked at a side, besides the fixture's own. */
+  readonly pluginPanel?: {
+    readonly id: string;
+    readonly plugin: string;
+    readonly view: string;
+    readonly area: Exclude<Area, "top">;
+  };
+  /** The settings' schema, as plugins make it. Left out, the application's own. */
+  readonly schema?: unknown;
 }
+
+/** What a window is told plugins add when none is installed. */
+export const NO_CONTRIBUTIONS: UiContributions = {
+  revision: 0,
+  plugins: [],
+  menus: {},
+  status: [],
+  panels: [],
+  images: {},
+  motions: [],
+  cursor_effects: [],
+  values: [],
+  rows: {},
+  contexts: {},
+};
 
 /** One tab of a fixture: its panes, in order, and the splits that divide it. */
 interface TabShape {
@@ -410,6 +437,8 @@ export class FakeCore implements Carrier {
   #nextGroup = GROUP_IDS_FROM;
   /** The commands the page ran, with their arguments, in order. */
   readonly ran: { readonly id: string; readonly args: unknown }[] = [];
+  /** What the page last said it has on screen of the plugins' things. */
+  visible: readonly string[] = [];
 
   constructor(options: FakeCoreOptions = {}) {
     this.#options = options;
@@ -482,6 +511,12 @@ export class FakeCore implements Carrier {
   #dock(area: Area): DockArea {
     const placement = this.#options.tabPlacement ?? "top";
     const panels = [];
+    // The top bar's three places for status items, as the core gives every window.
+    if (area === "top") {
+      for (const slot of ["topbar.left", "topbar.center", "topbar.right"] as const) {
+        panels.push({ id: `lume.${slot}`, content: { type: "slot" as const, slot } });
+      }
+    }
     // Along the top the tabs are in the bar itself; at a side they are a panel.
     if (placement === area && area !== "top") {
       panels.push({ id: TAB_LIST_PANEL, content: { type: "tab_list" as const } });
@@ -490,6 +525,13 @@ export class FakeCore implements Carrier {
       panels.push({
         id: FIXTURE_PANEL,
         content: { type: "plugin_view" as const, plugin: "fixture", view: "panel" },
+      });
+    }
+    const plugin = this.#options.pluginPanel;
+    if (plugin?.area === area) {
+      panels.push({
+        id: plugin.id,
+        content: { type: "plugin_view" as const, plugin: plugin.plugin, view: plugin.view },
       });
     }
     return { panels, size: this.#dockSizes.get(area) ?? DOCK_SIZE, collapsed: false };
@@ -576,6 +618,7 @@ export class FakeCore implements Carrier {
         },
         layout: { "tab-placement": this.#options.tabPlacement ?? "top" },
         renderer: { tier: this.#options.tier ?? "auto" },
+        plugins: { ...this.#options.settings?.["plugins"] },
       },
       sources: {},
       problems: [],
@@ -655,7 +698,12 @@ export class FakeCore implements Carrier {
           created: { pane: null, tab: null, window: null },
         });
       case "config_schema":
-        return answer(JSON.parse(schemaText));
+        return answer(this.#options.schema ?? JSON.parse(schemaText));
+      case "ui_contributions":
+        return answer(this.#options.contributions ?? NO_CONTRIBUTIONS);
+      case "ui_visible":
+        this.visible = Array.isArray(args["items"]) ? (args["items"] as string[]) : [];
+        return answer(null);
       case "themes_list":
         return answer(THEMES);
       case "shells_list":

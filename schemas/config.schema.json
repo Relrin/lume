@@ -39,6 +39,7 @@
     },
     "appearance": {
       "default": {
+        "motion": {},
         "pane-header": "always",
         "program-icons": {},
         "tab-highlight": "glow",
@@ -251,6 +252,77 @@
             "unit": "px",
             "unset": "Theme's"
           }
+        },
+        "motion": {
+          "default": {},
+          "description": "Effects plugins bring for places in the window, each as `<plugin>/<effect>`.\nA place left out moves as Lume's own does.",
+          "properties": {
+            "float-enter": {
+              "description": "How a floating pane appears.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-lume-format": "contributed"
+            },
+            "menu-enter": {
+              "description": "How menus open.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-lume-format": "contributed"
+            },
+            "palette-enter": {
+              "description": "How the command palette opens.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-lume-format": "contributed"
+            },
+            "panel-enter": {
+              "description": "How a docked panel comes in.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-lume-format": "contributed"
+            },
+            "pill-enter": {
+              "description": "How the pill of a pane put away appears.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-lume-format": "contributed"
+            },
+            "status-change": {
+              "description": "How a status item shows that it changed.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-lume-format": "contributed"
+            },
+            "toast-enter": {
+              "description": "How a notice appears.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-lume-format": "contributed"
+            },
+            "toast-exit": {
+              "description": "How a notice leaves.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-lume-format": "contributed"
+            }
+          },
+          "type": "object"
         },
         "pane-header": {
           "default": "always",
@@ -1086,35 +1158,45 @@
           "type": "object"
         },
         "tab-highlight": {
-          "default": "glow",
-          "description": "How the mark on the tab on show moves to another tab.",
-          "oneOf": [
+          "anyOf": [
             {
-              "const": "glow",
-              "description": "A lit pill in the tab's colour that stretches towards the tab and settles,\nglowing more the faster it goes.",
-              "type": "string"
+              "description": "How the mark on the tab on show moves to another tab. Each moves at once when the\nkeyboard changes the tab, and when the system asks for less motion.",
+              "oneOf": [
+                {
+                  "const": "glow",
+                  "description": "A lit pill in the tab's colour that stretches towards the tab and settles,\nglowing more the faster it goes.",
+                  "type": "string"
+                },
+                {
+                  "const": "glide",
+                  "description": "A plain pill that slides.",
+                  "type": "string"
+                },
+                {
+                  "const": "stretch",
+                  "description": "A line under the tab that stretches towards the next one.",
+                  "type": "string"
+                },
+                {
+                  "const": "spring",
+                  "description": "A plain pill that springs into place.",
+                  "type": "string"
+                },
+                {
+                  "const": "instant",
+                  "description": "No motion: the mark is simply on the other tab.",
+                  "type": "string"
+                }
+              ]
             },
             {
-              "const": "glide",
-              "description": "A plain pill that slides.",
-              "type": "string"
-            },
-            {
-              "const": "stretch",
-              "description": "A line under the tab that stretches towards the next one.",
-              "type": "string"
-            },
-            {
-              "const": "spring",
-              "description": "A plain pill that springs into place.",
-              "type": "string"
-            },
-            {
-              "const": "instant",
-              "description": "No motion: the mark is simply on the other tab.",
-              "type": "string"
+              "description": "Something a plugin brings, as <plugin>/<name>",
+              "type": "string",
+              "x-lume-format": "contributed"
             }
           ],
+          "default": "glow",
+          "description": "How the mark on the tab on show moves to another tab.",
           "x-lume-settings": {
             "control": "select",
             "group": "Tabs",
@@ -2195,35 +2277,45 @@
           }
         },
         "cursor-pulse": {
-          "default": "none",
-          "description": "What the cursor gives off when it changes shape or moves to another pane. Off\nwhile the system asks for less motion.",
-          "oneOf": [
+          "anyOf": [
             {
-              "const": "none",
-              "description": "Nothing.",
-              "type": "string"
+              "description": "What the cursor gives off when it changes shape or lands in another pane.",
+              "oneOf": [
+                {
+                  "const": "none",
+                  "description": "Nothing.",
+                  "type": "string"
+                },
+                {
+                  "const": "burst",
+                  "description": "A disc that grows from the cursor and fades.",
+                  "type": "string"
+                },
+                {
+                  "const": "ripple",
+                  "description": "A ring that grows from the cursor and fades.",
+                  "type": "string"
+                },
+                {
+                  "const": "box-burst",
+                  "description": "A box that grows from the cursor's shape and fades.",
+                  "type": "string"
+                },
+                {
+                  "const": "box-ripple",
+                  "description": "An outline that grows from the cursor's shape and fades.",
+                  "type": "string"
+                }
+              ]
             },
             {
-              "const": "burst",
-              "description": "A disc that grows from the cursor and fades.",
-              "type": "string"
-            },
-            {
-              "const": "ripple",
-              "description": "A ring that grows from the cursor and fades.",
-              "type": "string"
-            },
-            {
-              "const": "box-burst",
-              "description": "A box that grows from the cursor's shape and fades.",
-              "type": "string"
-            },
-            {
-              "const": "box-ripple",
-              "description": "An outline that grows from the cursor's shape and fades.",
-              "type": "string"
+              "description": "Something a plugin brings, as <plugin>/<name>",
+              "type": "string",
+              "x-lume-format": "contributed"
             }
           ],
+          "default": "none",
+          "description": "What the cursor gives off when it changes shape or moves to another pane. Off\nwhile the system asks for less motion.",
           "x-lume-settings": {
             "control": "select",
             "group": "Cursor",
@@ -2298,30 +2390,40 @@
           }
         },
         "cursor-trail": {
-          "default": "none",
-          "description": "What the cursor leaves behind when it jumps a distance, or moves to another\npane. Off while the system asks for less motion.",
-          "oneOf": [
+          "anyOf": [
             {
-              "const": "none",
-              "description": "Nothing: the cursor is simply in its new place.",
-              "type": "string"
+              "description": "What the cursor leaves behind when it jumps.",
+              "oneOf": [
+                {
+                  "const": "none",
+                  "description": "Nothing: the cursor is simply in its new place.",
+                  "type": "string"
+                },
+                {
+                  "const": "warp",
+                  "description": "The cursor smears towards its new place, its leading edge first.",
+                  "type": "string"
+                },
+                {
+                  "const": "sweep",
+                  "description": "A band from the old place shrinks into the new one.",
+                  "type": "string"
+                },
+                {
+                  "const": "comet",
+                  "description": "A glowing comet flies to the new place, its tail following.",
+                  "type": "string"
+                }
+              ]
             },
             {
-              "const": "warp",
-              "description": "The cursor smears towards its new place, its leading edge first.",
-              "type": "string"
-            },
-            {
-              "const": "sweep",
-              "description": "A band from the old place shrinks into the new one.",
-              "type": "string"
-            },
-            {
-              "const": "comet",
-              "description": "A glowing comet flies to the new place, its tail following.",
-              "type": "string"
+              "description": "Something a plugin brings, as <plugin>/<name>",
+              "type": "string",
+              "x-lume-format": "contributed"
             }
           ],
+          "default": "none",
+          "description": "What the cursor leaves behind when it jumps a distance, or moves to another\npane. Off while the system asks for less motion.",
           "x-lume-settings": {
             "control": "select",
             "group": "Cursor",
