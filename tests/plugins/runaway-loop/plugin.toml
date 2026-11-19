@@ -1,0 +1,12 @@
+# A plugin for the end-to-end tests whose command never returns.
+schema = 1
+id = "test.runaway-loop"
+name = "Runaway loop"
+version = "1.0.0"
+api = "1"
+main = "host.js"
+activation = ["onCommand:spin"]
+
+[[contributes.commands]]
+id = "spin"
+title = "Spin for ever"

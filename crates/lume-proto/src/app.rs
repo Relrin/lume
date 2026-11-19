@@ -28,7 +28,7 @@ use crate::frame::{Kind, encode_control_json};
 use crate::types::{BackendId, ExitStatus, Launcher, SessionId, SessionInfo, TermSize};
 
 /// The version of the control endpoint's messages this crate speaks.
-pub const APP_PROTO_VERSION: u32 = 7;
+pub const APP_PROTO_VERSION: u32 = 8;
 
 /// The name the control endpoint is served under, and looked for, when none is given.
 ///
@@ -319,6 +319,13 @@ pub enum AppRequestBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         window: Option<String>,
     },
+    /// Lists the plugins that are installed, in the order they load in, with whether
+    /// each can be used, whether its code is running, and how it has fared.
+    Plugins {},
+    /// Starts a plugin's code, as one of its activation events would.
+    PluginActivate {
+        id: String,
+    },
 }
 
 /// The answer to a request.
@@ -410,6 +417,12 @@ pub struct StartMarks {
     pub attached_ms: Option<u64>,
     /// The first output of a session was handed to the page.
     pub output_ms: Option<u64>,
+    /// The installed plugins were read, and those that start at once were started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugins_ms: Option<u64>,
+    /// How many files of plugins were read before the first output.
+    #[serde(default)]
+    pub plugin_files_before_output: u32,
 }
 
 /// One session as the application sees it.
@@ -553,6 +566,13 @@ pub enum AppReplyBody {
     },
     Commands {
         commands: serde_json::Value,
+    },
+    Plugins {
+        plugins: serde_json::Value,
+    },
+    /// A plugin's code was started, or was running already.
+    PluginActivated {
+        id: String,
     },
     /// A command was run.
     Ran {
@@ -795,6 +815,13 @@ mod tests {
                 r#"{"type":"layout_apply","intent":{"type":"focus_dir"}}"#,
             ),
             (AppRequestBody::Commands {}, r#"{"type":"commands"}"#),
+            (AppRequestBody::Plugins {}, r#"{"type":"plugins"}"#),
+            (
+                AppRequestBody::PluginActivate {
+                    id: "acme.metrics".to_owned(),
+                },
+                r#"{"type":"plugin_activate","id":"acme.metrics"}"#,
+            ),
             (
                 AppRequestBody::Command {
                     id: "lume.tab.new".to_owned(),

@@ -435,6 +435,15 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       case "notice":
         notices.push(notice.level, notice.message, notice.action);
         break;
+      case "commands_changed":
+        // Plugins came or went: the palette and the menus offer what there is now.
+        client.commandsList().then(
+          (list) => commandStore.getState().set(list),
+          (error: unknown) => {
+            notices.push("error", `The commands could not be read again: ${reason(error)}`);
+          },
+        );
+        break;
     }
   };
 

@@ -1,0 +1,18 @@
+[package]
+name = "lume-plugin-runtime"
+description = "Where a plugin's code runs: one QuickJS engine per plugin, on a thread of its own, held to limits."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+lume-plugin-api.workspace = true
+rquickjs = { workspace = true, features = ["allocator"] }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

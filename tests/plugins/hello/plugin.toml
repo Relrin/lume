@@ -1,0 +1,21 @@
+# A plugin for the end-to-end tests: a command that stores a count, shows it in a
+# status item and logs it.
+schema = 1
+id = "test.hello"
+name = "Hello"
+version = "1.0.0"
+description = "Counts how often it is greeted."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-hello"
+activation = ["onCommand:greet"]
+
+[[contributes.commands]]
+id = "greet"
+title = "Greet"
+
+[[contributes.status]]
+id = "count"
+slot = "topbar.right"
+kind = "badge"
+label = "Greetings"

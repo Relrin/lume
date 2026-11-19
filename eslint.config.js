@@ -18,6 +18,10 @@ export default tseslint.config(
       "vendor/**",
       ".tools/**",
       "crates/lume-app/gen/**",
+      // The prelude is one function expression with its calls written in where its
+      // template says; the runtime's tests run it.
+      "crates/lume-plugin-api/src/prelude.js",
+      "crates/lume-plugin-runtime/src/prelude.generated.js",
     ],
   },
   js.configs.recommended,
@@ -25,6 +29,13 @@ export default tseslint.config(
   {
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
+    },
+  },
+  {
+    // Plugins' code runs in Lume's engine, where `lume` is the one thing it is given.
+    files: ["tests/plugins/**/*.js"],
+    languageOptions: {
+      globals: { lume: "readonly", console: "readonly" },
     },
   },
   {

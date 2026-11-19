@@ -18,6 +18,8 @@ pub enum GeneratedKind {
     Schema,
     /// Part of the page's token package.
     Tokens,
+    /// Made from the plugin API's definitions: its typings, its prelude, its reference.
+    Api,
 }
 
 /// One generated file.

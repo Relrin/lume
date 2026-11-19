@@ -18,6 +18,7 @@ use crate::configsvc::ConfigService;
 use crate::control::Shell;
 use crate::error::CommandError;
 use crate::panes::Panes;
+use crate::plugins::Plugins;
 use crate::registry::{Registry, Runs};
 use crate::state::AppState;
 use crate::tuning::PAGE_ANSWER_TIMEOUT;
@@ -40,6 +41,7 @@ pub struct Services {
     pub config: Arc<ConfigService>,
     pub registry: Arc<Registry>,
     pub shell: Arc<dyn Shell>,
+    pub plugins: Arc<Plugins>,
 }
 
 /// The session of a pane that runs `exec`: a program and its arguments.
@@ -127,6 +129,7 @@ impl Services {
                 };
                 builtins::run(&context, id, args).await
             }
+            (Runs::Plugin, _) => self.plugins.run_command(id, args).await,
             (Runs::Page, Asker::Page) => Err(CommandError::bad_request(format!(
                 "`{id}` is carried out in the page"
             ))),

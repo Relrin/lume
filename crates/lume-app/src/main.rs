@@ -48,6 +48,7 @@ mod log;
 mod marks;
 mod opener;
 mod panes;
+mod plugins;
 mod profiles;
 mod registry;
 mod services;
@@ -445,14 +446,24 @@ fn main() -> ExitCode {
                 shell.open_window(window.id, window.bounds);
             }
             marks.window();
+            let registry = Arc::new(builtins::registry());
+            let plugins = plugins::Plugins::new(
+                config.dirs(),
+                Arc::clone(&registry),
+                Arc::clone(&serving),
+                Arc::clone(&config),
+            );
             let services = Arc::new(Services {
                 state: Arc::clone(&serving),
                 panes,
                 config,
-                registry: Arc::new(builtins::registry()),
+                registry,
                 shell: Arc::clone(&shell),
+                plugins: Arc::clone(&plugins),
             });
             app.manage(Arc::clone(&services));
+            // Plugins are read once the first terminal has shown its output.
+            plugins.start(&services);
             // The theme follows the system's scheme, which only a window can tell.
             let scheme = app
                 .webview_windows()
@@ -475,6 +486,7 @@ fn main() -> ExitCode {
                     return;
                 };
                 services.panes.profiles.config_changed();
+                services.plugins.config_changed();
                 frames.follow(&services.config, services.shell.as_ref());
                 let panes = Arc::clone(&services.panes);
                 telling
@@ -670,6 +682,10 @@ fn main() -> ExitCode {
             // application is closing.
             if let Some(panes) = state.panes() {
                 panes.close();
+            }
+            // Plugins' code hears that it is stopping.
+            if let Some(services) = app.try_state::<Arc<Services>>() {
+                services.plugins.shutdown();
             }
             // A program in a terminal can outlive a process that exits without closing
             // the terminal, so a host in this process ends its sessions before the

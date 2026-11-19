@@ -292,7 +292,7 @@ export interface SessionsStarted {
 }
 
 /** Where a command is carried out. */
-export type CommandRuns = "core" | "page";
+export type CommandRuns = "core" | "page" | "plugin";
 
 /** A command as `commands_list` describes it. */
 export interface CommandSpec {
@@ -345,6 +345,25 @@ export type Notice =
     }
   /** The profiles changed: what was found on the machine, or what the user wrote. */
   | ({ readonly type: "profiles_changed" } & ProfileList)
+  /** Commands were added or taken away, as plugins come and go. */
+  | { readonly type: "commands_changed" }
+  /** The plugins that are installed changed. */
+  | { readonly type: "plugins_changed" }
+  /** A plugin's status item shows something else, or no longer anything (`value` null). */
+  | {
+      readonly type: "plugin_status";
+      readonly plugin: string;
+      readonly item: string;
+      readonly pane: string | null;
+      readonly value: Readonly<Record<string, unknown>> | null;
+    }
+  /** A condition a plugin's keys and menus are shown under changed. */
+  | {
+      readonly type: "plugin_context";
+      readonly plugin: string;
+      readonly key: string;
+      readonly value: boolean;
+    }
   /** The settings window was asked for again: the page to show, if one was named. */
   | { readonly type: "settings_show"; readonly section: string | null }
   | {

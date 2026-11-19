@@ -60,6 +60,10 @@ Commands of lume ctl, which drive the running application:
                                  interrupted, or for --timeout seconds if that is given
   commands                       list the commands there are
   command <id> [<arguments>]     run a command; its arguments are a JSON object
+  plugins                        the installed plugins, in the order they load in:
+                                 whether each can be used, whether its code runs, how
+                                 it has fared, what its status items show, its log
+  plugin activate <id>           start a plugin's code, as its activation events would
   quit                           close the application
 
 A <target> is --pane <id> (as in p12) or --session <id>. A command that names neither
@@ -624,6 +628,24 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
         "commands" => {
             nothing_more(words, "commands")?;
             AppRequestBody::Commands {}
+        }
+        "plugins" => {
+            nothing_more(words, "plugins")?;
+            AppRequestBody::Plugins {}
+        }
+        "plugin" => {
+            match words.next().as_deref() {
+                Some("activate") => {}
+                Some(other) => {
+                    return Err(format!(
+                        "{other} is not something ctl plugin does (activate)"
+                    ));
+                }
+                None => return Err("ctl plugin needs a command: activate".to_owned()),
+            }
+            let id = value(words, "plugin activate", "a plugin's id")?;
+            nothing_more(words, "plugin activate")?;
+            AppRequestBody::PluginActivate { id }
         }
         "command" => {
             let id = value(words, "command", "a command's id")?;
@@ -1190,6 +1212,13 @@ mod tests {
     #[test]
     fn a_command_is_run_by_its_id_with_arguments_as_json() {
         assert_eq!(request(&["ctl", "commands"]), AppRequestBody::Commands {});
+        assert_eq!(request(&["ctl", "plugins"]), AppRequestBody::Plugins {});
+        assert_eq!(
+            request(&["ctl", "plugin", "activate", "acme.x"]),
+            AppRequestBody::PluginActivate {
+                id: "acme.x".to_owned()
+            }
+        );
         assert_eq!(
             request(&["ctl", "command", "lume.tab.new"]),
             AppRequestBody::Command {

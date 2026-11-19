@@ -10,6 +10,7 @@
 //! Nothing here runs a plugin's code. This crate knows what is installed and what each
 //! plugin asks for and adds.
 
+pub mod broker;
 pub mod hash;
 pub mod id;
 pub mod lock;

@@ -1,0 +1,18 @@
+[package]
+name = "lume-plugin-api"
+description = "The API Lume offers plugins' code, defined once: what the runtime answers, the typings authors write against, and its reference."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+lume-config.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

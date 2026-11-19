@@ -15,3 +15,6 @@ packages/tokens/src/defaults.css
 tests/layout/vectors/
 packages/ui/src/icons/glyphs.generated.ts
 packages/ui/src/icons/NOTICE.md
+packages/plugin-api/src/index.d.ts
+crates/lume-plugin-runtime/src/prelude.generated.js
+docs/plugins/api.md

@@ -59,6 +59,8 @@ Commands:
                manifests into schemas/
   tokens       Write the design tokens' TypeScript module and stylesheet into
                packages/tokens/src/
+  api          Write the plugin API's typings (packages/plugin-api), the runtime's
+               prelude and the API reference (docs/plugins/api.md)
   lint         Run format, clippy, licence and JS lint checks
   dev          Run the app with hot reload
 ";
@@ -90,6 +92,7 @@ fn main() -> Result<()> {
         ["latency", rest @ ..] => latency::run(rest),
         ["schema"] => generate::write(GeneratedKind::Schema, "schema"),
         ["tokens"] => generate::write(GeneratedKind::Tokens, "tokens"),
+        ["api"] => generate::write(GeneratedKind::Api, "api"),
         ["lint"] => lint(),
         ["dev"] => dev(),
         [] | ["help"] | ["--help"] | ["-h"] => {

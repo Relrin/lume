@@ -5,6 +5,7 @@
 //! is told apart from a slow shell.
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
 use lume_proto::app::StartMarks;
@@ -17,6 +18,10 @@ pub struct Marks {
     carrier: OnceLock<u64>,
     attached: OnceLock<u64>,
     output: OnceLock<u64>,
+    plugins: OnceLock<u64>,
+    /// Files of plugins read before the first output: none should be, so that the
+    /// number of plugins installed never slows the start.
+    plugin_files_early: AtomicU32,
 }
 
 impl Marks {
@@ -29,6 +34,8 @@ impl Marks {
             carrier: OnceLock::new(),
             attached: OnceLock::new(),
             output: OnceLock::new(),
+            plugins: OnceLock::new(),
+            plugin_files_early: AtomicU32::new(0),
         }
     }
 
@@ -62,6 +69,23 @@ impl Marks {
         self.note(&self.output);
     }
 
+    /// Whether a session's output has reached a page yet.
+    pub fn has_output(&self) -> bool {
+        self.output.get().is_some()
+    }
+
+    /// The installed plugins were read and those that start at once were started.
+    pub fn plugins(&self) {
+        self.note(&self.plugins);
+    }
+
+    /// A file of a plugin was read. Counted when it is before the first output.
+    pub fn plugin_file(&self) {
+        if !self.has_output() {
+            self.plugin_files_early.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     /// The marks as the control endpoint reports them.
     pub fn read(&self) -> StartMarks {
         StartMarks {
@@ -70,6 +94,8 @@ impl Marks {
             carrier_ms: self.carrier.get().copied(),
             attached_ms: self.attached.get().copied(),
             output_ms: self.output.get().copied(),
+            plugins_ms: self.plugins.get().copied(),
+            plugin_files_before_output: self.plugin_files_early.load(Ordering::Relaxed),
         }
     }
 }

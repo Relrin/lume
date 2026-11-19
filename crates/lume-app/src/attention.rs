@@ -544,12 +544,20 @@ mod tests {
             backend: started.backend.clone(),
             session: started.session,
         };
+        let registry = Arc::new(crate::builtins::registry());
+        let plugins = crate::plugins::Plugins::new(
+            config.dirs(),
+            Arc::clone(&registry),
+            Arc::clone(&state),
+            Arc::clone(&config),
+        );
         let services = Arc::new(Services {
             state,
             panes,
             config,
-            registry: Arc::new(crate::builtins::registry()),
+            registry,
             shell: shell.clone(),
+            plugins,
         });
         watch(&services, shell.clone());
         App {

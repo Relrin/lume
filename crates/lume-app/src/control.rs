@@ -997,6 +997,21 @@ impl Control {
                     AppReplyBody::Ran { command: id },
                 )
             }
+            AppRequestBody::Plugins {} => {
+                let plugins = self.services.plugins.describe();
+                let count = plugins.as_array().map_or(0, Vec::len);
+                reply(
+                    format!("listed {count} plugins"),
+                    AppReplyBody::Plugins { plugins },
+                )
+            }
+            AppRequestBody::PluginActivate { id } => {
+                self.services.plugins.activate_for_control(&id).await?;
+                reply(
+                    format!("{id} is running"),
+                    AppReplyBody::PluginActivated { id },
+                )
+            }
         }
     }
 }
@@ -1471,12 +1486,20 @@ mod tests {
         let shell = Arc::new(FakeShell::default());
         panes.run(shell.clone());
         let window = panes.focused_window().unwrap();
+        let registry = Arc::new(builtins::registry());
+        let plugins = crate::plugins::Plugins::new(
+            config.dirs(),
+            Arc::clone(&registry),
+            Arc::clone(&state),
+            Arc::clone(&config),
+        );
         let services = Arc::new(Services {
             state,
             panes,
             config,
-            registry: Arc::new(builtins::registry()),
+            registry,
             shell: shell.clone(),
+            plugins,
         });
         let control = Control::new(Arc::clone(&services), Duration::from_millis(200));
         let client = connect(&control);

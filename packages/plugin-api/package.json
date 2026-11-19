@@ -1,0 +1,24 @@
+{
+  "name": "@lume/plugin-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The typings of the API a Lume plugin's code is given: the lume object and console",
+  "license": "Apache-2.0",
+  "type": "module",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts"
+    }
+  },
+  "files": [
+    "src/index.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
+}

@@ -21,6 +21,7 @@ pub fn write(kind: GeneratedKind, command: &str) -> Result<()> {
     for file in generated_files()
         .into_iter()
         .chain(lume_plugin::manifest::generated_files())
+        .chain(lume_plugin_api::generate::generated_files())
         .filter(|file| file.kind == kind)
     {
         let path = root.join(file.path);

@@ -1,0 +1,15 @@
+# A plugin for the end-to-end tests whose command takes memory without end.
+schema = 1
+id = "test.runaway-alloc"
+name = "Runaway memory"
+version = "1.0.0"
+api = "1"
+main = "host.js"
+activation = ["onCommand:grow"]
+
+[limits]
+memory = 16
+
+[[contributes.commands]]
+id = "grow"
+title = "Grow for ever"

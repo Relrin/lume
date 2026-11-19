@@ -18,6 +18,8 @@ lume-ipc = { path = "crates/lume-ipc" }
 lume-layout = { path = "crates/lume-layout" }
 lume-proto = { path = "crates/lume-proto" }
 lume-plugin = { path = "crates/lume-plugin" }
+lume-plugin-api = { path = "crates/lume-plugin-api" }
+lume-plugin-runtime = { path = "crates/lume-plugin-runtime" }
 lume-pty = { path = "crates/lume-pty" }
 lume-session = { path = "crates/lume-session" }
 lume-vt = { path = "crates/lume-vt" }
@@ -36,6 +38,7 @@ libc = "0.2"
 notify = "8"
 portable-pty = "0.9"
 proptest = "1"
+rquickjs = "0.14"
 schemars = "1"
 semver = "1"
 serde = { version = "1", features = ["derive"] }

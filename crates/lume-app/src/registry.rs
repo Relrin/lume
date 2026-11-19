@@ -54,6 +54,70 @@ pub enum Runs {
     /// In the page of a window: it acts on what only the page has, such as a
     /// terminal's selection.
     Page,
+    /// By the code of the plugin that added it.
+    Plugin,
+}
+
+/// Whether a plugin may run one of the application's commands, as its code or as an
+/// item it adds to a menu or a key it binds.
+///
+/// Some commands do what a permission covers: starting a session runs a program,
+/// pasting reads the clipboard, changing the layout is what `layout.write` allows. A
+/// plugin may run those only with that permission. A few only the user may run, because
+/// they widen what plugins may do (setting a workspace's folder widens `${workspace}`)
+/// or end what the user has running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PluginAccess {
+    Open,
+    /// With this permission, by its manifest name.
+    Needs(&'static str),
+    UserOnly,
+}
+
+/// Commands only the user may run.
+const USER_ONLY: [&str; 10] = [
+    "lume.workspace.delete",
+    "lume.app.quit",
+    "lume.app.quit-end-sessions",
+    "lume.host.restart",
+    "lume.workspace.set-root",
+    "lume.terminal.paste",
+    "lume.terminal.copy",
+    "lume.config.open",
+    "lume.session.end",
+    "lume.session.reattach",
+];
+
+/// Commands that start sessions, and so run programs.
+const STARTS_SESSIONS: [&str; 7] = [
+    "lume.terminal.new-with-profile",
+    "lume.tab.new",
+    "lume.window.new",
+    "lume.pane.split-right",
+    "lume.pane.split-down",
+    "lume.pane.split-left",
+    "lume.pane.split-up",
+];
+
+/// Whether a plugin may run the application's command `id`.
+pub fn plugin_access(id: &str) -> PluginAccess {
+    if USER_ONLY.contains(&id) || id.starts_with("lume.session.") || id.starts_with("lume.host.") {
+        return PluginAccess::UserOnly;
+    }
+    if STARTS_SESSIONS.contains(&id)
+        || id.starts_with("lume.profile.")
+        || id.starts_with("lume.connect.")
+    {
+        return PluginAccess::Needs("sessions.spawn");
+    }
+    let area = id.split('.').nth(1).unwrap_or_default();
+    match area {
+        "tab" | "pane" | "window" | "group" | "workspace" | "panel" => {
+            PluginAccess::Needs("layout.write")
+        }
+        "terminal" | "search" => PluginAccess::Needs("panes.write"),
+        _ => PluginAccess::Open,
+    }
 }
 
 /// What a command is, for whoever lists commands or runs one.
@@ -79,13 +143,6 @@ pub enum Owner<'a> {
     /// The application itself.
     App,
     /// The plugin with this id.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "nothing loads plugins yet; the rule for their names is here already"
-        )
-    )]
     Plugin(&'a str),
 }
 
@@ -173,6 +230,18 @@ impl Registry {
         }
         commands.insert(id.to_owned(), spec);
         Ok(())
+    }
+
+    /// Takes out every command a plugin added. Returns how many there were.
+    pub fn unregister_plugin(&self, plugin: &str) -> usize {
+        let prefix = format!("{plugin}.");
+        let mut commands = self
+            .commands
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        let before = commands.len();
+        commands.retain(|id, spec| !(spec.runs == Runs::Plugin && id.starts_with(&prefix)));
+        before - commands.len()
     }
 
     pub fn get(&self, id: &str) -> Option<CommandSpec> {
@@ -266,6 +335,47 @@ mod tests {
         registry
             .register(Owner::Plugin("lumen.tools"), spec("lumen.tools.run"))
             .unwrap();
+    }
+
+    #[test]
+    fn a_plugins_commands_go_when_it_does() {
+        let registry = Registry::new();
+        let plugin = |id: &str| CommandSpec {
+            runs: Runs::Plugin,
+            ..spec(id)
+        };
+        registry
+            .register(Owner::Plugin("acme.x"), plugin("acme.x.one"))
+            .unwrap();
+        registry
+            .register(Owner::Plugin("acme.x"), plugin("acme.x.two"))
+            .unwrap();
+        registry
+            .register(Owner::Plugin("acme.xy"), plugin("acme.xy.one"))
+            .unwrap();
+        assert_eq!(registry.unregister_plugin("acme.x"), 2);
+        assert!(registry.get("acme.xy.one").is_some());
+        assert_eq!(registry.unregister_plugin("acme.x"), 0);
+    }
+
+    #[test]
+    fn a_plugin_runs_only_what_its_permissions_cover_of_the_applications_commands() {
+        assert_eq!(plugin_access("lume.palette.open"), PluginAccess::Open);
+        assert_eq!(plugin_access("lume.view.zoom-in"), PluginAccess::Open);
+        assert_eq!(
+            plugin_access("lume.pane.zoom"),
+            PluginAccess::Needs("layout.write")
+        );
+        assert_eq!(
+            plugin_access("lume.tab.new"),
+            PluginAccess::Needs("sessions.spawn")
+        );
+        assert_eq!(plugin_access("lume.app.quit"), PluginAccess::UserOnly);
+        assert_eq!(plugin_access("lume.terminal.paste"), PluginAccess::UserOnly);
+        assert_eq!(
+            plugin_access("lume.session.detached"),
+            PluginAccess::UserOnly
+        );
     }
 
     #[test]

@@ -2093,3 +2093,192 @@ fn a_window_goes_on_while_another_view_of_its_session_hangs() {
         "the hanging view was never left behind"
     );
 }
+
+/// A test plugin's package, from `tests/plugins`.
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/plugins")
+        .join(name)
+}
+
+/// Installs a test plugin into the folders of `home`, as `lume plugin install` does.
+fn install_plugin(home: &Path, package: &Path) {
+    let installed = Command::new(lume())
+        .args(["plugin", "install"])
+        .arg(package)
+        .arg("--yes")
+        .env("LUME_CONFIG_DIR", home.join("config"))
+        .env("LUME_STATE_DIR", home.join("state"))
+        .output()
+        .expect("lume runs");
+    assert!(
+        installed.status.success(),
+        "the plugin is installed: {}{}",
+        String::from_utf8_lossy(&installed.stdout),
+        String::from_utf8_lossy(&installed.stderr)
+    );
+}
+
+/// A home with the tests' configuration and these test plugins installed in it.
+fn home_with_plugins(names: &[&str]) -> PathBuf {
+    let number = NEXT.fetch_add(1, Ordering::Relaxed);
+    let home = std::env::temp_dir().join(format!("lume-e2e-{}-{number}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(home.join("config")).expect("a folder for the configuration");
+    std::fs::write(
+        home.join("config").join("config.toml"),
+        configuration() + IN_PROCESS_HOST,
+    )
+    .expect("the configuration is written");
+    for name in names {
+        install_plugin(&home, &fixture(name));
+    }
+    home
+}
+
+impl App {
+    /// The plugins as the application lists them, once it has read them.
+    fn plugins(&self) -> Vec<Value> {
+        let answer = self.ctl(&["plugins"]).ok("plugins");
+        answer["plugins"].as_array().cloned().unwrap_or_default()
+    }
+
+    /// Waits until the application lists the plugin `id` and `check` holds for it.
+    fn until_plugin(&self, id: &str, what: &str, check: impl Fn(&Value) -> bool) -> Value {
+        let deadline = Instant::now() + START;
+        loop {
+            let found = self.plugins().into_iter().find(|plugin| plugin["id"] == id);
+            if let Some(plugin) = found
+                && check(&plugin)
+            {
+                return plugin;
+            }
+            assert!(Instant::now() < deadline, "{what}: {:?}", self.plugins());
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugins_command_runs_its_code_and_what_it_shows_is_kept() {
+    let home = home_with_plugins(&["hello"]);
+    let app = App::start_in(home, false);
+    app.until_plugin("test.hello", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    // Nothing of the plugins was read before the terminal's first output.
+    let status = app.status_with_session();
+    assert_eq!(status["marks"]["plugin_files_before_output"], 0, "{status}");
+
+    // Its code starts with its command, which it carries out.
+    assert!(app.plugins()[0]["running"].is_null());
+    app.ctl(&["command", "test.hello.greet"]).ok("greet");
+    app.ctl(&["command", "test.hello.greet"]).ok("greet again");
+    let plugin = app.until_plugin("test.hello", "the count to be shown", |plugin| {
+        plugin["status"][0]["value"]["text"] == "2"
+    });
+    assert_eq!(plugin["running"]["started"], true, "{plugin}");
+    assert!(
+        plugin["log"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line.as_str().unwrap().ends_with("info greeted 2")),
+        "{plugin}"
+    );
+    let kv = app.home.join("state/plugins/data/test.hello/kv.json");
+    assert_eq!(std::fs::read_to_string(kv).unwrap(), r#"{"count":2}"#);
+
+    // Its command is in the registry, named under its id.
+    let commands = app.ctl(&["commands"]).ok("commands");
+    assert!(
+        commands["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|command| command["id"] == "test.hello.greet" && command["runs"] == "plugin")
+    );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_that_runs_away_is_stopped_while_the_terminal_keeps_up() {
+    let app = App::start();
+    app.status_with_session();
+    // Installed while the application runs: it follows the lock file.
+    install_plugin(&app.home, &fixture("runaway-loop"));
+    install_plugin(&app.home, &fixture("runaway-alloc"));
+    app.until_plugin(
+        "test.runaway-loop",
+        "the plugin installed while running to be read",
+        |plugin| plugin["state"] == "ready",
+    );
+
+    // Memory without end stops the plugin; the terminal answers all along.
+    let grow = app.ctl(&["command", "test.runaway-alloc.grow"]);
+    assert_eq!(grow.status, 1, "{}", grow.json);
+    app.until_plugin("test.runaway-alloc", "the breach to be counted", |plugin| {
+        plugin["breaches"] == 1
+    });
+
+    for round in 1..=3 {
+        let sent = Instant::now();
+        let spin = app.ctl(&["command", "test.runaway-loop.spin"]);
+        assert_eq!(spin.status, 1, "{}", spin.json);
+        // The loop was stopped within its budget, well before the command's own wait.
+        assert!(
+            sent.elapsed() < Duration::from_secs(5),
+            "round {round}: {:?}",
+            sent.elapsed()
+        );
+        let line = format!("echo {MARK}{round}");
+        let typed = Instant::now();
+        app.type_line(&line);
+        app.wait_text(&format!("{MARK}{round}"));
+        assert!(
+            typed.elapsed() < Duration::from_secs(3),
+            "round {round}: the terminal was slow"
+        );
+    }
+    // Three times in a minute and it is turned off.
+    app.until_plugin(
+        "test.runaway-loop",
+        "the plugin to be turned off",
+        |plugin| {
+            plugin["state"] == "inactive"
+                && plugin["reason"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("turned off")
+        },
+    );
+    let lock = std::fs::read_to_string(app.home.join("state/plugins/lock.toml")).unwrap();
+    assert!(lock.contains("enabled = false"), "{lock}");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_package_changed_after_it_was_installed_is_not_used() {
+    let home = home_with_plugins(&["hello"]);
+    std::fs::write(
+        home.join("state/plugins/packages/test.hello/1.0.0/host.js"),
+        "lume.commands.register('greet', () => 'something else');",
+    )
+    .unwrap();
+    let app = App::start_in(home, false);
+    let plugin = app.until_plugin("test.hello", "the changed plugin to be read", |plugin| {
+        plugin["state"] == "inactive"
+    });
+    assert!(
+        plugin["reason"].as_str().unwrap().contains("changed"),
+        "{plugin}"
+    );
+    // Its command is not there to run.
+    let greet = app.ctl(&["command", "test.hello.greet"]);
+    assert_eq!(greet.status, 1);
+    assert_eq!(greet.json["code"], "not_found");
+    app.quit();
+}

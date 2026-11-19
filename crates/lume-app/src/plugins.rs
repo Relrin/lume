@@ -1,0 +1,1366 @@
+//! The installed plugins, while the application runs.
+//!
+//! Plugins are read only once the first terminal has shown its first output, so that
+//! however many are installed the start is not slowed by them. Each plugin that can be
+//! used adds its commands to the registry, and its code is started when one of its
+//! activation events happens: the application started, one of its commands was run, a
+//! session reported something it listens for. Its calls come here, pass the broker,
+//! and are carried out.
+//!
+//! A plugin that goes over its limits is stopped; it starts again when it is next
+//! wanted. Three times in a minute and it is turned off until the user turns it on.
+//! Changes made with `lume plugin` reach the application through the lock file, which is
+//! watched.
+
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
+use std::time::{Duration, Instant};
+
+use lume_config::Dirs;
+use lume_plugin::Store;
+use lume_plugin::broker::{Broker, allows, append};
+use lume_plugin::id::full_id;
+use lume_plugin::manifest::{Activation, Manifest};
+use lume_plugin::order::{Resolution, State};
+use lume_plugin::permissions::{Kind, Permissions};
+use lume_plugin::store::{Check, Installed};
+use lume_plugin_api::types::{StatusValue, Topic};
+use lume_plugin_api::{ApiError, Call, ErrorCode};
+use lume_plugin_runtime::{Breach, Host, Level, Limits, Outbound, Plugin, Spec};
+use notify::{RecursiveMode, Watcher};
+use serde_json::{Map, Value, json};
+use tokio::sync::{mpsc, oneshot};
+
+use crate::configsvc::ConfigService;
+use crate::error::CommandError;
+use crate::registry::{CommandSpec, Owner, PluginAccess, Registry, Runs, plugin_access};
+use crate::services::{Asker, Services};
+use crate::sessions::News;
+use crate::state::AppState;
+use lume_proto::app::SessionNews;
+
+/// How long after the start the plugins are read when no terminal shows any output.
+const WITHOUT_OUTPUT: Duration = Duration::from_secs(2);
+
+/// How long a plugin's code has to start, and to carry out a command.
+const START_WAIT: Duration = Duration::from_secs(10);
+const COMMAND_WAIT: Duration = Duration::from_secs(30);
+
+/// How many breaches in how long turn a plugin off.
+const BREACHES_TO_TURN_OFF: usize = 3;
+const BREACH_WINDOW: Duration = Duration::from_secs(60);
+
+/// How long a plugin may do nothing before its code is stopped, and how often that is
+/// looked at.
+const IDLE_UNLOAD: Duration = Duration::from_secs(5 * 60);
+const IDLE_LOOK: Duration = Duration::from_secs(30);
+
+/// How long after the lock file changes the plugins are read again.
+const LOCK_SETTLE: Duration = Duration::from_millis(300);
+
+/// The lines of each plugin's log kept in memory, how many it may write in a second,
+/// and how large its log file grows before it is set aside.
+const LOG_LINES_KEPT: usize = 200;
+const LOG_LINES_PER_SECOND: u32 = 100;
+const LOG_FILE_MAX: u64 = 1024 * 1024;
+
+/// What a plugin may store with `lume.kv`, all together, and how long a key may be.
+const KV_MAX_BYTES: usize = 1024 * 1024;
+const KV_KEY_MAX: usize = 256;
+
+/// The file `lume.kv` keeps in a plugin's data folder.
+const KV_FILE: &str = "kv.json";
+
+/// A message a plugin's thread sent, with which run of its code sent it.
+struct Message {
+    local: String,
+    generation: u64,
+    outbound: Outbound,
+}
+
+/// Where a running plugin's messages go: to the manager's queue.
+struct Link {
+    local: String,
+    generation: u64,
+    queue: mpsc::UnboundedSender<Message>,
+}
+
+impl Host for Link {
+    fn send(&self, outbound: Outbound) {
+        let _ = self.queue.send(Message {
+            local: self.local.clone(),
+            generation: self.generation,
+            outbound,
+        });
+    }
+}
+
+/// A plugin's code, running.
+struct Running {
+    plugin: Arc<Plugin>,
+    generation: u64,
+    started: bool,
+    waiting: Vec<oneshot::Sender<Result<(), String>>>,
+}
+
+/// How a plugin has fared.
+#[derive(Default)]
+struct Health {
+    breaches: VecDeque<Instant>,
+    last_problem: Option<String>,
+    starts: u32,
+}
+
+/// The rate a plugin's log is written at.
+struct LogRate {
+    second: Instant,
+    lines: u32,
+    left_out: u32,
+}
+
+/// One installed plugin, as the application has it.
+struct Loaded {
+    installed: Installed,
+    state: State,
+    grants: Permissions,
+    running: Option<Running>,
+    health: Health,
+    /// What its status items show, by item and pane.
+    status: BTreeMap<(String, Option<String>), Value>,
+    contexts: BTreeMap<String, bool>,
+    topics: BTreeSet<Topic>,
+    log: VecDeque<String>,
+    rate: LogRate,
+    /// The settings it was last told of.
+    told_settings: Option<Value>,
+}
+
+impl Loaded {
+    fn manifest(&self) -> Option<&Manifest> {
+        self.installed.manifest.as_ref().ok()
+    }
+
+    fn is_ready(&self) -> bool {
+        self.state == State::Ready
+    }
+}
+
+/// A command given to a plugin: the plugin, the run of its code, and who waits.
+type Invocation = (String, u64, oneshot::Sender<Result<Value, ApiError>>);
+
+#[derive(Default)]
+struct Inner {
+    loaded: BTreeMap<String, Loaded>,
+    resolution: Resolution,
+    /// Commands given to plugins and not yet carried out: by invocation, the plugin,
+    /// the run of its code, and who waits.
+    invocations: HashMap<u64, Invocation>,
+    /// The hashes of packages the user has been told were changed.
+    told_modified: HashSet<String>,
+}
+
+/// The installed plugins and their running code.
+pub struct Plugins {
+    store: Store,
+    broker: Broker,
+    registry: Arc<Registry>,
+    state: Arc<AppState>,
+    config: Arc<ConfigService>,
+    services: OnceLock<Weak<Services>>,
+    inner: Mutex<Inner>,
+    queue: mpsc::UnboundedSender<Message>,
+    received: Mutex<Option<mpsc::UnboundedReceiver<Message>>>,
+    next: AtomicU64,
+    watcher: Mutex<Option<notify::RecommendedWatcher>>,
+}
+
+fn api_error(code: ErrorCode, message: impl Into<String>) -> ApiError {
+    ApiError::new(code, message)
+}
+
+impl Plugins {
+    pub fn new(
+        dirs: &Dirs,
+        registry: Arc<Registry>,
+        state: Arc<AppState>,
+        config: Arc<ConfigService>,
+    ) -> Arc<Self> {
+        let store = Store::of(dirs);
+        let broker = Broker::new(Some(store.audit_file()));
+        let (queue, received) = mpsc::unbounded_channel();
+        Arc::new(Self {
+            store,
+            broker,
+            registry,
+            state,
+            config,
+            services: OnceLock::new(),
+            inner: Mutex::new(Inner::default()),
+            queue,
+            received: Mutex::new(Some(received)),
+            next: AtomicU64::new(1),
+            watcher: Mutex::new(None),
+        })
+    }
+
+    fn inner(&self) -> MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn services(&self) -> Option<Arc<Services>> {
+        self.services.get().and_then(Weak::upgrade)
+    }
+
+    fn next(&self) -> u64 {
+        self.next.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn notice(&self, level: &str, message: String) {
+        match self.services() {
+            Some(services) => services.panes.notice(level, message),
+            None => tracing::info!(%message, "a notice about plugins had no window to go to"),
+        }
+    }
+
+    /// Starts following the plugins: once the first output is out, they are read, and
+    /// from then on their messages, the sessions' reports and the lock file are followed.
+    pub fn start(self: &Arc<Self>, services: &Arc<Services>) {
+        let _ = self.services.set(Arc::downgrade(services));
+        let this = Arc::clone(self);
+        self.state.runtime().spawn(async move {
+            let began = Instant::now();
+            while !this.state.marks().has_output() && began.elapsed() < WITHOUT_OUTPUT {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            if let Some(received) = this
+                .received
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+            {
+                tokio::spawn(Arc::clone(&this).follow_messages(received));
+            }
+            this.reload().await;
+            this.state.marks().plugins();
+            this.watch_lock();
+            tokio::spawn(Arc::clone(&this).follow_sessions());
+            tokio::spawn(Arc::clone(&this).look_for_idle());
+        });
+    }
+
+    /// Reads what is installed again and follows it: plugins that went or changed stop,
+    /// new ones add their commands, those that start at once start.
+    pub async fn reload(self: &Arc<Self>) {
+        let store = self.store.clone();
+        let marks_state = Arc::clone(&self.state);
+        let read = tokio::task::spawn_blocking(move || {
+            let read = store.resolve(true);
+            if let Ok((installed, _)) = &read {
+                for _ in installed {
+                    marks_state.marks().plugin_file();
+                }
+            }
+            read
+        })
+        .await;
+        let (installed, resolution) = match read {
+            Ok(Ok(read)) => read,
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "the installed plugins could not be read");
+                self.notice(
+                    "error",
+                    format!("The installed plugins could not be read: {error}"),
+                );
+                return;
+            }
+            Err(_) => return,
+        };
+        let starting = self.apply(installed, resolution);
+        self.state.broadcast(&json!({ "type": "commands_changed" }));
+        self.state.broadcast(&json!({ "type": "plugins_changed" }));
+        for local in starting {
+            if let Err(problem) = self.activate(&local).await {
+                tracing::warn!(plugin = %local, %problem, "a plugin that starts with the application did not start");
+            }
+        }
+    }
+
+    /// Puts what was read in place of what was there. Returns the plugins to start now.
+    fn apply(&self, installed: Vec<Installed>, resolution: Resolution) -> Vec<String> {
+        let mut inner = self.inner();
+        let mut old = std::mem::take(&mut inner.loaded);
+        let mut starting = Vec::new();
+        let mut modified = Vec::new();
+        for one in installed {
+            let local = one.entry.local.clone();
+            let state = resolution
+                .states
+                .get(&local)
+                .cloned()
+                .unwrap_or(State::Inactive("it was not resolved".to_owned()));
+            if one.check == Check::Modified
+                && !inner.told_modified.contains(&one.entry.content_hash)
+            {
+                inner.told_modified.insert(one.entry.content_hash.clone());
+                modified.push(one.name());
+            }
+            let grants =
+                lume_plugin::permissions::parse_table(&one.entry.grants).unwrap_or_default();
+            let previous = old.remove(&local);
+            let same = previous.as_ref().is_some_and(|previous| {
+                previous.installed.entry.content_hash == one.entry.content_hash
+                    && previous.is_ready()
+                    && state == State::Ready
+            });
+            let mut loaded = match previous {
+                Some(mut previous) if same => {
+                    previous.installed = one;
+                    previous.grants = grants;
+                    previous.state = state;
+                    previous
+                }
+                previous => {
+                    if let Some(mut previous) = previous
+                        && let Some(running) = previous.running.take()
+                    {
+                        running.plugin.stop();
+                    }
+                    Loaded {
+                        installed: one,
+                        state,
+                        grants,
+                        running: None,
+                        health: Health::default(),
+                        status: BTreeMap::new(),
+                        contexts: BTreeMap::new(),
+                        topics: BTreeSet::new(),
+                        log: VecDeque::new(),
+                        rate: LogRate {
+                            second: Instant::now(),
+                            lines: 0,
+                            left_out: 0,
+                        },
+                        told_settings: None,
+                    }
+                }
+            };
+            self.registry.unregister_plugin(&local);
+            if loaded.is_ready()
+                && let Some(manifest) = loaded.installed.manifest.as_ref().ok().cloned()
+            {
+                for command in &manifest.contributes.commands {
+                    let spec = CommandSpec {
+                        id: full_id(&local, &command.id),
+                        title: command.title.clone(),
+                        category: command
+                            .category
+                            .clone()
+                            .unwrap_or_else(|| loaded.installed.name()),
+                        runs: Runs::Plugin,
+                        palette: command.palette,
+                        args: None,
+                    };
+                    if let Err(error) = self.registry.register(Owner::Plugin(&local), spec) {
+                        loaded.health.last_problem = Some(error.to_string());
+                    }
+                }
+                if manifest.events.contains(&Activation::Startup) && loaded.running.is_none() {
+                    starting.push(local.clone());
+                }
+            }
+            inner.loaded.insert(local, loaded);
+        }
+        // Plugins that are no longer installed.
+        for (local, mut gone) in old {
+            self.registry.unregister_plugin(&local);
+            if let Some(running) = gone.running.take() {
+                running.plugin.stop();
+            }
+        }
+        // In the order they load in.
+        starting.sort_by_key(|local| resolution.rank(local));
+        inner.resolution = resolution;
+        drop(inner);
+        for name in modified {
+            self.notice(
+                "error",
+                format!(
+                    "{name} is not used: its files have changed since it was installed. \
+                     Install it again to use it."
+                ),
+            );
+        }
+        starting
+    }
+
+    /// Starts a plugin's code, and that of the plugins it depends on first, if it is not
+    /// running yet.
+    pub async fn activate(self: &Arc<Self>, local: &str) -> Result<(), String> {
+        let dependencies: Vec<(String, bool)> = {
+            let inner = self.inner();
+            let loaded = inner
+                .loaded
+                .get(local)
+                .ok_or_else(|| format!("no plugin is installed as {local}"))?;
+            if let State::Inactive(why) = &loaded.state {
+                return Err(format!("{} cannot be used: {why}", loaded.installed.name()));
+            }
+            let bound = inner
+                .resolution
+                .bound
+                .get(local)
+                .cloned()
+                .unwrap_or_default();
+            loaded
+                .manifest()
+                .map(|manifest| {
+                    manifest
+                        .dependencies
+                        .iter()
+                        .filter_map(|(wanted, dependency)| {
+                            bound
+                                .get(wanted)
+                                .map(|target| (target.clone(), dependency.optional()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        for (dependency, optional) in dependencies {
+            let has_code = self
+                .inner()
+                .loaded
+                .get(&dependency)
+                .and_then(Loaded::manifest)
+                .is_some_and(|manifest| manifest.main.is_some());
+            if !has_code {
+                continue;
+            }
+            let started = Box::pin(self.activate(&dependency)).await;
+            if let Err(problem) = started
+                && !optional
+            {
+                return Err(format!(
+                    "{dependency}, which it needs, did not start: {problem}"
+                ));
+            }
+        }
+        let waiting = self.begin(local)?;
+        match waiting {
+            None => Ok(()),
+            Some(receiver) => match tokio::time::timeout(START_WAIT, receiver).await {
+                Ok(Ok(outcome)) => outcome,
+                Ok(Err(_)) => Err("its code stopped while it started".to_owned()),
+                Err(_) => Err("its code did not start in time".to_owned()),
+            },
+        }
+    }
+
+    /// Starts the code of a plugin whose dependencies run, unless it runs already.
+    /// Returns what to wait on, or nothing when it has started.
+    fn begin(&self, local: &str) -> Result<Option<oneshot::Receiver<Result<(), String>>>, String> {
+        let (directory, manifest, name) = {
+            let mut inner = self.inner();
+            let loaded = inner
+                .loaded
+                .get_mut(local)
+                .ok_or_else(|| format!("no plugin is installed as {local}"))?;
+            match &mut loaded.running {
+                Some(running) if running.started => return Ok(None),
+                Some(running) => {
+                    let (sender, receiver) = oneshot::channel();
+                    running.waiting.push(sender);
+                    return Ok(Some(receiver));
+                }
+                None => {}
+            }
+            let manifest = loaded
+                .manifest()
+                .cloned()
+                .ok_or_else(|| "its manifest cannot be read".to_owned())?;
+            (
+                self.store.package_dir(&loaded.installed.entry),
+                manifest,
+                loaded.installed.name(),
+            )
+        };
+        let Some(main) = manifest.main.clone() else {
+            return Ok(None);
+        };
+        let code = std::fs::read_to_string(directory.join(&main))
+            .map_err(|error| format!("its code cannot be read: {error}"))?;
+        let source_map = std::fs::read_to_string(directory.join(format!("{main}.map"))).ok();
+        self.state.marks().plugin_file();
+        let generation = self.next();
+        let spec = Spec {
+            id: local.to_owned(),
+            manifest_id: manifest.id.clone(),
+            name,
+            version: manifest.version.clone(),
+            code,
+            file: main,
+            source_map,
+            limits: Limits::with_memory_mib(manifest.limits.memory_mib()),
+        };
+        let link = Link {
+            local: local.to_owned(),
+            generation,
+            queue: self.queue.clone(),
+        };
+        let mut inner = self.inner();
+        let loaded = inner
+            .loaded
+            .get_mut(local)
+            .ok_or_else(|| format!("{local} was removed while it started"))?;
+        if let Some(running) = &mut loaded.running {
+            // Another start got there while the code was read.
+            if running.started {
+                return Ok(None);
+            }
+            let (sender, receiver) = oneshot::channel();
+            running.waiting.push(sender);
+            return Ok(Some(receiver));
+        }
+        let plugin = Plugin::start(spec, Box::new(link)).map_err(|error| error.to_string())?;
+        let (sender, receiver) = oneshot::channel();
+        loaded.health.starts += 1;
+        loaded.running = Some(Running {
+            plugin: Arc::new(plugin),
+            generation,
+            started: false,
+            waiting: vec![sender],
+        });
+        Ok(Some(receiver))
+    }
+
+    async fn follow_messages(self: Arc<Self>, mut received: mpsc::UnboundedReceiver<Message>) {
+        while let Some(message) = received.recv().await {
+            self.handle(message);
+        }
+    }
+
+    /// The running code of a plugin, if this run of it is the current one.
+    fn current(&self, local: &str, generation: u64) -> Option<Arc<Plugin>> {
+        self.inner()
+            .loaded
+            .get(local)
+            .and_then(|loaded| loaded.running.as_ref())
+            .filter(|running| running.generation == generation)
+            .map(|running| Arc::clone(&running.plugin))
+    }
+
+    fn handle(self: &Arc<Self>, message: Message) {
+        let Message {
+            local,
+            generation,
+            outbound,
+        } = message;
+        match outbound {
+            Outbound::Log { level, message } => self.log(&local, level, &message),
+            Outbound::Call { id, name, args } => {
+                if let Some(plugin) = self.current(&local, generation) {
+                    self.call(&local, plugin, id, &name, args);
+                }
+            }
+            Outbound::CommandDone { invocation, result } => {
+                if let Some((_, _, sender)) = self.inner().invocations.remove(&invocation) {
+                    let _ = sender.send(result);
+                }
+            }
+            Outbound::Started => {
+                let mut inner = self.inner();
+                if let Some(running) = inner
+                    .loaded
+                    .get_mut(&local)
+                    .and_then(|loaded| loaded.running.as_mut())
+                    .filter(|running| running.generation == generation)
+                {
+                    running.started = true;
+                    for waiting in running.waiting.drain(..) {
+                        let _ = waiting.send(Ok(()));
+                    }
+                }
+            }
+            Outbound::Failed { message } => {
+                let name = self.ended(&local, generation, &message);
+                if let Some(name) = name {
+                    self.notice("error", format!("{name} could not start: {message}"));
+                }
+            }
+            Outbound::Breached { breach, detail } => {
+                self.breached(&local, generation, breach, &detail)
+            }
+            Outbound::Hung => self.breached(
+                &local,
+                generation,
+                Breach::Time,
+                "it was busy for too long and could not be interrupted",
+            ),
+            Outbound::Stopped => {
+                self.ended(&local, generation, "its code stopped");
+            }
+        }
+    }
+
+    /// The end of a run of a plugin's code: whoever waits is told. Returns the plugin's
+    /// name when this was its current run.
+    fn ended(&self, local: &str, generation: u64, why: &str) -> Option<String> {
+        let mut inner = self.inner();
+        let failed: Vec<u64> = inner
+            .invocations
+            .iter()
+            .filter(|(_, (plugin, run, _))| plugin == local && *run == generation)
+            .map(|(invocation, _)| *invocation)
+            .collect();
+        for invocation in failed {
+            if let Some((_, _, sender)) = inner.invocations.remove(&invocation) {
+                let _ = sender.send(Err(api_error(ErrorCode::Stopped, why)));
+            }
+        }
+        let loaded = inner.loaded.get_mut(local)?;
+        let running = loaded
+            .running
+            .take_if(|running| running.generation == generation)?;
+        for waiting in running.waiting {
+            let _ = waiting.send(Err(why.to_owned()));
+        }
+        if why != "its code stopped" {
+            loaded.health.last_problem = Some(why.to_owned());
+        }
+        Some(loaded.installed.name())
+    }
+
+    fn breached(self: &Arc<Self>, local: &str, generation: u64, breach: Breach, detail: &str) {
+        let Some(name) = self.ended(
+            local,
+            generation,
+            &format!("it went over its {} limit: {detail}", breach.as_str()),
+        ) else {
+            return;
+        };
+        let turn_off = {
+            let mut inner = self.inner();
+            let Some(loaded) = inner.loaded.get_mut(local) else {
+                return;
+            };
+            let now = Instant::now();
+            loaded.health.breaches.push_back(now);
+            while loaded
+                .health
+                .breaches
+                .front()
+                .is_some_and(|at| now.duration_since(*at) > BREACH_WINDOW)
+            {
+                loaded.health.breaches.pop_front();
+            }
+            loaded.health.breaches.len() >= BREACHES_TO_TURN_OFF
+        };
+        self.log(local, Level::Error, &format!("stopped: {detail}"));
+        if turn_off {
+            self.notice(
+                "error",
+                format!(
+                    "{name} was turned off: it went over its limits {BREACHES_TO_TURN_OFF} times \
+                     in a minute ({detail}). Turn it on again with `lume plugin enable {local}`."
+                ),
+            );
+            let store = self.store.clone();
+            let local = local.to_owned();
+            let this = Arc::clone(self);
+            self.state.runtime().spawn(async move {
+                let _ = tokio::task::spawn_blocking(move || store.set_enabled(&local, false)).await;
+                this.reload().await;
+            });
+        } else {
+            self.notice(
+                "warning",
+                format!("{name} was stopped: {detail}. It starts again when it is next needed."),
+            );
+        }
+    }
+
+    /// Writes a line to a plugin's log, keeping to its rate.
+    fn log(&self, local: &str, level: Level, message: &str) {
+        let line = format!(
+            "{} {} {}",
+            lume_plugin::broker::utc_now(),
+            level.as_str(),
+            message.trim_end()
+        );
+        let mut write = Vec::new();
+        {
+            let mut inner = self.inner();
+            let Some(loaded) = inner.loaded.get_mut(local) else {
+                return;
+            };
+            let rate = &mut loaded.rate;
+            if rate.second.elapsed() >= Duration::from_secs(1) {
+                if rate.left_out > 0 {
+                    write.push(format!(
+                        "{} warn {} lines were left out: the plugin wrote more than {LOG_LINES_PER_SECOND} a second",
+                        lume_plugin::broker::utc_now(),
+                        rate.left_out
+                    ));
+                }
+                rate.second = Instant::now();
+                rate.lines = 0;
+                rate.left_out = 0;
+            }
+            rate.lines += 1;
+            if rate.lines > LOG_LINES_PER_SECOND {
+                rate.left_out += 1;
+            } else {
+                write.push(line);
+            }
+            for line in &write {
+                loaded.log.push_back(line.clone());
+                while loaded.log.len() > LOG_LINES_KEPT {
+                    loaded.log.pop_front();
+                }
+            }
+        }
+        if level == Level::Error {
+            tracing::debug!(plugin = %local, "a plugin logged an error");
+        }
+        let file = self.store.log_file(local);
+        for line in write {
+            append(&file, &line, LOG_FILE_MAX);
+        }
+    }
+
+    /// Checks a call against the plugin's grants, and carries it out.
+    fn call(self: &Arc<Self>, local: &str, plugin: Arc<Plugin>, id: u64, name: &str, args: Value) {
+        let call = match Call::decode(name, args) {
+            Ok(call) => call,
+            Err(error) => {
+                plugin.answer(id, Err(api_error(ErrorCode::Invalid, error.to_string())));
+                return;
+            }
+        };
+        if let Some(permission) = call.permission() {
+            let granted = self
+                .inner()
+                .loaded
+                .get(local)
+                .map(|loaded| loaded.grants.clone())
+                .unwrap_or_default();
+            let checked = match Kind::parse(permission) {
+                Some(kind) => self
+                    .broker
+                    .check(local, &granted, kind, None)
+                    .map_err(|denied| denied.message),
+                None => Err(format!("{permission} is not a permission")),
+            };
+            if let Err(message) = checked {
+                plugin.answer(id, Err(api_error(ErrorCode::Denied, message)));
+                return;
+            }
+        }
+        let this = Arc::clone(self);
+        let local = local.to_owned();
+        self.state.runtime().spawn(async move {
+            let result = this.serve(&local, call).await;
+            plugin.answer(id, result);
+        });
+    }
+
+    async fn serve(self: &Arc<Self>, local: &str, call: Call) -> Result<Value, ApiError> {
+        match call {
+            Call::StatusSet(set) => self.status_set(local, &set.id, set.pane, Some(set.value)),
+            Call::StatusClear(clear) => self.status_set(local, &clear.id, clear.pane, None),
+            Call::CommandsExecute(execute) => self.execute(local, &execute.id, execute.args).await,
+            Call::KvGet(get) => {
+                self.kv(local, move |map| {
+                    Ok(map.get(&get.key).cloned().unwrap_or(Value::Null))
+                })
+                .await
+            }
+            Call::KvSet(set) => {
+                if set.key.is_empty() || set.key.len() > KV_KEY_MAX {
+                    return Err(api_error(
+                        ErrorCode::Invalid,
+                        format!("a key has 1 to {KV_KEY_MAX} characters"),
+                    ));
+                }
+                self.kv(local, move |map| {
+                    map.insert(set.key, set.value);
+                    Ok(Value::Null)
+                })
+                .await
+            }
+            Call::KvDelete(delete) => {
+                self.kv(local, move |map| {
+                    map.remove(&delete.key);
+                    Ok(Value::Null)
+                })
+                .await
+            }
+            Call::KvList(_) => {
+                self.kv(local, |map| {
+                    Ok(json!(map.keys().cloned().collect::<Vec<_>>()))
+                })
+                .await
+            }
+            Call::SettingsGet(get) => {
+                let settings = self.settings_of(local);
+                Ok(match get.key {
+                    Some(key) => settings.get(&key).cloned().unwrap_or(Value::Null),
+                    None => settings,
+                })
+            }
+            Call::ContextSet(set) => {
+                let mut inner = self.inner();
+                if let Some(loaded) = inner.loaded.get_mut(local) {
+                    loaded.contexts.insert(set.key.clone(), set.value);
+                }
+                drop(inner);
+                self.state.broadcast(&json!({
+                    "type": "plugin_context",
+                    "plugin": local,
+                    "key": set.key,
+                    "value": set.value,
+                }));
+                Ok(Value::Null)
+            }
+            Call::EventsSubscribe(subscribe) => {
+                let mut inner = self.inner();
+                if let Some(loaded) = inner.loaded.get_mut(local) {
+                    loaded.topics.insert(subscribe.topic);
+                }
+                Ok(Value::Null)
+            }
+        }
+    }
+
+    /// Shows a value in one of a plugin's status items, or takes it back.
+    fn status_set(
+        &self,
+        local: &str,
+        item: &str,
+        pane: Option<String>,
+        value: Option<StatusValue>,
+    ) -> Result<Value, ApiError> {
+        let merged = {
+            let mut inner = self.inner();
+            let loaded = inner
+                .loaded
+                .get_mut(local)
+                .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
+            let declared = loaded.manifest().is_some_and(|manifest| {
+                manifest
+                    .contributes
+                    .status
+                    .iter()
+                    .any(|status| status.id == item)
+            });
+            if !declared {
+                return Err(api_error(
+                    ErrorCode::NotFound,
+                    format!("the plugin's manifest has no status item {item}"),
+                ));
+            }
+            let key = (item.to_owned(), pane.clone());
+            match value {
+                None => {
+                    loaded.status.remove(&key);
+                    Value::Null
+                }
+                Some(value) => {
+                    let fresh = serde_json::to_value(value).unwrap_or(Value::Null);
+                    let entry = loaded.status.entry(key).or_insert_with(|| json!({}));
+                    if let (Some(old), Some(new)) = (entry.as_object_mut(), fresh.as_object()) {
+                        for (field, value) in new {
+                            old.insert(field.clone(), value.clone());
+                        }
+                    }
+                    entry.clone()
+                }
+            }
+        };
+        self.state.broadcast(&json!({
+            "type": "plugin_status",
+            "plugin": local,
+            "item": full_id(local, item),
+            "pane": pane,
+            "value": merged,
+        }));
+        Ok(Value::Null)
+    }
+
+    /// Runs a command for a plugin: one of its own, or one of the application's that its
+    /// permissions cover.
+    async fn execute(
+        self: &Arc<Self>,
+        local: &str,
+        id: &str,
+        args: Option<Value>,
+    ) -> Result<Value, ApiError> {
+        let command = if id.starts_with("lume.") {
+            let allowed = match plugin_access(id) {
+                PluginAccess::Open => Ok(()),
+                PluginAccess::UserOnly => {
+                    Err(format!("{id} is run by the user only, not by plugins"))
+                }
+                PluginAccess::Needs(permission) => {
+                    let granted = self
+                        .inner()
+                        .loaded
+                        .get(local)
+                        .map(|loaded| loaded.grants.clone())
+                        .unwrap_or_default();
+                    match Kind::parse(permission) {
+                        Some(kind) => self
+                            .broker
+                            .check(local, &granted, kind, None)
+                            .map_err(|denied| denied.message),
+                        None => Err(format!("{permission} is not a permission")),
+                    }
+                }
+            };
+            allowed.map_err(|message| api_error(ErrorCode::Denied, message))?;
+            id.to_owned()
+        } else if id.contains(':') {
+            return Err(api_error(
+                ErrorCode::Denied,
+                "a plugin runs its own commands and the application's; another plugin's are reached through its services",
+            ));
+        } else {
+            full_id(local, id)
+        };
+        let services = self
+            .services()
+            .ok_or_else(|| api_error(ErrorCode::Failed, "the application is closing"))?;
+        let window = services
+            .panes
+            .focused_window()
+            .or_else(|| {
+                services
+                    .panes
+                    .workspace()
+                    .windows
+                    .first()
+                    .map(|window| window.id)
+            })
+            .ok_or_else(|| api_error(ErrorCode::Failed, "there is no window to run it in"))?;
+        services
+            .run_command(
+                window,
+                &command,
+                &args.unwrap_or(Value::Null),
+                Asker::Outside,
+            )
+            .await
+            .map(|()| Value::Null)
+            .map_err(|error| api_error(ErrorCode::Failed, error.message))
+    }
+
+    /// Reads and changes a plugin's stored values, in one step.
+    async fn kv(
+        &self,
+        local: &str,
+        change: impl FnOnce(&mut Map<String, Value>) -> Result<Value, ApiError> + Send + 'static,
+    ) -> Result<Value, ApiError> {
+        let file = self.store.data_dir(local).join(KV_FILE);
+        tokio::task::spawn_blocking(move || {
+            let mut map: Map<String, Value> = match std::fs::read_to_string(&file) {
+                Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
+                Err(_) => Map::new(),
+            };
+            let before = Value::Object(map.clone());
+            let answer = change(&mut map)?;
+            let after = Value::Object(map);
+            if after != before {
+                let text = after.to_string();
+                if text.len() > KV_MAX_BYTES {
+                    return Err(api_error(
+                        ErrorCode::Failed,
+                        format!(
+                            "what a plugin stores may be {} KiB at most",
+                            KV_MAX_BYTES / 1024
+                        ),
+                    ));
+                }
+                lume_config::write::write_atomic(&file, &text)
+                    .map_err(|error| api_error(ErrorCode::Failed, error.to_string()))?;
+            }
+            Ok(answer)
+        })
+        .await
+        .unwrap_or_else(|_| {
+            Err(api_error(
+                ErrorCode::Failed,
+                "the stored values could not be read",
+            ))
+        })
+    }
+
+    /// A plugin's settings: what the user set, over the defaults its manifest gives.
+    fn settings_of(&self, local: &str) -> Value {
+        let defaults: Map<String, Value> = self
+            .inner()
+            .loaded
+            .get(local)
+            .and_then(Loaded::manifest)
+            .map(|manifest| {
+                manifest
+                    .contributes
+                    .settings
+                    .iter()
+                    .filter_map(|setting| {
+                        serde_json::to_value(&setting.default)
+                            .ok()
+                            .map(|value| (setting.key.clone(), value))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut settings = defaults;
+        let current = self.config.current();
+        if let Some(Value::Object(set)) = current.config.plugins.get(local) {
+            for (key, value) in set {
+                if settings.contains_key(key) {
+                    settings.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        Value::Object(settings)
+    }
+
+    /// Tells running plugins whose settings changed.
+    pub fn config_changed(&self) {
+        let running: Vec<(String, Arc<Plugin>)> = self
+            .inner()
+            .loaded
+            .iter()
+            .filter_map(|(local, loaded)| {
+                loaded
+                    .running
+                    .as_ref()
+                    .map(|running| (local.clone(), Arc::clone(&running.plugin)))
+            })
+            .collect();
+        for (local, plugin) in running {
+            let settings = self.settings_of(&local);
+            let mut inner = self.inner();
+            let Some(loaded) = inner.loaded.get_mut(&local) else {
+                continue;
+            };
+            if loaded.told_settings.as_ref() == Some(&settings) {
+                continue;
+            }
+            let first = loaded.told_settings.is_none();
+            loaded.told_settings = Some(settings.clone());
+            drop(inner);
+            if !first {
+                plugin.event("settings", settings);
+            }
+        }
+    }
+
+    /// Runs one of a plugin's commands: starts its code if need be, gives it the command
+    /// and waits for it to be carried out.
+    pub async fn run_command(self: &Arc<Self>, id: &str, args: &Value) -> Result<(), CommandError> {
+        let (local, name) = {
+            let inner = self.inner();
+            inner
+                .loaded
+                .keys()
+                .find_map(|local| {
+                    id.strip_prefix(local.as_str())
+                        .and_then(|rest| rest.strip_prefix('.'))
+                        .map(|name| (local.clone(), name.to_owned()))
+                })
+                .ok_or_else(|| {
+                    CommandError::not_found(format!("no plugin adds the command {id}"))
+                })?
+        };
+        self.activate(&local).await.map_err(|problem| {
+            CommandError::new("failed", format!("{id} could not run: {problem}"))
+        })?;
+        let (plugin, generation) = {
+            let inner = self.inner();
+            let running = inner
+                .loaded
+                .get(&local)
+                .and_then(|loaded| loaded.running.as_ref())
+                .ok_or_else(|| {
+                    CommandError::new("failed", format!("{local} stopped before {id} could run"))
+                })?;
+            (Arc::clone(&running.plugin), running.generation)
+        };
+        let invocation = self.next();
+        let (sender, receiver) = oneshot::channel();
+        self.inner()
+            .invocations
+            .insert(invocation, (local.clone(), generation, sender));
+        plugin.command(invocation, &name, args.clone());
+        match tokio::time::timeout(COMMAND_WAIT, receiver).await {
+            Ok(Ok(Ok(_))) => Ok(()),
+            Ok(Ok(Err(error))) => Err(CommandError::new(
+                "failed",
+                format!("{id}: {}", error.message),
+            )),
+            Ok(Err(_)) => Err(CommandError::new(
+                "failed",
+                format!("{local} stopped while it ran {id}"),
+            )),
+            Err(_) => {
+                self.inner().invocations.remove(&invocation);
+                Err(CommandError::new(
+                    lume_proto::app::codes::TIMEOUT,
+                    format!("{id} did not finish in {} seconds", COMMAND_WAIT.as_secs()),
+                ))
+            }
+        }
+    }
+
+    async fn follow_sessions(self: Arc<Self>) {
+        let reports = Arc::clone(self.state.reports());
+        let (_, mut news) = reports.follow();
+        loop {
+            match news.recv().await {
+                Ok(news) => self.session_news(news).await,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                    tracing::debug!(missed, "session reports were missed by plugins");
+                    (_, news) = reports.follow();
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    }
+
+    /// Passes a session's report to the plugins that hear such reports, starting those
+    /// whose activation events name it.
+    async fn session_news(self: &Arc<Self>, news: News) {
+        let (kind, details) = match &news.what {
+            SessionNews::Event(event) => {
+                let mut value = serde_json::to_value(event).unwrap_or(Value::Null);
+                let kind = value
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("event")
+                    .to_owned();
+                if let Some(object) = value.as_object_mut() {
+                    object.remove("type");
+                }
+                (kind, value)
+            }
+            SessionNews::Exit(status) => (
+                "exit".to_owned(),
+                serde_json::to_value(status).unwrap_or(Value::Null),
+            ),
+        };
+        let pane = self
+            .services()
+            .and_then(|services| services.panes.pane_of(&news.key))
+            .map(|pane| pane.to_string());
+        let report = json!({
+            "session": news.key.session.to_string(),
+            "pane": pane,
+            "kind": kind,
+            "details": details,
+        });
+        let (deliver, start): (Vec<Arc<Plugin>>, Vec<String>) = {
+            let inner = self.inner();
+            let mut deliver = Vec::new();
+            let mut start = Vec::new();
+            for (local, loaded) in &inner.loaded {
+                if !loaded.is_ready() || !allows(&loaded.grants, Kind::WorkspaceRead, None) {
+                    continue;
+                }
+                let listens = loaded.topics.contains(&Topic::Session);
+                match &loaded.running {
+                    Some(running) if running.started && listens => {
+                        deliver.push(Arc::clone(&running.plugin))
+                    }
+                    None => {
+                        let named = loaded.manifest().is_some_and(|manifest| {
+                            manifest
+                                .events
+                                .contains(&Activation::SessionEvent(kind.clone()))
+                        });
+                        if named {
+                            start.push(local.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (deliver, start)
+        };
+        for plugin in deliver {
+            plugin.event("session", report.clone());
+        }
+        for local in start {
+            let this = Arc::clone(self);
+            let report = report.clone();
+            tokio::spawn(async move {
+                if this.activate(&local).await.is_ok() {
+                    // Its code listens now, if it means to.
+                    let plugin = this
+                        .inner()
+                        .loaded
+                        .get(&local)
+                        .and_then(|loaded| loaded.running.as_ref())
+                        .map(|running| Arc::clone(&running.plugin));
+                    if let Some(plugin) = plugin {
+                        plugin.event("session", report);
+                    }
+                }
+            });
+        }
+    }
+
+    /// Stops the code of plugins that have done nothing for a while and have nothing
+    /// waiting, which their activation events would start again.
+    async fn look_for_idle(self: Arc<Self>) {
+        loop {
+            tokio::time::sleep(IDLE_LOOK).await;
+            let mut inner = self.inner();
+            let busy: HashSet<String> = inner
+                .invocations
+                .values()
+                .map(|(local, ..)| local.clone())
+                .collect();
+            for (local, loaded) in &mut inner.loaded {
+                let Some(running) = &loaded.running else {
+                    continue;
+                };
+                let Some(manifest) = loaded.installed.manifest.as_ref().ok() else {
+                    continue;
+                };
+                let stats = running.plugin.stats();
+                let comes_back = !manifest.events.contains(&Activation::Startup)
+                    && (loaded.topics.is_empty()
+                        || manifest
+                            .events
+                            .iter()
+                            .any(|event| matches!(event, Activation::SessionEvent(_))));
+                let idle = running.started
+                    && stats.idle_for >= IDLE_UNLOAD
+                    && stats.timers == 0
+                    && stats.calls_in_flight == 0
+                    && !busy.contains(local);
+                if idle && comes_back {
+                    tracing::debug!(plugin = %local, "a plugin's code was stopped for doing nothing");
+                    running.plugin.stop();
+                    loaded.running = None;
+                    loaded.topics.clear();
+                }
+            }
+        }
+    }
+
+    /// Watches the lock file, so that what `lume plugin` changes is followed.
+    fn watch_lock(self: &Arc<Self>) {
+        let root = self.store.root().to_owned();
+        let _ = std::fs::create_dir_all(&root);
+        let lock = self.store.lock_file();
+        let (changed, mut changes) = mpsc::unbounded_channel::<()>();
+        let made = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            if let Ok(event) = event
+                && event.paths.iter().any(|path| same_file(path, &lock))
+            {
+                let _ = changed.send(());
+            }
+        });
+        let mut watcher = match made {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                tracing::warn!(%error, "the plugins' lock file is not watched for changes");
+                return;
+            }
+        };
+        if let Err(error) = watcher.watch(&root, RecursiveMode::NonRecursive) {
+            tracing::warn!(%error, "the plugins' folder is not watched for changes");
+            return;
+        }
+        *self.watcher.lock().unwrap_or_else(PoisonError::into_inner) = Some(watcher);
+        let this = Arc::clone(self);
+        self.state.runtime().spawn(async move {
+            while changes.recv().await.is_some() {
+                tokio::time::sleep(LOCK_SETTLE).await;
+                while changes.try_recv().is_ok() {}
+                this.reload().await;
+            }
+        });
+    }
+
+    /// Activates a plugin for `lume ctl plugin activate`.
+    pub async fn activate_for_control(self: &Arc<Self>, local: &str) -> Result<(), CommandError> {
+        self.activate(local)
+            .await
+            .map_err(|problem| CommandError::new("failed", problem))
+    }
+
+    /// The plugins, as `lume ctl plugins` lists them.
+    pub fn describe(&self) -> Value {
+        let inner = self.inner();
+        let plugins: Vec<Value> = inner
+            .resolution
+            .order
+            .iter()
+            .filter_map(|local| inner.loaded.get(local).map(|loaded| (local, loaded)))
+            .map(|(local, loaded)| {
+                let (state, reason) = match &loaded.state {
+                    State::Ready => ("ready", None),
+                    State::Inactive(why) => ("inactive", Some(why.clone())),
+                };
+                let running = loaded.running.as_ref().map(|running| {
+                    let stats = running.plugin.stats();
+                    json!({
+                        "started": running.started,
+                        "memory": stats.memory_used,
+                        "timers": stats.timers,
+                        "calls": stats.calls_in_flight,
+                    })
+                });
+                json!({
+                    "id": local,
+                    "name": loaded.installed.name(),
+                    "version": loaded.installed.entry.version,
+                    "state": state,
+                    "reason": reason,
+                    "running": running,
+                    "starts": loaded.health.starts,
+                    "breaches": loaded.health.breaches.len(),
+                    "problem": loaded.health.last_problem,
+                    "status": loaded.status.iter().map(|((item, pane), value)| json!({
+                        "item": item, "pane": pane, "value": value,
+                    })).collect::<Vec<_>>(),
+                    "contexts": loaded.contexts,
+                    "log": loaded.log.iter().rev().take(20).rev().cloned().collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        json!(plugins)
+    }
+
+    /// Stops every plugin's code, as the application closes.
+    pub fn shutdown(&self) {
+        let mut inner = self.inner();
+        let mut running = Vec::new();
+        for loaded in inner.loaded.values_mut() {
+            if let Some(run) = loaded.running.take() {
+                run.plugin.stop();
+                running.push(run.plugin);
+            }
+        }
+        drop(inner);
+        // A moment for their code to hear it is stopping.
+        let deadline = Instant::now() + Duration::from_millis(250);
+        while Instant::now() < deadline && running.iter().any(|plugin| !plugin.stats().finished) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+/// Whether two paths name the same file, as a watcher may report one written another
+/// way.
+fn same_file(one: &Path, other: &Path) -> bool {
+    one == other
+        || one.file_name() == other.file_name()
+            && one.parent().map(Path::file_name) == other.parent().map(Path::file_name)
+}
