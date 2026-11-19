@@ -45,6 +45,7 @@ export interface Measured {
 export const MEASURED_BOXES: readonly string[] = [
   "shell",
   "top-bar",
+  "status-bar",
   "shell-body",
   "shell-centre",
   "tab-area",

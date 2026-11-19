@@ -320,6 +320,11 @@
           "minimum": 0,
           "type": "number"
         },
+        "statusbar": {
+          "description": "The height of the status bar along the bottom of a window, while it has something to show.",
+          "minimum": 0,
+          "type": "number"
+        },
         "tab": {
           "description": "The height of a tab.",
           "minimum": 0,

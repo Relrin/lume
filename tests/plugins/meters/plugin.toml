@@ -1,10 +1,11 @@
-# A plugin for the end-to-end tests: meters of the machine in the top bar, read only
-# while they are on screen. Its settings take meters away without its code.
+# A plugin for the end-to-end tests: meters of the machine in the status bar, read only
+# while they are on screen. Its settings take meters away, or move them to the top bar,
+# without its code.
 schema = 1
 id = "test.meters"
 name = "Meters"
 version = "1.0.0"
-description = "The processor, memory, graphics card and network, in the top bar."
+description = "The processor, memory, graphics card and network, in the status bar."
 api = "1"
 main = "host.js"
 repository = "https://example.invalid/lume/test-meters"
@@ -43,7 +44,7 @@ command = "refresh"
 
 [[contributes.status]]
 id = "cpu"
-slot = "topbar.right"
+slot-setting = "place"
 kind = "meter"
 label = "CPU"
 menu = "cpu-menu"
@@ -51,7 +52,7 @@ shown-when = "cpu"
 
 [[contributes.status]]
 id = "memory"
-slot = "topbar.right"
+slot-setting = "place"
 kind = "meter"
 label = "RAM"
 after = "cpu"
@@ -59,7 +60,7 @@ shown-when = "memory"
 
 [[contributes.status]]
 id = "gpu"
-slot = "topbar.right"
+slot-setting = "place"
 kind = "meter"
 label = "GPU"
 after = "memory"
@@ -67,7 +68,7 @@ shown-when = "gpu"
 
 [[contributes.status]]
 id = "network"
-slot = "topbar.right"
+slot-setting = "place"
 kind = "sparkline"
 label = "NET"
 after = "gpu"
@@ -76,6 +77,18 @@ shown-when = "network"
 [[contributes.setting-groups]]
 id = "meters"
 title = "Status bar meters"
+
+[[contributes.settings]]
+key = "place"
+type = "string"
+default = "statusbar.right"
+label = "Show in"
+control = "segmented"
+choices = [
+  { value = "statusbar.right", label = "Status bar" },
+  { value = "topbar.right", label = "Top bar" },
+]
+group = "meters"
 
 [[contributes.settings]]
 key = "cpu"

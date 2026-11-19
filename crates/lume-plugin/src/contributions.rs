@@ -112,9 +112,13 @@ pub struct StatusDef {
     /// `<install>.<name>`.
     pub id: String,
     pub plugin: String,
+    /// The place it is in: where its manifest puts it, or, for an item a setting
+    /// moves, where that setting puts it until the user changes it.
     pub slot: String,
     pub kind: String,
-    /// Where it is among the items of its slot.
+    /// Where it is among the items of the bars, or of the panes' headers. The items of
+    /// the bars are put in order together, so one that moves keeps its place among the
+    /// others of the place it goes to.
     pub order: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -133,6 +137,17 @@ pub struct StatusDef {
     /// The plugin's switch that must be on for it to be shown, with its default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shown_when: Option<ShownWhen>,
+    /// The plugin's setting that chooses which of the bars' places it is in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot_setting: Option<SlotSetting>,
+}
+
+/// A setting of the plugin's that chooses where a status item goes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SlotSetting {
+    pub key: String,
+    /// The places it may choose, in the order its choices are given.
+    pub slots: Vec<String>,
 }
 
 /// A switch of the plugin's settings a thing is shown under.
@@ -932,7 +947,8 @@ fn command_title(id: &str, by_local: &BTreeMap<&str, &Install<'_>>) -> Option<St
 }
 
 fn status(installs: &[Install<'_>], commands: &dyn Commands, out: &mut Contributions) {
-    let mut slots: BTreeMap<String, Vec<Placed<StatusDef>>> = BTreeMap::new();
+    // The items of the bars are put in order together, those of the panes' headers apart.
+    let mut containers: BTreeMap<&'static str, Vec<Placed<StatusDef>>> = BTreeMap::new();
     for install in installs {
         let names = Names { install };
         let local = install.local;
@@ -957,10 +973,50 @@ fn status(installs: &[Install<'_>], commands: &dyn Commands, out: &mut Contribut
                     found => found,
                 },
             };
+            let settings = &install.manifest.contributes.settings;
+            let slot_setting = item.slot_setting.as_ref().and_then(|key| {
+                let setting = settings.iter().find(|setting| setting.key == *key)?;
+                let slots: Vec<String> = setting
+                    .choices
+                    .iter()
+                    .filter_map(|choice| choice.value.as_str())
+                    .filter(|place| places::BAR_SLOTS.contains(place))
+                    .map(str::to_owned)
+                    .collect();
+                let first = setting
+                    .default
+                    .as_str()
+                    .filter(|place| slots.iter().any(|slot| slot == place))
+                    .map(str::to_owned)
+                    .or_else(|| slots.first().cloned())?;
+                Some((
+                    first,
+                    SlotSetting {
+                        key: key.clone(),
+                        slots,
+                    },
+                ))
+            });
+            let slot = match (&item.slot, &slot_setting) {
+                (Some(slot), _) => slot.clone(),
+                (None, Some((first, _))) => first.clone(),
+                (None, None) => {
+                    out.warn(
+                        local,
+                        format!("{local}.{} is left out: it has no place", item.id),
+                    );
+                    continue;
+                }
+            };
+            let container = if slot == "pane.header" {
+                "pane.header"
+            } else {
+                "bars"
+            };
             let def = StatusDef {
                 id: full_id(local, &item.id),
                 plugin: local.to_owned(),
-                slot: item.slot.clone(),
+                slot,
                 kind: item.kind.clone(),
                 order: 0,
                 label: item.label.clone(),
@@ -980,8 +1036,9 @@ fn status(installs: &[Install<'_>], commands: &dyn Commands, out: &mut Contribut
                         .and_then(|setting| setting.default.as_bool())
                         .unwrap_or(true),
                 }),
+                slot_setting: slot_setting.map(|(_, setting)| setting),
             };
-            slots.entry(item.slot.clone()).or_default().push(placed(
+            containers.entry(container).or_default().push(placed(
                 &names,
                 &item.id,
                 &item.placement(),
@@ -991,7 +1048,7 @@ fn status(installs: &[Install<'_>], commands: &dyn Commands, out: &mut Contribut
         }
     }
     let mut warnings = Vec::new();
-    for (_, things) in slots {
+    for (_, things) in containers {
         for (order, thing) in arrange(things, &mut warnings).into_iter().enumerate() {
             let mut def = thing.value;
             def.order = order;
@@ -1685,6 +1742,69 @@ order = 1
         );
         assert_eq!(out.panels[0].id, "acme.meters.procs");
         assert_eq!(keys(&out.menus["menu.status"]), ["acme.meters:options"]);
+    }
+
+    #[test]
+    fn a_status_item_a_setting_moves_keeps_its_place_among_the_bars_items() {
+        let dir = TempDir::new("moved");
+        let one = manifest(
+            "acme.meters",
+            r#"
+[[contributes.status]]
+id = "cpu"
+slot-setting = "place"
+kind = "meter"
+label = "CPU"
+order = 10
+
+[[contributes.status]]
+id = "net"
+slot = "topbar.right"
+kind = "text"
+after = "cpu"
+
+[[contributes.status]]
+id = "branch"
+slot = "statusbar.left"
+kind = "text"
+
+[[contributes.settings]]
+key = "place"
+type = "string"
+default = "statusbar.right"
+choices = [
+  { value = "topbar.right", label = "Top bar" },
+  { value = "statusbar.right", label = "Status bar" },
+]
+"#,
+        );
+        let bound = BTreeMap::new();
+        let installs = [install("acme.meters", &one, &dir, 0, &bound)];
+        let out = build(&installs, &Known);
+        let placed: Vec<(&str, &str, usize)> = out
+            .status
+            .iter()
+            .map(|item| (item.id.as_str(), item.slot.as_str(), item.order))
+            .collect();
+        // One order for the bars: the meter comes before what follows it wherever it
+        // goes, and is where its setting puts it until the user moves it.
+        assert_eq!(
+            placed,
+            [
+                ("acme.meters.cpu", "statusbar.right", 0),
+                ("acme.meters.net", "topbar.right", 1),
+                ("acme.meters.branch", "statusbar.left", 2),
+            ]
+        );
+        assert_eq!(
+            out.status[0].slot_setting,
+            Some(SlotSetting {
+                key: "place".to_owned(),
+                slots: vec!["topbar.right".to_owned(), "statusbar.right".to_owned()],
+            })
+        );
+        assert_eq!(out.status[2].slot_setting, None);
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
     }
 
     #[test]

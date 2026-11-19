@@ -237,6 +237,11 @@ pub const TOKENS: &[TokenDef] = &[
         L,
         "The height of the bar at the top of a window.",
     ),
+    token(
+        "size.statusbar",
+        L,
+        "The height of the status bar along the bottom of a window, while it has something to show.",
+    ),
     token("size.tab", L, "The height of a tab."),
     token("size.border", L, "The width of a border."),
     token(

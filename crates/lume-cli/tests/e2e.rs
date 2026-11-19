@@ -2208,7 +2208,8 @@ fn a_plugins_meters_are_read_only_while_they_are_on_screen() {
     let home = home_with_plugins(&["meters"]);
     let app = App::start_in(home, false);
     app.status_with_session();
-    // On screen, the meters start the plugin, which asks for readings and shows them.
+    // On screen in the status bar, where their setting puts them, the meters start the
+    // plugin, which asks for readings and shows them.
     let plugin = app.until_plugin("test.meters", "the meters to be read and shown", |plugin| {
         plugin["metrics"]["reading"] == true
             && plugin["status"].as_array().is_some_and(|status| {

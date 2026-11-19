@@ -201,6 +201,7 @@ export const PLUGIN_CONTRIBUTIONS: UiContributions = {
       order: 0,
       label: "CPU",
       menu: "acme.meters:cpu-menu",
+      slot_setting: { key: "place", slots: ["statusbar.right", "topbar.right"] },
     },
     {
       id: "acme.meters.memory",
@@ -209,6 +210,7 @@ export const PLUGIN_CONTRIBUTIONS: UiContributions = {
       kind: "meter",
       order: 1,
       label: "RAM",
+      slot_setting: { key: "place", slots: ["statusbar.right", "topbar.right"] },
     },
     {
       id: "acme.meters.gpu",
@@ -217,6 +219,7 @@ export const PLUGIN_CONTRIBUTIONS: UiContributions = {
       kind: "meter",
       order: 2,
       label: "GPU",
+      slot_setting: { key: "place", slots: ["statusbar.right", "topbar.right"] },
     },
     {
       id: "acme.meters.network",
@@ -225,6 +228,7 @@ export const PLUGIN_CONTRIBUTIONS: UiContributions = {
       kind: "sparkline",
       order: 3,
       label: "NET",
+      slot_setting: { key: "place", slots: ["statusbar.right", "topbar.right"] },
     },
   ],
   panels: [
@@ -321,6 +325,21 @@ const WITH_PLUGINS: FakeCoreOptions = {
   contributions: PLUGIN_CONTRIBUTIONS,
 };
 
+/** The same, with the meters' setting putting them in the status bar. */
+const WITH_METERS_BELOW: FakeCoreOptions = {
+  ...WITH_PLUGINS,
+  settings: { plugins: { "acme.meters": { place: "statusbar.right" } } },
+};
+
+/** What is wrong with `what`, which should be over the item `under`. */
+function over(what: Element | null, under: Element | null, name: string): string[] {
+  if (!what || !under) return [`${name} is not on show`];
+  const box = what.getBoundingClientRect();
+  return box.bottom <= under.getBoundingClientRect().top
+    ? []
+    : [`${name} is not over its item, at ${String(box.top)} to ${String(box.bottom)}`];
+}
+
 /** Waits for the plugins' items to be in the top bar, and gives the one asked for. */
 function statusItem(id: string): Promise<HTMLElement> {
   return until(`the status item ${id}`, () =>
@@ -407,6 +426,61 @@ export const PLUGIN_SCENES: readonly Scene[] = [
       const menu = page.querySelector(".status-menu .menu");
       if (!menu) return ["the CPU's menu is not open"];
       return compare(rowsOf(menu), ["Show busiest processes", "Refresh meters"], "the CPU's menu");
+    },
+  },
+  {
+    name: "plugin-status-bar",
+    window: WITH_METERS_BELOW,
+    prepare: async () => {
+      await statusItem("acme.meters.network");
+    },
+    check: (page) => {
+      const below = [
+        ...page.querySelectorAll('.status-bar [data-slot="statusbar.right"] .status-label'),
+      ].map((label) => label.textContent ?? "");
+      const problems = compare(below, ["CPU", "RAM", "GPU", "NET"], "the right of the status bar");
+      if (page.querySelector('[data-slot="topbar.right"] [data-plugin="acme.meters"]')) {
+        problems.push("a meter is still in the top bar");
+      }
+      const bar = page.querySelector(".status-bar")?.getBoundingClientRect();
+      if (!bar || Math.round(bar.bottom) !== Math.round(page.getBoundingClientRect().bottom)) {
+        problems.push("the status bar is not along the bottom of the window");
+      }
+      return problems;
+    },
+  },
+  {
+    name: "plugin-status-bar-card",
+    window: WITH_METERS_BELOW,
+    prepare: async () => {
+      const cpu = await statusItem("acme.meters.cpu");
+      cpu.dispatchEvent(new PointerEvent("pointerenter"));
+      cpu.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+      await until("the CPU's card", () => document.querySelector(".status-card"));
+    },
+    check: (page) =>
+      over(
+        page.querySelector(".status-card"),
+        page.querySelector('[data-status="acme.meters.cpu"]'),
+        "the CPU's card",
+      ),
+  },
+  {
+    name: "plugin-status-bar-menu",
+    window: WITH_METERS_BELOW,
+    prepare: async () => {
+      const cpu = await statusItem("acme.meters.cpu");
+      cpu.click();
+      await until("the CPU's menu", () => document.querySelector(".status-menu .menu"));
+    },
+    check: (page) => {
+      const menu = page.querySelector(".status-menu .menu");
+      return [
+        ...over(menu, page.querySelector('[data-status="acme.meters.cpu"]'), "the CPU's menu"),
+        ...(menu
+          ? compare(rowsOf(menu), ["Show busiest processes", "Refresh meters"], "the CPU's menu")
+          : []),
+      ];
     },
   },
   {
@@ -537,6 +611,23 @@ function pluginSchema(): unknown {
       type: "object",
       additionalProperties: false,
       properties: {
+        place: {
+          type: "string",
+          default: "topbar.right",
+          enum: ["statusbar.right", "topbar.right"],
+          "x-lume-settings": {
+            page,
+            group: "Status bar meters",
+            order: 5,
+            label: "Show in",
+            control: "segmented",
+            plugin: from,
+            options: [
+              { value: "statusbar.right", label: "Status bar" },
+              { value: "topbar.right", label: "Top bar" },
+            ],
+          },
+        },
         cpu: meter("CPU", 10, true),
         memory: meter("Memory", 20, true),
         network: meter("Network", 30, false),
@@ -582,7 +673,7 @@ function pluginSchema(): unknown {
       label: from,
       icon: "plugin",
       group: "Add-ons",
-      blurb: "Meters in the top bar for this machine.",
+      blurb: "Meters in the status bar or the top bar for this machine.",
       groups: ["Status bar meters", "Sampling"],
       meta: "v1.2.0",
       plugin: "acme.meters",

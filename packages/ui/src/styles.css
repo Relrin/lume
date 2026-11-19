@@ -159,6 +159,33 @@
     height: 100%;
   }
 
+  /*
+   * The status bar along the bottom of the window, shown while it has items: those of
+   * its left end, then those of its right end against the window's right edge. When
+   * the window is narrow its ends give way and cut off what does not fit.
+   */
+  .status-bar {
+    @apply text-ink-muted;
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 16px;
+    height: var(--lume-size-statusbar);
+    padding: 0 14px;
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+    background: color-mix(in srgb, var(--lume-color-surface) 70%, transparent);
+  }
+
+  .status-bar-gap {
+    flex: 1;
+  }
+
+  .status-bar .status-slot {
+    gap: 16px;
+  }
+
   .top-divider {
     flex-shrink: 0;
     width: var(--lume-size-border);
@@ -292,10 +319,11 @@
     animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
   }
 
+  /* What opens above its anchor rises into place: it sets `--menu-rise` to 4px. */
   @keyframes menu-in {
     from {
       opacity: 0;
-      translate: 0 -4px;
+      translate: 0 var(--menu-rise, -4px);
       scale: 0.97;
     }
   }
@@ -678,6 +706,10 @@
   }
 
   /* The card of a status item, under it while the pointer rests on the item. */
+  .status-card[data-above] {
+    --menu-rise: 4px;
+  }
+
   .status-card {
     position: fixed;
     z-index: 50;
@@ -1483,6 +1515,13 @@
     max-height: var(--anchored-room);
     transform-origin: var(--anchored-origin);
     animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  .anchored[data-above] > .menu,
+  .anchored[data-above] > .group-editor {
+    --menu-rise: 4px;
+    top: auto;
+    bottom: 6px;
   }
 
   @media (prefers-reduced-motion: reduce) {

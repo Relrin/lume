@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ConfigView, MenuNodeData, MotionDef, UiContributions } from "../src/core/types.ts";
@@ -6,9 +8,13 @@ import { pluginStatusItems } from "../src/plugins/status.ts";
 import { createPluginsStore, holds, iconNamed } from "../src/plugins/store.ts";
 import { VisibleItems } from "../src/plugins/visible.ts";
 import { joinPath, splitPath } from "../src/settings/model.ts";
+import type { ShellApp } from "../src/shell/boot.ts";
+import { ShellContext } from "../src/shell/context.ts";
 import { flatten } from "../src/shell/ListPanel.tsx";
 import type { MenuItem } from "../src/shell/Menu.tsx";
 import { menuRows, nodesOf, type MenuParts } from "../src/shell/menus.ts";
+import { StatusBar } from "../src/shell/StatusBar.tsx";
+import { createStatusStore } from "../src/status/registry.ts";
 import { cursorFxSettings } from "../src/terminal/cursor-fx.ts";
 
 const EMPTY: UiContributions = {
@@ -196,10 +202,64 @@ describe("the plugins' status items", () => {
     expect(items[0]?.problem).toBe("it went over its time");
   });
 
+  it("go where the plugin's setting that chooses their place puts them", () => {
+    const store = createPluginsStore();
+    store.getState().set({
+      ...shown,
+      status: [
+        {
+          id: "acme.ram",
+          plugin: "acme",
+          slot: "statusbar.right",
+          kind: "meter",
+          order: 0,
+          label: "RAM",
+          slot_setting: { key: "place", slots: ["statusbar.right", "topbar.right"] },
+        },
+      ],
+    });
+    const placed = (place: unknown) =>
+      pluginStatusItems(store.getState(), {
+        config: { plugins: { acme: { place } } },
+      } as unknown as ConfigView).map((item) => item.slot);
+    expect(pluginStatusItems(store.getState()).map((item) => item.slot)).toEqual([
+      "statusbar.right",
+    ]);
+    expect(placed("topbar.right")).toEqual(["topbar.right"]);
+    // A place the setting may not choose leaves the item where its manifest puts it.
+    expect(placed("pane.header")).toEqual(["statusbar.right"]);
+    expect(placed(3)).toEqual(["statusbar.right"]);
+  });
+
   it("name pictures of the plugin's own before the page's", () => {
     expect(iconNamed("acme", "chip", shown.images)).toEqual({ image: "acme:chip" });
     expect(iconNamed("acme", "cpu", shown.images)).toEqual({ glyph: "cpu" });
     expect(holds(["!plugin:acme.x", "terminal"], new Set(["terminal"]))).toBe(true);
+  });
+});
+
+describe("the status bar", () => {
+  it("is drawn only while it has items, those of its left end before those of its right", () => {
+    const status = createStatusStore();
+    // Drawn on its own, a store is read as it first was: here, as it is now.
+    const now = { ...status, getInitialState: () => status.getState() };
+    const app = {
+      status: now,
+      plugins: createPluginsStore(),
+      views: { focus: () => undefined },
+    } as unknown as ShellApp;
+    const draw = () =>
+      renderToStaticMarkup(createElement(ShellContext, { value: app }, createElement(StatusBar)));
+    expect(draw()).toBe("");
+    status
+      .getState()
+      .register({ id: "a.load", slot: "statusbar.right", kind: "text", text: "1.2" });
+    status.getState().register({ id: "a.host", slot: "statusbar.left", kind: "text", text: "pc" });
+    status.getState().register({ id: "a.top", slot: "topbar.right", kind: "text", text: "top" });
+    const html = draw();
+    expect(html).toContain('<footer class="status-bar">');
+    expect(html.indexOf('data-status="a.host"')).toBeLessThan(html.indexOf('data-status="a.load"'));
+    expect(html).not.toContain("a.top");
   });
 });
 

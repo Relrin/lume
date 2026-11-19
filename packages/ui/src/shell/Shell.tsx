@@ -1,7 +1,8 @@
 /**
- * The window: a bar along the top, the panes of the tab on show in the middle, and
- * whatever panels are docked at the left, the right and the bottom around them, all
- * of it over the picture the configuration puts behind the panes, if it names one.
+ * The window: a bar along the top, the panes of the tab on show in the middle,
+ * whatever panels are docked at the left, the right and the bottom around them, and
+ * the status bar along the bottom while it has something to show, all of it over the
+ * picture the configuration puts behind the panes, if it names one.
  */
 
 import { useStore } from "zustand";
@@ -16,6 +17,7 @@ import type { ShellApp } from "./boot.ts";
 import { ShellContext } from "./context.ts";
 import { DockArea, DockDropPreview } from "./DockArea.tsx";
 import { Notices } from "./Notices.tsx";
+import { StatusBar } from "./StatusBar.tsx";
 import { TabArea } from "./TabArea.tsx";
 import { TabPopups } from "./TabPopups.tsx";
 import { TopBar } from "./TopBar.tsx";
@@ -48,6 +50,7 @@ export function Shell({ app }: { app: ShellApp }) {
           <DockArea area="right" />
           <DockDropPreview />
         </div>
+        <StatusBar />
         <CursorFxLayer />
         <TabPopups />
         <Palette />

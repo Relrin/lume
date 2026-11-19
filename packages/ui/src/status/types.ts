@@ -14,16 +14,32 @@
 import type { IconRef } from "../core/types.ts";
 import type { PaneId } from "../layout/types.ts";
 
-/** Where status items are shown: the three parts of the top bar, and a pane's header. */
-export type StatusSlot = "topbar.left" | "topbar.center" | "topbar.right" | "pane.header";
+/**
+ * Where status items are shown: the three parts of the top bar, the two ends of the
+ * status bar along the bottom of the window, and a pane's header.
+ */
+export type StatusSlot =
+  | "topbar.left"
+  | "topbar.center"
+  | "topbar.right"
+  | "statusbar.left"
+  | "statusbar.right"
+  | "pane.header";
 
 /** The slots there are. */
 export const STATUS_SLOTS = [
   "topbar.left",
   "topbar.center",
   "topbar.right",
+  "statusbar.left",
+  "statusbar.right",
   "pane.header",
 ] as const satisfies readonly StatusSlot[];
+
+/** Whether what opens from an item in this slot opens above it: in the status bar. */
+export function opensAbove(slot: StatusSlot): boolean {
+  return slot === "statusbar.left" || slot === "statusbar.right";
+}
 
 /** What an item's colour says about what it shows. */
 export type StatusTone = "neutral" | "info" | "success" | "warning" | "danger";

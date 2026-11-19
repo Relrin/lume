@@ -86,6 +86,7 @@ export const TOKEN_KINDS = {
   "radius.control": "length",
   "size.header": "length",
   "size.topbar": "length",
+  "size.statusbar": "length",
   "size.tab": "length",
   "size.border": "length",
   "size.focus-ring": "length",
@@ -181,6 +182,7 @@ export const CSS_VARIABLES: Readonly<Record<TokenName, string>> = {
   "radius.control": "--lume-radius-control",
   "size.header": "--lume-size-header",
   "size.topbar": "--lume-size-topbar",
+  "size.statusbar": "--lume-size-statusbar",
   "size.tab": "--lume-size-tab",
   "size.border": "--lume-size-border",
   "size.focus-ring": "--lume-size-focus-ring",
@@ -336,6 +338,8 @@ export interface Tokens {
   readonly "size.header": number;
   /** The height of the bar at the top of a window. */
   readonly "size.topbar": number;
+  /** The height of the status bar along the bottom of a window, while it has something to show. */
+  readonly "size.statusbar": number;
   /** The height of a tab. */
   readonly "size.tab": number;
   /** The width of a border. */
@@ -444,6 +448,7 @@ export const DEFAULT_TOKENS: Tokens = {
   "radius.control": 8.0,
   "size.header": 34.0,
   "size.topbar": 44.0,
+  "size.statusbar": 28.0,
   "size.tab": 30.0,
   "size.border": 1.0,
   "size.focus-ring": 1.0,
@@ -533,6 +538,7 @@ export const LIGHT_TOKENS: Tokens = {
   "radius.control": 8.0,
   "size.header": 34.0,
   "size.topbar": 44.0,
+  "size.statusbar": 28.0,
   "size.tab": 30.0,
   "size.border": 1.0,
   "size.focus-ring": 1.0,

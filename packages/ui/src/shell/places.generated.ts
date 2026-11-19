@@ -35,7 +35,18 @@ export const STATUS_SLOTS = [
   "topbar.left",
   "topbar.center",
   "topbar.right",
+  "statusbar.left",
+  "statusbar.right",
   "pane.header",
+] as const;
+
+/** The places in the window's bars, where a setting may move an item. */
+export const BAR_SLOTS = [
+  "topbar.left",
+  "topbar.center",
+  "topbar.right",
+  "statusbar.left",
+  "statusbar.right",
 ] as const;
 
 /** The places a plugin's motion can play in. */

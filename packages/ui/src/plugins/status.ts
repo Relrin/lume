@@ -2,11 +2,11 @@
  * The plugins' status items, as the window's bars draw them.
  *
  * A plugin's manifest says what each of its items is and where it goes; its code says,
- * as it runs, what the item shows. An item in the top bar is drawn from its manifest
- * until its code says more, and only while the switch of its plugin's settings that
- * it is shown under, if it names one, is on; an item in a pane's header is drawn only
- * in the headers
- * of the panes its code shows it for. An item whose conditions do not hold, or that its
+ * as it runs, what the item shows. An item in a bar is drawn from its manifest until
+ * its code says more, and only while the switch of its plugin's settings that it is
+ * shown under, if it names one, is on. It is in the place its manifest gives, or in
+ * the one the plugin's setting that chooses it holds. An item in a pane's header is
+ * drawn only in the headers of the panes its code shows it for. An item whose conditions do not hold, or that its
  * code hides, is not drawn. An item of a plugin whose code was stopped for going over
  * its limits says so.
  *
@@ -31,6 +31,8 @@ const SLOTS: readonly StatusSlot[] = [
   "topbar.left",
   "topbar.center",
   "topbar.right",
+  "statusbar.left",
+  "statusbar.right",
   "pane.header",
 ];
 
@@ -78,10 +80,11 @@ function itemOf(
   values: StatusValues | undefined,
   pane: string | undefined,
   state: PluginsState,
+  view: ConfigView | null,
 ): StatusItem | undefined {
   const value = values ?? {};
   if (value["hidden"] === true) return undefined;
-  const slot = SLOTS.includes(def.slot as StatusSlot) ? (def.slot as StatusSlot) : undefined;
+  const slot = slotOf(def, view);
   if (slot === undefined) return undefined;
   const label = text(value["label"]) ?? def.label ?? "";
   const shownText = text(value["text"]);
@@ -139,20 +142,35 @@ function itemOf(
   }
 }
 
+/** What the user set one of a plugin's settings to, if anything. */
+function settingOf(plugin: string, key: string, view: ConfigView | null): unknown {
+  const table = view?.config["plugins"];
+  const own =
+    typeof table === "object" && table !== null
+      ? (table as Record<string, unknown>)[plugin]
+      : undefined;
+  return typeof own === "object" && own !== null
+    ? (own as Record<string, unknown>)[key]
+    : undefined;
+}
+
 /** Whether the switch of a plugin's settings an item is shown under is on. */
 function switchedOn(def: StatusDef, view: ConfigView | null): boolean {
   const named = def.shown_when;
   if (named === undefined) return true;
-  const table = view?.config["plugins"];
-  const own =
-    typeof table === "object" && table !== null
-      ? (table as Record<string, unknown>)[def.plugin]
-      : undefined;
-  const set =
-    typeof own === "object" && own !== null
-      ? (own as Record<string, unknown>)[named.key]
-      : undefined;
+  const set = settingOf(def.plugin, named.key, view);
   return typeof set === "boolean" ? set : named.default;
+}
+
+/**
+ * The place an item is in: the one its plugin's setting that chooses it holds, if the
+ * user set it to one it may choose, or else the one its manifest gives.
+ */
+function slotOf(def: StatusDef, view: ConfigView | null): StatusSlot | undefined {
+  const chooser = def.slot_setting;
+  const set = chooser === undefined ? undefined : settingOf(def.plugin, chooser.key, view);
+  const chosen = typeof set === "string" && chooser?.slots.includes(set) === true ? set : def.slot;
+  return SLOTS.includes(chosen as StatusSlot) ? (chosen as StatusSlot) : undefined;
 }
 
 /** The plugins' items as they are drawn now, under the settings in `view`. */
@@ -169,12 +187,12 @@ export function pluginStatusItems(
       const prefix = `${def.id}@`;
       for (const [key, values] of state.values) {
         if (!key.startsWith(prefix)) continue;
-        const item = itemOf(def, key, values, key.slice(prefix.length), state);
+        const item = itemOf(def, key, values, key.slice(prefix.length), state, view);
         if (item) items.push(item);
       }
       continue;
     }
-    const item = itemOf(def, def.id, state.values.get(def.id), undefined, state);
+    const item = itemOf(def, def.id, state.values.get(def.id), undefined, state, view);
     if (item) items.push(item);
   }
   return items;

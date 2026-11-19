@@ -224,6 +224,11 @@ export interface StatusDef {
   readonly when?: readonly string[];
   /** The plugin's switch that must be on for it to be shown, and the switch's default. */
   readonly shown_when?: { readonly key: string; readonly default: boolean };
+  /**
+   * The plugin's setting that chooses which of the bars' places it is in, and the places
+   * it may choose. Until the user sets it, the item is in `slot`.
+   */
+  readonly slot_setting?: { readonly key: string; readonly slots: readonly string[] };
 }
 
 /** A plugin's list panel, as its manifest says it. */

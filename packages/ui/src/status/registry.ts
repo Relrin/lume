@@ -51,6 +51,8 @@ function emptySlots(): Record<StatusSlot, readonly StatusItem[]> {
     "topbar.left": NO_ITEMS,
     "topbar.center": NO_ITEMS,
     "topbar.right": NO_ITEMS,
+    "statusbar.left": NO_ITEMS,
+    "statusbar.right": NO_ITEMS,
     "pane.header": NO_ITEMS,
   };
 }

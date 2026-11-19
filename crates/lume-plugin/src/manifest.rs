@@ -420,8 +420,17 @@ pub struct Section {
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct StatusItem {
     pub id: String,
-    /// `topbar.left`, `topbar.center`, `topbar.right` or `pane.header`.
-    pub slot: String,
+    /// Where it goes: `topbar.left`, `topbar.center`, `topbar.right`, `statusbar.left`,
+    /// `statusbar.right` or `pane.header`. An item whose place the user chooses names
+    /// `slot-setting` instead.
+    #[serde(default)]
+    pub slot: Option<String>,
+    /// One of the plugin's settings whose value is the place the item goes in: a
+    /// `string` setting whose choices are each one of the bars' places, all but
+    /// `pane.header`. The window reads it itself, so the item moves as soon as the
+    /// setting changes, without the plugin's code.
+    #[serde(default)]
+    pub slot_setting: Option<String>,
     /// `text`, `icon`, `meter`, `sparkline` or `badge`.
     pub kind: String,
     /// What the item stands for, read out and shown until the plugin says more.
@@ -1056,6 +1065,37 @@ fn number(value: &toml::Value) -> Option<f64> {
 }
 
 impl Contributes {
+    /// Checks the setting a status item takes its place from: one of the plugin's own
+    /// `string` settings, each of whose choices is a place in the bars.
+    fn check_slot_setting(&self, p: &mut Checker, key: &str, setting: &str) {
+        let Some(found) = self
+            .settings
+            .iter()
+            .find(|candidate| candidate.key == setting)
+        else {
+            p.say(format!(
+                "{key}.slot-setting: `{setting}` is not one of the plugin's settings"
+            ));
+            return;
+        };
+        if found.kind != "string" || found.choices.is_empty() {
+            p.say(format!(
+                "{key}.slot-setting: `{setting}` is not a string setting with choices"
+            ));
+            return;
+        }
+        for choice in &found.choices {
+            let place = choice.value.as_str();
+            if !place.is_some_and(|place| places::BAR_SLOTS.contains(&place)) {
+                p.say(format!(
+                    "{key}.slot-setting: the choice {} of `{setting}` is not a place in the bars; they are {}",
+                    choice.value,
+                    places::BAR_SLOTS.join(", ")
+                ));
+            }
+        }
+    }
+
     fn check(&self, p: &mut Checker, own: &Own<'_>, dependencies: &BTreeSet<&str>) {
         let mut seen = BTreeSet::new();
         for (index, command) in self.commands.iter().enumerate() {
@@ -1185,12 +1225,22 @@ impl Contributes {
         for (index, item) in self.status.iter().enumerate() {
             let key = format!("contributes.status[{index}]");
             p.name(&format!("{key}.id"), &item.id, &mut seen);
-            if !places::STATUS_SLOTS.contains(&item.slot.as_str()) {
-                p.say(format!(
-                    "{key}.slot: `{}` is not a place for status items; they are {}",
-                    item.slot,
-                    places::STATUS_SLOTS.join(", ")
-                ));
+            match (&item.slot, &item.slot_setting) {
+                (Some(_), Some(_)) => {
+                    p.say(format!("{key}: give a slot or a slot-setting, not both"));
+                }
+                (None, None) => p.say(format!(
+                    "{key}: give the slot it goes in, or the slot-setting that chooses it"
+                )),
+                (Some(slot), None) => {
+                    if !places::STATUS_SLOTS.contains(&slot.as_str()) {
+                        p.say(format!(
+                            "{key}.slot: `{slot}` is not a place for status items; they are {}",
+                            places::STATUS_SLOTS.join(", ")
+                        ));
+                    }
+                }
+                (None, Some(setting)) => self.check_slot_setting(p, &key, setting),
             }
             if !places::STATUS_KINDS.contains(&item.kind.as_str()) {
                 p.say(format!(
@@ -1741,6 +1791,12 @@ kind = "meter"
 label = "CPU"
 menu = "cpu-menu"
 
+[[contributes.status]]
+id = "memory"
+slot-setting = "place"
+kind = "meter"
+label = "RAM"
+
 [[contributes.setting-groups]]
 id = "sampling"
 title = "Sampling"
@@ -1767,6 +1823,13 @@ default = false
 page = "terminal"
 group = "lume:cursor"
 label = "Glow"
+
+[[contributes.settings]]
+key = "place"
+type = "string"
+default = "statusbar.right"
+choices = [{{ value = "statusbar.right", label = "Status bar" }}, {{ value = "topbar.right", label = "Top bar" }}]
+label = "Show in"
 
 [[contributes.themes]]
 id = "night"
@@ -1895,6 +1958,35 @@ name = "latest"
                 "[[contributes.status]]\nid = \"s\"\nslot = \"topbar.left\"\nkind = \"gauge\"\n",
             ),
             "not a kind of status item",
+        );
+        says(
+            &manifest("[[contributes.status]]\nid = \"s\"\nkind = \"meter\"\n"),
+            "the slot it goes in, or the slot-setting",
+        );
+        let place = "[[contributes.settings]]\nkey = \"place\"\ntype = \"string\"\ndefault = \"topbar.right\"\nchoices = [{ value = \"topbar.right\", label = \"Top\" }, { value = \"pane.header\", label = \"Pane\" }]\n";
+        says(
+            &manifest(&format!(
+                "[[contributes.status]]\nid = \"s\"\nslot = \"topbar.left\"\nslot-setting = \"place\"\nkind = \"meter\"\n{place}"
+            )),
+            "a slot or a slot-setting, not both",
+        );
+        says(
+            &manifest(&format!(
+                "[[contributes.status]]\nid = \"s\"\nslot-setting = \"place\"\nkind = \"meter\"\n{place}"
+            )),
+            "the choice \"pane.header\" of `place` is not a place in the bars",
+        );
+        says(
+            &manifest(
+                "[[contributes.status]]\nid = \"s\"\nslot-setting = \"place\"\nkind = \"meter\"\n",
+            ),
+            "`place` is not one of the plugin's settings",
+        );
+        says(
+            &manifest(
+                "[[contributes.status]]\nid = \"s\"\nslot-setting = \"on\"\nkind = \"meter\"\n[[contributes.settings]]\nkey = \"on\"\ntype = \"boolean\"\ndefault = true\n",
+            ),
+            "not a string setting with choices",
         );
         says(
             &manifest(

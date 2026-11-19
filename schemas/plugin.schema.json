@@ -1048,8 +1048,20 @@
           ]
         },
         "slot": {
-          "description": "`topbar.left`, `topbar.center`, `topbar.right` or `pane.header`.",
-          "type": "string"
+          "default": null,
+          "description": "Where it goes: `topbar.left`, `topbar.center`, `topbar.right`, `statusbar.left`,\n`statusbar.right` or `pane.header`. An item whose place the user chooses names\n`slot-setting` instead.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slot-setting": {
+          "default": null,
+          "description": "One of the plugin's settings whose value is the place the item goes in: a\n`string` setting whose choices are each one of the bars' places, all but\n`pane.header`. The window reads it itself, so the item moves as soon as the\nsetting changes, without the plugin's code.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "tooltip": {
           "default": null,
@@ -1068,7 +1080,6 @@
       },
       "required": [
         "id",
-        "slot",
         "kind"
       ],
       "type": "object"

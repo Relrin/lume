@@ -89,6 +89,25 @@
             "name": "Status bar meters"
           },
           {
+            "role": "group",
+            "parts": [
+              {
+                "role": "button",
+                "name": "Status bar",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Top bar",
+                "state": {
+                  "pressed": "true"
+                }
+              }
+            ]
+          },
+          {
             "role": "switch",
             "state": {
               "checked": "true"

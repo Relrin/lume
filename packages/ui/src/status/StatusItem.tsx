@@ -46,13 +46,14 @@ import { Menu } from "../shell/Menu.tsx";
 import { menuRows } from "../shell/menus.ts";
 import { anchorOf, type Anchor } from "../shell/tab-ui.ts";
 import type { StatusStore } from "./registry.ts";
-import type {
-  MeterItem,
-  SparklineItem,
-  StatusCardRow,
-  StatusIconName,
-  StatusItem,
-  StatusSlot,
+import {
+  opensAbove,
+  type MeterItem,
+  type SparklineItem,
+  type StatusCardRow,
+  type StatusIconName,
+  type StatusItem,
+  type StatusSlot,
 } from "./types.ts";
 
 /** The size of a meter's bar, in the units it is drawn in. */
@@ -67,6 +68,9 @@ const CARD_DELAY_MS = 350;
 /** How wide a card is, and how far it is kept from the window's edges. */
 const CARD_WIDTH_PX = 240;
 const CARD_EDGE_PX = 8;
+
+/** How far from its item a card is. */
+const CARD_GAP_PX = 6;
 
 /** How wide the menu an item opens is. */
 const STATUS_MENU_WIDTH = 240;
@@ -225,25 +229,37 @@ function layerOf(element: Element | null): Element {
   return element?.closest(".shell") ?? document.body;
 }
 
-/** The card shown while the pointer rests on an item: its rows, under the item. */
+/**
+ * The card shown while the pointer rests on an item: its rows, under the item, or over
+ * it with `above`.
+ */
 function Card({
   rows,
   title,
   at,
+  above,
   layer,
 }: {
   rows: readonly StatusCardRow[];
   title: string;
   at: DOMRect;
+  above: boolean;
   layer: Element;
 }) {
   const left = Math.max(
     CARD_EDGE_PX,
     Math.min(at.left, window.innerWidth - CARD_WIDTH_PX - CARD_EDGE_PX),
   );
-  const style = { left: `${Math.round(left)}px`, top: `${Math.round(at.bottom + 6)}px` };
+  // Over the item, it hangs from the item's top by its own height.
+  const style = above
+    ? {
+        left: `${Math.round(left)}px`,
+        top: `${Math.round(at.top - CARD_GAP_PX)}px`,
+        transform: "translateY(-100%)",
+      }
+    : { left: `${Math.round(left)}px`, top: `${Math.round(at.bottom + CARD_GAP_PX)}px` };
   return createPortal(
-    <div className="status-card" role="tooltip" style={style}>
+    <div className="status-card" role="tooltip" data-above={above ? true : undefined} style={style}>
       {title !== "" && <div className="status-card-title">{title}</div>}
       {rows.map((row, index) => (
         <div key={index} className="status-card-row" data-tone={row.tone ?? "neutral"}>
@@ -319,7 +335,12 @@ function StatusMenu({
   // Presses in the menu are the menu's, not the top bar's, which would move the window.
   return createPortal(
     <div onMouseDown={(event) => event.stopPropagation()}>
-      <AnchoredMenu anchor={anchor} width={STATUS_MENU_WIDTH} className="status-menu">
+      <AnchoredMenu
+        anchor={anchor}
+        width={STATUS_MENU_WIDTH}
+        above={opensAbove(item.slot)}
+        className="status-menu"
+      >
         <Menu label={node?.title ?? "Menu"} items={items} close={close} />
       </AnchoredMenu>
     </div>,
@@ -447,7 +468,13 @@ export function StatusItemView({ item }: { item: StatusItem }) {
         </span>
       )}
       {card !== null && rows.length > 0 && (
-        <Card rows={rows} title={label} at={card} layer={layerOf(element.current)} />
+        <Card
+          rows={rows}
+          title={label}
+          at={card}
+          above={opensAbove(item.slot)}
+          layer={layerOf(element.current)}
+        />
       )}
       {app !== null && menu !== null && (
         <StatusMenu

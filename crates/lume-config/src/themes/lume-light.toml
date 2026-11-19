@@ -63,6 +63,7 @@ control = 8
 [size]
 header = 34
 topbar = 44
+statusbar = 28
 tab = 30
 border = 1
 focus-ring = 1

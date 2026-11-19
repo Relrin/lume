@@ -23,12 +23,26 @@ pub const MENUS: [&str; 8] = [
     "menu.status",
 ];
 
-/// Where status items go: the three parts of the top bar, and a pane's header.
-pub const STATUS_SLOTS: [&str; 4] = [
+/// Where status items go: the three parts of the top bar, the two ends of the status
+/// bar along the bottom of the window, and a pane's header.
+pub const STATUS_SLOTS: [&str; 6] = [
     "topbar.left",
     "topbar.center",
     "topbar.right",
+    "statusbar.left",
+    "statusbar.right",
     "pane.header",
+];
+
+/// The places in the window's bars: every place for status items but a pane's header.
+/// An item shown in one of them is shown once for the window, and an item whose place
+/// a setting chooses goes in one of them.
+pub const BAR_SLOTS: [&str; 5] = [
+    "topbar.left",
+    "topbar.center",
+    "topbar.right",
+    "statusbar.left",
+    "statusbar.right",
 ];
 
 /// The kinds of status item.
@@ -275,6 +289,12 @@ pub fn typescript() -> String {
         "STATUS_SLOTS",
         "Where status items go.",
         &STATUS_SLOTS,
+        &mut ts,
+    );
+    list(
+        "BAR_SLOTS",
+        "The places in the window's bars, where a setting may move an item.",
+        &BAR_SLOTS,
         &mut ts,
     );
     list(
