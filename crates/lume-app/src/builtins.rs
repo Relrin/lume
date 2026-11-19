@@ -440,6 +440,13 @@ const COMMANDS: &[Row] = &[
         false,
     ),
     (
+        "lume.panel.expand",
+        "Open a Row of a Panel",
+        "Panel",
+        Runs::Core,
+        false,
+    ),
+    (
         "lume.workspace.switch",
         "Switch Workspace",
         "Workspace",
@@ -765,6 +772,20 @@ fn arguments(id: &str) -> Option<Value> {
                 "description": "A plugin's panel, by its id: the plugin's and the panel's name, as in acme.tools.processes.",
             } }),
             &["panel"],
+        )),
+        "lume.panel.expand" => Some(object(
+            json!({
+                "panel": {
+                    "type": "string",
+                    "description": "A plugin's panel, by its id: the plugin's and the panel's name, as in acme.tools.processes.",
+                },
+                "path": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "The row whose rows the plugin is asked for, by the ids of the rows from the top down to it.",
+                },
+            }),
+            &["panel", "path"],
         )),
         "lume.workspace.switch" => Some(object(
             json!({ "name": {

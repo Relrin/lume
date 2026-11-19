@@ -2,7 +2,8 @@
 //!
 //! A terminal window's page fetches everything the plugins add once, with what their
 //! code shows in it now, and again whenever it is told that changed; what their code
-//! shows from then on reaches it as notices. The page says in turn which of the
+//! shows from then on reaches it as notices. Pictures and shaders are named there by
+//! their hashes, and the page asks for one when it first needs it. The page says in turn which of the
 //! plugins' things it has on screen, which starts a plugin that waits for one of its
 //! things to be seen and lets the machine be read for meters only while they are seen.
 //!
@@ -22,8 +23,39 @@ type Shared<'a> = State<'a, Arc<Services>>;
 
 /// Everything the plugins add to a window, with what their code shows in it now.
 #[tauri::command]
-pub fn ui_contributions(services: Shared<'_>) -> Value {
-    services.plugins.snapshot()
+pub fn ui_contributions(services: Shared<'_>, window: WebviewWindow) -> Value {
+    services.plugins.snapshot(window.label())
+}
+
+/// How many pictures and shaders a page may ask for at a time.
+const ASSETS_AT_ONCE: usize = 64;
+
+/// The plugins' pictures, as the addresses a window draws them from, and the shaders
+/// of their cursor effects, by the hashes the window was told. One that is not there
+/// any more is left out.
+#[tauri::command]
+pub fn ui_assets(services: Shared<'_>, hashes: Vec<String>) -> Value {
+    let found: serde_json::Map<String, Value> = hashes
+        .into_iter()
+        .filter(|hash| hash.len() <= 128)
+        .take(ASSETS_AT_ONCE)
+        .filter_map(|hash| {
+            let body = services.plugins.asset(&hash)?;
+            Some((hash, Value::String(body)))
+        })
+        .collect();
+    Value::Object(found)
+}
+
+/// The user opened a row of a plugin's list panel whose rows are given when it is
+/// opened: the plugin is asked for them, and they arrive as the panel's rows do.
+#[tauri::command]
+pub async fn ui_panel_expand(
+    services: Shared<'_>,
+    panel: String,
+    path: Vec<String>,
+) -> Result<(), CommandError> {
+    services.plugins.expand(&panel, path).await
 }
 
 /// The plugins' things the calling window has on screen: status items and panels, by

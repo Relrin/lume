@@ -186,9 +186,12 @@ export interface ThemeEntry {
 /** A picture a plugin's thing shows: one of the page's, by name, or one of the plugins'. */
 export type IconRef = { readonly glyph: string } | { readonly image: string };
 
-/** A picture of a plugin's, as a `data:` address, and whether it takes the colour around it. */
+/**
+ * A picture of a plugin's: the hash it is fetched by when it is first drawn, and
+ * whether it takes the colour around it.
+ */
 export interface PluginImage {
-  readonly url: string;
+  readonly hash: string;
   readonly tint: boolean;
 }
 
@@ -293,8 +296,11 @@ export interface CursorEffectDef {
   readonly kind: "trail" | "pulse";
   readonly duration: number;
   readonly reach: number;
-  /** The GLSL of `vec4 lume_effect(vec2 pixel)` and its helpers. */
-  readonly source: string;
+  /**
+   * The hash the shader is fetched by when the effect is chosen: the GLSL of
+   * `vec4 lume_effect(vec2 pixel)` and its helpers.
+   */
+  readonly hash: string;
 }
 
 /** A plugin that is installed, as a window is told of it. */
@@ -317,6 +323,10 @@ export interface PanelRowData {
   readonly badge?: string;
   readonly tone?: "neutral" | "info" | "success" | "warning" | "danger";
   readonly children?: readonly PanelRowData[];
+  /** Whether its rows are given only when it is opened. */
+  readonly lazy?: boolean;
+  /** Whether a row that is `lazy` has been given its rows. */
+  readonly loaded?: boolean;
   readonly expanded?: boolean;
   readonly actions?: readonly {
     readonly command: string;
@@ -343,7 +353,7 @@ export interface UiContributions {
     readonly pane: string | null;
     readonly value: Readonly<Record<string, unknown>>;
   }[];
-  /** What the plugins' list panels show now, by panel. */
+  /** What the list panels this window has on screen show now, by panel. */
   readonly rows: Readonly<Record<string, readonly PanelRowData[]>>;
   /** The conditions plugins set, by name (`plugin:<id>.<key>`). */
   readonly contexts: Readonly<Record<string, boolean>>;
@@ -529,30 +539,25 @@ export type Notice =
   | { readonly type: "plugins_changed" }
   /** What the plugins add to the windows changed: the page fetches it again. */
   | { readonly type: "contributions_changed"; readonly revision: number }
-  /** A plugin's list panel shows other rows, or none (`rows` null). */
+  /**
+   * What a plugin's code showed since the window was last told, all of it together:
+   * status items' values (null where one shows nothing any more), the rows of the
+   * panels this window has on screen (null where one shows none), and the conditions
+   * it set, by name (`plugin:<id>.<key>`). The page takes it in in one step.
+   */
   | {
-      readonly type: "plugin_panel";
+      readonly type: "plugin_frame";
       readonly plugin: string;
-      readonly panel: string;
-      readonly rows: readonly PanelRowData[] | null;
+      readonly statuses: readonly {
+        readonly item: string;
+        readonly pane: string | null;
+        readonly value: Readonly<Record<string, unknown>> | null;
+      }[];
+      readonly panels: Readonly<Record<string, readonly PanelRowData[] | null>>;
+      readonly contexts: Readonly<Record<string, boolean>>;
     }
   /** How a plugin fares: what went wrong with its code, or nothing when all is well. */
   | { readonly type: "plugin_state"; readonly plugin: string; readonly problem: string | null }
-  /** A plugin's status item shows something else, or no longer anything (`value` null). */
-  | {
-      readonly type: "plugin_status";
-      readonly plugin: string;
-      readonly item: string;
-      readonly pane: string | null;
-      readonly value: Readonly<Record<string, unknown>> | null;
-    }
-  /** A condition a plugin's keys and menus are shown under changed. */
-  | {
-      readonly type: "plugin_context";
-      readonly plugin: string;
-      readonly key: string;
-      readonly value: boolean;
-    }
   /** The settings window was asked for again: the page to show, if one was named. */
   | { readonly type: "settings_show"; readonly section: string | null }
   | {

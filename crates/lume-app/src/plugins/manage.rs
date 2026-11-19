@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use lume_plugin::id::overlap;
 use lume_plugin::order::State;
@@ -57,29 +57,71 @@ fn described(items: &[permissions::Item]) -> Vec<Value> {
         .collect()
 }
 
+/// The newest audit entries of each plugin, with the length and the time of the file
+/// they were read from.
+#[derive(Default)]
+pub(super) struct Audited {
+    length: u64,
+    written: Option<std::time::SystemTime>,
+    entries: Arc<BTreeMap<String, Vec<Value>>>,
+}
+
 impl Plugins {
+    /// The newest audit entries of each plugin. The file is read again only when it
+    /// has been written to since: the settings window asks every few seconds.
+    async fn audited(&self) -> Arc<BTreeMap<String, Vec<Value>>> {
+        let file = self.store.audit_file();
+        let held = {
+            let audited = self.audited.lock().unwrap_or_else(PoisonError::into_inner);
+            (
+                audited.length,
+                audited.written,
+                Arc::clone(&audited.entries),
+            )
+        };
+        let read = tokio::task::spawn_blocking(move || {
+            let (length, written) = std::fs::metadata(&file)
+                .map(|metadata| (metadata.len(), metadata.modified().ok()))
+                .unwrap_or((0, None));
+            if (length, written) == (held.0, held.1) {
+                return None;
+            }
+            let text = std::fs::read_to_string(&file).unwrap_or_default();
+            let mut entries: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+            for line in text.lines().rev() {
+                let Ok(entry) = serde_json::from_str::<Value>(line) else {
+                    continue;
+                };
+                let Some(plugin) = entry["plugin"].as_str() else {
+                    continue;
+                };
+                let held = entries.entry(plugin.to_owned()).or_default();
+                if held.len() < TAIL_LINES {
+                    held.push(entry);
+                }
+            }
+            Some((length, written, Arc::new(entries)))
+        })
+        .await
+        .ok()
+        .flatten();
+        match read {
+            None => held.2,
+            Some((length, written, entries)) => {
+                *self.audited.lock().unwrap_or_else(PoisonError::into_inner) = Audited {
+                    length,
+                    written,
+                    entries: Arc::clone(&entries),
+                };
+                entries
+            }
+        }
+    }
+
     /// Every install, in the order plugins load in, with what the settings window shows
     /// of it: its permissions in words, how it fares, its log and its audit entries.
     pub async fn addons(&self) -> Value {
-        let audit = {
-            let file = self.store.audit_file();
-            tokio::task::spawn_blocking(move || std::fs::read_to_string(file).unwrap_or_default())
-                .await
-                .unwrap_or_default()
-        };
-        let mut entries: BTreeMap<String, Vec<Value>> = BTreeMap::new();
-        for line in audit.lines().rev() {
-            let Ok(entry) = serde_json::from_str::<Value>(line) else {
-                continue;
-            };
-            let Some(plugin) = entry["plugin"].as_str() else {
-                continue;
-            };
-            let held = entries.entry(plugin.to_owned()).or_default();
-            if held.len() < TAIL_LINES {
-                held.push(entry);
-            }
-        }
+        let entries = self.audited().await;
         let inner = self.inner();
         let mut order = inner.resolution.order.clone();
         for local in inner.loaded.keys() {

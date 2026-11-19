@@ -24,6 +24,14 @@ export const RESTORE_WAIT_MS = 1000;
  */
 export const REPORT_INTERVAL_MS = 16;
 
+/**
+ * How long a terminal keeps showing its last whole screen for a program that said it
+ * is drawing the next one and has not said it is done (synchronized output). A program
+ * that redraws says so within a frame or two; one that never does must not leave the
+ * pane standing still, so after this long the screen is drawn as it is.
+ */
+export const SYNC_HOLD_MAX_MS = 150;
+
 /** The longest time between two presses that still make a double or triple click. */
 export const CLICK_REPEAT_INTERVAL_MS = 500;
 

@@ -10,7 +10,9 @@ use lume_config::generate::{Generated, GeneratedKind};
 use schemars::SchemaGenerator;
 use serde_json::Value;
 
-use crate::types::{ErrorCode, FsEvent, MetricKind, MetricsSample, SessionReport, WorkspaceInfo};
+use crate::types::{
+    ErrorCode, FsEvent, MetricKind, MetricsSample, PanelExpand, SessionReport, WorkspaceInfo,
+};
 use crate::{METHODS, Method, ts};
 
 /// The hand-written parts.
@@ -46,6 +48,7 @@ fn schemas() -> Schemas {
     generator.subschema_for::<MetricKind>();
     generator.subschema_for::<FsEvent>();
     generator.subschema_for::<WorkspaceInfo>();
+    generator.subschema_for::<PanelExpand>();
     let definitions = generator
         .take_definitions(true)
         .into_iter()

@@ -28,6 +28,7 @@
 mod engine;
 pub mod sourcemap;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
@@ -164,6 +165,10 @@ pub enum Outbound {
         name: String,
         args: Value,
     },
+    /// The calls of one turn of the code have all been handed on: what they show
+    /// belongs together, and the host shows it together. Sent after a turn that made
+    /// calls, and not after one that made none.
+    TurnDone,
     /// A command the host gave the plugin was carried out, or failed.
     CommandDone {
         invocation: u64,
@@ -217,6 +222,10 @@ enum Inbound {
         topic: String,
         payload: Value,
     },
+    /// The newest thing on a topic waits in [`Shared::latest`].
+    Latest {
+        topic: String,
+    },
     Stop,
 }
 
@@ -230,11 +239,16 @@ struct Shared {
     hung: AtomicBool,
     finished: AtomicBool,
     events_queued: AtomicUsize,
+    /// How many events it missed because too many waited already.
+    events_missed: AtomicU64,
     calls_in_flight: AtomicUsize,
     timers: AtomicUsize,
     memory_used: AtomicU64,
     /// When the plugin last did anything, in nanoseconds from `started`.
     last_activity: AtomicU64,
+    /// The newest thing on each topic only the newest counts on, until the code takes
+    /// it.
+    latest: Mutex<HashMap<String, Value>>,
 }
 
 impl Shared {
@@ -249,6 +263,8 @@ pub struct Stats {
     pub calls_in_flight: usize,
     pub timers: usize,
     pub memory_used: u64,
+    /// How many events it missed because too many waited for it already.
+    pub events_missed: u64,
     /// How long since it last did anything.
     pub idle_for: Duration,
     pub hung: bool,
@@ -301,10 +317,12 @@ impl Plugin {
             hung: AtomicBool::new(false),
             finished: AtomicBool::new(false),
             events_queued: AtomicUsize::new(0),
+            events_missed: AtomicU64::new(0),
             calls_in_flight: AtomicUsize::new(0),
             timers: AtomicUsize::new(0),
             memory_used: AtomicU64::new(0),
             last_activity: AtomicU64::new(0),
+            latest: Mutex::new(HashMap::new()),
         });
         let (inbound, receiver) = channel();
         let thread_shared = Arc::clone(&shared);
@@ -356,6 +374,7 @@ impl Plugin {
         let queued = self.shared.events_queued.fetch_add(1, Ordering::AcqRel);
         if queued >= EVENTS_QUEUED_MAX {
             self.shared.events_queued.fetch_sub(1, Ordering::AcqRel);
+            self.shared.events_missed.fetch_add(1, Ordering::Relaxed);
             return false;
         }
         self.inbound
@@ -364,6 +383,26 @@ impl Plugin {
                 payload,
             })
             .is_ok()
+    }
+
+    /// Tells the plugin of the newest thing on a topic where only the newest counts,
+    /// as a reading of the machine. One the code has not taken yet is replaced by this
+    /// one, so a plugin that is busy hears the latest when it is free and never a row
+    /// of old ones. Says whether an older one was replaced.
+    pub fn latest(&self, topic: &str, payload: Value) -> bool {
+        let mut latest = self
+            .shared
+            .latest
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if latest.insert(topic.to_owned(), payload).is_some() {
+            return true;
+        }
+        drop(latest);
+        let _ = self.inbound.send(Inbound::Latest {
+            topic: topic.to_owned(),
+        });
+        false
     }
 
     /// Asks the plugin to stop: its code is told, then its engine goes.
@@ -378,6 +417,7 @@ impl Plugin {
             calls_in_flight: self.shared.calls_in_flight.load(Ordering::Relaxed),
             timers: self.shared.timers.load(Ordering::Relaxed),
             memory_used: self.shared.memory_used.load(Ordering::Relaxed),
+            events_missed: self.shared.events_missed.load(Ordering::Relaxed),
             idle_for: Duration::from_nanos(now.saturating_sub(last)),
             hung: self.shared.hung.load(Ordering::Relaxed),
             finished: self.shared.finished.load(Ordering::Relaxed),

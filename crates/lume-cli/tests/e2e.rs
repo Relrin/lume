@@ -2250,6 +2250,65 @@ network = false
 
 #[test]
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_panels_rows_come_when_it_is_shown_and_a_rows_own_when_it_is_opened() {
+    let home = home_with_plugins(&["tree"]);
+    let app = App::start_in(home, false);
+    app.status_with_session();
+    let plugin = app.until_plugin("test.tree", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    // Its panel is not on show, so its code has not started.
+    assert!(plugin["running"].is_null(), "{plugin}");
+
+    // Shown, the panel starts the plugin, which gives it its first rows: two folders
+    // and a file, and nothing of what is in the folders.
+    app.ctl(&[
+        "command",
+        "lume.panel.show",
+        r#"{"panel":"test.tree.files"}"#,
+    ])
+    .ok("show the panel");
+    let plugin = app.until_plugin("test.tree", "the panel's rows", |plugin| {
+        plugin["rows"]["files"] == 3
+    });
+    assert!(
+        plugin["visible"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::from("test.tree.files")),
+        "{plugin}"
+    );
+
+    // A folder opened is asked for, and its rows join the panel's: a folder and two
+    // files. So with the folder inside it.
+    let expand = |path: &str| {
+        let args = format!(r#"{{"panel":"test.tree.files","path":{path}}}"#);
+        app.ctl(&["command", "lume.panel.expand", &args])
+            .ok("open a row");
+    };
+    expand(r#"["src"]"#);
+    app.until_plugin("test.tree", "the rows of the folder", |plugin| {
+        plugin["rows"]["files"] == 6
+    });
+    expand(r#"["src","nested"]"#);
+    let plugin = app.until_plugin("test.tree", "the rows of the folder inside it", |plugin| {
+        plugin["rows"]["files"] == 7
+    });
+    assert!(logged(&plugin, "asked for src/nested"), "{plugin}");
+
+    // A row that is not there is refused, and nothing changes.
+    let args = r#"{"panel":"test.tree.none","path":["src"]}"#;
+    assert_ne!(
+        app.ctl(&["command", "lume.panel.expand", args]).status,
+        0,
+        "a panel no plugin adds has no rows to open"
+    );
+    assert_eq!(app.plugins()[0]["rows"]["files"], 7);
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn a_plugin_that_runs_away_is_stopped_while_the_terminal_keeps_up() {
     let app = App::start();
     app.status_with_session();

@@ -40,6 +40,12 @@ pub const SCROLLBACK_MAX_LINES: usize = 100_000;
 /// The most bytes of scrollback a session's screen keeps. The same bound a view keeps.
 pub const SCROLLBACK_MAX_BYTES: usize = 192 * 1024 * 1024;
 
+/// How long a screen read as text is the last whole one, for a program that said it is
+/// drawing the next (synchronized output) and has not said it is done. A program that
+/// redraws says so within a frame or two; one that never does is read as it stands
+/// after this long.
+pub const SYNC_HOLD_MAX: Duration = Duration::from_millis(150);
+
 /// How often a screen is looked at for text somebody waits for, at most, while output
 /// arrives. Looking reads the whole screen, so it is not done after every write.
 pub const WAIT_TEXT_CHECK: Duration = Duration::from_millis(50);

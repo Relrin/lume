@@ -146,6 +146,22 @@ impl Services {
             .registry
             .get(id)
             .ok_or_else(|| CommandError::not_found(format!("there is no command called `{id}`")))?;
+        if id == "lume.panel.expand" {
+            let panel = args
+                .get("panel")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CommandError::bad_request("which panel is not said"))?;
+            let path: Vec<String> = args
+                .get("path")
+                .and_then(Value::as_array)
+                .map(|path| {
+                    path.iter()
+                        .filter_map(|id| id.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default();
+            return self.plugins.expand(panel, path).await;
+        }
         if matches!(id, "lume.panel.show" | "lume.panel.close") {
             return self
                 .plugin_panel(window, id == "lume.panel.show", args)

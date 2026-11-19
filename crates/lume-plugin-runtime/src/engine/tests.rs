@@ -422,3 +422,67 @@ fn a_plugin_busy_where_the_interrupt_cannot_reach_is_given_up_on() {
     assert!(outcome == "hung" || outcome == "breached");
     stopped(&recorder);
 }
+
+#[test]
+fn the_calls_of_a_turn_are_followed_by_its_end() {
+    let (plugin, recorder) = start(spec(
+        r#"
+        lume.commands.register("show", () => {
+            lume.kv.set("a", 1);
+            lume.kv.set("b", 2);
+        });
+        "#,
+    ));
+    started(&recorder);
+    plugin.command(1, "show", Value::Null);
+    command_result(&recorder, 1).unwrap();
+    recorder.wait(WAIT, |message| {
+        matches!(message, Outbound::TurnDone).then_some(())
+    });
+    let messages = recorder.messages.lock().unwrap();
+    let kinds: Vec<&str> = messages
+        .iter()
+        .filter_map(|message| match message {
+            Outbound::Call { .. } => Some("call"),
+            Outbound::TurnDone => Some("end"),
+            _ => None,
+        })
+        .collect();
+    // Both calls, then one end: what a turn shows is told as one.
+    assert_eq!(kinds, ["call", "call", "end"]);
+}
+
+#[test]
+fn only_the_newest_of_what_waits_on_a_topic_is_heard() {
+    let (plugin, recorder) = start(spec(
+        r#"
+        lume.commands.register("busy", () => {
+            const until = Date.now() + 40;
+            while (Date.now() < until) {}
+        });
+        lume.settings.onChange((value) => lume.log.info("heard", value.n));
+        "#,
+    ));
+    started(&recorder);
+    // While the code is busy, three arrive: the first waits, the others replace it.
+    plugin.command(1, "busy", Value::Null);
+    assert!(!plugin.latest("settings", json!({ "n": 1 })));
+    assert!(plugin.latest("settings", json!({ "n": 2 })));
+    assert!(plugin.latest("settings", json!({ "n": 3 })));
+    recorder.wait(WAIT, |message| match message {
+        Outbound::Log { message, .. } if message == "heard 3" => Some(()),
+        _ => None,
+    });
+    // One taken, the next waits again.
+    assert!(!plugin.latest("settings", json!({ "n": 4 })));
+    recorder.wait(WAIT, |message| match message {
+        Outbound::Log { message, .. } if message == "heard 4" => Some(()),
+        _ => None,
+    });
+    let heard: Vec<String> = recorder
+        .logs()
+        .into_iter()
+        .filter(|line| line.starts_with("heard"))
+        .collect();
+    assert_eq!(heard, ["heard 3", "heard 4"]);
+}

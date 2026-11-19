@@ -52,6 +52,16 @@ export interface LumeBase {
     /** The same as `sessions.onEvent`: what the panes' sessions report. */
     onEvent(listener: (report: SessionReport) => void): Disposable;
   };
+  readonly panels: {
+    /**
+     * Hears when the user opens a row of one of the plugin's list panels that is
+     * `lazy` and has not been given its rows yet. Give them with `setChildren`; the
+     * row shows that it is waiting until then, and that nothing came after ten
+     * seconds. A plugin whose manifest starts it with `onView:<panel>` is started to
+     * hear this.
+     */
+    onExpand(id: string, listener: (event: PanelExpand) => void): Disposable;
+  };
   readonly workspace: {
     /**
      * Hears when the workspace in use changes, or its root folder does. Needs the

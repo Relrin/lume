@@ -202,6 +202,9 @@
     settings: {
       onChange: (listener) => listen("settings", listener, false),
     },
+    panels: {
+      onExpand: (id, listener) => listen(`panel:${String(id)}`, listener, false),
+    },
     metrics: {
       subscribe: subscribeMetrics,
     },
@@ -263,6 +266,7 @@
   Object.assign(namespace(["panels"]), {
     set: (id, rows) => request("panels.set", { id, rows }),
     clear: (id) => request("panels.clear", { id }),
+    setChildren: (id, path, rows) => request("panels.setChildren", { id, path, rows }),
   });
   Object.assign(namespace(["panes"]), {
     list: () => request("panes.list", {}),

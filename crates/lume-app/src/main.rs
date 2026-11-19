@@ -574,6 +574,8 @@ fn main() -> ExitCode {
             commands_window::workspaces_list,
             commands_plugins::ui_contributions,
             commands_plugins::ui_visible,
+            commands_plugins::ui_assets,
+            commands_plugins::ui_panel_expand,
             commands_plugins::addons_list,
             commands_plugins::addon_set_enabled,
             commands_plugins::addon_remove,

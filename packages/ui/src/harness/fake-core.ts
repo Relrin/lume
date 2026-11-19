@@ -22,6 +22,7 @@ import type {
   KeyBinding,
   Machine,
   Notice,
+  PanelRowData,
   Scheme,
   ProfileList,
   ShellEntry,
@@ -213,6 +214,13 @@ export interface FakeCoreOptions {
   readonly settings?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** What plugins add to the window. Left out, nothing. */
   readonly contributions?: UiContributions;
+  /** The plugins' pictures and shaders, by the hashes the contributions name. */
+  readonly assets?: Readonly<Record<string, string>>;
+  /**
+   * The rows a plugin gives when a row of its panel is opened, by panel and then by
+   * the ids down to the row, joined with `/`. A row not named here is never answered.
+   */
+  readonly lazyRows?: Readonly<Record<string, Readonly<Record<string, readonly PanelRowData[]>>>>;
   /** A plugin's panel docked at a side, besides the fixture's own. */
   readonly pluginPanel?: {
     readonly id: string;
@@ -224,6 +232,21 @@ export interface FakeCoreOptions {
   readonly schema?: unknown;
   /** The plugins installed, as the settings window lists them. Left out, none. */
   readonly addons?: readonly AddonEntry[];
+}
+
+/** Rows with the rows beneath the row at `path` put in, as a plugin gives them. */
+function withChildren(
+  rows: readonly PanelRowData[],
+  path: readonly string[],
+  children: readonly PanelRowData[],
+): readonly PanelRowData[] {
+  const [first, ...rest] = path;
+  return rows.map((row) => {
+    if (row.id !== first) return row;
+    return rest.length === 0
+      ? { ...row, children, loaded: true }
+      : { ...row, children: withChildren(row.children ?? [], rest, children) };
+  });
 }
 
 /** What a window is told plugins add when none is installed. */
@@ -413,6 +436,8 @@ interface TabsNow {
 /** A core that is only a layout, a configuration and whatever a test sends through it. */
 export class FakeCore implements Carrier {
   readonly #options: FakeCoreOptions;
+  /** The rows of panels a row of which was opened, as they are since. */
+  readonly #panelRows = new Map<string, readonly PanelRowData[]>();
   readonly #fixture: Arrangement;
   /** The tab on show, and the pane that has the keyboard. */
   #active: TabId;
@@ -707,6 +732,42 @@ export class FakeCore implements Carrier {
       case "ui_visible":
         this.visible = Array.isArray(args["items"]) ? (args["items"] as string[]) : [];
         return answer(null);
+      case "ui_assets": {
+        const held = this.#options.assets ?? {};
+        const hashes = Array.isArray(args["hashes"]) ? (args["hashes"] as string[]) : [];
+        return answer(
+          Object.fromEntries(
+            hashes.filter((hash) => Object.hasOwn(held, hash)).map((hash) => [hash, held[hash]]),
+          ),
+        );
+      }
+      case "ui_panel_expand": {
+        this.ran.push({ id: name, args });
+        const panel = String(args["panel"]);
+        const path = Array.isArray(args["path"]) ? (args["path"] as string[]) : [];
+        const given = this.#options.lazyRows?.[panel]?.[path.join("/")];
+        if (given) {
+          this.#panelRows.set(
+            panel,
+            withChildren(
+              this.#panelRows.get(panel) ?? this.#options.contributions?.rows[panel] ?? [],
+              path,
+              given,
+            ),
+          );
+          // As the core does: the panel's rows whole, a moment later.
+          queueMicrotask(() =>
+            this.#notify({
+              type: "plugin_frame",
+              plugin: panel,
+              statuses: [],
+              panels: { [panel]: this.#panelRows.get(panel) ?? [] },
+              contexts: {},
+            }),
+          );
+        }
+        return answer(null);
+      }
       case "addons_list":
         return answer({ plugins: this.#options.addons ?? [] });
       case "addon_set_enabled":

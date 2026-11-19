@@ -223,7 +223,11 @@ struct Engine {
     shared: Arc<Shared>,
     limits: Limits,
     file: String,
-    map: Option<SourceMap>,
+    /// The package's map of its code to its source, as text, and what it says once a
+    /// stack has needed it: most code never throws, and reading a map takes longer
+    /// than starting the code does.
+    map_text: Option<String>,
+    map: std::cell::OnceCell<Option<SourceMap>>,
     timers: RefCell<Timers>,
     waiting: RefCell<HashSet<u64>>,
     /// When the current turn began.
@@ -375,7 +379,8 @@ impl Engine {
             shared: Arc::clone(shared),
             limits: spec.limits,
             file: spec.file.clone(),
-            map: spec.source_map.as_deref().and_then(SourceMap::parse),
+            map_text: spec.source_map.clone(),
+            map: std::cell::OnceCell::new(),
             timers: RefCell::new(Timers::default()),
             waiting: RefCell::new(HashSet::new()),
             turn_started: Cell::new(None),
@@ -405,7 +410,10 @@ impl Engine {
 
     /// A stack written with the source's places, where the package has a map.
     fn place(&self, text: String) -> String {
-        match &self.map {
+        let map = self
+            .map
+            .get_or_init(|| self.map_text.as_deref().and_then(SourceMap::parse));
+        match map {
             Some(map) => map.rewrite(&text, &self.file),
             None => text,
         }
@@ -545,6 +553,7 @@ impl Engine {
             );
         }
         let made: Vec<Made> = self.made.borrow_mut().drain(..).collect();
+        let mut called = false;
         for Made { id, name, json } in made {
             let args: Value = match serde_json::from_str(&json) {
                 Ok(args) => args,
@@ -599,8 +608,12 @@ impl Engine {
                 _ => {
                     self.waiting.borrow_mut().insert(id);
                     self.shared.host.send(Outbound::Call { id, name, args });
+                    called = true;
                 }
             }
+        }
+        if called {
+            self.shared.host.send(Outbound::TurnDone);
         }
         self.shared
             .timers
@@ -684,6 +697,19 @@ impl Engine {
                 }
                 Ok(Inbound::Event { topic, payload }) => {
                     self.shared.events_queued.fetch_sub(1, Ordering::AcqRel);
+                    let json = json!({ "topic": topic, "payload": payload }).to_string();
+                    self.turn(|_, dispatch| dispatch.call::<_, ()>(("event", 0.0, json)))?;
+                }
+                Ok(Inbound::Latest { topic }) => {
+                    let payload = self
+                        .shared
+                        .latest
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .remove(&topic);
+                    let Some(payload) = payload else {
+                        continue;
+                    };
                     let json = json!({ "topic": topic, "payload": payload }).to_string();
                     self.turn(|_, dispatch| dispatch.call::<_, ()>(("event", 0.0, json)))?;
                 }

@@ -171,6 +171,16 @@ export class CoreClient {
     return this.transport.command("ui_visible", { items });
   }
 
+  /** The plugins' pictures and shaders the core has, of those named by their hashes. */
+  uiAssets(hashes: readonly string[]): Promise<Record<string, string>> {
+    return this.transport.command("ui_assets", { hashes });
+  }
+
+  /** Asks a plugin for the rows beneath a row of its panel that the user opened. */
+  uiPanelExpand(panel: string, path: readonly string[]): Promise<void> {
+    return this.transport.command("ui_panel_expand", { panel, path });
+  }
+
   /** Every plugin installed, in the order they load in, with how each fares. */
   addonsList(): Promise<{ plugins: AddonEntry[] }> {
     return this.transport.command("addons_list");

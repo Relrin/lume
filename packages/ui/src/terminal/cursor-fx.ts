@@ -24,6 +24,7 @@ import type {
 } from "@lume/renderer";
 
 import type { ConfigView, UiContributions } from "../core/types.ts";
+import { assets } from "../plugins/assets.ts";
 
 /** The window's effects, as far as this needs them. */
 export interface EffectsLike {
@@ -97,16 +98,38 @@ const OFF: CursorFxSettings = { trail: "none", pulse: "none" };
 const TRAILS: readonly string[] = ["none", "warp", "sweep", "comet"];
 const PULSES: readonly string[] = ["none", "burst", "ripple", "box-burst", "box-ripple"];
 
-/** A plugin's effect of a kind, by the id the settings name it with. */
+/**
+ * A plugin's effect of a kind, by the id the settings name it with, once its shader
+ * has been fetched: none until then.
+ */
 function customOf(
   shown: UiContributions | null | undefined,
   id: string,
   kind: "trail" | "pulse",
 ): CustomEffect | undefined {
   const found = shown?.cursor_effects.find((effect) => effect.id === id && effect.kind === kind);
-  return found
-    ? { id: found.id, source: found.source, duration: found.duration, reach: found.reach }
+  const source = found ? assets.peek(found.hash) : undefined;
+  return found && source !== undefined
+    ? { id: found.id, source, duration: found.duration, reach: found.reach }
     : undefined;
+}
+
+/**
+ * The hashes of the shaders a configuration's cursor effects need: those of the
+ * plugins' effects it names, and of no other.
+ */
+export function cursorFxShaders(view: ConfigView | null, shown?: UiContributions | null): string[] {
+  const terminal = view?.config.terminal;
+  const named = [
+    ["trail", terminal?.["cursor-trail"] ?? "none"],
+    ["pulse", terminal?.["cursor-pulse"] ?? "none"],
+  ] as const;
+  const hashes: string[] = [];
+  for (const [kind, id] of named) {
+    const found = shown?.cursor_effects.find((effect) => effect.id === id && effect.kind === kind);
+    if (found) hashes.push(found.hash);
+  }
+  return hashes;
 }
 
 /**

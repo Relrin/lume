@@ -6,7 +6,11 @@
  * the motion and the cursor effects. The page fetches that whole when it starts and
  * whenever it is told it changed. What the plugins' code shows (a status item's value,
  * a panel's rows, a condition it set) arrives in notices as it changes, and is kept
- * here beside it.
+ * here beside it. All a plugin showed in one turn of its code comes as one notice and
+ * is taken in in one step, so the window draws it together and never the half of it.
+ *
+ * A panel's rows come only while the panel is on screen in this window, and whole
+ * again each time it comes on screen; the rows of one that went are kept until then.
  *
  * Nothing here touches the page, so all of it is tested with plain objects.
  */
@@ -61,7 +65,12 @@ export function createPluginsStore(): PluginsStore {
     set: (shown) => {
       const values = new Map<string, StatusValues>();
       for (const entry of shown.values) values.set(valueKey(entry.item, entry.pane), entry.value);
-      const rows = new Map<string, readonly PanelRowData[]>(Object.entries(shown.rows));
+      // The rows of panels there still are stay until the core sends them again.
+      const panels = new Set(shown.panels.map((panel) => panel.id));
+      const rows = new Map<string, readonly PanelRowData[]>(
+        [...get().rows].filter(([panel]) => panels.has(panel)),
+      );
+      for (const [panel, given] of Object.entries(shown.rows)) rows.set(panel, given);
       const contexts = new Set(
         Object.entries(shown.contexts)
           .filter(([, on]) => on)
@@ -75,27 +84,42 @@ export function createPluginsStore(): PluginsStore {
     },
     follow: (notice) => {
       switch (notice.type) {
-        case "plugin_status": {
-          const values = new Map(get().values);
-          const key = valueKey(notice.item, notice.pane);
-          if (notice.value === null) values.delete(key);
-          else values.set(key, notice.value);
-          set({ values });
-          return true;
-        }
-        case "plugin_panel": {
-          const rows = new Map(get().rows);
-          if (notice.rows === null) rows.delete(notice.panel);
-          else rows.set(notice.panel, notice.rows);
-          set({ rows });
-          return true;
-        }
-        case "plugin_context": {
-          const contexts = new Set(get().contexts);
-          const name = `plugin:${notice.plugin}.${notice.key}`;
-          if (notice.value) contexts.add(name);
-          else contexts.delete(name);
-          set({ contexts });
+        case "plugin_frame": {
+          const now = get();
+          const next: {
+            values?: PluginsState["values"];
+            rows?: PluginsState["rows"];
+            contexts?: PluginsState["contexts"];
+          } = {};
+          if (notice.statuses.length > 0) {
+            const values = new Map(now.values);
+            for (const status of notice.statuses) {
+              const key = valueKey(status.item, status.pane);
+              if (status.value === null) values.delete(key);
+              else values.set(key, status.value);
+            }
+            next.values = values;
+          }
+          const panels = Object.entries(notice.panels);
+          if (panels.length > 0) {
+            const rows = new Map(now.rows);
+            for (const [panel, given] of panels) {
+              if (given === null) rows.delete(panel);
+              else rows.set(panel, given);
+            }
+            next.rows = rows;
+          }
+          const conditions = Object.entries(notice.contexts);
+          if (conditions.length > 0) {
+            const contexts = new Set(now.contexts);
+            for (const [name, on] of conditions) {
+              if (on) contexts.add(name);
+              else contexts.delete(name);
+            }
+            next.contexts = contexts;
+          }
+          // One step: everything the plugin's turn showed is drawn together.
+          set(next);
           return true;
         }
         case "plugin_state": {

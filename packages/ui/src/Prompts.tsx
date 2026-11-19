@@ -6,11 +6,15 @@
  * does not approve it.
  */
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useRef, useSyncExternalStore } from "react";
 
-import { PluginPickDialog } from "./plugins/Pick.tsx";
 import { closingText, closingTitle } from "./shell/closing.ts";
 import type { PluginQuestion, Prompt, PromptStore } from "./terminal/prompts.ts";
+
+// The list a plugin asks the user to choose from is loaded when one first does.
+const PluginPickDialog = lazy(() =>
+  import("./plugins/Pick.tsx").then((loaded) => ({ default: loaded.PluginPickDialog })),
+);
 
 /** A number for each prompt, so that each choice opens with nothing typed. */
 const numbers = new WeakMap<Prompt, number>();
@@ -28,7 +32,13 @@ function numberOf(prompt: Prompt): number {
 export function Prompts({ store }: { store: PromptStore }) {
   const prompt = useSyncExternalStore(store.subscribe, store.current);
   if (!prompt) return null;
-  if (prompt.kind === "pick") return <PluginPickDialog key={numberOf(prompt)} prompt={prompt} />;
+  if (prompt.kind === "pick") {
+    return (
+      <Suspense fallback={null}>
+        <PluginPickDialog key={numberOf(prompt)} prompt={prompt} />
+      </Suspense>
+    );
+  }
   return <PromptDialog prompt={prompt} />;
 }
 

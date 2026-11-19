@@ -244,7 +244,7 @@ export const PLUGIN_CONTRIBUTIONS: UiContributions = {
       icon: { image: "acme.tools:gear" },
     },
   ],
-  images: { "acme.tools:gear": { url: GEAR, tint: true } },
+  images: { "acme.tools:gear": { hash: "gear", tint: true } },
   motions: [],
   cursor_effects: [],
   values: [
@@ -324,6 +324,36 @@ const WITH_PLUGINS: FakeCoreOptions = {
   bindings: FIXTURE_BINDINGS,
   titleBar: "custom",
   contributions: PLUGIN_CONTRIBUTIONS,
+  assets: { gear: GEAR },
+};
+
+/** The same, with a row in the panel whose rows are given when it is opened. */
+const WITH_LAZY_ROWS: FakeCoreOptions = {
+  ...WITH_PLUGINS,
+  contributions: {
+    ...PLUGIN_CONTRIBUTIONS,
+    rows: {
+      "acme.tools.jobs-panel": [
+        ...(PLUGIN_CONTRIBUTIONS.rows["acme.tools.jobs-panel"] ?? []),
+        { id: "artifacts", label: "artifacts", detail: "target/release", lazy: true },
+        { id: "cache", label: "cache", detail: "never answers", lazy: true },
+      ],
+    },
+  },
+  lazyRows: {
+    "acme.tools.jobs-panel": {
+      artifacts: [
+        { id: "lume", label: "lume.exe", detail: "9.4 MB" },
+        { id: "gui", label: "lume-gui.exe", detail: "21 MB" },
+      ],
+    },
+  },
+  pluginPanel: {
+    id: "acme.tools.jobs-panel",
+    plugin: "acme.tools",
+    view: "jobs-panel",
+    area: "right",
+  },
 };
 
 /** The same, with the meters' setting putting them in the status bar. */
@@ -648,6 +678,53 @@ export const PLUGIN_SCENES: readonly Scene[] = [
       return compare(
         rows,
         ["build", "Compiling lume-app", "Linking", "tests", "lint"],
+        "the panel",
+      );
+    },
+  },
+  {
+    name: "plugin-list-panel-lazy",
+    window: WITH_LAZY_ROWS,
+    prepare: async () => {
+      const open = async (label: string) => {
+        const row = await until(`the row ${label}`, () =>
+          [...document.querySelectorAll<HTMLElement>(".list-row")].find(
+            (one) => one.querySelector(".list-row-label")?.textContent === label,
+          ),
+        );
+        row.querySelector<HTMLElement>(".list-row-chevron")?.click();
+      };
+      // One row's rows come when it is opened; the other's never do, and it says so
+      // while it waits.
+      await open("artifacts");
+      await until("the rows that were asked for", () =>
+        [...document.querySelectorAll(".list-row-label")].find(
+          (label) => label.textContent === "lume-gui.exe",
+        ),
+      );
+      await open("cache");
+      await until("the line that says rows are on their way", () =>
+        document.querySelector(".list-row-note"),
+      );
+    },
+    check: (page) => {
+      const rows = [...page.querySelectorAll(".list-row .list-row-label")].map(
+        (label) => label.textContent ?? "",
+      );
+      return compare(
+        rows,
+        [
+          "build",
+          "Compiling lume-app",
+          "Linking",
+          "tests",
+          "lint",
+          "artifacts",
+          "lume.exe",
+          "lume-gui.exe",
+          "cache",
+          "Loading…",
+        ],
         "the panel",
       );
     },

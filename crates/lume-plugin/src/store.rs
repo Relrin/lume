@@ -18,7 +18,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
 use crate::hash::{self, HashError};
@@ -749,18 +749,35 @@ impl Store {
         }
     }
 
-    /// Everything installed, with its manifest. `verify` checks each package's hash.
-    pub fn installed(&self, verify: bool) -> Result<Vec<Installed>, StoreError> {
-        let lock = self.lock()?;
-        Ok(lock
-            .plugins
+    /// Whether an install's package is as it was installed, hashing it only when this
+    /// run has not hashed it since its files were last touched. A package that cannot
+    /// be looked at from outside is hashed, which says why.
+    pub fn verify_seen(&self, entry: &Entry, seen: &Seen) -> Check {
+        let folder = self.package_dir(entry);
+        let look = hash::fingerprint(&folder).ok();
+        if let Some(look) = &look
+            && let Some(check) = seen.get(entry, look)
+        {
+            return check;
+        }
+        let check = self.verify(entry);
+        // Looked at again after the hashing: a file written while it was hashed leaves
+        // nothing to go by.
+        match (look, hash::fingerprint(&folder).ok()) {
+            (Some(before), Some(after)) if before == after => {
+                seen.put(entry, before, check.clone());
+            }
+            _ => seen.forget(&entry.local),
+        }
+        check
+    }
+
+    /// The installs of a lock file, with their manifests and what `check` says of each.
+    fn installed_of(&self, entries: Vec<Entry>, checks: Vec<Check>) -> Vec<Installed> {
+        entries
             .into_iter()
-            .map(|entry| {
-                let check = if verify {
-                    self.verify(&entry)
-                } else {
-                    Check::Unchecked
-                };
+            .zip(checks)
+            .map(|(entry, check)| {
                 let manifest = Self::read_manifest(&self.package_dir(&entry))
                     .map(|(manifest, _)| manifest)
                     .map_err(|error| match error {
@@ -776,13 +793,88 @@ impl Store {
                     check,
                 }
             })
-            .collect())
+            .collect()
+    }
+
+    /// Everything installed, with its manifest. `verify` checks each package's hash.
+    pub fn installed(&self, verify: bool) -> Result<Vec<Installed>, StoreError> {
+        let lock = self.lock()?;
+        let checks = lock
+            .plugins
+            .iter()
+            .map(|entry| {
+                if verify {
+                    self.verify(entry)
+                } else {
+                    Check::Unchecked
+                }
+            })
+            .collect();
+        Ok(self.installed_of(lock.plugins, checks))
     }
 
     /// Everything installed, and the order it loads in.
     pub fn resolve(&self, verify: bool) -> Result<(Vec<Installed>, Resolution), StoreError> {
         let lock = self.lock()?;
-        let installed = self.installed(verify)?;
+        let order = lock.full_order();
+        let checks = lock
+            .plugins
+            .iter()
+            .map(|entry| {
+                if verify {
+                    self.verify(entry)
+                } else {
+                    Check::Unchecked
+                }
+            })
+            .collect();
+        Ok(Self::resolved(
+            self.installed_of(lock.plugins, checks),
+            &order,
+        ))
+    }
+
+    /// Everything installed and the order it loads in, as a program that stays up reads
+    /// it again and again: a package this run has hashed is hashed again only when its
+    /// files were touched since, the packages that do need hashing are hashed several at
+    /// a time, and one that is turned off is not looked at until it is turned on.
+    pub fn resolve_seen(&self, seen: &Seen) -> Result<(Vec<Installed>, Resolution), StoreError> {
+        let lock = self.lock()?;
+        let order = lock.full_order();
+        seen.keep(lock.plugins.iter().map(|entry| entry.local.as_str()));
+        let checks: Vec<std::sync::OnceLock<Check>> =
+            lock.plugins.iter().map(|_| Default::default()).collect();
+        let next = AtomicUsize::new(0);
+        let workers = lock.plugins.len().clamp(1, HASHING_AT_ONCE);
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(entry) = lock.plugins.get(index) else {
+                            break;
+                        };
+                        let check = if entry.enabled {
+                            self.verify_seen(entry, seen)
+                        } else {
+                            Check::Unchecked
+                        };
+                        let _ = checks[index].set(check);
+                    }
+                });
+            }
+        });
+        let checks = checks
+            .into_iter()
+            .map(|check| check.into_inner().unwrap_or(Check::Unchecked))
+            .collect();
+        Ok(Self::resolved(
+            self.installed_of(lock.plugins, checks),
+            &order,
+        ))
+    }
+
+    fn resolved(installed: Vec<Installed>, order: &[String]) -> (Vec<Installed>, Resolution) {
         let unusable: Vec<Option<String>> = installed.iter().map(Installed::unusable).collect();
         let candidates: Vec<Candidate<'_>> = installed
             .iter()
@@ -793,8 +885,74 @@ impl Store {
                 unusable: unusable.clone(),
             })
             .collect();
-        let resolution = resolve(&candidates, &lock.full_order());
-        Ok((installed, resolution))
+        let resolution = resolve(&candidates, order);
+        (installed, resolution)
+    }
+}
+
+/// How many packages are hashed at a time.
+const HASHING_AT_ONCE: usize = 4;
+
+/// What a run has found of the packages it hashed, kept in memory only: for each
+/// install, the hash its lock entry names, how its files looked from outside then, and
+/// what the hashing said. Nothing of it outlives the program, so the first look of
+/// every run hashes.
+#[derive(Debug, Default)]
+pub struct Seen {
+    by_local: std::sync::Mutex<std::collections::HashMap<String, SeenOne>>,
+}
+
+#[derive(Debug)]
+struct SeenOne {
+    content_hash: String,
+    look: String,
+    check: Check,
+}
+
+impl Seen {
+    fn all(&self) -> std::sync::MutexGuard<'_, std::collections::HashMap<String, SeenOne>> {
+        self.by_local
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn get(&self, entry: &Entry, look: &str) -> Option<Check> {
+        self.all()
+            .get(&entry.local)
+            .filter(|one| one.content_hash == entry.content_hash && one.look == look)
+            .map(|one| one.check.clone())
+    }
+
+    fn put(&self, entry: &Entry, look: String, check: Check) {
+        self.all().insert(
+            entry.local.clone(),
+            SeenOne {
+                content_hash: entry.content_hash.clone(),
+                look,
+                check,
+            },
+        );
+    }
+
+    /// Forgets what was found of an install, so it is hashed the next time.
+    pub fn forget(&self, local: &str) {
+        self.all().remove(local);
+    }
+
+    /// Forgets every install that is not among `locals`.
+    fn keep<'a>(&self, locals: impl Iterator<Item = &'a str>) {
+        let locals: BTreeSet<&str> = locals.collect();
+        self.all()
+            .retain(|local, _| locals.contains(local.as_str()));
+    }
+
+    /// How many installs it holds a finding of.
+    pub fn len(&self) -> usize {
+        self.all().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -1077,6 +1235,66 @@ mod tests {
         assert_eq!(store.verify(&installed[0].entry), Check::Modified);
         std::fs::remove_dir_all(store.package_dir(&installed[0].entry)).unwrap();
         assert_eq!(store.verify(&installed[0].entry), Check::Missing);
+    }
+
+    #[test]
+    fn a_package_is_hashed_again_only_when_its_files_were_touched() {
+        let dir = TempDir::new("seen");
+        let store = store(&dir);
+        for id in ["acme.a", "acme.b", "acme.off"] {
+            let source = package(&dir, &format!("src-{id}"), id, "1.0.0", "");
+            store
+                .commit(store.prepare(&source, InstallOptions::default()).unwrap())
+                .unwrap();
+        }
+        store.set_enabled("acme.off", false).unwrap();
+        let seen = Seen::default();
+        let (installed, _) = store.resolve_seen(&seen).unwrap();
+        let check = |installed: &[Installed], local: &str| {
+            installed
+                .iter()
+                .find(|one| one.entry.local == local)
+                .unwrap()
+                .check
+                .clone()
+        };
+        assert_eq!(check(&installed, "acme.a"), Check::Intact);
+        assert_eq!(check(&installed, "acme.b"), Check::Intact);
+        // One that is turned off is not looked at.
+        assert_eq!(check(&installed, "acme.off"), Check::Unchecked);
+        assert_eq!(seen.len(), 2);
+
+        // What was found is kept while the files look the same: a finding put in by
+        // hand is what comes back, so nothing was hashed.
+        let entry = installed
+            .iter()
+            .find(|one| one.entry.local == "acme.a")
+            .unwrap()
+            .entry
+            .clone();
+        let look = hash::fingerprint(&store.package_dir(&entry)).unwrap();
+        seen.put(&entry, look, Check::Unreadable("kept".to_owned()));
+        let (installed, _) = store.resolve_seen(&seen).unwrap();
+        assert_eq!(
+            check(&installed, "acme.a"),
+            Check::Unreadable("kept".to_owned())
+        );
+
+        // A file written since is found, whatever was kept.
+        std::fs::write(store.package_dir(&entry).join("host.js"), "evil()").unwrap();
+        let (installed, resolution) = store.resolve_seen(&seen).unwrap();
+        assert_eq!(check(&installed, "acme.a"), Check::Modified);
+        assert!(!resolution.is_ready("acme.a"));
+        assert_eq!(check(&installed, "acme.b"), Check::Intact);
+
+        // Turned on, the third is hashed; removed, an install is forgotten.
+        store.set_enabled("acme.off", true).unwrap();
+        let (installed, _) = store.resolve_seen(&seen).unwrap();
+        assert_eq!(check(&installed, "acme.off"), Check::Intact);
+        assert_eq!(seen.len(), 3);
+        store.remove("acme.b", false).unwrap();
+        store.resolve_seen(&seen).unwrap();
+        assert_eq!(seen.len(), 2);
     }
 
     #[test]

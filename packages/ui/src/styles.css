@@ -2054,6 +2054,15 @@
     font-size: 12px;
   }
 
+  .list-row-note {
+    @apply text-ink-muted;
+    font-style: italic;
+  }
+
+  .list-row-note[data-note="failed"] {
+    color: var(--lume-color-status-warning);
+  }
+
   .list-panel-problem {
     color: var(--lume-color-status-warning);
   }

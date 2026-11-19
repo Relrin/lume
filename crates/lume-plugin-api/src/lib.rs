@@ -28,10 +28,10 @@ use types::{
     ClipboardWrite, CommandExecute, ContextSet, FetchResult, FetchStreamResult, FsEntry, FsPath,
     FsRead, FsStat, FsUnwatch, FsWatch, FsWrite, Grant, KvKey, KvSet, LayoutApply, MetricsSample,
     MetricsSubscribe, MetricsUnsubscribe, NetFetch, Nothing, PaneInfo, PaneRef, PaneStats,
-    PaneWrite, PanelId, PanelsSet, PermissionsRequest, ProcessExit, ProcessId, ProcessResult,
-    ProcessRun, ProcessSpawn, SecretKey, SecretSet, ServicesCall, SessionEntry, SessionsSpawn,
-    SettingsGet, Spawned, StatusClear, StatusSet, StreamId, StreamRead, StreamWrite, Subscribe,
-    UiConfirm, UiPick, UiToast, WorkspaceInfo,
+    PaneWrite, PanelId, PanelsSet, PanelsSetChildren, PermissionsRequest, ProcessExit, ProcessId,
+    ProcessResult, ProcessRun, ProcessSpawn, SecretKey, SecretSet, ServicesCall, SessionEntry,
+    SessionsSpawn, SettingsGet, Spawned, StatusClear, StatusSet, StreamId, StreamRead, StreamWrite,
+    Subscribe, UiConfirm, UiPick, UiToast, WorkspaceInfo,
 };
 
 /// The major version of the API, which a manifest's `api` names.
@@ -168,6 +168,10 @@ api! {
     PanelsSet = "panels.set"(id, rows): PanelsSet => ();
     /// Takes away the rows a list panel shows.
     PanelsClear = "panels.clear"(id): PanelId => ();
+    /// Gives the rows beneath a row that is `lazy`, by the ids of the rows from the top
+    /// down to it, in place of those it had. They count toward the panel's 5000 rows
+    /// and eight levels. Setting the panel's rows anew takes them away with the rest.
+    PanelsSetChildren = "panels.setChildren"(id, path, rows): PanelsSetChildren => ();
     /// The latest reading of the machine, or null before the first: how busy the
     /// processor and the graphics card are, how much memory is used, how fast the
     /// network goes.

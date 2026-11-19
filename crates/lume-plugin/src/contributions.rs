@@ -52,6 +52,9 @@ pub struct Install<'a> {
     pub manifest: &'a Manifest,
     /// Where its package is.
     pub dir: PathBuf,
+    /// The hash of its package, as its lock entry has it: what was read of a package
+    /// is kept while this stays the same.
+    pub content: &'a str,
     /// Where it is in the order plugins load in.
     pub rank: i64,
     /// For each plugin it depends on, by manifest id, the install it is bound to.
@@ -74,10 +77,14 @@ pub enum Icon {
     Image(String),
 }
 
-/// A picture of a plugin's, as the window draws it.
+/// A picture of a plugin's, as the window draws it. A window is told its hash and
+/// asks for the picture itself when it first draws it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ImageOut {
+    #[serde(skip)]
     pub url: String,
+    /// The hash of the picture's bytes, which a window asks for it by.
+    pub hash: String,
     pub tint: bool,
 }
 
@@ -197,7 +204,10 @@ pub struct CursorEffectOut {
     pub kind: String,
     pub duration: u32,
     pub reach: u32,
+    #[serde(skip)]
     pub source: String,
+    /// The hash of the shader's text, which a window asks for it by.
+    pub hash: String,
 }
 
 /// A key a plugin binds, with its names made full.
@@ -239,8 +249,94 @@ pub struct Contributions {
     pub warnings: Vec<(String, String)>,
 }
 
+/// What has been read of the installs' packages, kept from one working-out to the next
+/// so a package is read again only when it is another one: by install, the hash of the
+/// package the files were read from, and the files.
+#[derive(Debug, Default)]
+pub struct Read {
+    by_install: BTreeMap<String, (String, Files)>,
+}
+
+/// The files read of one package, by their path in it.
+#[derive(Debug, Default)]
+struct Files {
+    images: BTreeMap<String, Result<Picture, String>>,
+    shaders: BTreeMap<String, Result<String, String>>,
+    themes: BTreeMap<String, Result<String, String>>,
+}
+
+/// A picture as it was read: its address, the hash and the count of its bytes.
+#[derive(Clone, Debug)]
+struct Picture {
+    url: String,
+    hash: String,
+    bytes: u64,
+}
+
+impl Read {
+    /// Forgets the packages that are not among the installs any more.
+    fn keep(&mut self, installs: &[Install<'_>]) {
+        self.by_install.retain(|local, (content, _)| {
+            installs
+                .iter()
+                .any(|install| install.local == local && install.content == content)
+        });
+    }
+
+    fn files(&mut self, install: &Install<'_>) -> &mut Files {
+        &mut self
+            .by_install
+            .entry(install.local.to_owned())
+            .or_insert_with(|| (install.content.to_owned(), Files::default()))
+            .1
+    }
+
+    fn image(&mut self, install: &Install<'_>, file: &str) -> Result<Picture, String> {
+        let dir = &install.dir;
+        self.files(install)
+            .images
+            .entry(file.to_owned())
+            .or_insert_with(|| {
+                assets::read_image(dir, file).map(|image| Picture {
+                    url: image.data_url(),
+                    hash: crate::hash::hex(&image.bytes),
+                    bytes: image.bytes.len() as u64,
+                })
+            })
+            .clone()
+    }
+
+    fn shader(&mut self, install: &Install<'_>, file: &str) -> Result<String, String> {
+        let dir = &install.dir;
+        self.files(install)
+            .shaders
+            .entry(file.to_owned())
+            .or_insert_with(|| assets::read_shader(dir, file))
+            .clone()
+    }
+
+    fn theme(&mut self, install: &Install<'_>, file: &str) -> Result<String, String> {
+        let path = install.dir.join(file);
+        self.files(install)
+            .themes
+            .entry(file.to_owned())
+            .or_insert_with(|| std::fs::read_to_string(&path).map_err(|error| error.to_string()))
+            .clone()
+    }
+
+    /// How many packages it holds files of.
+    pub fn len(&self) -> usize {
+        self.by_install.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_install.is_empty()
+    }
+}
+
 impl Contributions {
-    /// What a window is sent.
+    /// What a window is sent: everything but the pictures and the shaders themselves,
+    /// which it asks for by their hashes when it needs them.
     pub fn to_json(&self) -> Value {
         json!({
             "menus": self.menus,
@@ -250,6 +346,21 @@ impl Contributions {
             "motions": self.motions,
             "cursor_effects": self.cursor_effects,
         })
+    }
+
+    /// A picture, as the address a window draws it from, or a shader's text, by its
+    /// hash.
+    pub fn asset(&self, hash: &str) -> Option<&str> {
+        self.images
+            .values()
+            .find(|image| image.hash == hash)
+            .map(|image| image.url.as_str())
+            .or_else(|| {
+                self.cursor_effects
+                    .iter()
+                    .find(|effect| effect.hash == hash)
+                    .map(|effect| effect.source.as_str())
+            })
     }
 
     fn warn(&mut self, local: &str, message: String) {
@@ -380,16 +491,18 @@ fn say(out: &mut Contributions, warnings: Vec<Warning>) {
     }
 }
 
-/// Works out everything the installs add. They come in the order they load in.
-pub fn build(installs: &[Install<'_>], commands: &dyn Commands) -> Contributions {
+/// Works out everything the installs add. They come in the order they load in. What
+/// `read` holds of a package from an earlier time is used again.
+pub fn build(installs: &[Install<'_>], commands: &dyn Commands, read: &mut Read) -> Contributions {
     let mut out = Contributions::default();
+    read.keep(installs);
     let by_local: BTreeMap<&str, &Install<'_>> = installs
         .iter()
         .map(|install| (install.local, install))
         .collect();
 
     for install in installs {
-        images(install, &mut out);
+        images(install, read, &mut out);
     }
     menus(installs, &by_local, commands, &mut out);
     status(installs, commands, &mut out);
@@ -411,7 +524,7 @@ pub fn build(installs: &[Install<'_>], commands: &dyn Commands) -> Contributions
             }
         }
         for effect in &contributes.cursor_effects {
-            match assets::read_shader(&install.dir, &effect.shader) {
+            match read.shader(install, &effect.shader) {
                 Ok(source) => out.cursor_effects.push(CursorEffectOut {
                     id: format!("{local}/{}", effect.id),
                     plugin: local.to_owned(),
@@ -419,6 +532,7 @@ pub fn build(installs: &[Install<'_>], commands: &dyn Commands) -> Contributions
                     kind: effect.kind.clone(),
                     duration: effect.duration_ms(),
                     reach: effect.reach_px(),
+                    hash: crate::hash::hex(source.as_bytes()),
                     source,
                 }),
                 Err(problem) => out.warn(
@@ -430,13 +544,10 @@ pub fn build(installs: &[Install<'_>], commands: &dyn Commands) -> Contributions
         for theme in &contributes.themes {
             let id = format!("{local}/{}", theme.id);
             let file = install.dir.join(&theme.file);
-            let read = std::fs::read_to_string(&file)
-                .map_err(|error| error.to_string())
-                .and_then(|text| {
-                    lume_config::parse_theme(&id, &text, Some(&file))
-                        .map_err(|problem| problem.message)
-                });
-            match read {
+            let parsed = read.theme(install, &theme.file).and_then(|text| {
+                lume_config::parse_theme(&id, &text, Some(&file)).map_err(|problem| problem.message)
+            });
+            match parsed {
                 Ok((parsed, problems)) => {
                     for problem in problems {
                         out.warn(
@@ -491,7 +602,7 @@ pub fn build(installs: &[Install<'_>], commands: &dyn Commands) -> Contributions
 }
 
 /// Reads the pictures a plugin declares, and those its things name by path.
-fn images(install: &Install<'_>, out: &mut Contributions) {
+fn images(install: &Install<'_>, read: &mut Read, out: &mut Contributions) {
     let local = install.local;
     let contributes = &install.manifest.contributes;
     let mut wanted: Vec<(String, String, bool)> = contributes
@@ -524,9 +635,9 @@ fn images(install: &Install<'_>, out: &mut Contributions) {
     }
     let mut total = 0u64;
     for (id, file, tint) in wanted {
-        match assets::read_image(&install.dir, &file) {
+        match read.image(install, &file) {
             Ok(image) => {
-                total += image.bytes.len() as u64;
+                total += image.bytes;
                 if total > assets::IMAGES_MAX_BYTES {
                     out.warn(
                         local,
@@ -540,7 +651,8 @@ fn images(install: &Install<'_>, out: &mut Contributions) {
                 out.images.insert(
                     format!("{local}:{id}"),
                     ImageOut {
-                        url: image.data_url(),
+                        url: image.url,
+                        hash: image.hash,
                         tint,
                     },
                 );
@@ -1466,6 +1578,7 @@ mod tests {
             name: manifest.name.clone(),
             manifest,
             dir: dir.path().to_owned(),
+            content: "sha256:test",
             rank,
             bound,
         }
@@ -1534,7 +1647,7 @@ order = 5
         );
         let bound = BTreeMap::new();
         let installs = [install("acme.tools", &one, &dir, 0, &bound)];
-        let out = build(&installs, &Known);
+        let out = build(&installs, &Known, &mut Read::default());
 
         let view = &out.menus["menu.app.view"];
         assert_eq!(
@@ -1642,7 +1755,7 @@ order = 1
             install("fork.core", &core, &dir, 0, &none),
             install("acme.user", &user, &dir, 1, &bound),
         ];
-        let out = build(&installs, &Known);
+        let out = build(&installs, &Known, &mut Read::default());
         let tab = &out.menus["menu.tab"];
         let section = tab
             .iter()
@@ -1722,7 +1835,7 @@ order = 1
             install("acme.meters", &one, &dir, 0, &bound),
             install("acme.other", &two, &dir, 1, &bound),
         ];
-        let out = build(&installs, &Known);
+        let out = build(&installs, &Known, &mut Read::default());
         let ids: Vec<&str> = out.status.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -1742,6 +1855,50 @@ order = 1
         );
         assert_eq!(out.panels[0].id, "acme.meters.procs");
         assert_eq!(keys(&out.menus["menu.status"]), ["acme.meters:options"]);
+
+        // A window is told a picture's hash, not the picture, and has it for the asking.
+        let chip = &out.images["acme.meters:chip"];
+        let sent = out.to_json();
+        assert_eq!(sent["images"]["acme.meters:chip"]["hash"], chip.hash);
+        assert!(sent["images"]["acme.meters:chip"].get("url").is_none());
+        assert_eq!(out.asset(&chip.hash), Some(chip.url.as_str()));
+        assert_eq!(out.asset("none"), None);
+    }
+
+    #[test]
+    fn a_package_is_read_again_only_when_it_is_another_one() {
+        let dir = TempDir::new("read-again");
+        dir.write(
+            "icons/chip.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+        );
+        let one = manifest(
+            "acme.meters",
+            "[[contributes.images]]\nid = \"chip\"\nfile = \"icons/chip.svg\"\n",
+        );
+        let bound = BTreeMap::new();
+        let mut read = Read::default();
+        let installs = [install("acme.meters", &one, &dir, 0, &bound)];
+        let first = build(&installs, &Known, &mut read).images["acme.meters:chip"].clone();
+        assert_eq!(read.len(), 1);
+
+        // The same package: the file is not read again, whatever is in it now.
+        dir.write(
+            "icons/chip.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><g/></svg>",
+        );
+        let again = build(&installs, &Known, &mut read).images["acme.meters:chip"].clone();
+        assert_eq!(again, first);
+
+        // Another package under the same name: read anew.
+        let mut other = install("acme.meters", &one, &dir, 0, &bound);
+        other.content = "sha256:other";
+        let changed = build(&[other], &Known, &mut read).images["acme.meters:chip"].clone();
+        assert_ne!(changed.hash, first.hash);
+
+        // An install that went is forgotten.
+        build(&[], &Known, &mut read);
+        assert!(read.is_empty());
     }
 
     #[test]
@@ -1780,7 +1937,7 @@ choices = [
         );
         let bound = BTreeMap::new();
         let installs = [install("acme.meters", &one, &dir, 0, &bound)];
-        let out = build(&installs, &Known);
+        let out = build(&installs, &Known, &mut Read::default());
         let placed: Vec<(&str, &str, usize)> = out
             .status
             .iter()
@@ -1855,7 +2012,7 @@ default = ""
         );
         let bound = BTreeMap::new();
         let installs = [install("acme.meters", &one, &dir, 0, &bound)];
-        let out = build(&installs, &Known);
+        let out = build(&installs, &Known, &mut Read::default());
         let fragment = &out.settings.fragments["acme.meters"];
         assert_eq!(fragment["additionalProperties"], false);
         assert_eq!(fragment["properties"]["rate"]["enum"], json!([1, 2]));
@@ -1935,7 +2092,7 @@ file = "themes/night.toml"
         );
         let bound = BTreeMap::new();
         let installs = [install("acme.fx", &one, &dir, 0, &bound)];
-        let out = build(&installs, &Known);
+        let out = build(&installs, &Known, &mut Read::default());
         assert_eq!(out.cursor_effects.len(), 1);
         assert_eq!(out.cursor_effects[0].id, "acme.fx/glow");
         assert_eq!(out.cursor_effects[0].duration, 400);

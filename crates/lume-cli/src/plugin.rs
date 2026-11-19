@@ -545,6 +545,7 @@ fn contribution_warnings(
                 name: one.name(),
                 manifest: one.manifest.as_ref().ok()?,
                 dir: store.package_dir(&one.entry),
+                content: &one.entry.content_hash,
                 rank: resolution
                     .rank(local)
                     .and_then(|rank| i64::try_from(rank).ok())
@@ -553,7 +554,12 @@ fn contribution_warnings(
             })
         })
         .collect();
-    lume_plugin::contributions::build(&installs, &Unchecked).warnings
+    lume_plugin::contributions::build(
+        &installs,
+        &Unchecked,
+        &mut lume_plugin::contributions::Read::default(),
+    )
+    .warnings
 }
 
 fn list(store: &Store, json: bool, out: &mut dyn Write) -> Result<Outcome, String> {

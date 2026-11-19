@@ -98,6 +98,11 @@ pub struct PanelRow {
     pub tone: Option<Tone>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<PanelRow>>,
+    /// Whether the row has rows beneath it that are given only when the user opens it:
+    /// `lume.panels.onExpand` hears of that, and `lume.panels.setChildren` gives them.
+    /// A tree too large to build whole is shown this way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lazy: Option<bool>,
     /// Whether its rows are open beneath it at first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expanded: Option<bool>,
@@ -134,6 +139,27 @@ pub struct PanelsSet {
 #[serde(deny_unknown_fields)]
 pub struct PanelId {
     pub id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PanelsSetChildren {
+    /// The panel, by the name the manifest gives it.
+    pub id: String,
+    /// The row, by the ids of the rows from the top down to it.
+    pub path: Vec<String>,
+    pub rows: Vec<PanelRow>,
+}
+
+/// A row of a list panel the user opened whose rows are given when it is opened.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PanelExpand {
+    /// The panel, by the name the manifest gives it.
+    pub panel: String,
+    /// The row's id.
+    pub row: String,
+    /// The ids of the rows from the top down to it.
+    pub path: Vec<String>,
 }
 
 /// What the machine is doing, as one reading has it.

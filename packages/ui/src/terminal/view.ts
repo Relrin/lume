@@ -105,6 +105,7 @@ import {
 } from "./mouse.ts";
 import type { PromptStore } from "./prompts.ts";
 import { TerminalSession } from "./session.ts";
+import { SyncHold } from "./sync-hold.ts";
 
 /** The elements a view works on. They are created once and never replaced. */
 export interface ViewElements {
@@ -318,6 +319,9 @@ export class TerminalView implements FrameView {
   #releaseTimer: number | undefined;
   #zoomPx: number;
   #dirty = false;
+  /** The wait for a program that is drawing a screen it asked not to be shown half of. */
+  readonly #sync = new SyncHold();
+  #syncTimer: ReturnType<typeof setTimeout> | undefined;
   #focused = false;
   #fontSizePx: number;
   #dpr = 1;
@@ -509,6 +513,8 @@ export class TerminalView implements FrameView {
   /** Unmounts, detaches from the session and frees what the view allocated. */
   dispose(): void {
     this.unmount();
+    if (this.#syncTimer !== undefined) clearTimeout(this.#syncTimer);
+    this.#syncTimer = undefined;
     this.#dropSession();
     this.#mouse.free();
   }
@@ -998,7 +1004,26 @@ export class TerminalView implements FrameView {
     const session = this.#session;
     if (!this.#dirty || this.#renderer === undefined || session === undefined) return false;
     // An empty screen in place of the one on its way would only flash.
-    return !session.restoring || performance.now() >= this.#restoreUntil;
+    if (session.restoring && performance.now() < this.#restoreUntil) return false;
+    // Nor is the half of a screen a program is still drawing shown.
+    return !this.#held(session);
+  }
+
+  /**
+   * Whether the program asked for what it draws not to be shown yet (synchronized
+   * output) and may still be believed. Its bytes are taken into the terminal all the
+   * while; only the picture waits.
+   */
+  #held(session: TerminalSession): boolean {
+    const drawing = session.terminal.mode(Mode.SynchronizedOutput);
+    return this.#sync.held(drawing, performance.now(), (ms) => {
+      if (this.#syncTimer !== undefined) clearTimeout(this.#syncTimer);
+      // Nothing may come from the program to draw a frame for: this does.
+      this.#syncTimer = setTimeout(() => {
+        this.#syncTimer = undefined;
+        if (this.#dirty) this.#services.host.loop.requestFrame();
+      }, ms);
+    });
   }
 
   frame(now: number = performance.now()): void {

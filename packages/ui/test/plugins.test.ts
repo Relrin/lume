@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ConfigView, MenuNodeData, MotionDef, UiContributions } from "../src/core/types.ts";
 import { tabStyle, tabStyleName } from "../src/motion/tab.ts";
+import { Assets, assets } from "../src/plugins/assets.ts";
 import { pluginStatusItems } from "../src/plugins/status.ts";
 import { createPluginsStore, holds, iconNamed } from "../src/plugins/store.ts";
 import { VisibleItems } from "../src/plugins/visible.ts";
@@ -15,7 +16,7 @@ import type { MenuItem } from "../src/shell/Menu.tsx";
 import { menuRows, nodesOf, type MenuParts } from "../src/shell/menus.ts";
 import { StatusBar } from "../src/shell/StatusBar.tsx";
 import { createStatusStore } from "../src/status/registry.ts";
-import { cursorFxSettings } from "../src/terminal/cursor-fx.ts";
+import { cursorFxSettings, cursorFxShaders } from "../src/terminal/cursor-fx.ts";
 
 const EMPTY: UiContributions = {
   revision: 1,
@@ -149,7 +150,7 @@ describe("the plugins' status items", () => {
         command: "acme.go",
       },
     ],
-    images: { "acme:chip": { url: "data:image/png;base64,AA==", tint: false } },
+    images: { "acme:chip": { hash: "c41p", tint: false } },
     values: [
       {
         plugin: "acme",
@@ -188,11 +189,11 @@ describe("the plugins' status items", () => {
     const store = createPluginsStore();
     store.getState().set(shown);
     store.getState().follow({
-      type: "plugin_status",
+      type: "plugin_frame",
       plugin: "acme",
-      item: "acme.cpu",
-      pane: null,
-      value: { hidden: true },
+      statuses: [{ item: "acme.cpu", pane: null, value: { hidden: true } }],
+      panels: {},
+      contexts: {},
     });
     store
       .getState()
@@ -229,6 +230,59 @@ describe("the plugins' status items", () => {
     // A place the setting may not choose leaves the item where its manifest puts it.
     expect(placed("pane.header")).toEqual(["statusbar.right"]);
     expect(placed(3)).toEqual(["statusbar.right"]);
+  });
+
+  it("take in all a plugin showed in one turn in one step", () => {
+    const store = createPluginsStore();
+    store.getState().set({
+      ...shown,
+      panels: [
+        {
+          id: "acme.jobs",
+          plugin: "acme",
+          view: "jobs",
+          title: "Jobs",
+          kind: "list",
+          area: "right",
+          order: 0,
+        },
+      ],
+    });
+    let steps = 0;
+    store.subscribe(() => steps++);
+    store.getState().follow({
+      type: "plugin_frame",
+      plugin: "acme",
+      statuses: [
+        { item: "acme.cpu", pane: null, value: { text: "70%" } },
+        { item: "acme.badge", pane: "p1", value: null },
+      ],
+      panels: { "acme.jobs": [{ id: "a", label: "A" }] },
+      contexts: { "plugin:acme.busy": true },
+    });
+    // One step: no window is drawn with the half of it.
+    expect(steps).toBe(1);
+    const state = store.getState();
+    expect(state.values.get("acme.cpu")).toEqual({ text: "70%" });
+    expect(state.values.has("acme.badge@p1")).toBe(false);
+    expect(state.rows.get("acme.jobs")).toEqual([{ id: "a", label: "A" }]);
+    expect(state.contexts.has("plugin:acme.busy")).toBe(true);
+
+    // What plugins add is worked out again: the rows stay until the core sends them,
+    // and go with a panel that is no more.
+    store.getState().set({ ...state.shown!, revision: 2 });
+    expect(store.getState().rows.get("acme.jobs")).toEqual([{ id: "a", label: "A" }]);
+    store.getState().set({ ...shown, revision: 3 });
+    expect(store.getState().rows.has("acme.jobs")).toBe(false);
+
+    store.getState().follow({
+      type: "plugin_frame",
+      plugin: "acme",
+      statuses: [],
+      panels: { "acme.jobs": null },
+      contexts: { "plugin:acme.busy": false },
+    });
+    expect(store.getState().contexts.has("plugin:acme.busy")).toBe(false);
   });
 
   it("name pictures of the plugin's own before the page's", () => {
@@ -315,6 +369,75 @@ describe("a list panel's rows", () => {
   });
 });
 
+describe("a list panel's rows that are given when opened", () => {
+  it("show a line in their place until they come, and then themselves", () => {
+    const rows = [
+      { id: "a", label: "A", lazy: true },
+      { id: "b", label: "B" },
+    ];
+    // Closed, a row that will have rows is one line.
+    expect(flatten(rows, new Map()).map((row) => row.row.id)).toEqual(["a", "b"]);
+    const open = new Map([["a", true]]);
+    const waiting = flatten(rows, open);
+    expect(waiting.map((row) => row.note)).toEqual([undefined, "waiting", undefined]);
+    expect(waiting[1]?.row.label).toBe("Loading…");
+    expect(waiting[1]?.parent).toBe(0);
+    const failed = flatten(rows, open, new Map([["a", "failed"]]));
+    expect(failed[1]?.note).toBe("failed");
+    expect(failed[1]?.row.label).toBe("Could not load");
+
+    const given = [
+      { id: "a", label: "A", lazy: true, loaded: true, children: [{ id: "a1", label: "A1" }] },
+      { id: "b", label: "B" },
+    ];
+    expect(flatten(given, open).map((row) => row.row.id)).toEqual(["a", "a1", "b"]);
+    // Given none, it is open with nothing beneath it, and says nothing.
+    const none = [{ id: "a", label: "A", lazy: true, loaded: true, children: [] }];
+    expect(flatten(none, open).map((row) => row.row.id)).toEqual(["a"]);
+  });
+});
+
+describe("the plugins' pictures and shaders", () => {
+  it("are asked for once, all that one turn wants in one question", async () => {
+    const asked: string[][] = [];
+    const held = new Assets();
+    held.connect((hashes) => {
+      asked.push([...hashes]);
+      return Promise.resolve({ a: "data:a", b: "data:b" });
+    });
+    let told = 0;
+    held.subscribe(() => told++);
+    expect(held.peek("a")).toBeUndefined();
+    held.want("a");
+    held.want("b");
+    held.want("a");
+    await held.load(["a", "b", "gone"]);
+    expect(asked).toEqual([["a", "b", "gone"]]);
+    expect(held.peek("a")).toBe("data:a");
+    expect(held.peek("gone")).toBeUndefined();
+    expect(told).toBe(1);
+
+    // Held, or known not to be there: nothing is asked.
+    await held.load(["a", "gone"]);
+    expect(asked).toHaveLength(1);
+    // Until what plugins add is worked out again.
+    held.retry();
+    await held.load(["gone"]);
+    expect(asked).toEqual([["a", "b", "gone"], ["gone"]]);
+  });
+
+  it("are asked for again after a question that failed", async () => {
+    const held = new Assets();
+    let fail = true;
+    held.connect(() => (fail ? Promise.reject(new Error("no")) : Promise.resolve({ a: "x" })));
+    await held.load(["a"]);
+    expect(held.peek("a")).toBeUndefined();
+    fail = false;
+    await held.load(["a"]);
+    expect(held.peek("a")).toBe("x");
+  });
+});
+
 describe("plugins' effects chosen in the settings", () => {
   it("draw a plugin's shader for the trail, and nothing for one that is not there", () => {
     const shown: UiContributions = {
@@ -327,16 +450,21 @@ describe("plugins' effects chosen in the settings", () => {
           kind: "trail",
           duration: 300,
           reach: 32,
-          source: "x",
+          hash: "glow-shader",
         },
       ],
     };
     const view = {
       config: { terminal: { "cursor-trail": "acme/glow", "cursor-pulse": "gone/thing" } },
     } as unknown as ConfigView;
+    // The shader the chosen effect needs, and no other; none until it is fetched.
+    expect(cursorFxShaders(view, shown)).toEqual(["glow-shader"]);
+    expect(cursorFxSettings(view, shown).customTrail).toBeUndefined();
+    assets.put("glow-shader", "x");
     const settings = cursorFxSettings(view, shown);
     expect(settings.trail).toBe("none");
     expect(settings.customTrail?.id).toBe("acme/glow");
+    expect(settings.customTrail?.source).toBe("x");
     expect(settings.pulse).toBe("none");
     expect(settings.customPulse).toBeUndefined();
   });
@@ -364,5 +492,19 @@ describe("plugins' effects chosen in the settings", () => {
     expect(tabStyleName(style)).toBe("stretch");
     expect(tabStyle("gone/thing", [motion])).toBe("glow");
     expect(tabStyle("spring", [motion])).toBe("spring");
+  });
+});
+
+describe("the parts of the page only plugins need", () => {
+  it("are loaded when first shown, not with the window", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const source = (file: string) => readFile(new URL(`../src/${file}`, import.meta.url), "utf8");
+    // Brought in where they are drawn, by a call that loads them then.
+    const host = await source("shell/PanelHost.tsx");
+    expect(host).toContain('import("./ListPanel.tsx")');
+    expect(host).not.toMatch(/^import .* from "\.\/ListPanel\.tsx";$/m);
+    const prompts = await source("Prompts.tsx");
+    expect(prompts).toContain('import("./plugins/Pick.tsx")');
+    expect(prompts).not.toMatch(/^import .* from "\.\/plugins\/Pick\.tsx";$/m);
   });
 });

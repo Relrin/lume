@@ -12,6 +12,12 @@
 //! is showing the session, or of nobody. Those answers go straight back to the program.
 //! The client tells the session what its view looks like (colours, cell size, scheme,
 //! focus) so that the answers match what the user sees.
+//!
+//! A program that redraws its whole screen may say when it begins and when it is done
+//! (synchronized output, mode 2026). Whoever reads the screen as text in between is
+//! given the screen as it was when the program began, not the half of the next one: the
+//! text is copied at that moment and answers until the program says it is done, or for
+//! a short while if it never does. Nothing is copied for a program that does not ask.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -21,7 +27,15 @@ use lume_proto::{CellPx, ClientFacts, ColorScheme, HydratePayload, TermSize};
 use lume_vt::{Colors, Format, Terminal, palette_256};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::tuning::{INPUT_BACKLOG_MAX, SCREEN_QUEUE, SCROLLBACK_MAX_BYTES, WAIT_TEXT_CHECK};
+use crate::tuning::{
+    INPUT_BACKLOG_MAX, SCREEN_QUEUE, SCROLLBACK_MAX_BYTES, SYNC_HOLD_MAX, WAIT_TEXT_CHECK,
+};
+
+/// What a program prints to say it begins a screen it does not want shown the half of.
+const BEGIN_SYNC: &[u8] = b"\x1b[?2026h";
+
+/// The number of the mode that is set while it draws.
+const SYNC_MODE: u16 = 2026;
 
 /// The version of the terminal engine every session's screen runs.
 pub fn vt_version() -> &'static str {
@@ -207,6 +221,9 @@ struct State {
     waits: Vec<Wait>,
     /// Whether output arrived since the waits last looked at the screen.
     changed: bool,
+    /// The screen as it was when the program began the one it is drawing, and when
+    /// that was. `None` while it draws none.
+    front: Option<(ScreenText, Instant)>,
 }
 
 impl State {
@@ -218,6 +235,41 @@ impl State {
             focused: false,
             waits: Vec::new(),
             changed: false,
+            front: None,
+        }
+    }
+
+    /// Takes in what the program printed. Where it says it begins a screen, the screen
+    /// before it is kept as text for whoever reads meanwhile.
+    fn feed(&mut self, bytes: &[u8]) {
+        let begins = if self.front.is_none() {
+            bytes
+                .windows(BEGIN_SYNC.len())
+                .position(|window| window == BEGIN_SYNC)
+        } else {
+            None
+        };
+        match begins {
+            Some(at) => {
+                self.terminal.write(&bytes[..at]);
+                let before = self.text();
+                self.terminal.write(&bytes[at..]);
+                self.front = before.map(|text| (text, Instant::now()));
+            }
+            None => self.terminal.write(bytes),
+        }
+        // Done within what was fed, or said to be done now: there is one screen again.
+        if self.front.is_some() && !self.terminal.mode(SYNC_MODE, false).unwrap_or(false) {
+            self.front = None;
+        }
+    }
+
+    /// The screen as whoever reads it is to have it: the one the program last
+    /// finished while it draws the next and may be believed, else the one there is.
+    fn shown(&self) -> Option<ScreenText> {
+        match &self.front {
+            Some((text, since)) if since.elapsed() < SYNC_HOLD_MAX => Some(text.clone()),
+            _ => self.text(),
         }
     }
 
@@ -265,7 +317,7 @@ impl State {
     fn on_op(&mut self, op: Op) {
         match op {
             Op::Feed(bytes) => {
-                self.terminal.write(&bytes);
+                self.feed(&bytes);
                 self.answers.send(self.terminal.take_replies());
                 self.changed = true;
             }
@@ -278,6 +330,8 @@ impl State {
                 }
                 // A program may be told the new size as the terminal changes.
                 self.answers.send(self.terminal.take_replies());
+                // A screen of another size is not the one that was kept.
+                self.front = None;
                 self.changed = true;
             }
             Op::Facts(facts) => self.on_facts(facts),
@@ -285,7 +339,7 @@ impl State {
                 let _ = reply.send(self.hydrate(with));
             }
             Op::Text(reply) => {
-                let _ = reply.send(self.text());
+                let _ = reply.send(self.shown());
             }
             Op::WaitText {
                 text,
@@ -397,7 +451,7 @@ impl State {
     }
 
     fn find(&self, text: &str) -> Option<Found> {
-        let lines = self.terminal.screen_text().ok()?;
+        let lines = self.shown()?.lines;
         let row = lines.iter().position(|line| line.contains(text))?;
         Some(Found {
             row: u16::try_from(row).ok()?,
@@ -413,7 +467,7 @@ impl State {
         let now = Instant::now();
         let lines = if self.changed || timer {
             self.changed = false;
-            self.terminal.screen_text().ok()
+            self.shown().map(|shown| shown.lines)
         } else {
             None
         };
@@ -444,3 +498,79 @@ const HYDRATE_MAX_BYTES: usize = lume_proto::tuning::MAX_HYDRATE - 1024;
 const FOCUS_EVENTS: u16 = 1004;
 /// The DEC private mode a program sets to hear of colour scheme changes.
 const COLOR_SCHEME_REPORT: u16 = 2031;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state() -> State {
+        let (input, _) = mpsc::unbounded_channel();
+        let answers = Answers {
+            input,
+            queued: Arc::new(AtomicUsize::new(0)),
+        };
+        State::new(Terminal::new(20, 4).unwrap(), answers)
+    }
+
+    fn first(state: &State) -> String {
+        state.shown().unwrap().lines[0].clone()
+    }
+
+    #[test]
+    fn a_screen_being_drawn_is_read_as_the_one_before_it_until_it_is_done() {
+        let mut state = state();
+        state.feed(b"old screen");
+        assert_eq!(first(&state), "old screen");
+        assert!(state.front.is_none());
+
+        // The program says it begins, clears, and has drawn half: what is read is
+        // still the old screen, with what came before the beginning in it.
+        state.feed(b"!\x1b[?2026h\x1b[2J\x1b[Hnew sc");
+        assert_eq!(first(&state), "old screen!");
+        assert!(state.find("new sc").is_none());
+        assert_eq!(state.find("old").map(|found| found.row), Some(0));
+        state.feed(b"reen");
+        assert_eq!(first(&state), "old screen!");
+
+        // Done: the new one, whole.
+        state.feed(b"\x1b[?2026l");
+        assert!(state.front.is_none());
+        assert_eq!(first(&state), "new screen");
+    }
+
+    #[test]
+    fn a_screen_begun_and_done_in_one_piece_keeps_nothing() {
+        let mut state = state();
+        state.feed(b"one\x1b[?2026h\x1b[2J\x1b[Htwo\x1b[?2026l");
+        assert!(state.front.is_none());
+        assert_eq!(first(&state), "two");
+    }
+
+    #[test]
+    fn a_program_that_never_says_it_is_done_is_read_as_it_stands_after_a_while() {
+        let mut state = state();
+        state.feed(b"old\x1b[?2026h\x1b[2J\x1b[Hstuck");
+        assert_eq!(first(&state), "old");
+        // As if the while had passed.
+        if let Some((_, since)) = &mut state.front {
+            *since = Instant::now() - SYNC_HOLD_MAX;
+        }
+        assert_eq!(first(&state), "stuck");
+        // More of the same screen does not begin the while again.
+        state.feed(b" still");
+        assert_eq!(first(&state), "stuck still");
+    }
+
+    #[test]
+    fn a_screen_of_another_size_is_read_as_it_is() {
+        let mut state = state();
+        state.feed(b"old\x1b[?2026h\x1b[2J\x1b[Hnew");
+        assert_eq!(first(&state), "old");
+        state.on_op(Op::Resize(
+            TermSize::new(30, 5).unwrap(),
+            CellPx { w: 8, h: 16 },
+        ));
+        assert_eq!(first(&state), "new");
+        assert_eq!(state.shown().unwrap().size, TermSize::new(30, 5).unwrap());
+    }
+}

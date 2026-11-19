@@ -43,8 +43,8 @@ use lume_plugin::id::{check_name, full_id};
 use lume_plugin::manifest::{Activation, Manifest};
 use lume_plugin::order::{Resolution, State};
 use lume_plugin::permissions::{Kind, Permissions, ScopeKind};
-use lume_plugin::store::{Check, Installed};
-use lume_plugin_api::types::{PanelRow, StatusValue, Topic};
+use lume_plugin::store::{Check, Installed, Seen};
+use lume_plugin_api::types::{PanelExpand, PanelRow, StatusValue, Topic};
 use lume_plugin_api::{ApiError, Call, ErrorCode};
 use lume_plugin_runtime::{Breach, Host, Level, Limits, Outbound, Plugin, Spec};
 use lume_services::metrics::{Hold, Listening, Sampler};
@@ -168,6 +168,27 @@ struct Loaded {
     told_settings: Option<Value>,
     /// What each of its list panels shows, by the panel's name.
     panels: BTreeMap<String, Value>,
+    /// What its code has shown in the turn it is in, which nobody sees yet.
+    next: Frame,
+}
+
+/// What a plugin's code shows during one turn: the values of status items, the rows of
+/// panels and the conditions it set, each as it will be, or nothing where it was taken
+/// away. It is put together out of sight while the turn's calls come in, and takes the
+/// place of what is shown in one step when the turn is over, so a window never shows
+/// the half of a change: a meter with its new value beside its old colour, or a panel
+/// emptied a moment before it is filled again.
+#[derive(Default)]
+struct Frame {
+    status: BTreeMap<(String, Option<String>), Option<Value>>,
+    panels: BTreeMap<String, Option<Value>>,
+    contexts: BTreeMap<String, bool>,
+}
+
+impl Frame {
+    fn is_empty(&self) -> bool {
+        self.status.is_empty() && self.panels.is_empty() && self.contexts.is_empty()
+    }
 }
 
 impl Loaded {
@@ -211,11 +232,13 @@ struct Shown {
 }
 
 /// What plugins' code showed that pages have not been told yet: status items' values by
-/// (install, item, pane), panels' rows by (install, panel).
+/// (install, item, pane), panels' rows by (install, panel), conditions by (install,
+/// key).
 #[derive(Default)]
 struct Pending {
     status: BTreeSet<(String, String, Option<String>)>,
     panels: BTreeSet<(String, String)>,
+    contexts: BTreeSet<(String, String)>,
     /// Whether something is on its way to tell them.
     telling: bool,
 }
@@ -271,6 +294,16 @@ pub struct Plugins {
     told_workspace: Mutex<Option<Value>>,
     /// Packages the settings window is installing, waiting for the user's word.
     waiting: manage::Waiting,
+    /// What this run has found of the packages it hashed, so one is hashed again only
+    /// when its files were touched.
+    seen: Arc<Seen>,
+    /// What was read of the packages for what they add to the windows.
+    read: Arc<Mutex<contributions::Read>>,
+    /// The audit entries the settings window was last shown.
+    audited: Mutex<manage::Audited>,
+    /// Rung when what is installed should be read again though the lock file did not
+    /// change: a package found changed as its code was about to start.
+    read_again: tokio::sync::Notify,
 }
 
 fn api_error(code: ErrorCode, message: impl Into<String>) -> ApiError {
@@ -306,6 +339,10 @@ impl Plugins {
             system: system::Held::default(),
             told_workspace: Mutex::new(None),
             waiting: manage::Waiting::default(),
+            seen: Arc::new(Seen::default()),
+            read: Arc::new(Mutex::new(contributions::Read::default())),
+            audited: Mutex::new(manage::Audited::default()),
+            read_again: tokio::sync::Notify::new(),
         })
     }
 
@@ -362,6 +399,13 @@ impl Plugins {
             this.reload().await;
             this.state.marks().plugins();
             this.watch_lock();
+            let again = Arc::clone(&this);
+            tokio::spawn(async move {
+                loop {
+                    again.read_again.notified().await;
+                    again.reload().await;
+                }
+            });
             tokio::spawn(Arc::clone(&this).follow_sessions());
             tokio::spawn(Arc::clone(&this).look_for_idle());
         });
@@ -372,8 +416,9 @@ impl Plugins {
     pub async fn reload(self: &Arc<Self>) {
         let store = self.store.clone();
         let marks_state = Arc::clone(&self.state);
+        let seen = Arc::clone(&self.seen);
         let read = tokio::task::spawn_blocking(move || {
-            let read = store.resolve(true);
+            let read = store.resolve_seen(&seen);
             if let Ok((installed, _)) = &read {
                 for _ in installed {
                     marks_state.marks().plugin_file();
@@ -413,6 +458,7 @@ impl Plugins {
             name: String,
             manifest: Manifest,
             dir: std::path::PathBuf,
+            content: String,
             rank: i64,
             bound: BTreeMap<String, String>,
         }
@@ -430,6 +476,7 @@ impl Plugins {
                         name: loaded.installed.name(),
                         manifest: loaded.manifest()?.clone(),
                         dir: self.store.package_dir(&loaded.installed.entry),
+                        content: loaded.installed.entry.content_hash.clone(),
                         rank: inner
                             .resolution
                             .rank(local)
@@ -453,6 +500,7 @@ impl Plugins {
             (owned, enabled)
         };
         let registry = Arc::clone(&self.registry);
+        let read = Arc::clone(&self.read);
         let built = tokio::task::spawn_blocking(move || {
             let installs: Vec<Install<'_>> = owned
                 .iter()
@@ -461,11 +509,13 @@ impl Plugins {
                     name: one.name.clone(),
                     manifest: &one.manifest,
                     dir: one.dir.clone(),
+                    content: &one.content,
                     rank: one.rank,
                     bound: &one.bound,
                 })
                 .collect();
-            contributions::build(&installs, &Known(&registry))
+            let mut read = read.lock().unwrap_or_else(PoisonError::into_inner);
+            contributions::build(&installs, &Known(&registry), &mut read)
         })
         .await;
         let Ok(built) = built else {
@@ -584,6 +634,7 @@ impl Plugins {
                         },
                         told_settings: None,
                         panels: BTreeMap::new(),
+                        next: Frame::default(),
                     }
                 }
             };
@@ -693,7 +744,7 @@ impl Plugins {
                 ));
             }
         }
-        let waiting = self.begin(local)?;
+        let waiting = self.begin(local).await?;
         match waiting {
             None => Ok(()),
             Some(receiver) => match tokio::time::timeout(START_WAIT, receiver).await {
@@ -706,8 +757,14 @@ impl Plugins {
 
     /// Starts the code of a plugin whose dependencies run, unless it runs already.
     /// Returns what to wait on, or nothing when it has started.
-    fn begin(&self, local: &str) -> Result<Option<oneshot::Receiver<Result<(), String>>>, String> {
-        let (directory, manifest, name) = {
+    ///
+    /// The package is looked at once more before its code is read: files touched since
+    /// it was last hashed are hashed again, and code from a changed package is not run.
+    async fn begin(
+        self: &Arc<Self>,
+        local: &str,
+    ) -> Result<Option<oneshot::Receiver<Result<(), String>>>, String> {
+        let (directory, manifest, name, entry) = {
             let mut inner = self.inner();
             let loaded = inner
                 .loaded
@@ -730,15 +787,42 @@ impl Plugins {
                 self.store.package_dir(&loaded.installed.entry),
                 manifest,
                 loaded.installed.name(),
+                loaded.installed.entry.clone(),
             )
         };
         let Some(main) = manifest.main.clone() else {
             return Ok(None);
         };
-        let code = std::fs::read_to_string(directory.join(&main))
-            .map_err(|error| format!("its code cannot be read: {error}"))?;
-        let source_map = std::fs::read_to_string(directory.join(format!("{main}.map"))).ok();
+        let store = self.store.clone();
+        let seen = Arc::clone(&self.seen);
+        let file = main.clone();
+        let read = tokio::task::spawn_blocking(move || {
+            let check = store.verify_seen(&entry, &seen);
+            if check != Check::Intact {
+                return Err(check);
+            }
+            let code = std::fs::read_to_string(directory.join(&file))
+                .map_err(|error| Check::Unreadable(error.to_string()))?;
+            let source_map = std::fs::read_to_string(directory.join(format!("{file}.map"))).ok();
+            Ok((code, source_map))
+        })
+        .await
+        .map_err(|_| "its code could not be read".to_owned())?;
         self.state.marks().plugin_file();
+        let (code, source_map) = match read {
+            Ok(read) => read,
+            Err(Check::Unreadable(why)) => {
+                return Err(format!("its code cannot be read: {why}"));
+            }
+            Err(_) => {
+                // What is installed is read again, which stops using it and says so.
+                self.read_again.notify_one();
+                return Err(
+                    "its files have changed since it was installed; install it again to use it"
+                        .to_owned(),
+                );
+            }
+        };
         let generation = self.next();
         let spec = Spec {
             id: local.to_owned(),
@@ -810,6 +894,7 @@ impl Plugins {
                     self.call(&local, plugin, id, &name, args);
                 }
             }
+            Outbound::TurnDone => self.turn_done(&local, generation),
             Outbound::CommandDone { invocation, result } => {
                 if let Some((_, _, sender)) = self.inner().invocations.remove(&invocation) {
                     let _ = sender.send(result);
@@ -870,6 +955,8 @@ impl Plugins {
         let running = loaded
             .running
             .take_if(|running| running.generation == generation)?;
+        // What a turn that never ended had shown is never seen.
+        loaded.next = Frame::default();
         for waiting in running.waiting {
             let _ = waiting.send(Err(why.to_owned()));
         }
@@ -1036,6 +1123,15 @@ impl Plugins {
                 return;
             }
         }
+        // What a call shows is taken in here and now, in the order the code made its
+        // calls: it only changes what is held, and the turn's end shows it.
+        let call = match self.show(local, call) {
+            Ok(result) => {
+                plugin.answer(id, result);
+                return;
+            }
+            Err(call) => *call,
+        };
         let this = Arc::clone(self);
         let local = local.to_owned();
         self.state.runtime().spawn(async move {
@@ -1044,10 +1140,89 @@ impl Plugins {
         });
     }
 
-    async fn serve(self: &Arc<Self>, local: &str, call: Call) -> Result<Value, ApiError> {
-        match call {
+    /// Takes in a call that shows something in the windows; any other call comes back.
+    fn show(&self, local: &str, call: Call) -> Result<Result<Value, ApiError>, Box<Call>> {
+        Ok(match call {
             Call::StatusSet(set) => self.status_set(local, &set.id, set.pane, Some(set.value)),
             Call::StatusClear(clear) => self.status_set(local, &clear.id, clear.pane, None),
+            Call::ContextSet(set) => self.context_set(local, set.key, set.value),
+            Call::PanelsSet(set) => self.panel_set(local, &set.id, Some(&set.rows)),
+            Call::PanelsClear(clear) => self.panel_set(local, &clear.id, None),
+            Call::PanelsSetChildren(set) => {
+                self.panel_children(local, &set.id, &set.path, &set.rows)
+            }
+            other => return Err(Box::new(other)),
+        })
+    }
+
+    /// The end of a turn of a plugin's code: what the turn showed takes the place of
+    /// what was shown, all of it at once, and pages are told soon.
+    fn turn_done(self: &Arc<Self>, local: &str, generation: u64) {
+        {
+            let mut guard = self.inner();
+            let inner = &mut *guard;
+            let Some(loaded) = inner.loaded.get_mut(local) else {
+                return;
+            };
+            let frame = std::mem::take(&mut loaded.next);
+            let current = loaded
+                .running
+                .as_ref()
+                .is_some_and(|running| running.generation == generation);
+            if !current || frame.is_empty() {
+                return;
+            }
+            for ((item, pane), value) in frame.status {
+                match value {
+                    Some(value) => {
+                        loaded.status.insert((item.clone(), pane.clone()), value);
+                    }
+                    None => {
+                        loaded.status.remove(&(item.clone(), pane.clone()));
+                    }
+                }
+                inner.pending.status.insert((local.to_owned(), item, pane));
+            }
+            for (panel, rows) in frame.panels {
+                match rows {
+                    Some(rows) => {
+                        loaded.panels.insert(panel.clone(), rows);
+                    }
+                    None => {
+                        loaded.panels.remove(&panel);
+                    }
+                }
+                inner.pending.panels.insert((local.to_owned(), panel));
+            }
+            for (key, value) in frame.contexts {
+                loaded.contexts.insert(key.clone(), value);
+                inner.pending.contexts.insert((local.to_owned(), key));
+            }
+        }
+        self.tell_soon();
+    }
+
+    /// Sets a condition the plugin's keys and menu items can be shown under.
+    fn context_set(&self, local: &str, key: String, value: bool) -> Result<Value, ApiError> {
+        check_name(&key).map_err(|problem| api_error(ErrorCode::Invalid, problem))?;
+        let mut inner = self.inner();
+        let loaded = inner
+            .loaded
+            .get_mut(local)
+            .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
+        loaded.next.contexts.insert(key, value);
+        Ok(Value::Null)
+    }
+
+    async fn serve(self: &Arc<Self>, local: &str, call: Call) -> Result<Value, ApiError> {
+        match call {
+            // Taken in before a call gets here; here for a call that comes another way.
+            shows @ (Call::StatusSet(_)
+            | Call::StatusClear(_)
+            | Call::ContextSet(_)
+            | Call::PanelsSet(_)
+            | Call::PanelsClear(_)
+            | Call::PanelsSetChildren(_)) => self.show(local, shows).unwrap_or(Ok(Value::Null)),
             Call::CommandsExecute(execute) => self.execute(local, &execute.id, execute.args).await,
             Call::KvGet(get) => {
                 self.kv(local, move |map| {
@@ -1088,21 +1263,6 @@ impl Plugins {
                     None => settings,
                 })
             }
-            Call::ContextSet(set) => {
-                check_name(&set.key).map_err(|problem| api_error(ErrorCode::Invalid, problem))?;
-                let mut inner = self.inner();
-                if let Some(loaded) = inner.loaded.get_mut(local) {
-                    loaded.contexts.insert(set.key.clone(), set.value);
-                }
-                drop(inner);
-                self.state.broadcast(&json!({
-                    "type": "plugin_context",
-                    "plugin": local,
-                    "key": set.key,
-                    "value": set.value,
-                }));
-                Ok(Value::Null)
-            }
             Call::EventsSubscribe(subscribe) => {
                 let mut inner = self.inner();
                 if let Some(loaded) = inner.loaded.get_mut(local) {
@@ -1110,8 +1270,6 @@ impl Plugins {
                 }
                 Ok(Value::Null)
             }
-            Call::PanelsSet(set) => self.panel_set(local, &set.id, Some(&set.rows)),
-            Call::PanelsClear(clear) => self.panel_set(local, &clear.id, None),
             Call::MetricsSnapshot(_) => {
                 let latest = self
                     .inner()
@@ -1197,71 +1355,135 @@ impl Plugins {
 
     /// Shows rows in one of a plugin's list panels, or takes them away.
     fn panel_set(
-        self: &Arc<Self>,
+        &self,
         local: &str,
         panel: &str,
         rows: Option<&[PanelRow]>,
     ) -> Result<Value, ApiError> {
-        let rows = {
-            let inner = self.inner();
-            let loaded = inner
-                .loaded
-                .get(local)
-                .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
-            let manifest = loaded
-                .manifest()
-                .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
-            if !manifest
-                .contributes
-                .panels
-                .iter()
-                .any(|known| known.id == panel)
-            {
-                return Err(api_error(
-                    ErrorCode::NotFound,
-                    format!("the plugin's manifest has no panel {panel}"),
-                ));
-            }
-            let commands: BTreeSet<&str> = manifest
-                .contributes
-                .commands
-                .iter()
-                .map(|command| command.id.as_str())
-                .collect();
-            match rows {
-                None => None,
-                Some(rows) => {
-                    let mut count = 0;
-                    check_rows(rows, 1, &mut count, &commands)
-                        .map_err(|problem| api_error(ErrorCode::Invalid, problem))?;
-                    let mut value = serde_json::to_value(rows).unwrap_or(Value::Null);
-                    full_commands(&mut value, local);
-                    Some(value)
-                }
+        let mut inner = self.inner();
+        let loaded = inner
+            .loaded
+            .get_mut(local)
+            .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
+        let commands = panel_commands(loaded, panel)?;
+        let rows = match rows {
+            None => None,
+            Some(rows) => {
+                let mut count = 0;
+                check_rows(rows, 1, &mut count, &commands)
+                    .map_err(|problem| api_error(ErrorCode::Invalid, problem))?;
+                let mut value = serde_json::to_value(rows).unwrap_or(Value::Null);
+                full_commands(&mut value, local);
+                Some(value)
             }
         };
-        {
-            let mut inner = self.inner();
-            if let Some(loaded) = inner.loaded.get_mut(local) {
-                match rows {
-                    Some(rows) => {
-                        loaded.panels.insert(panel.to_owned(), rows);
-                    }
-                    None => {
-                        loaded.panels.remove(panel);
-                    }
-                }
-            }
-            inner
-                .pending
-                .panels
-                .insert((local.to_owned(), panel.to_owned()));
-        }
-        self.tell_soon();
+        loaded.next.panels.insert(panel.to_owned(), rows);
         Ok(Value::Null)
     }
 
-    /// Tells pages, soon, what waits to be told: at most once every [`SHOW_EVERY`].
+    /// Gives the rows beneath a row of a panel whose rows are given when it is opened.
+    fn panel_children(
+        &self,
+        local: &str,
+        panel: &str,
+        path: &[String],
+        rows: &[PanelRow],
+    ) -> Result<Value, ApiError> {
+        let invalid = |problem: String| api_error(ErrorCode::Invalid, problem);
+        let mut inner = self.inner();
+        let loaded = inner
+            .loaded
+            .get_mut(local)
+            .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
+        let commands = panel_commands(loaded, panel)?;
+        if path.is_empty() {
+            return Err(invalid(
+                "a row is named by the ids from the top down to it".to_owned(),
+            ));
+        }
+        let mut count = 0;
+        check_rows(rows, path.len() + 1, &mut count, &commands).map_err(invalid)?;
+        // The rows as the turn has them so far, or else as they are shown.
+        let held = match loaded.next.panels.get(panel) {
+            Some(waiting) => waiting.clone(),
+            None => loaded.panels.get(panel).cloned(),
+        };
+        let mut held =
+            held.ok_or_else(|| api_error(ErrorCode::NotFound, format!("{panel} shows no rows")))?;
+        let row = row_at(&mut held, path).ok_or_else(|| {
+            api_error(
+                ErrorCode::NotFound,
+                format!("{panel} has no row {}", path.join(" / ")),
+            )
+        })?;
+        if row.get("lazy").and_then(Value::as_bool) != Some(true) {
+            return Err(invalid(format!(
+                "the row {} is not one whose rows are given when it is opened: say `lazy: true`",
+                path.join(" / ")
+            )));
+        }
+        let mut children = serde_json::to_value(rows).unwrap_or(Value::Null);
+        full_commands(&mut children, local);
+        row["children"] = children;
+        row["loaded"] = json!(true);
+        if count_rows(&held) > PANEL_ROWS_MAX {
+            return Err(invalid(format!(
+                "a panel holds {PANEL_ROWS_MAX} rows at most"
+            )));
+        }
+        loaded.next.panels.insert(panel.to_owned(), Some(held));
+        Ok(Value::Null)
+    }
+
+    /// The user opened a row of a panel whose rows are given when it is opened: the
+    /// plugin's code is told, started first if it is not running.
+    pub async fn expand(
+        self: &Arc<Self>,
+        panel: &str,
+        path: Vec<String>,
+    ) -> Result<(), CommandError> {
+        let known = self
+            .panel(panel)
+            .ok_or_else(|| CommandError::not_found(format!("no plugin adds the panel {panel}")))?;
+        let fits = !path.is_empty()
+            && path.len() <= PANEL_DEPTH_MAX
+            && path.iter().all(|id| id.chars().count() <= PANEL_TEXT_MAX);
+        let Some(row) = path.last().cloned().filter(|_| fits) else {
+            return Err(CommandError::bad_request(
+                "a row is named by the ids from the top down to it",
+            ));
+        };
+        self.activate(&known.plugin).await.map_err(|problem| {
+            CommandError::new(
+                "failed",
+                format!("{} could not start: {problem}", known.title),
+            )
+        })?;
+        let plugin = self
+            .inner()
+            .loaded
+            .get(&known.plugin)
+            .and_then(|loaded| loaded.running.as_ref())
+            .map(|running| Arc::clone(&running.plugin));
+        let Some(plugin) = plugin else {
+            return Err(CommandError::new("failed", "the plugin has no code to ask"));
+        };
+        let event = PanelExpand {
+            panel: known.view.clone(),
+            row,
+            path,
+        };
+        plugin.event(
+            &format!("panel:{}", known.view),
+            serde_json::to_value(event).unwrap_or(Value::Null),
+        );
+        Ok(())
+    }
+
+    /// Tells pages, soon, what waits to be told: at most once every [`SHOW_EVERY`], and
+    /// all a plugin showed since the last time as one notice, which a page takes in in
+    /// one step. A panel's rows go only to the windows that have the panel on screen;
+    /// a window that brings one on screen is given its rows then.
     fn tell_soon(self: &Arc<Self>) {
         {
             let mut inner = self.inner();
@@ -1274,53 +1496,64 @@ impl Plugins {
         self.state.runtime().spawn(async move {
             loop {
                 tokio::time::sleep(SHOW_EVERY).await;
-                let (status, panels) = {
+                let (frames, visible) = {
                     let mut inner = this.inner();
-                    let status = std::mem::take(&mut inner.pending.status);
-                    let panels = std::mem::take(&mut inner.pending.panels);
-                    if status.is_empty() && panels.is_empty() {
-                        inner.pending.telling = false;
+                    let pending = std::mem::take(&mut inner.pending);
+                    if pending.status.is_empty()
+                        && pending.panels.is_empty()
+                        && pending.contexts.is_empty()
+                    {
                         return;
                     }
-                    let status: Vec<Value> = status
-                        .into_iter()
-                        .map(|(local, item, pane)| {
-                            let value = inner
-                                .loaded
-                                .get(&local)
-                                .and_then(|loaded| loaded.status.get(&(item.clone(), pane.clone())))
-                                .cloned()
-                                .unwrap_or(Value::Null);
-                            json!({
-                                "type": "plugin_status",
-                                "plugin": local,
-                                "item": full_id(&local, &item),
-                                "pane": pane,
-                                "value": value,
-                            })
-                        })
-                        .collect();
-                    let panels: Vec<Value> = panels
-                        .into_iter()
-                        .map(|(local, panel)| {
-                            let rows = inner
-                                .loaded
-                                .get(&local)
-                                .and_then(|loaded| loaded.panels.get(&panel))
-                                .cloned()
-                                .unwrap_or(Value::Null);
-                            json!({
-                                "type": "plugin_panel",
-                                "plugin": local,
-                                "panel": full_id(&local, &panel),
-                                "rows": rows,
-                            })
-                        })
-                        .collect();
-                    (status, panels)
+                    inner.pending.telling = true;
+                    let mut frames: BTreeMap<String, Told> = BTreeMap::new();
+                    for (local, item, pane) in pending.status {
+                        let value = inner
+                            .loaded
+                            .get(&local)
+                            .and_then(|loaded| loaded.status.get(&(item.clone(), pane.clone())))
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        let item = full_id(&local, &item);
+                        frames.entry(local).or_default().statuses.push(json!({
+                            "item": item,
+                            "pane": pane,
+                            "value": value,
+                        }));
+                    }
+                    for (local, panel) in pending.panels {
+                        let rows = inner
+                            .loaded
+                            .get(&local)
+                            .and_then(|loaded| loaded.panels.get(&panel))
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        let panel = full_id(&local, &panel);
+                        frames.entry(local).or_default().panels.insert(panel, rows);
+                    }
+                    for (local, key) in pending.contexts {
+                        let value = inner
+                            .loaded
+                            .get(&local)
+                            .and_then(|loaded| loaded.contexts.get(&key))
+                            .copied()
+                            .unwrap_or(false);
+                        let name = format!("plugin:{local}.{key}");
+                        frames
+                            .entry(local)
+                            .or_default()
+                            .contexts
+                            .insert(name, json!(value));
+                    }
+                    (frames, inner.visible.clone())
                 };
-                for notice in status.iter().chain(&panels) {
-                    this.state.broadcast(notice);
+                let links = this.state.links();
+                for (local, told) in &frames {
+                    for (label, link) in &links {
+                        if let Some(notice) = told.notice(local, visible.get(label)) {
+                            link.notify(&notice);
+                        }
+                    }
                 }
             }
         });
@@ -1328,62 +1561,58 @@ impl Plugins {
 
     /// Shows a value in one of a plugin's status items, or takes it back.
     fn status_set(
-        self: &Arc<Self>,
+        &self,
         local: &str,
         item: &str,
         pane: Option<String>,
         value: Option<StatusValue>,
     ) -> Result<Value, ApiError> {
-        {
-            let mut inner = self.inner();
-            let loaded = inner
-                .loaded
-                .get_mut(local)
-                .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
-            let declared = loaded.manifest().is_some_and(|manifest| {
-                manifest
-                    .contributes
-                    .status
-                    .iter()
-                    .any(|status| status.id == item)
-            });
-            if !declared {
+        let mut inner = self.inner();
+        let loaded = inner
+            .loaded
+            .get_mut(local)
+            .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
+        let declared = loaded.manifest().is_some_and(|manifest| {
+            manifest
+                .contributes
+                .status
+                .iter()
+                .any(|status| status.id == item)
+        });
+        if !declared {
+            return Err(api_error(
+                ErrorCode::NotFound,
+                format!("the plugin's manifest has no status item {item}"),
+            ));
+        }
+        if let Some(color) = value.as_ref().and_then(|value| value.color.as_deref()) {
+            let named = lume_config::tokens::token_def(color)
+                .is_some_and(|token| token.kind == lume_config::TokenKind::Color);
+            if !named {
                 return Err(api_error(
-                    ErrorCode::NotFound,
-                    format!("the plugin's manifest has no status item {item}"),
+                    ErrorCode::Invalid,
+                    format!("`{color}` is not one of the theme's colours, as color.tab.purple"),
                 ));
             }
-            if let Some(color) = value.as_ref().and_then(|value| value.color.as_deref()) {
-                let named = lume_config::tokens::token_def(color)
-                    .is_some_and(|token| token.kind == lume_config::TokenKind::Color);
-                if !named {
-                    return Err(api_error(
-                        ErrorCode::Invalid,
-                        format!("`{color}` is not one of the theme's colours, as color.tab.purple"),
-                    ));
-                }
-            }
-            let key = (item.to_owned(), pane.clone());
-            match value {
-                None => {
-                    loaded.status.remove(&key);
-                }
-                Some(value) => {
-                    let fresh = serde_json::to_value(value).unwrap_or(Value::Null);
-                    let entry = loaded.status.entry(key).or_insert_with(|| json!({}));
-                    if let (Some(old), Some(new)) = (entry.as_object_mut(), fresh.as_object()) {
-                        for (field, value) in new {
-                            old.insert(field.clone(), value.clone());
-                        }
-                    }
-                }
-            }
-            inner
-                .pending
-                .status
-                .insert((local.to_owned(), item.to_owned(), pane));
         }
-        self.tell_soon();
+        let key = (item.to_owned(), pane);
+        let fresh = value.map(|value| {
+            let fresh = serde_json::to_value(value).unwrap_or(Value::Null);
+            // The fields set join those the item has: as the turn has them so far, or
+            // else as they are shown.
+            let held = match loaded.next.status.get(&key) {
+                Some(waiting) => waiting.clone(),
+                None => loaded.status.get(&key).cloned(),
+            };
+            let mut merged = held.unwrap_or_else(|| json!({}));
+            if let (Some(old), Some(new)) = (merged.as_object_mut(), fresh.as_object()) {
+                for (field, value) in new {
+                    old.insert(field.clone(), value.clone());
+                }
+            }
+            merged
+        });
+        loaded.next.status.insert(key, fresh);
         Ok(Value::Null)
     }
 
@@ -1876,6 +2105,7 @@ impl Plugins {
                         "memory": stats.memory_used,
                         "timers": stats.timers,
                         "calls": stats.calls_in_flight,
+                        "missed": stats.events_missed,
                     })
                 });
                 json!({
@@ -1894,6 +2124,9 @@ impl Plugins {
                     "contexts": loaded.contexts,
                     "warnings": loaded.health.warnings,
                     "panels": loaded.panels.keys().collect::<Vec<_>>(),
+                    "rows": loaded.panels.iter().map(|(panel, rows)| {
+                        (panel.clone(), json!(count_rows(rows)))
+                    }).collect::<Map<String, Value>>(),
                     "visible": visible.iter().filter(|id| {
                         id.strip_prefix(local.as_str()).is_some_and(|rest| rest.starts_with('.'))
                     }).collect::<Vec<_>>(),
@@ -1909,9 +2142,11 @@ impl Plugins {
     }
 
     /// What the plugins add to the windows, with what their code shows in it now: what
-    /// a page fetches when it starts and whenever it is told this changed.
-    pub fn snapshot(&self) -> Value {
+    /// a page fetches when it starts and whenever it is told this changed. Of the
+    /// panels' rows it holds those of the panels the window has on screen.
+    pub fn snapshot(&self, window: &str) -> Value {
         let inner = self.inner();
+        let on_screen = inner.visible.get(window);
         let mut snapshot = inner.shown.contributions.to_json();
         let plugins: Vec<Value> = inner
             .resolution
@@ -1941,7 +2176,10 @@ impl Plugins {
                 }));
             }
             for (panel, rows) in &loaded.panels {
-                panels.insert(full_id(local, panel), rows.clone());
+                let id = full_id(local, panel);
+                if on_screen.is_some_and(|items| items.contains(&id)) {
+                    panels.insert(id, rows.clone());
+                }
             }
             for (key, value) in &loaded.contexts {
                 contexts.insert(format!("plugin:{local}.{key}"), json!(value));
@@ -1974,10 +2212,36 @@ impl Plugins {
         self.recount(window, items);
     }
 
+    /// A picture, as the address a window draws it from, or a cursor effect's shader,
+    /// by the hash the window was told.
+    pub fn asset(&self, hash: &str) -> Option<String> {
+        self.inner()
+            .shown
+            .contributions
+            .asset(hash)
+            .map(str::to_owned)
+    }
+
     fn recount(self: &Arc<Self>, window: &str, items: Vec<String>) {
-        let appeared: Vec<String> = {
+        let (appeared, rows): (Vec<String>, BTreeMap<String, Told>) = {
             let mut inner = self.inner();
             let before = seen(&inner);
+            // The panels this window did not have on screen and now has: it is given
+            // their rows, which it was not sent while it did not show them.
+            let had = inner.visible.get(window).cloned().unwrap_or_default();
+            let mut rows: BTreeMap<String, Told> = BTreeMap::new();
+            for id in items.iter().filter(|id| !had.contains(*id)) {
+                let found = inner.loaded.iter().find_map(|(local, loaded)| {
+                    let name = id.strip_prefix(local.as_str())?.strip_prefix('.')?;
+                    Some((local, loaded.panels.get(name)?))
+                });
+                if let Some((local, shown)) = found {
+                    rows.entry(local.clone())
+                        .or_default()
+                        .panels
+                        .insert(id.clone(), shown.clone());
+                }
+            }
             if items.is_empty() {
                 inner.visible.remove(window);
             } else {
@@ -1986,8 +2250,15 @@ impl Plugins {
                     .insert(window.to_owned(), items.into_iter().collect());
             }
             let after = seen(&inner);
-            after.difference(&before).cloned().collect()
+            (after.difference(&before).cloned().collect(), rows)
         };
+        if let Some(link) = self.state.page_of(window) {
+            for (local, told) in &rows {
+                if let Some(notice) = told.notice(local, None) {
+                    link.notify(&notice);
+                }
+            }
+        }
         for id in appeared {
             let wanted = {
                 let inner = self.inner();
@@ -2098,8 +2369,10 @@ impl Plugins {
                     })
                     .collect()
             };
+            // Only the newest reading counts: one a busy plugin has not taken yet is
+            // replaced, not followed by this one.
             for (plugin, ids) in deliver {
-                plugin.event("metrics", json!({ "to": ids, "sample": sample }));
+                plugin.latest("metrics", json!({ "to": ids, "sample": sample }));
             }
         }
     }
@@ -2130,6 +2403,87 @@ impl Plugins {
     }
 }
 
+/// What one plugin's code showed since pages were last told.
+#[derive(Default)]
+struct Told {
+    statuses: Vec<Value>,
+    /// By the panel's full id, its rows, or null where it shows none.
+    panels: BTreeMap<String, Value>,
+    contexts: Map<String, Value>,
+}
+
+impl Told {
+    /// The notice of it for a window that has `on_screen` on screen, with the rows of
+    /// the panels it shows and of no other; with every panel's when nothing is given.
+    /// Nothing when none of it is for that window.
+    fn notice(&self, plugin: &str, on_screen: Option<&BTreeSet<String>>) -> Option<Value> {
+        let panels: Map<String, Value> = self
+            .panels
+            .iter()
+            .filter(|(id, _)| on_screen.is_none_or(|items| items.contains(*id)))
+            .map(|(id, rows)| (id.clone(), rows.clone()))
+            .collect();
+        if self.statuses.is_empty() && self.contexts.is_empty() && panels.is_empty() {
+            return None;
+        }
+        Some(json!({
+            "type": "plugin_frame",
+            "plugin": plugin,
+            "statuses": self.statuses,
+            "panels": panels,
+            "contexts": self.contexts,
+        }))
+    }
+}
+
+/// The plugin's commands a panel's rows may run, once the panel is known to be one of
+/// its manifest's.
+fn panel_commands(loaded: &Loaded, panel: &str) -> Result<BTreeSet<String>, ApiError> {
+    let manifest = loaded
+        .manifest()
+        .ok_or_else(|| api_error(ErrorCode::Stopped, "the plugin is not installed"))?;
+    if !manifest
+        .contributes
+        .panels
+        .iter()
+        .any(|known| known.id == panel)
+    {
+        return Err(api_error(
+            ErrorCode::NotFound,
+            format!("the plugin's manifest has no panel {panel}"),
+        ));
+    }
+    Ok(manifest
+        .contributes
+        .commands
+        .iter()
+        .map(|command| command.id.clone())
+        .collect())
+}
+
+/// The row at the end of a path of ids, among rows as they are kept.
+fn row_at<'a>(rows: &'a mut Value, path: &[String]) -> Option<&'a mut Value> {
+    let (first, rest) = path.split_first()?;
+    let row = rows
+        .as_array_mut()?
+        .iter_mut()
+        .find(|row| row.get("id").and_then(Value::as_str) == Some(first.as_str()))?;
+    if rest.is_empty() {
+        Some(row)
+    } else {
+        row_at(row.get_mut("children")?, rest)
+    }
+}
+
+/// How many rows there are among rows as they are kept, at every depth.
+fn count_rows(rows: &Value) -> usize {
+    rows.as_array().map_or(0, |rows| {
+        rows.iter()
+            .map(|row| 1 + row.get("children").map_or(0, count_rows))
+            .sum()
+    })
+}
+
 /// Everything the windows that are not minimised have on screen.
 fn seen(inner: &Inner) -> BTreeSet<String> {
     inner
@@ -2146,7 +2500,7 @@ fn check_rows(
     rows: &[PanelRow],
     depth: usize,
     count: &mut usize,
-    commands: &BTreeSet<&str>,
+    commands: &BTreeSet<String>,
 ) -> Result<(), String> {
     if depth > PANEL_DEPTH_MAX {
         return Err(format!("a panel's rows go {PANEL_DEPTH_MAX} deep at most"));
@@ -2176,7 +2530,7 @@ fn check_rows(
             }
         }
         for action in row.actions.iter().flatten() {
-            if !commands.contains(action.command.as_str()) {
+            if !commands.contains(&action.command) {
                 return Err(format!(
                     "an action runs {}, which is not one of the plugin's commands",
                     action.command
@@ -2190,12 +2544,16 @@ fn check_rows(
     Ok(())
 }
 
-/// Gives the actions of rows their commands' full ids.
+/// Gives the actions of rows their commands' full ids, and marks the rows whose rows
+/// are given when they are opened and that came with them as having them.
 fn full_commands(rows: &mut Value, local: &str) {
     let Some(rows) = rows.as_array_mut() else {
         return;
     };
     for row in rows {
+        if row.get("lazy").and_then(Value::as_bool) == Some(true) && row.get("children").is_some() {
+            row["loaded"] = json!(true);
+        }
         if let Some(actions) = row.get_mut("actions").and_then(Value::as_array_mut) {
             for action in actions {
                 if let Some(command) = action.get("command").and_then(Value::as_str) {
@@ -2228,7 +2586,7 @@ mod tests {
 
     #[test]
     fn a_panels_rows_are_held_to_their_limits_and_run_the_plugins_own_commands() {
-        let commands: BTreeSet<&str> = ["open"].into_iter().collect();
+        let commands: BTreeSet<String> = ["open".to_owned()].into_iter().collect();
         let good = rows(json!([
             { "id": "a", "label": "A", "children": [
                 { "id": "a1", "label": "A1", "actions": [{ "command": "open", "title": "Open" }] }
@@ -2271,6 +2629,68 @@ mod tests {
             check_rows(&rows(Value::Array(many)), 1, &mut 0, &commands)
                 .unwrap_err()
                 .contains("rows at most")
+        );
+    }
+
+    #[test]
+    fn a_row_is_found_by_the_ids_down_to_it_and_rows_are_counted_at_every_depth() {
+        let mut held = json!([
+            { "id": "a", "label": "A", "lazy": true, "children": [
+                { "id": "b", "label": "B", "children": [{ "id": "c", "label": "C" }] }
+            ] },
+            { "id": "d", "label": "D" },
+        ]);
+        assert_eq!(count_rows(&held), 4);
+        let path = |ids: &[&str]| ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            row_at(&mut held, &path(&["a", "b", "c"])).unwrap()["label"],
+            "C"
+        );
+        assert_eq!(row_at(&mut held, &path(&["d"])).unwrap()["label"], "D");
+        assert!(row_at(&mut held, &path(&["a", "x"])).is_none());
+        assert!(row_at(&mut held, &path(&["d", "e"])).is_none());
+        assert!(row_at(&mut held, &[]).is_none());
+
+        // A row that came with the rows it would otherwise be asked for has them.
+        full_commands(&mut held, "acme.tools");
+        assert_eq!(held[0]["loaded"], true);
+        assert!(held[1].get("loaded").is_none());
+    }
+
+    #[test]
+    fn a_window_is_told_what_a_plugin_showed_as_one_and_only_the_rows_it_shows() {
+        let mut told = Told::default();
+        told.statuses
+            .push(json!({ "item": "acme.cpu", "pane": null, "value": { "text": "4%" } }));
+        told.panels.insert(
+            "acme.procs".to_owned(),
+            json!([{ "id": "a", "label": "A" }]),
+        );
+        told.panels.insert("acme.files".to_owned(), Value::Null);
+        let on_screen: BTreeSet<String> = ["acme.procs".to_owned()].into_iter().collect();
+
+        let seen = told.notice("acme", Some(&on_screen)).unwrap();
+        assert_eq!(seen["type"], "plugin_frame");
+        assert_eq!(seen["statuses"][0]["value"]["text"], "4%");
+        assert_eq!(seen["panels"].as_object().unwrap().len(), 1);
+        assert_eq!(seen["panels"]["acme.procs"][0]["id"], "a");
+
+        // A window with nothing of it on screen still hears of the status items.
+        let other = told.notice("acme", Some(&BTreeSet::new())).unwrap();
+        assert!(other["panels"].as_object().unwrap().is_empty());
+
+        // Rows alone are not told to a window that does not show their panel.
+        let rows_only = Told {
+            panels: told.panels.clone(),
+            ..Told::default()
+        };
+        assert!(rows_only.notice("acme", Some(&BTreeSet::new())).is_none());
+        assert_eq!(
+            rows_only.notice("acme", None).unwrap()["panels"]
+                .as_object()
+                .unwrap()
+                .len(),
+            2
         );
     }
 

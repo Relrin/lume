@@ -1,0 +1,21 @@
+# A plugin for the end-to-end tests: a panel whose rows are a tree too large to give
+# whole. The rows beneath a folder are given when the folder is opened.
+schema = 1
+id = "test.tree"
+name = "Tree"
+version = "1.0.0"
+description = "A tree of folders whose rows come when they are opened."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-tree"
+activation = ["onView:files", "onCommand:show"]
+
+[[contributes.commands]]
+id = "show"
+title = "Show the tree"
+
+[[contributes.panels]]
+id = "files"
+title = "Files"
+kind = "list"
+area = "right"

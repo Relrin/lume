@@ -246,6 +246,20 @@ Takes away the rows a list panel shows.
 
 Gives `void`.
 
+### `lume.panels.setChildren(id, path, rows)`
+
+Gives the rows beneath a row that is `lazy`, by the ids of the rows from the top
+ down to it, in place of those it had. They count toward the panel's 5000 rows
+ and eight levels. Setting the panel's rows anew takes them away with the rest.
+
+| Argument | Type | |
+|---|---|---|
+| `id` | `string` | The panel, by the name the manifest gives it. |
+| `path` | `string[]` | The row, by the ids of the rows from the top down to it. |
+| `rows` | `PanelRow[]` |  |
+
+Gives `void`.
+
 ## lume.panes
 
 ### `lume.panes.list()`
@@ -897,6 +911,16 @@ What the programs of a pane use: the one it started and everything it started.
 | `pane` | `string` |  |
 | `text` | `string` | What is typed, as it is: a line ends with `\r` to be run. |
 
+### `PanelExpand`
+
+A row of a list panel the user opened whose rows are given when it is opened.
+
+| Field | Type | |
+|---|---|---|
+| `panel` | `string` | The panel, by the name the manifest gives it. |
+| `path` | `string[]` | The ids of the rows from the top down to it. |
+| `row` | `string` | The row's id. |
+
 ### `PanelId`
 
 | Field | Type | |
@@ -917,6 +941,7 @@ One row of a list panel. Rows hold rows of their own, which open beneath them.
 | `icon` | `string` | optional. One of the plugin's pictures, by the name its manifest gives it, or one of the application's, by name. |
 | `id` | `string` | Names the row among its siblings, for the actions run on it. |
 | `label` | `string` |  |
+| `lazy` | `boolean` | optional. Whether the row has rows beneath it that are given only when the user opens it: `lume.panels.onExpand` hears of that, and `lume.panels.setChildren` gives them. A tree too large to build whole is shown this way. |
 | `tone` | `Tone` | optional.  |
 
 ### `PanelsSet`
@@ -924,6 +949,14 @@ One row of a list panel. Rows hold rows of their own, which open beneath them.
 | Field | Type | |
 |---|---|---|
 | `id` | `string` | The panel, by the name the manifest gives it. |
+| `rows` | `PanelRow[]` |  |
+
+### `PanelsSetChildren`
+
+| Field | Type | |
+|---|---|---|
+| `id` | `string` | The panel, by the name the manifest gives it. |
+| `path` | `string[]` | The row, by the ids of the rows from the top down to it. |
 | `rows` | `PanelRow[]` |  |
 
 ### `PermissionsRequest`

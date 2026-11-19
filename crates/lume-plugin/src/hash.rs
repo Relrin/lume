@@ -84,6 +84,34 @@ pub fn slashed(path: &Path) -> String {
         .join("/")
 }
 
+/// What a package's files look like from outside: every file's path, length and the
+/// time it was last written, without reading any of them. Two looks that are the same
+/// say the files were very likely not touched in between; it is no proof, so it only
+/// ever spares hashing a package again that this run has hashed already.
+pub fn fingerprint(root: &Path) -> Result<String, HashError> {
+    let mut whole = Sha256::new();
+    for relative in files(root)? {
+        let path = root.join(&relative);
+        let metadata = std::fs::symlink_metadata(&path).map_err(|error| HashError::Io {
+            path: path.clone(),
+            error,
+        })?;
+        let written = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |since| since.as_nanos());
+        let mut line = String::new();
+        let _ = writeln!(line, "{relative}\0{}\0{written}", metadata.len());
+        whole.update(line.as_bytes());
+    }
+    let mut text = String::new();
+    for byte in whole.finalize() {
+        let _ = write!(text, "{byte:02x}");
+    }
+    Ok(text)
+}
+
 /// The hash of the package in `root`.
 pub fn of_package(root: &Path) -> Result<String, HashError> {
     let mut whole = Sha256::new();
@@ -148,6 +176,25 @@ mod tests {
         // The same bytes under another name are another package.
         std::fs::rename(dir.path().join("dist"), dir.path().join("out")).unwrap();
         assert_ne!(of_package(dir.path()).unwrap(), first);
+    }
+
+    #[test]
+    fn the_look_of_a_package_changes_when_a_file_is_written_added_or_removed() {
+        let dir = TempDir::new("fingerprint");
+        dir.write("plugin.toml", "id = 1");
+        dir.write("dist/host.js", "run()");
+        let first = fingerprint(dir.path()).unwrap();
+        assert_eq!(fingerprint(dir.path()).unwrap(), first);
+
+        dir.write("dist/host.js", "run();");
+        assert_ne!(fingerprint(dir.path()).unwrap(), first);
+
+        dir.write("dist/host.js", "run()");
+        dir.write("dist/extra.js", "");
+        let added = fingerprint(dir.path()).unwrap();
+        assert_ne!(added, first);
+        std::fs::remove_file(dir.path().join("dist/extra.js")).unwrap();
+        assert_ne!(fingerprint(dir.path()).unwrap(), added);
     }
 
     #[test]

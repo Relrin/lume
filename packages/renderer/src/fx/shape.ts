@@ -69,13 +69,20 @@ export interface FxBackend {
   onLost(listener: () => void): void;
   dispose(): void;
   /**
-   * Readies a plugin's shader to be drawn with. Only WebGL2 has these; with Canvas 2D a
-   * plugin's effect is not drawn.
+   * Begins building a plugin's shader to be drawn with. Only WebGL2 has these; with
+   * Canvas 2D a plugin's effect is not drawn. The building goes on beside the page
+   * where the browser can do that, and `customReady` says when it is over.
    */
   prepareCustom?(id: string, source: string): void;
   /**
-   * Draws a frame of a plugin's effect over what `draw` drew. Throws a
-   * `CustomEffectError` when the shader could not be built.
+   * Whether a plugin's shader is built and can be drawn with: false while it is
+   * still being built, without waiting for it. Throws a `CustomEffectError` when it
+   * could not be built.
+   */
+  customReady?(id: string): boolean;
+  /**
+   * Draws a frame of a plugin's effect over what `draw` drew. A shader `customReady`
+   * has not said is built draws nothing: a frame never waits for one.
    */
   drawCustom?(id: string, frame: CustomDraw): void;
   /** Lets go of a plugin's shader. */

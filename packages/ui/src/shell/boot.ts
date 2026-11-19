@@ -45,7 +45,8 @@ import { VisibleItems } from "../plugins/visible.ts";
 import { createProfilesStore, findProfile, type ProfilesStore } from "../profiles/store.ts";
 import { SearchController } from "../search/controller.ts";
 import { createStatusStore, type StatusStore } from "../status/registry.ts";
-import { CursorFx, cursorFxSettings } from "../terminal/cursor-fx.ts";
+import { assets } from "../plugins/assets.ts";
+import { CursorFx, cursorFxSettings, cursorFxShaders } from "../terminal/cursor-fx.ts";
 import { currentPlatform, KeyLayout } from "../terminal/keyboard.ts";
 import { PromptStore } from "../terminal/prompts.ts";
 import { answerRequest, type PaneRef, type RemoteTarget } from "../terminal/remote.ts";
@@ -95,6 +96,11 @@ export interface ShellApp {
   readonly plugins: PluginsStore;
   /** Which of the plugins' things the window has on screen. */
   readonly visible: VisibleItems;
+  /**
+   * Asks a plugin for the rows beneath a row of its list panel that the user opened,
+   * by the panel's id and the ids of the rows down to it.
+   */
+  readonly expandRow: (panel: string, path: readonly string[]) => Promise<void>;
   /** What the window is doing on the desktop. */
   readonly windowState: WindowStateStore;
   /** Moves cards about the window by their headers. */
@@ -302,7 +308,24 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   // one pane to another; the page gives them their element when it is rendered.
   const lessMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const cursorFx = new CursorFx((container) => host.createCursorEffects(container), lessMotion);
-  cursorFx.configure(cursorFxSettings(configView, plugins.getState().shown));
+  // The plugins' pictures and shaders are fetched as they are needed.
+  assets.connect((hashes) => client.uiAssets(hashes));
+  // The effects the configuration names, with the plugins' shaders among them: a
+  // shader not fetched yet is fetched, and the effects are set up again when it is
+  // there, unless something else was chosen meanwhile.
+  const configureCursorFx = (): void => {
+    const view = config.getState().view;
+    const shown = plugins.getState().shown;
+    cursorFx.configure(cursorFxSettings(view, shown));
+    const wanted = cursorFxShaders(view, shown).filter((hash) => assets.peek(hash) === undefined);
+    if (wanted.length === 0) return;
+    void assets.load(wanted).then(() => {
+      if (wanted.some((hash) => assets.peek(hash) !== undefined)) {
+        cursorFx.configure(cursorFxSettings(config.getState().view, plugins.getState().shown));
+      }
+    });
+  };
+  configureCursorFx();
   cursorFx.onProblem((id, message) => {
     const named = plugins.getState().shown?.cursor_effects.find((effect) => effect.id === id);
     notices.push(
@@ -323,7 +346,8 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         if (shown.revision < contributionsRevision) return;
         contributionsRevision = shown.revision;
         plugins.getState().set(shown);
-        cursorFx.configure(cursorFxSettings(config.getState().view, shown));
+        assets.retry();
+        configureCursorFx();
       },
       (error: unknown) => {
         fetchingContributions = false;
@@ -453,7 +477,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         if (!config.getState().set(notice.view)) break;
         look = appearance();
         applyConfig(notice.view);
-        cursorFx.configure(cursorFxSettings(notice.view, plugins.getState().shown));
+        configureCursorFx();
         shortcuts.setBindings(notice.view.keymap.bindings);
         {
           // The terminals are set up again once the font the configuration now names
@@ -493,9 +517,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       case "contributions_changed":
         if (notice.revision > contributionsRevision) fetchContributions();
         break;
-      case "plugin_status":
-      case "plugin_panel":
-      case "plugin_context":
+      case "plugin_frame":
       case "plugin_state":
         plugins.getState().follow(notice);
         break;
@@ -725,6 +747,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     status,
     plugins,
     visible,
+    expandRow: (panel, path) => client.uiPanelExpand(panel, path),
     windowState,
     cardDrag,
     panelDrag,

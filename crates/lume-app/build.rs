@@ -45,6 +45,8 @@ const COMMANDS: &[&str] = &[
     "workspaces_list",
     "ui_contributions",
     "ui_visible",
+    "ui_assets",
+    "ui_panel_expand",
     "addons_list",
     "addon_set_enabled",
     "addon_remove",

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ui-panel-expand"
+description = "Enables the ui_panel_expand command without any pre-configured scope."
+commands.allow = ["ui_panel_expand"]
+
+[[permission]]
+identifier = "deny-ui-panel-expand"
+description = "Denies the ui_panel_expand command without any pre-configured scope."
+commands.deny = ["ui_panel_expand"]

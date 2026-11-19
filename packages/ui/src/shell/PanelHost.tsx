@@ -11,7 +11,7 @@
  * panel of a plugin that is not there, or cannot be used, says whose it is.
  */
 
-import { useRef } from "react";
+import { lazy, Suspense, useRef } from "react";
 import { useStore } from "zustand";
 
 import type { PanelDef } from "../core/types.ts";
@@ -24,9 +24,13 @@ import { DRAG_START_PX } from "../tuning.ts";
 import { useShell } from "./context.ts";
 import { useKeyHint } from "./hints.ts";
 import { CloseIcon, CollapseIcon } from "./icons.tsx";
-import { ListPanel } from "./ListPanel.tsx";
 import { PluginViewPlaceholder } from "./PluginViewPlaceholder.tsx";
 import { TabListPanel } from "./TabListPanel.tsx";
+
+// A plugin's list panel is a part of the page a window without one never loads.
+const ListPanel = lazy(() =>
+  import("./ListPanel.tsx").then((loaded) => ({ default: loaded.ListPanel })),
+);
 
 /** The sides the list of tabs may be docked at. */
 const TAB_LIST_AREAS: readonly SideArea[] = ["left", "right"];
@@ -184,7 +188,9 @@ export function PanelHost({ panel, area }: { panel: Panel; area: SideArea }) {
         {panel.content.type === "tab_list" && <TabListPanel />}
         {panel.content.type === "plugin_view" &&
           (def !== undefined && ready && def.kind === "list" ? (
-            <ListPanel panel={def} />
+            <Suspense fallback={null}>
+              <ListPanel panel={def} />
+            </Suspense>
           ) : (
             <PluginViewPlaceholder plugin={panel.content.plugin} view={panel.content.view} />
           ))}

@@ -66,6 +66,14 @@ interface PlayingCustom {
 /** How long after a plugin's effect played the loss of WebGL is laid at its door. */
 const CUSTOM_BLAME_MS = 2000;
 
+/**
+ * How often a shader that is being built is looked at, and how many times at most: a
+ * shader is built in well under a second, and one that takes longer is found out when
+ * the cursor next jumps.
+ */
+const BUILD_LOOK_MS = 100;
+const BUILD_LOOKS_MAX = 50;
+
 /** Where the effects' canvas goes in the page. */
 export interface FxSurface<Canvas> {
   createCanvas(): Canvas;
@@ -169,13 +177,42 @@ export class CursorEffects<Canvas> implements FrameView {
     this.#problem = listener;
   }
 
-  /** Whether a plugin's effect can be drawn here, as far as is known. */
+  /**
+   * Whether a plugin's effect can be drawn here and now: its shader is built. One
+   * still being built is not played, and nothing waits for it; the jumps until then go
+   * without.
+   */
   #usable(effect: CustomEffect | undefined): effect is CustomEffect {
     return (
       effect !== undefined &&
       !this.#failed.has(effect.id) &&
-      this.#backend?.prepareCustom !== undefined
+      this.#backend?.prepareCustom !== undefined &&
+      this.#built(effect.id)
     );
+  }
+
+  /** Whether a plugin's shader is built. One that could not be is given up, and said. */
+  #built(id: string): boolean {
+    try {
+      return this.#backend?.customReady?.(id) ?? true;
+    } catch (error) {
+      if (!(error instanceof CustomEffectError)) throw error;
+      this.#fail(id, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Looks now and then at a shader that is being built, so that one that cannot be
+   * built is said when that is known and not when the cursor next jumps.
+   */
+  #watch(id: string, looks = 0): void {
+    if (looks >= BUILD_LOOKS_MAX) return;
+    setTimeout(() => {
+      const chosen = this.#settings.customTrail?.id === id || this.#settings.customPulse?.id === id;
+      if (this.#disposed || !chosen || this.#failed.has(id) || !this.#backend) return;
+      if (!this.#built(id) && !this.#failed.has(id)) this.#watch(id, looks + 1);
+    }, BUILD_LOOK_MS);
   }
 
   #fail(id: string, message: string): void {
@@ -207,7 +244,10 @@ export class CursorEffects<Canvas> implements FrameView {
     this.#prepareCustoms();
   }
 
-  /** Builds the plugins' shaders now, so the first effect does not wait for them. */
+  /**
+   * Begins building the plugins' shaders now, so that they are ready by the time the
+   * cursor jumps. Building goes on beside the page; no frame waits for it.
+   */
   #prepareCustoms(): void {
     const backend = this.#backend;
     if (!backend?.prepareCustom) return;
@@ -217,7 +257,9 @@ export class CursorEffects<Canvas> implements FrameView {
         backend.prepareCustom(effect.id, effect.source);
       } catch (error) {
         this.#fail(effect.id, error instanceof Error ? error.message : String(error));
+        continue;
       }
+      if (!this.#built(effect.id) && !this.#failed.has(effect.id)) this.#watch(effect.id);
     }
   }
 

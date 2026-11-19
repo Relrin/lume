@@ -402,6 +402,24 @@ export interface PaneWrite {
   text: string;
 }
 
+/**
+ * A row of a list panel the user opened whose rows are given when it is opened.
+ */
+export interface PanelExpand {
+  /**
+   * The panel, by the name the manifest gives it.
+   */
+  panel: string;
+  /**
+   * The ids of the rows from the top down to it.
+   */
+  path: string[];
+  /**
+   * The row's id.
+   */
+  row: string;
+}
+
 export interface PanelId {
   id: string;
 }
@@ -440,6 +458,12 @@ export interface PanelRow {
    */
   id: string;
   label: string;
+  /**
+   * Whether the row has rows beneath it that are given only when the user opens it:
+   * `lume.panels.onExpand` hears of that, and `lume.panels.setChildren` gives them.
+   * A tree too large to build whole is shown this way.
+   */
+  lazy?: boolean;
   tone?: Tone;
 }
 
@@ -448,6 +472,18 @@ export interface PanelsSet {
    * The panel, by the name the manifest gives it.
    */
   id: string;
+  rows: PanelRow[];
+}
+
+export interface PanelsSetChildren {
+  /**
+   * The panel, by the name the manifest gives it.
+   */
+  id: string;
+  /**
+   * The row, by the ids of the rows from the top down to it.
+   */
+  path: string[];
   rows: PanelRow[];
 }
 
@@ -916,6 +952,16 @@ export interface LumeBase {
     /** The same as `sessions.onEvent`: what the panes' sessions report. */
     onEvent(listener: (report: SessionReport) => void): Disposable;
   };
+  readonly panels: {
+    /**
+     * Hears when the user opens a row of one of the plugin's list panels that is
+     * `lazy` and has not been given its rows yet. Give them with `setChildren`; the
+     * row shows that it is waiting until then, and that nothing came after ten
+     * seconds. A plugin whose manifest starts it with `onView:<panel>` is started to
+     * hear this.
+     */
+    onExpand(id: string, listener: (event: PanelExpand) => void): Disposable;
+  };
   readonly workspace: {
     /**
      * Hears when the workspace in use changes, or its root folder does. Needs the
@@ -1098,6 +1144,12 @@ export interface LumeCalls {
      * Takes away the rows a list panel shows.
      */
     clear(id: string): Promise<void>;
+    /**
+     * Gives the rows beneath a row that is `lazy`, by the ids of the rows from the top
+     *  down to it, in place of those it had. They count toward the panel's 5000 rows
+     *  and eight levels. Setting the panel's rows anew takes them away with the rest.
+     */
+    setChildren(id: string, path: string[], rows: PanelRow[]): Promise<void>;
   };
   readonly panes: {
     /**

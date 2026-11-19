@@ -28,6 +28,8 @@
     "allow-background-image",
     "allow-ui-contributions",
     "allow-ui-visible",
+    "allow-ui-assets",
+    "allow-ui-panel-expand",
     "allow-window-drag",
     "allow-window-control",
     "allow-window-state",

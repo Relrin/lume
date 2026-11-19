@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { easeOutCirc, easeOutCubic, fadeOutQuad, smoothstep } from "../src/fx/easing.ts";
+import { CustomEffectError } from "../src/fx/custom.ts";
 import { CursorEffects, type FxSurface } from "../src/fx/effects.ts";
 import {
   convexHull,
@@ -196,6 +197,24 @@ class FakeFx implements FxBackend {
   }
   dispose() {
     this.disposed = true;
+  }
+  /** A plugin's shaders, by id: being built, built, or the reason they cannot be. */
+  built = new Map<string, "building" | "built" | string>();
+  customs: string[] = [];
+  prepareCustom(id: string) {
+    if (!this.built.has(id)) this.built.set(id, "building");
+  }
+  customReady(id: string) {
+    const state = this.built.get(id);
+    if (state === undefined || state === "building") return false;
+    if (state !== "built") throw new CustomEffectError(state);
+    return true;
+  }
+  drawCustom(id: string) {
+    this.customs.push(id);
+  }
+  forgetCustom(id: string) {
+    this.built.delete(id);
   }
 }
 
@@ -393,5 +412,37 @@ describe("the cursor's effects", () => {
     effects.dispose();
     expect(disposed()).toBe(1);
     expect(shown).toEqual([]);
+  });
+});
+
+describe("a plugin's cursor effect", () => {
+  const glow = { id: "acme/glow", source: "x", duration: 300, reach: 32 };
+
+  it("is not played, and nothing waits, while its shader is being built", () => {
+    const { effects, last, frames } = setup();
+    effects.configure({ trail: "none", pulse: "none", customTrail: glow });
+    expect(last().built.get("acme/glow")).toBe("building");
+    // The cursor jumps before the shader is there: the jump goes without.
+    expect(effects.move(cell(0, 0), cell(50, 30), MINT, 0)).toBe(false);
+    expect(frames()).toBe(0);
+    expect(effects.playing).toBe(false);
+
+    // Built: the next jump plays it.
+    last().built.set("acme/glow", "built");
+    expect(effects.move(cell(0, 0), cell(50, 30), MINT, 100)).toBe(true);
+    effects.frame(110);
+    expect(last().customs).toEqual(["acme/glow"]);
+  });
+
+  it("is given up and said once when its shader cannot be built", () => {
+    const { effects, last } = setup();
+    const problems: [string, string][] = [];
+    effects.onProblem((id, message) => problems.push([id, message]));
+    effects.configure({ trail: "none", pulse: "none", customPulse: glow });
+    last().built.set("acme/glow", "0:3: syntax error");
+    expect(effects.pulse(cell(4, 4), MINT, 0)).toBe(false);
+    expect(effects.pulse(cell(4, 4), MINT, 10)).toBe(false);
+    expect(problems).toEqual([["acme/glow", "0:3: syntax error"]]);
+    expect(last().customs).toEqual([]);
   });
 });
