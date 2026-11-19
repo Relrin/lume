@@ -37,6 +37,8 @@ import { roveWithin } from "../shell/roving.ts";
 import { WindowButtons } from "../shell/WindowControls.tsx";
 import { currentPlatform, KeyLayout } from "../terminal/keyboard.ts";
 import { TRAFFIC_LIGHTS_INSET_PX } from "../tuning.ts";
+import { withAddons } from "./addons.ts";
+import { AddonSections, AddonsManager } from "./Addons.tsx";
 import type { SettingsApp } from "./boot.ts";
 import {
   searchSettings,
@@ -148,6 +150,7 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
     app.registry.current,
     app.registry.current,
   );
+  const addons = useStore(app.addons, (state) => state.list);
 
   // Plugins change what can be set; the window is given the schema again when they do.
   const readSchema = () => app.schemaStore?.getState().schema ?? app.schema;
@@ -157,8 +160,9 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
     readSchema,
   );
   const pages = useMemo(
-    () => (view ? allPages(settingsPages(schema, view, lists), registered) : []),
-    [schema, view, lists, registered],
+    () =>
+      view ? withAddons(allPages(settingsPages(schema, view, lists), registered), addons) : [],
+    [schema, view, lists, registered, addons],
   );
   const nav = useMemo(() => navOf(pages), [pages]);
 
@@ -355,6 +359,10 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
                             {group.rows.map((row) => rowOf(row))}
                           </Group>
                         ))}
+                      {current.manage === true && <AddonsManager app={app} />}
+                      {current.addon !== undefined && (
+                        <AddonSections app={app} id={current.addon} />
+                      )}
                     </>
                   )
                 )}

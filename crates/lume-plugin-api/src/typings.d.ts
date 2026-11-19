@@ -48,6 +48,36 @@ export interface LumeBase {
     /** Hears what sessions report. Needs the `workspace.read` permission. */
     onEvent(listener: (report: SessionReport) => void): Disposable;
   };
+  readonly panes: {
+    /** The same as `sessions.onEvent`: what the panes' sessions report. */
+    onEvent(listener: (report: SessionReport) => void): Disposable;
+  };
+  readonly workspace: {
+    /**
+     * Hears when the workspace in use changes, or its root folder does. Needs the
+     * `workspace.read` permission.
+     */
+    onChange(listener: (workspace: WorkspaceInfo) => void): Disposable;
+  };
+  readonly fs: {
+    /**
+     * Watches a file or folder the plugin may read, and gives the listener what happens
+     * to it, or within it with `recursive`. Fails as `fs.read` does.
+     */
+    watch(
+      path: string,
+      listener: (event: FsEvent) => void,
+      options?: { readonly recursive?: boolean },
+    ): Promise<Disposable>;
+  };
+  readonly services: {
+    /**
+     * Offers a service other plugins call with `lume.services.call`, by the name the
+     * manifest declares under `[[contributes.services]]`. The handler is given the
+     * caller's arguments, or null, and what it returns is given back.
+     */
+    export(name: string, handler: (args: Json) => unknown): Disposable;
+  };
   readonly settings: {
     /** Hears when the plugin's settings change; the listener is given all of them. */
     onChange(listener: (settings: Record<string, Json>) => void): Disposable;

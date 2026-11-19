@@ -1,0 +1,15 @@
+# A plugin for the end-to-end tests: it holds no permission and asks for everything
+# one is needed for. Every call must be refused.
+schema = 1
+id = "test.denied"
+name = "Denied"
+version = "1.0.0"
+description = "Asks for everything, holding nothing."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-denied"
+activation = ["onCommand:probe"]
+
+[[contributes.commands]]
+id = "probe"
+title = "Try everything"

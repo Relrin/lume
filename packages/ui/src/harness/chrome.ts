@@ -277,6 +277,8 @@ export async function mountWindow(
     app,
     container,
     unmount: () => {
+      // The page's questions outlive a window: what one scene left asked is not the next's.
+      app.prompts.dismissAll();
       root.unmount();
       app.dispose();
       container.remove();

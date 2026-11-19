@@ -592,6 +592,10 @@ pub enum AppReplyBody {
     Estimated {
         size: TermSize,
     },
+    /// What the user answered to something a plugin asked. Only a page answers this.
+    Answered {
+        answer: serde_json::Value,
+    },
 }
 
 /// A request from the application to a window's page. It travels to the page as a
@@ -654,6 +658,11 @@ pub enum PageRequestBody {
         session: Option<SessionId>,
         size: TermSize,
     },
+    /// Put a question to the user on a plugin's behalf: a permission it asks for, a
+    /// use it needs approved, a confirmation or a choice. The page draws it under the
+    /// plugin's name; the plugin cannot draw, fill in or dismiss it. Answered with
+    /// [`AppReplyBody::Answered`].
+    PluginAsk { ask: serde_json::Value },
 }
 
 /// Appends something the application tells a page without being asked to `out`, as the

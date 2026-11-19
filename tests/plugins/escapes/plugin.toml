@@ -1,0 +1,22 @@
+# A plugin for the end-to-end tests: it holds narrow permissions and tries to reach past
+# them, through `..`, through a link the test makes in its data folder, through a
+# workspace that has no root, and to servers and programs it was not given.
+schema = 1
+id = "test.escapes"
+name = "Escapes"
+version = "1.0.0"
+description = "Tries to reach past what it was given."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-escapes"
+activation = ["onCommand:probe"]
+
+[permissions]
+"fs.read" = ["${plugin-data}/**", "${workspace}/**"]
+"fs.write" = ["${plugin-data}/**"]
+"net" = ["example.invalid"]
+"process.run" = ["lume-no-such-program"]
+
+[[contributes.commands]]
+id = "probe"
+title = "Try to get out"

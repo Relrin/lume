@@ -2328,3 +2328,169 @@ fn a_package_changed_after_it_was_installed_is_not_used() {
     assert_eq!(greet.json["code"], "not_found");
     app.quit();
 }
+
+impl App {
+    /// Runs `lume ctl` with these words on a thread of its own, for a request that waits
+    /// for something the test does meanwhile.
+    fn ctl_in_background(&self, args: &[&str]) -> std::thread::JoinHandle<Answer> {
+        let endpoint = self.endpoint.clone();
+        let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+        std::thread::spawn(move || {
+            let words: Vec<&str> = args.iter().map(String::as_str).collect();
+            ctl_at(&endpoint, &words)
+        })
+    }
+
+    /// Answers the question the window has on show as the user's press would: going
+    /// ahead, or not. Waits for the question to be put.
+    fn answer_prompt(&self, proceed: bool) {
+        let args = serde_json::json!({ "proceed": proceed }).to_string();
+        let deadline = Instant::now() + START;
+        loop {
+            let answer = self.ctl(&["command", "lume.window.answer", &args]);
+            if answer.status == 0 {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no question was put to the user: {}",
+                answer.json
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
+/// Whether a plugin, as `ctl plugins` lists it, wrote a line holding `text` to its log.
+fn logged(plugin: &Value, text: &str) -> bool {
+    plugin["log"].as_array().is_some_and(|lines| {
+        lines
+            .iter()
+            .any(|line| line.as_str().is_some_and(|line| line.contains(text)))
+    })
+}
+
+/// Makes `link` a link to the folder `target`: a junction on Windows, which needs no
+/// privilege, a symbolic link elsewhere.
+fn link_folder(link: &Path, target: &Path) {
+    #[cfg(windows)]
+    {
+        let made = Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .expect("cmd runs");
+        assert!(
+            made.status.success(),
+            "the junction is made: {}{}",
+            String::from_utf8_lossy(&made.stdout),
+            String::from_utf8_lossy(&made.stderr)
+        );
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).expect("the link is made");
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_is_refused_everything_it_was_not_given() {
+    let home = home_with_plugins(&["denied"]);
+    let app = App::start_in(home, false);
+    app.status_with_session();
+    app.until_plugin("test.denied", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    // Its command tries every call that needs a permission, and fails if one is not
+    // refused as denied.
+    app.ctl(&["command", "test.denied.probe"]).ok("the probe");
+    app.until_plugin("test.denied", "its report", |plugin| {
+        logged(plugin, "refused all")
+    });
+    // Each refusal is in the audit log, which holds what was asked and nothing of the
+    // data.
+    let audit = std::fs::read_to_string(app.home.join("state/plugins/audit.log")).unwrap();
+    let refused: Vec<Value> = audit
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|entry| entry["plugin"] == "test.denied" && entry["outcome"] == "denied")
+        .collect();
+    assert!(refused.len() >= 20, "{audit}");
+    for entry in &refused {
+        let fields: Vec<&String> = entry.as_object().unwrap().keys().collect();
+        assert_eq!(
+            fields,
+            ["capability", "outcome", "plugin", "scope", "time"],
+            "{entry}"
+        );
+    }
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_cannot_reach_past_what_it_was_given() {
+    let home = home_with_plugins(&["escapes"]);
+    // A link in the plugin's own data folder to the plugins folder, which holds the
+    // lock file: following it leaves what the plugin was given.
+    let plugins = home.join("state").join("plugins");
+    let data = plugins.join("data").join("test.escapes");
+    std::fs::create_dir_all(&data).unwrap();
+    link_folder(&data.join("link"), &plugins);
+    let app = App::start_in(home, false);
+    app.status_with_session();
+    app.until_plugin("test.escapes", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    app.ctl(&["command", "test.escapes.probe"]).ok("the probe");
+    app.until_plugin("test.escapes", "its report", |plugin| {
+        logged(plugin, "refused all 8")
+    });
+    assert!(
+        !std::env::home_dir()
+            .unwrap()
+            .join("lume-escape.txt")
+            .exists()
+    );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_asks_while_it_runs_and_the_user_answers_in_the_window() {
+    let home = home_with_plugins(&["asker"]);
+    let app = App::start_in(home, false);
+    let status = app.status_with_session();
+    let pane = status["focused"]["pane"].as_str().unwrap().to_owned();
+    app.until_plugin("test.asker", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+
+    // A permission it may ask for later: the window puts the question, the user allows
+    // it, and it is kept.
+    let asked = app.ctl_in_background(&["command", "test.asker.request"]);
+    app.answer_prompt(true);
+    asked.join().unwrap().ok("the request");
+    app.until_plugin("test.asker", "what it was let see", |plugin| {
+        logged(plugin, "granted true") && logged(plugin, "workspace ")
+    });
+    let lock = std::fs::read_to_string(app.home.join("state/plugins/lock.toml")).unwrap();
+    assert!(lock.contains("workspace.read"), "{lock}");
+
+    // Typing, which the user approves each time: once allowed, and once not.
+    let text = serde_json::json!({ "pane": pane, "text": "echo lume-asked\r" }).to_string();
+    let typed = app.ctl_in_background(&["command", "test.asker.type", &text]);
+    app.answer_prompt(true);
+    typed.join().unwrap().ok("typing");
+    app.wait_text_in(&pane, "lume-asked");
+    let refused = app.ctl_in_background(&["command", "test.asker.type", &text]);
+    app.answer_prompt(false);
+    let refused = refused.join().unwrap();
+    assert_ne!(refused.status, 0, "{}", refused.json);
+    assert!(
+        refused.json.to_string().contains("did not allow"),
+        "{}",
+        refused.json
+    );
+    app.quit();
+}

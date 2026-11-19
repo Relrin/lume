@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-addon-inspect"
+description = "Enables the addon_inspect command without any pre-configured scope."
+commands.allow = ["addon_inspect"]
+
+[[permission]]
+identifier = "deny-addon-inspect"
+description = "Denies the addon_inspect command without any pre-configured scope."
+commands.deny = ["addon_inspect"]

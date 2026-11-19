@@ -14,6 +14,7 @@ import type { FakeCoreOptions } from "./fake-core.ts";
 import { FIXTURE_BINDINGS, FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import type { Scene } from "./scene.ts";
 import { CHROME_START_TIMEOUT_MS } from "./tuning.ts";
+import type { AddonEntry } from "../settings/addons.ts";
 
 /** How often a scene looks again for what it waits for. */
 const POLL_MS = 20;
@@ -558,6 +559,75 @@ export const PLUGIN_SCENES: readonly Scene[] = [
     },
   },
   {
+    name: "plugin-ask-permission",
+    window: WITH_PLUGINS,
+    prepare: async (app) => {
+      void app.prompts.askPlugin({
+        kind: "permission",
+        plugin: { id: "acme.tools", name: "Tools" },
+        permission: "process.run",
+        what: "Run these programs, with any arguments: git",
+        warning:
+          "A program such as a shell or git can do anything you can, so running it is close to trusting this plugin with your account.",
+        reason: "to show which files changed in the workspace",
+      });
+      await until("the question", () => document.querySelector(".prompt"));
+    },
+    check: (page) => {
+      const dialog = page.ownerDocument.querySelector('[role="alertdialog"]');
+      if (!dialog) return ["the question is not on show"];
+      const problems: string[] = [];
+      if (!dialog.textContent?.includes("Tools says:"))
+        problems.push("the plugin's words are not under its name");
+      if (dialog.querySelector("button")?.textContent !== "Don't allow") {
+        problems.push("the cautious answer does not come first");
+      }
+      return problems;
+    },
+  },
+  {
+    name: "plugin-ask-each",
+    window: WITH_PLUGINS,
+    prepare: async (app) => {
+      void app.prompts.askPlugin({
+        kind: "each",
+        plugin: { id: "acme.tools", name: "Tools" },
+        permission: "panes.write",
+        text: "cargo test --workspace\r",
+        place: "pane p1, Terminal",
+      });
+      await until("the question", () => document.querySelector(".prompt"));
+    },
+    check: (page) => {
+      const shown = page.ownerDocument.querySelector(".prompt-preview")?.textContent ?? "";
+      return shown.startsWith("cargo test --workspace") ? [] : ["the exact text is not shown"];
+    },
+  },
+  {
+    name: "plugin-pick",
+    window: WITH_PLUGINS,
+    prepare: async (app) => {
+      void app.prompts.askPlugin({
+        kind: "pick",
+        plugin: { id: "acme.tools", name: "Tools" },
+        title: "Run a job",
+        placeholder: "Type to find a job",
+        items: [
+          { id: "build", label: "build", detail: "cargo build --release" },
+          { id: "test", label: "test", detail: "cargo xtask test" },
+          { id: "lint", label: "lint", detail: "cargo xtask lint" },
+        ],
+      });
+      await until("the choice", () => document.querySelector(".plugin-pick"));
+    },
+    check: (page) => {
+      const rows = [...page.ownerDocument.querySelectorAll(".plugin-pick .palette-row-text")].map(
+        (row) => row.textContent ?? "",
+      );
+      return compare(rows, ["build", "test", "lint"], "the choice");
+    },
+  },
+  {
     name: "plugin-list-panel",
     window: {
       ...WITH_PLUGINS,
@@ -682,11 +752,104 @@ function pluginSchema(): unknown {
   return schema;
 }
 
+/** The plugins the settings window lists: the meters, a tool that uses another, and
+ *  one whose files changed. */
+export const FIXTURE_ADDONS: readonly AddonEntry[] = [
+  {
+    id: "acme.meters",
+    manifestId: "acme.meters",
+    name: "Performance metrics",
+    version: "1.2.0",
+    description: "Meters for this machine in the status bar.",
+    enabled: true,
+    state: { ready: true, reason: null },
+    modified: false,
+    missing: false,
+    source: "D:/plugins/metrics",
+    dependencies: [],
+    permissions: [
+      {
+        what: "See how busy the processor, memory, graphics card and network are",
+        warning: null,
+      },
+    ],
+    later: [],
+    health: { running: true, starts: 1, breaches: 0, lastProblem: null, warnings: [] },
+    log: ["info: reading every 2 s", "info: the graphics card cannot be read here"],
+    audit: [
+      {
+        time: "2026-11-19T09:14:02Z",
+        capability: "system.metrics",
+        scope: "",
+        outcome: "allowed",
+      },
+    ],
+  },
+  {
+    id: "acme.tools",
+    manifestId: "acme.tools",
+    name: "Tools",
+    version: "0.4.0",
+    description: "Jobs, and the commands to run them.",
+    enabled: true,
+    state: { ready: true, reason: null },
+    modified: false,
+    missing: false,
+    source: "D:/plugins/tools",
+    dependencies: [{ id: "acme.core", optional: false, bound: "acme.core", rebound: false }],
+    permissions: [
+      {
+        what: "Run these programs, with any arguments: cargo, git",
+        warning:
+          "A program such as a shell or git can do anything you can, so running it is close to trusting this plugin with your account.",
+      },
+      { what: "Read files in: ${workspace}/**", warning: null },
+    ],
+    later: ["Read what you copy"],
+    health: {
+      running: false,
+      starts: 3,
+      breaches: 1,
+      lastProblem: "it ran for longer than 100 ms without a break",
+      warnings: [],
+    },
+    log: [],
+    audit: [
+      { time: "2026-11-19T09:20:41Z", capability: "process.run", scope: "git", outcome: "allowed" },
+      {
+        time: "2026-11-19T09:21:07Z",
+        capability: "fs.read",
+        scope: "C:/Users/me/.ssh/id_ed25519",
+        outcome: "denied",
+      },
+    ],
+  },
+  {
+    id: "acme.core",
+    manifestId: "acme.core",
+    name: "Core tools",
+    version: "2.0.1",
+    description: null,
+    enabled: false,
+    state: { ready: false, reason: "it is turned off" },
+    modified: true,
+    missing: false,
+    source: "D:/plugins/core",
+    dependencies: [],
+    permissions: [],
+    later: [],
+    health: { running: false, starts: 0, breaches: 0, lastProblem: null, warnings: [] },
+    log: [],
+    audit: [],
+  },
+];
+
 /** The settings window with the meters installed, and two of them set. */
 export const PLUGIN_SETTINGS: FakeCoreOptions = {
   titleBar: "custom",
   schema: pluginSchema(),
   settings: { plugins: { "acme.meters": { network: true, rate: 1 } } },
+  addons: FIXTURE_ADDONS,
 };
 
 /** The settings scenes of plugins: their page, and their rows on the application's. */
@@ -697,4 +860,6 @@ export const PLUGIN_SETTINGS_SCENES: readonly {
 }[] = [
   { name: "settings-plugin-page", page: "addon:acme.meters", window: PLUGIN_SETTINGS },
   { name: "settings-plugin-rows", page: "appearance", window: PLUGIN_SETTINGS },
+  { name: "settings-addons", page: "addons", window: PLUGIN_SETTINGS },
+  { name: "settings-addon-health", page: "addon:acme.tools", window: PLUGIN_SETTINGS },
 ];

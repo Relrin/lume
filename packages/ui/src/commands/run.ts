@@ -47,6 +47,11 @@ export interface CommandServices {
   focusBar(): void;
   /** Opens the field that renames a tab in place: the one named, or the tab on show. */
   renameTab(tab: string | null): void;
+  /**
+   * Answers the question on show as its buttons would: going ahead (with the item of a
+   * choice), or not. Says whether there was one.
+   */
+  answerPrompt(proceed: boolean, item?: string): boolean;
   /** Tells the user that a command they ran could not be carried out. */
   failed(message: string): void;
 }
@@ -187,6 +192,16 @@ export class Commands {
       case "lume.tab.rename-start":
         this.#services.renameTab(tabOf(args) ?? null);
         return;
+      case "lume.window.answer": {
+        const fields =
+          typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+        const proceed = fields["proceed"] === true;
+        const item = typeof fields["item"] === "string" ? fields["item"] : undefined;
+        if (!this.#services.answerPrompt(proceed, item)) {
+          throw new CommandError("not_found", "there is no question on show");
+        }
+        return;
+      }
       default:
         throw new CommandError("not_found", `the page has no command called ${id}`);
     }

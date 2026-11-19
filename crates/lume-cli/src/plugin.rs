@@ -11,7 +11,7 @@ use std::path::Path;
 
 use lume_config::Dirs;
 use lume_plugin::order::State;
-use lume_plugin::permissions::{self, Item, Request};
+use lume_plugin::permissions::{self, Item};
 use lume_plugin::store::{Change, Check, Direction, InstallOptions, Position, Prepared};
 use lume_plugin::{Installed, Store};
 use serde_json::{Value, json};
@@ -342,24 +342,9 @@ impl Outcome {
 
 /// One line for each thing granted.
 fn granted_lines(items: &[Item]) -> Vec<String> {
-    // Put the items back together by kind and prompt, as the manifest asked for them.
-    let mut requests: Vec<Request> = Vec::new();
-    for item in items {
-        match requests
-            .iter_mut()
-            .find(|request| request.kind == item.kind && request.prompt == item.prompt)
-        {
-            Some(request) => request.scope.extend(item.scope.clone()),
-            None => requests.push(Request {
-                kind: item.kind,
-                scope: item.scope.clone().into_iter().collect(),
-                prompt: item.prompt,
-            }),
-        }
-    }
-    requests
-        .iter()
-        .map(|request| permissions::describe(request).what)
+    permissions::describe_items(items)
+        .into_iter()
+        .map(|description| description.what)
         .collect()
 }
 

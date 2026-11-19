@@ -75,8 +75,9 @@ pub enum PluginAccess {
 }
 
 /// Commands only the user may run.
-const USER_ONLY: [&str; 10] = [
+const USER_ONLY: [&str; 11] = [
     "lume.workspace.delete",
+    "lume.window.answer",
     "lume.app.quit",
     "lume.app.quit-end-sessions",
     "lume.host.restart",
@@ -372,6 +373,8 @@ mod tests {
         );
         assert_eq!(plugin_access("lume.app.quit"), PluginAccess::UserOnly);
         assert_eq!(plugin_access("lume.terminal.paste"), PluginAccess::UserOnly);
+        // A plugin cannot answer the questions it puts to the user.
+        assert_eq!(plugin_access("lume.window.answer"), PluginAccess::UserOnly);
         assert_eq!(
             plugin_access("lume.session.detached"),
             PluginAccess::UserOnly

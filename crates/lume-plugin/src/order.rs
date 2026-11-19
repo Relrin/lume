@@ -352,6 +352,7 @@ mod tests {
             enabled: true,
             grants: toml::Table::new(),
             bindings: BTreeMap::new(),
+            services: BTreeMap::new(),
         }
     }
 

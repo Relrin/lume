@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "What the page of the settings window may call: the configuration, what there is to choose from, and its own window. It starts no session, sees no layout and runs no command. Nothing from Tauri's core plugins is granted.",
+  "description": "What the page of the settings window may call: the configuration, what there is to choose from, its own window, and the plugins it manages, with a folder picker to install one from. It starts no session, sees no layout and runs no command. Nothing else from Tauri's core plugins is granted.",
   "windows": ["settings"],
   "permissions": [
     "allow-webview-info",
@@ -19,6 +19,14 @@
     "allow-workspaces-list",
     "allow-window-drag",
     "allow-window-control",
-    "allow-window-state"
+    "allow-window-state",
+    "allow-addons-list",
+    "allow-addon-set-enabled",
+    "allow-addon-remove",
+    "allow-addon-move",
+    "allow-addon-inspect",
+    "allow-addon-install",
+    "allow-addon-cancel",
+    "dialog:allow-open"
   ]
 }

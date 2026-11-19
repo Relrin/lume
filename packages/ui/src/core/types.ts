@@ -585,7 +585,9 @@ export type PageRequestBody =
       readonly pane?: PaneId;
       readonly session?: string;
       readonly size: TermSize;
-    };
+    }
+  /** Put a plugin's question to the user: drawn by the page, under the plugin's name. */
+  | { readonly type: "plugin_ask"; readonly ask: unknown };
 
 /** A control message from the core: a notice, or a request to be answered. */
 export type ControlMessage =

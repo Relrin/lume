@@ -290,6 +290,16 @@ fn parse_optional(key: &str, value: &toml::Value) -> Result<Optional, String> {
     Ok(Optional { kind, within })
 }
 
+/// A permission asked for while a plugin runs: `kind` over `scope`, checked as a
+/// manifest's would be.
+pub fn request(kind: Kind, scope: Vec<String>) -> Result<Request, String> {
+    Ok(Request {
+        kind,
+        scope: check_scope(kind, scope)?,
+        prompt: Prompt::Once,
+    })
+}
+
 /// Checks a scope for its kind, and returns it sorted and without repeats.
 fn check_scope(kind: Kind, scope: Vec<String>) -> Result<Vec<String>, String> {
     let checker: fn(&str) -> Result<String, String> = match kind.scope() {
@@ -646,6 +656,26 @@ pub fn describe(request: &Request) -> Description {
 pub struct Description {
     pub what: String,
     pub warning: Option<String>,
+}
+
+/// Some permission items in words, put back together by kind and by whether the user is
+/// asked each time, as a manifest would have asked for them.
+pub fn describe_items(items: &[Item]) -> Vec<Description> {
+    let mut requests: Vec<Request> = Vec::new();
+    for item in items {
+        match requests
+            .iter_mut()
+            .find(|request| request.kind == item.kind && request.prompt == item.prompt)
+        {
+            Some(request) => request.scope.extend(item.scope.clone()),
+            None => requests.push(Request {
+                kind: item.kind,
+                scope: item.scope.clone().into_iter().collect(),
+                prompt: item.prompt,
+            }),
+        }
+    }
+    requests.iter().map(describe).collect()
 }
 
 /// What an optional permission would let a plugin ask for, in words.

@@ -8,12 +8,114 @@
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
+import { PluginPickDialog } from "./plugins/Pick.tsx";
 import { closingText, closingTitle } from "./shell/closing.ts";
-import type { Prompt, PromptStore } from "./terminal/prompts.ts";
+import type { PluginQuestion, Prompt, PromptStore } from "./terminal/prompts.ts";
+
+/** A number for each prompt, so that each choice opens with nothing typed. */
+const numbers = new WeakMap<Prompt, number>();
+let counted = 0;
+
+function numberOf(prompt: Prompt): number {
+  let number = numbers.get(prompt);
+  if (number === undefined) {
+    number = ++counted;
+    numbers.set(prompt, number);
+  }
+  return number;
+}
 
 export function Prompts({ store }: { store: PromptStore }) {
   const prompt = useSyncExternalStore(store.subscribe, store.current);
-  return prompt ? <PromptDialog prompt={prompt} /> : null;
+  if (!prompt) return null;
+  if (prompt.kind === "pick") return <PluginPickDialog key={numberOf(prompt)} prompt={prompt} />;
+  return <PromptDialog prompt={prompt} />;
+}
+
+/**
+ * Text to be typed into a terminal with its keys shown: Enter as ⏎ before the line it
+ * ends, Tab as ⇥, Escape as ␛, and any other control character as ^ and its letter, so
+ * that what would run a command is seen to.
+ */
+export function visibleKeys(text: string): string {
+  let out = "";
+  const characters = [...text];
+  characters.forEach((character, index) => {
+    const code = character.charCodeAt(0);
+    if (character === "\r" || character === "\n") {
+      // A line ended with both is one Enter.
+      if (character === "\n" && characters[index - 1] === "\r") return;
+      out += "⏎\n";
+    } else if (character === "\t") {
+      out += "⇥";
+    } else if (code === 0x1b) {
+      out += "␛";
+    } else if (code === 0x7f) {
+      out += "^?";
+    } else if (code < 0x20) {
+      out += `^${String.fromCharCode(code + 64)}`;
+    } else {
+      out += character;
+    }
+  });
+  return out;
+}
+
+/** The words of a permission, as the user is asked for it. */
+function permissionWords(permission: string): string {
+  return permission === "process.run" ? "run this command" : "type this";
+}
+
+/** A plugin's question, drawn under its name. */
+function describePlugin(ask: PluginQuestion): Described {
+  const from = <p className="prompt-from">From {ask.plugin.name}</p>;
+  switch (ask.kind) {
+    case "permission":
+      return {
+        title: `${ask.plugin.name} asks for a permission`,
+        body: (
+          <>
+            <p className="prompt-what">{ask.what}</p>
+            {ask.warning ? <p className="prompt-warning">{ask.warning}</p> : null}
+            {ask.reason !== "" && (
+              <blockquote className="prompt-quote">
+                <span className="prompt-quote-who">{ask.plugin.name} says:</span>
+                {`\u201c${ask.reason}\u201d`}
+              </blockquote>
+            )}
+          </>
+        ),
+        proceed: "Allow",
+        dismiss: "Don't allow",
+      };
+    case "each":
+      return {
+        title: `Allow ${ask.plugin.name} to ${permissionWords(ask.permission)}?`,
+        body: (
+          <>
+            {ask.place ? <p>In {ask.place}:</p> : null}
+            <pre className="prompt-preview">
+              {ask.permission === "panes.write" ? visibleKeys(ask.text) : ask.text}
+            </pre>
+          </>
+        ),
+        proceed: ask.permission === "process.run" ? "Run" : "Type",
+        dismiss: "Don't allow",
+      };
+    case "confirm":
+      return {
+        title: ask.title,
+        body: (
+          <>
+            {from}
+            <p>{ask.message}</p>
+          </>
+        ),
+        proceed: ask.confirm,
+        danger: ask.danger,
+        dismiss: "Cancel",
+      };
+  }
 }
 
 interface Described {
@@ -26,7 +128,7 @@ interface Described {
   dismiss: string;
 }
 
-function describe(prompt: Prompt): Described {
+function describe(prompt: Exclude<Prompt, { kind: "pick" }>): Described {
   switch (prompt.kind) {
     case "paste": {
       const { lines, truncated, text } = prompt.preview;
@@ -71,10 +173,12 @@ function describe(prompt: Prompt): Described {
       };
     case "notice":
       return { title: "Lume", body: <p>{prompt.message}</p>, dismiss: "OK" };
+    case "plugin":
+      return describePlugin(prompt.ask);
   }
 }
 
-function PromptDialog({ prompt }: { prompt: Prompt }) {
+function PromptDialog({ prompt }: { prompt: Exclude<Prompt, { kind: "pick" }> }) {
   const { title, body, proceed, danger, dismiss } = describe(prompt);
   const cautious = useRef<HTMLButtonElement>(null);
 

@@ -49,6 +49,17 @@ pub fn allows(granted: &Permissions, kind: Kind, scope: Option<&str>) -> bool {
     })
 }
 
+/// Whether `granted` holds `kind` at all, over any scope. A call of a kind with a scope
+/// is first checked for this, and its scope is matched by the capability itself.
+pub fn holds(granted: &Permissions, kind: Kind) -> bool {
+    granted.required.iter().any(|request| request.kind == kind)
+}
+
+/// The grant of `kind` in `granted`, if there is one.
+pub fn grant_of(granted: &Permissions, kind: Kind) -> Option<&crate::permissions::Request> {
+    granted.required.iter().find(|request| request.kind == kind)
+}
+
 /// When each allowed call was last written: by plugin, permission and scope.
 type Written = HashMap<(String, Kind, Option<String>), Instant>;
 

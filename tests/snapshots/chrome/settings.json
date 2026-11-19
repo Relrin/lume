@@ -52,6 +52,14 @@
               {
                 "role": "button",
                 "name": "Terminal"
+              },
+              {
+                "role": "heading",
+                "name": "Add-ons"
+              },
+              {
+                "role": "button",
+                "name": "Manage add-ons"
               }
             ]
           }

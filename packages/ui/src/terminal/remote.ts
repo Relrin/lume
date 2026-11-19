@@ -3,8 +3,8 @@
  *
  * The core passes on what only the page can do or know: how large a pane that is about
  * to be made will be, running a command that acts on a terminal, reading what is on a
- * pane's screen, waiting for text to appear there, and giving a terminal a size of the
- * caller's choosing. A request arrives as a control message on the carrier; the answer
+ * pane's screen, waiting for text to appear there, giving a terminal a size of the
+ * caller's choosing, and putting a plugin's question to the user. A request arrives as a control message on the carrier; the answer
  * goes back through a command, with the request's id.
  *
  * Nothing here touches a terminal itself. The page hands in the few operations a
@@ -14,6 +14,7 @@
 
 import type { Intent } from "../layout/types.ts";
 import { CommandError, isTermSize, type TermSize } from "../transport/types.ts";
+import type { PickItem, PluginAsk, PluginAsker } from "./prompts.ts";
 
 /**
  * The terminal a request is about: a pane, the pane that shows a session, or, with
@@ -56,6 +57,8 @@ export interface RemoteTarget {
   screen(target: PaneRef): Screen | Promise<Screen>;
   waitText(target: PaneRef, text: string, timeoutMs: number): Promise<Match>;
   resizeTo(target: PaneRef, size: TermSize): Promise<TermSize>;
+  /** Puts a plugin's question to the user and gives their answer. */
+  ask(ask: PluginAsk): Promise<Record<string, unknown>>;
 }
 
 /** An answer as the core takes it: what the request yielded, or why it yielded nothing. */
@@ -92,6 +95,74 @@ function refOf(body: Fields): PaneRef {
     ...(pane === undefined ? {} : { pane }),
     ...(session === undefined ? {} : { session }),
   };
+}
+
+function text(body: Fields, field: string): string {
+  const value = body[field];
+  if (typeof value !== "string") throw badRequest(`the question has no ${field}`);
+  return value;
+}
+
+function maybeText(body: Fields, field: string): string | null {
+  const value = body[field];
+  return typeof value === "string" ? value : null;
+}
+
+/** A plugin's question as the core sent it, checked field by field. */
+export function readAsk(body: unknown): PluginAsk {
+  if (!isFields(body)) throw badRequest("the question is not an object");
+  const from = body["plugin"];
+  if (!isFields(from)) throw badRequest("the question names no plugin");
+  const plugin: PluginAsker = { id: text(from, "id"), name: text(from, "name") };
+  switch (body["kind"]) {
+    case "permission":
+      return {
+        kind: "permission",
+        plugin,
+        permission: text(body, "permission"),
+        what: text(body, "what"),
+        warning: maybeText(body, "warning"),
+        reason: maybeText(body, "reason") ?? "",
+      };
+    case "each":
+      return {
+        kind: "each",
+        plugin,
+        permission: text(body, "permission"),
+        text: text(body, "text"),
+        place: maybeText(body, "place"),
+      };
+    case "confirm":
+      return {
+        kind: "confirm",
+        plugin,
+        title: text(body, "title"),
+        message: text(body, "message"),
+        confirm: text(body, "confirm"),
+        danger: body["danger"] === true,
+      };
+    case "pick": {
+      const items = body["items"];
+      if (!Array.isArray(items)) throw badRequest("the choice has no items");
+      const read: PickItem[] = items.map((item: unknown) => {
+        if (!isFields(item)) throw badRequest("an item of the choice is not an object");
+        return {
+          id: text(item, "id"),
+          label: text(item, "label"),
+          detail: maybeText(item, "detail"),
+        };
+      });
+      return {
+        kind: "pick",
+        plugin,
+        title: maybeText(body, "title"),
+        placeholder: maybeText(body, "placeholder"),
+        items: read,
+      };
+    }
+    default:
+      throw badRequest(`the page knows no question called ${String(body["kind"])}`);
+  }
 }
 
 function sizeOf(value: unknown): TermSize {
@@ -156,6 +227,10 @@ async function carryOut(target: RemoteTarget, body: Fields): Promise<Record<stri
     case "resize": {
       const size = await target.resizeTo(refOf(body), sizeOf(body["size"]));
       return { type: "resized", size: wire(size) };
+    }
+    case "plugin_ask": {
+      const answer = await target.ask(readAsk(body["ask"]));
+      return { type: "answered", answer };
     }
     default:
       throw badRequest(`the page knows no request called ${String(body["type"])}`);

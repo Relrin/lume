@@ -413,13 +413,17 @@ fn main() -> ExitCode {
 
     let loading = Arc::clone(&state);
     let serving = Arc::clone(&state);
+    // One thread owns the clipboard; pages and plugins reach it through it.
+    let clipboard = ClipboardThread::start();
+    let for_plugins = clipboard.clone();
     let app = tauri::Builder::default()
         // Notifications are shown from the application's side only; no page is granted
         // the plugin's commands.
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(args)
         .manage(Arc::clone(&state))
-        .manage(ClipboardThread::start())
+        .manage(clipboard)
         .manage(Fonts::default())
         .setup(move |app| {
             if matches!(mode, Mode::Harness(_)) {
@@ -462,6 +466,7 @@ fn main() -> ExitCode {
                 shell: Arc::clone(&shell),
                 plugins: Arc::clone(&plugins),
             });
+            plugins.set_clipboard(for_plugins);
             app.manage(Arc::clone(&services));
             // Plugins are read once the first terminal has shown its output.
             plugins.start(&services);
@@ -569,6 +574,13 @@ fn main() -> ExitCode {
             commands_window::workspaces_list,
             commands_plugins::ui_contributions,
             commands_plugins::ui_visible,
+            commands_plugins::addons_list,
+            commands_plugins::addon_set_enabled,
+            commands_plugins::addon_remove,
+            commands_plugins::addon_move,
+            commands_plugins::addon_inspect,
+            commands_plugins::addon_install,
+            commands_plugins::addon_cancel,
             harness::harness_done,
             harness::harness_save,
             harness::harness_read,

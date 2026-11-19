@@ -165,6 +165,11 @@ export interface SettingsPage {
   readonly groups: readonly SettingsGroup[];
   /** What the page shows in the column beside its rows, if it shows anything there. */
   readonly preview?: ComponentType;
+  /** The plugin the page is about, by the id it is installed under: the page shows what
+   *  it may do, how it fares and what it did lately after its rows. */
+  readonly addon?: string;
+  /** Whether the page is the one that manages the plugins. */
+  readonly manage?: boolean;
 }
 
 /** What only the machine knows that settings are chosen from. */

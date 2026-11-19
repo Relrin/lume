@@ -52,6 +52,14 @@
                 "state": {
                   "current": "page"
                 }
+              },
+              {
+                "role": "heading",
+                "name": "Add-ons"
+              },
+              {
+                "role": "button",
+                "name": "Manage add-ons"
               }
             ]
           }

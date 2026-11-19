@@ -18,14 +18,20 @@
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde_json::Value;
 
+pub mod encoding;
 pub mod generate;
 mod ts;
 pub mod types;
 
 pub use types::{ApiError, ErrorCode};
 use types::{
-    CommandExecute, ContextSet, KvKey, KvSet, MetricsSample, MetricsSubscribe, MetricsUnsubscribe,
-    Nothing, PanelId, PanelsSet, SettingsGet, StatusClear, StatusSet, Subscribe,
+    ClipboardWrite, CommandExecute, ContextSet, FetchResult, FetchStreamResult, FsEntry, FsPath,
+    FsRead, FsStat, FsUnwatch, FsWatch, FsWrite, Grant, KvKey, KvSet, LayoutApply, MetricsSample,
+    MetricsSubscribe, MetricsUnsubscribe, NetFetch, Nothing, PaneInfo, PaneRef, PaneStats,
+    PaneWrite, PanelId, PanelsSet, PermissionsRequest, ProcessExit, ProcessId, ProcessResult,
+    ProcessRun, ProcessSpawn, SecretKey, SecretSet, ServicesCall, SessionEntry, SessionsSpawn,
+    SettingsGet, Spawned, StatusClear, StatusSet, StreamId, StreamRead, StreamWrite, Subscribe,
+    UiConfirm, UiPick, UiToast, WorkspaceInfo,
 };
 
 /// The major version of the API, which a manifest's `api` names.
@@ -170,6 +176,92 @@ api! {
     MetricsSubscribe = "metrics.subscribe"(kinds, visible): MetricsSubscribe => u64, needs "system.metrics", internal = true;
     /// Stops them.
     MetricsUnsubscribe = "metrics.unsubscribe"(subscription): MetricsUnsubscribe => (), needs "system.metrics", internal = true;
+    /// What a file holds, as text or, when asked, base64. Only files the plugin may
+    /// read, found after links are followed; a file larger than `maxBytes` is refused.
+    FsRead = "fs.read"(path, options): FsRead => String, needs "fs.read";
+    /// Writes a file the plugin may write. A file with more than one name (a hard
+    /// link) is refused.
+    FsWrite = "fs.write"(path, data, options): FsWrite => (), needs "fs.write";
+    /// What is known of a file or folder the plugin may read.
+    FsStat = "fs.stat"(path): FsPath => FsStat, needs "fs.read";
+    /// What a folder the plugin may read holds: the entries it may read, 10 000 at most.
+    FsList = "fs.list"(path): FsPath => Vec<FsEntry>, needs "fs.read";
+    /// Starts watching a file or folder.
+    FsWatch = "fs.watch"(path, recursive): FsWatch => u64, needs "fs.read", internal = true;
+    /// Stops watching it.
+    FsUnwatch = "fs.unwatch"(watch): FsUnwatch => (), internal = true;
+    /// Opens a file the plugin may read as a stream, read with `lume.streams.read`.
+    FsOpenStream = "fs.openStream"(path): FsPath => u64, needs "fs.read";
+    /// The next bytes of one of the plugin's streams, or null once it has ended. Waits
+    /// until there are some.
+    StreamsRead = "streams.read"(stream, options): StreamRead => Option<String>;
+    /// Writes to one of the plugin's streams, as a program's input.
+    StreamsWrite = "streams.write"(stream, data, encoding): StreamWrite => ();
+    /// Closes one of the plugin's streams. A program's input that is closed ends.
+    StreamsClose = "streams.close"(stream): StreamId => ();
+    /// Runs a program the plugin may run, found once on the system's path, and gives
+    /// back how it ended and what it wrote. Where the permission says so, the user is
+    /// asked first, shown the command.
+    ProcessRun = "process.run"(program, args, options): ProcessRun => ProcessResult, needs "process.run";
+    /// Starts a program the plugin may run and leaves it running, with its input and
+    /// output as streams.
+    ProcessSpawn = "process.spawn"(program, args, options): ProcessSpawn => Spawned, needs "process.run";
+    /// Waits for a program the plugin started to end.
+    ProcessWait = "process.wait"(process): ProcessId => ProcessExit;
+    /// Stops a program the plugin started.
+    ProcessKill = "process.kill"(process): ProcessId => ();
+    /// Asks a server the plugin may reach. Redirects are followed while they stay
+    /// within what it may reach; this computer's own addresses only where they are
+    /// named.
+    NetFetch = "net.fetch"(url, init): NetFetch => FetchResult, needs "net";
+    /// The same, with the answer's body as a stream.
+    NetFetchStream = "net.fetchStream"(url, init): NetFetch => FetchStreamResult, needs "net";
+    /// One of the plugin's secrets from the system's keychain, or null.
+    SecretsGet = "secrets.get"(key): SecretKey => Option<String>;
+    /// Keeps a secret of the plugin's in the system's keychain. Where there is no
+    /// keychain this fails as `unavailable`; it is never written anywhere else.
+    SecretsSet = "secrets.set"(key, secret): SecretSet => ();
+    /// Removes one of the plugin's secrets.
+    SecretsDelete = "secrets.delete"(key): SecretKey => ();
+    /// The text on the clipboard, or null.
+    ClipboardRead = "clipboard.read"(): Nothing => Option<String>, needs "clipboard.read";
+    /// Puts text on the clipboard.
+    ClipboardWrite = "clipboard.write"(text): ClipboardWrite => (), needs "clipboard.write";
+    /// The terminal panes of the workspace.
+    PanesList = "panes.list"(): Nothing => Vec<PaneInfo>, needs "panes.read";
+    /// What a terminal pane shows.
+    PanesText = "panes.text"(pane): PaneRef => String, needs "panes.read";
+    /// Types into a terminal pane. Where the permission says so, the user is asked
+    /// first, shown the text.
+    PanesWrite = "panes.write"(pane, text): PaneWrite => (), needs "panes.write";
+    /// What the programs of a terminal pane use of the machine.
+    PanesStats = "panes.stats"(pane): PaneRef => PaneStats, needs "panes.read";
+    /// Opens a terminal from one of the user's profiles.
+    SessionsSpawn = "sessions.spawn"(profile, options): SessionsSpawn => PaneInfo, needs "sessions.spawn";
+    /// The sessions of the workspace.
+    SessionsList = "sessions.list"(): Nothing => Vec<SessionEntry>, needs "workspace.read";
+    /// The workspace in use.
+    WorkspaceCurrent = "workspace.current"(): Nothing => WorkspaceInfo, needs "workspace.read";
+    /// The workspace's root folder, which `${workspace}` stands for, or null.
+    WorkspaceRoot = "workspace.root"(): Nothing => Option<String>, needs "workspace.read";
+    /// Changes the layout: opens, moves, splits or closes tabs and panes, as a layout
+    /// intent says. What only the application may do is refused.
+    LayoutApply = "layout.apply"(intent): LayoutApply => Value, needs "layout.write";
+    /// Shows a notice, under the plugin's name.
+    UiToast = "ui.toast"(message, level): UiToast => ();
+    /// Asks the user a question, under the plugin's name, and says whether they went
+    /// ahead.
+    UiConfirm = "ui.confirm"(title, message, options): UiConfirm => bool;
+    /// Has the user choose one of a list, under the plugin's name: its id, or null if
+    /// they chose none.
+    UiPick = "ui.pick"(items, options): UiPick => Option<String>;
+    /// Asks the user for a permission the manifest lists under
+    /// `[permissions.optional]`, and says whether it was granted.
+    PermissionsRequest = "permissions.request"(permission, scope, reason): PermissionsRequest => bool;
+    /// The permissions the plugin holds.
+    PermissionsList = "permissions.list"(): Nothing => Vec<Grant>;
+    /// Calls a service another plugin offers, as its manifest declares it.
+    ServicesCall = "services.call"(plugin, name, args): ServicesCall => Value, needs "services.use";
 }
 
 /// The call of this name.

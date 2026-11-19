@@ -19,6 +19,7 @@ enum Request {
 }
 
 /// The way to the thread that owns the clipboard.
+#[derive(Clone)]
 pub struct ClipboardThread {
     requests: mpsc::Sender<Request>,
 }

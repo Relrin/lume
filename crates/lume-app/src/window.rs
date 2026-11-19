@@ -82,15 +82,18 @@ pub fn has_own_bar(label: &str) -> bool {
 }
 
 /// The section of the settings a request names, if it could be one: a short word of
-/// lower-case letters, digits and hyphens. It becomes part of the page's address, so
-/// nothing else is let through.
+/// lower-case letters, digits and hyphens, or a plugin's page, as `addon:acme.tools`.
+/// It becomes part of the page's address, so nothing else is let through.
 pub fn settings_section(asked: Option<&str>) -> Option<&str> {
     asked.filter(|section| {
-        !section.is_empty()
+        section.starts_with(|first: char| first.is_ascii_lowercase())
             && section.len() <= SETTINGS_SECTION_MAX_BYTES
-            && section
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+            && !section.contains("..")
+            && section.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'-' | b'.' | b':')
+            })
     })
 }
 
@@ -760,7 +763,23 @@ mod tests {
     fn a_section_is_a_short_plain_word_and_anything_else_is_none() {
         assert_eq!(settings_section(Some("appearance")), Some("appearance"));
         assert_eq!(settings_section(Some("add-on-2")), Some("add-on-2"));
-        for asked in ["", "Appearance", "a b", "a#b", "a/b", "a?b=c", "..", "é"] {
+        assert_eq!(
+            settings_section(Some("addon:acme.tools")),
+            Some("addon:acme.tools")
+        );
+        for asked in [
+            "",
+            "Appearance",
+            "a b",
+            "a#b",
+            "a/b",
+            "a?b=c",
+            "..",
+            "a..b",
+            ".a",
+            ":a",
+            "é",
+        ] {
             assert_eq!(settings_section(Some(asked)), None, "{asked}");
         }
         let long = "a".repeat(SETTINGS_SECTION_MAX_BYTES + 1);

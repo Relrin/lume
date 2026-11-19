@@ -9,6 +9,28 @@ Besides the calls below, the API has `lume.self`, `lume.commands.register`,
 `lume.metrics.subscribe`, `lume.log`, `lume.onDeactivate` and `console`; the
 typings describe them.
 
+## lume.clipboard
+
+### `lume.clipboard.read()`
+
+The text on the clipboard, or null.
+
+Needs the `clipboard.read` permission.
+
+Gives `string \| null`.
+
+### `lume.clipboard.write(text)`
+
+Puts text on the clipboard.
+
+Needs the `clipboard.write` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `text` | `string` |  |
+
+Gives `void`.
+
 ## lume.commands
 
 ### `lume.commands.execute(id, args?)`
@@ -35,6 +57,73 @@ Sets a condition the plugin's keys and menu items can be shown under.
 | `value` | `boolean` |  |
 
 Gives `void`.
+
+## lume.fs
+
+### `lume.fs.read(path, options?)`
+
+What a file holds, as text or, when asked, base64. Only files the plugin may
+ read, found after links are followed; a file larger than `maxBytes` is refused.
+
+Needs the `fs.read` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `path` | `string` |  |
+| `options` | `FsReadOptions` | optional.  |
+
+Gives `string`.
+
+### `lume.fs.write(path, data, options?)`
+
+Writes a file the plugin may write. A file with more than one name (a hard
+ link) is refused.
+
+Needs the `fs.write` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `path` | `string` |  |
+| `data` | `string` |  |
+| `options` | `FsWriteOptions` | optional.  |
+
+Gives `void`.
+
+### `lume.fs.stat(path)`
+
+What is known of a file or folder the plugin may read.
+
+Needs the `fs.read` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `path` | `string` |  |
+
+Gives `FsStat`.
+
+### `lume.fs.list(path)`
+
+What a folder the plugin may read holds: the entries it may read, 10 000 at most.
+
+Needs the `fs.read` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `path` | `string` |  |
+
+Gives `FsEntry[]`.
+
+### `lume.fs.openStream(path)`
+
+Opens a file the plugin may read as a stream, read with `lume.streams.read`.
+
+Needs the `fs.read` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `path` | `string` |  |
+
+Gives `number`.
 
 ## lume.kv
 
@@ -76,6 +165,21 @@ The keys the plugin has stored values under.
 
 Gives `string[]`.
 
+## lume.layout
+
+### `lume.layout.apply(intent)`
+
+Changes the layout: opens, moves, splits or closes tabs and panes, as a layout
+ intent says. What only the application may do is refused.
+
+Needs the `layout.write` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `intent` | `Json` | What to change, as the layout's intents are written. |
+
+Gives `Json`.
+
 ## lume.metrics
 
 ### `lume.metrics.snapshot()`
@@ -87,6 +191,36 @@ The latest reading of the machine, or null before the first: how busy the
 Needs the `system.metrics` permission.
 
 Gives `MetricsSample \| null`.
+
+## lume.net
+
+### `lume.net.fetch(url, init?)`
+
+Asks a server the plugin may reach. Redirects are followed while they stay
+ within what it may reach; this computer's own addresses only where they are
+ named.
+
+Needs the `net` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `url` | `string` |  |
+| `init` | `FetchInit` | optional.  |
+
+Gives `FetchResult`.
+
+### `lume.net.fetchStream(url, init?)`
+
+The same, with the answer's body as a stream.
+
+Needs the `net` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `url` | `string` |  |
+| `init` | `FetchInit` | optional.  |
+
+Gives `FetchStreamResult`.
 
 ## lume.panels
 
@@ -111,6 +245,201 @@ Takes away the rows a list panel shows.
 | `id` | `string` |  |
 
 Gives `void`.
+
+## lume.panes
+
+### `lume.panes.list()`
+
+The terminal panes of the workspace.
+
+Needs the `panes.read` permission.
+
+Gives `PaneInfo[]`.
+
+### `lume.panes.text(pane)`
+
+What a terminal pane shows.
+
+Needs the `panes.read` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `pane` | `string` |  |
+
+Gives `string`.
+
+### `lume.panes.write(pane, text)`
+
+Types into a terminal pane. Where the permission says so, the user is asked
+ first, shown the text.
+
+Needs the `panes.write` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `pane` | `string` |  |
+| `text` | `string` | What is typed, as it is: a line ends with `\r` to be run. |
+
+Gives `void`.
+
+### `lume.panes.stats(pane)`
+
+What the programs of a terminal pane use of the machine.
+
+Needs the `panes.read` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `pane` | `string` |  |
+
+Gives `PaneStats`.
+
+## lume.permissions
+
+### `lume.permissions.request(permission, scope?, reason?)`
+
+Asks the user for a permission the manifest lists under
+ `[permissions.optional]`, and says whether it was granted.
+
+| Argument | Type | |
+|---|---|---|
+| `permission` | `string` | A kind the manifest lists under `[permissions.optional]`, as `clipboard.read`. |
+| `scope` | `string[]` | optional. What it should cover, for a kind that has a scope: paths, programs, servers or plugins, written as a manifest writes them. |
+| `reason` | `string` | optional. Why the plugin asks, shown to the user under its name. At most 300 characters. |
+
+Gives `boolean`.
+
+### `lume.permissions.list()`
+
+The permissions the plugin holds.
+
+Gives `Grant[]`.
+
+## lume.process
+
+### `lume.process.run(program, args?, options?)`
+
+Runs a program the plugin may run, found once on the system's path, and gives
+ back how it ended and what it wrote. Where the permission says so, the user is
+ asked first, shown the command.
+
+Needs the `process.run` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `program` | `string` | The program, by its name alone, as `git`. |
+| `args` | `string[]` | optional.  |
+| `options` | `ProcessOptions` | optional.  |
+
+Gives `ProcessResult`.
+
+### `lume.process.spawn(program, args?, options?)`
+
+Starts a program the plugin may run and leaves it running, with its input and
+ output as streams.
+
+Needs the `process.run` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `program` | `string` |  |
+| `args` | `string[]` | optional.  |
+| `options` | `SpawnOptions` | optional.  |
+
+Gives `Spawned`.
+
+### `lume.process.wait(process)`
+
+Waits for a program the plugin started to end.
+
+| Argument | Type | |
+|---|---|---|
+| `process` | `number` |  |
+
+Gives `ProcessExit`.
+
+### `lume.process.kill(process)`
+
+Stops a program the plugin started.
+
+| Argument | Type | |
+|---|---|---|
+| `process` | `number` |  |
+
+Gives `void`.
+
+## lume.secrets
+
+### `lume.secrets.get(key)`
+
+One of the plugin's secrets from the system's keychain, or null.
+
+| Argument | Type | |
+|---|---|---|
+| `key` | `string` |  |
+
+Gives `string \| null`.
+
+### `lume.secrets.set(key, secret)`
+
+Keeps a secret of the plugin's in the system's keychain. Where there is no
+ keychain this fails as `unavailable`; it is never written anywhere else.
+
+| Argument | Type | |
+|---|---|---|
+| `key` | `string` |  |
+| `secret` | `string` |  |
+
+Gives `void`.
+
+### `lume.secrets.delete(key)`
+
+Removes one of the plugin's secrets.
+
+| Argument | Type | |
+|---|---|---|
+| `key` | `string` |  |
+
+Gives `void`.
+
+## lume.services
+
+### `lume.services.call(plugin, name, args?)`
+
+Calls a service another plugin offers, as its manifest declares it.
+
+Needs the `services.use` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `plugin` | `string` | The plugin that offers the service, by the id its manifest gives it. |
+| `name` | `string` | The service, by the name its manifest gives it. |
+| `args` | `Json` | optional.  |
+
+Gives `Json`.
+
+## lume.sessions
+
+### `lume.sessions.spawn(profile?, options?)`
+
+Opens a terminal from one of the user's profiles.
+
+Needs the `sessions.spawn` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `profile` | `string` | optional. One of the user's profiles, by its id; the default profile if left out. |
+| `options` | `SessionSpawnOptions` | optional.  |
+
+Gives `PaneInfo`.
+
+### `lume.sessions.list()`
+
+The sessions of the workspace.
+
+Needs the `workspace.read` permission.
+
+Gives `SessionEntry[]`.
 
 ## lume.settings
 
@@ -151,6 +480,98 @@ Takes back what a status item showed, so it shows what its manifest says.
 
 Gives `void`.
 
+## lume.streams
+
+### `lume.streams.read(stream, options?)`
+
+The next bytes of one of the plugin's streams, or null once it has ended. Waits
+ until there are some.
+
+| Argument | Type | |
+|---|---|---|
+| `stream` | `number` |  |
+| `options` | `StreamReadOptions` | optional.  |
+
+Gives `string \| null`.
+
+### `lume.streams.write(stream, data, encoding?)`
+
+Writes to one of the plugin's streams, as a program's input.
+
+| Argument | Type | |
+|---|---|---|
+| `stream` | `number` |  |
+| `data` | `string` |  |
+| `encoding` | `Encoding` | optional.  |
+
+Gives `void`.
+
+### `lume.streams.close(stream)`
+
+Closes one of the plugin's streams. A program's input that is closed ends.
+
+| Argument | Type | |
+|---|---|---|
+| `stream` | `number` |  |
+
+Gives `void`.
+
+## lume.ui
+
+### `lume.ui.toast(message, level?)`
+
+Shows a notice, under the plugin's name.
+
+| Argument | Type | |
+|---|---|---|
+| `message` | `string` | At most 300 characters. |
+| `level` | `NoticeLevel` | optional.  |
+
+Gives `void`.
+
+### `lume.ui.confirm(title, message, options?)`
+
+Asks the user a question, under the plugin's name, and says whether they went
+ ahead.
+
+| Argument | Type | |
+|---|---|---|
+| `title` | `string` | At most 80 characters. |
+| `message` | `string` | At most 1000 characters. |
+| `options` | `ConfirmOptions` | optional.  |
+
+Gives `boolean`.
+
+### `lume.ui.pick(items, options?)`
+
+Has the user choose one of a list, under the plugin's name: its id, or null if
+ they chose none.
+
+| Argument | Type | |
+|---|---|---|
+| `items` | `PickItem[]` | At most 500. |
+| `options` | `PickOptions` | optional.  |
+
+Gives `string \| null`.
+
+## lume.workspace
+
+### `lume.workspace.current()`
+
+The workspace in use.
+
+Needs the `workspace.read` permission.
+
+Gives `WorkspaceInfo`.
+
+### `lume.workspace.root()`
+
+The workspace's root folder, which `${workspace}` stands for, or null.
+
+Needs the `workspace.read` permission.
+
+Gives `string \| null`.
+
 ## Types
 
 ### `CardRow`
@@ -165,12 +586,25 @@ its latest values.
 | `tone` | `Tone` | optional.  |
 | `value` | `string` |  |
 
+### `ClipboardWrite`
+
+| Field | Type | |
+|---|---|---|
+| `text` | `string` |  |
+
 ### `CommandExecute`
 
 | Field | Type | |
 |---|---|---|
 | `args` | `Json` | optional.  |
 | `id` | `string` | The command's id: one of the application's, or one of the plugin's own by its name. |
+
+### `ConfirmOptions`
+
+| Field | Type | |
+|---|---|---|
+| `confirm` | `string` | optional. The label of the button that goes ahead: `OK` if left out. |
+| `danger` | `boolean` | optional. Whether going ahead cannot be taken back, which the button shows. |
 
 ### `ContextSet`
 
@@ -179,11 +613,146 @@ its latest values.
 | `key` | `string` | The name of a condition the plugin's keys and menus can be shown under, as `plugin:<id>.<key>`. |
 | `value` | `boolean` |  |
 
+### `Encoding`
+
+How bytes are written where a call sends or gets back text: as text, or as base64
+for what is not text.
+
+`"utf8" \| "base64"`
+
+### `EntryKind`
+
+What a path is: a file, a folder, or something else.
+
+`"file" \| "dir" \| "other"`
+
 ### `ErrorCode`
 
 The kinds of failure a call can have.
 
-`"denied" \| "invalid" \| "not_found" \| "busy" \| "failed" \| "stopped" \| "unhandled"`
+`"denied" \| "invalid" \| "not_found" \| "busy" \| "failed" \| "stopped" \| "unhandled" \| "too_large" \| "unavailable" \| "timed_out"`
+
+### `FetchInit`
+
+What a request to a server sends.
+
+| Field | Type | |
+|---|---|---|
+| `body` | `string` | optional.  |
+| `encoding` | `Encoding` | optional. How the body sent and the body given back are written. |
+| `headers` | `Record<string, string>` | optional.  |
+| `maxBytes` | `number` | optional. The largest answer taken; 16 MiB if left out. |
+| `method` | `string` | optional. `GET` if left out. |
+| `timeoutMs` | `number` | optional. 30 s if left out, 5 minutes at most. |
+
+### `FetchResult`
+
+A server's answer.
+
+| Field | Type | |
+|---|---|---|
+| `body` | `string` |  |
+| `headers` | `Record<string, string>` | Its headers, by their names in lower case; repeated ones joined with `, `. |
+| `status` | `number` |  |
+| `url` | `string` | Where the answer came from, after any redirects. |
+
+### `FetchStreamResult`
+
+A server's answer whose body is read from a stream.
+
+| Field | Type | |
+|---|---|---|
+| `headers` | `Record<string, string>` |  |
+| `status` | `number` |  |
+| `stream` | `number` |  |
+| `url` | `string` |  |
+
+### `FsChange`
+
+What happened to a path that is watched.
+
+`"created" \| "changed" \| "removed" \| "other"`
+
+### `FsEntry`
+
+One entry of a folder.
+
+| Field | Type | |
+|---|---|---|
+| `kind` | `EntryKind` |  |
+| `name` | `string` |  |
+| `size` | `number` |  |
+
+### `FsEvent`
+
+Something that happened to a file or folder that is watched.
+
+| Field | Type | |
+|---|---|---|
+| `kind` | `FsChange` |  |
+| `path` | `string` |  |
+
+### `FsPath`
+
+A file or folder, as an absolute path or one that begins with `${workspace}`,
+`${home}` or `${plugin-data}`.
+
+| Field | Type | |
+|---|---|---|
+| `path` | `string` |  |
+
+### `FsRead`
+
+| Field | Type | |
+|---|---|---|
+| `options` | `FsReadOptions` | optional.  |
+| `path` | `string` |  |
+
+### `FsReadOptions`
+
+| Field | Type | |
+|---|---|---|
+| `encoding` | `Encoding` | optional.  |
+| `maxBytes` | `number` | optional. The most that is read; a larger file is refused. 16 MiB if left out. |
+
+### `FsStat`
+
+What is known of a file or folder.
+
+| Field | Type | |
+|---|---|---|
+| `kind` | `EntryKind` |  |
+| `modified` | `number` | optional. When it last changed, in milliseconds since 1970, where that is known. |
+| `readonly` | `boolean` |  |
+| `size` | `number` | Its size in bytes. |
+
+### `FsUnwatch`
+
+| Field | Type | |
+|---|---|---|
+| `watch` | `number` |  |
+
+### `FsWatch`
+
+| Field | Type | |
+|---|---|---|
+| `path` | `string` |  |
+| `recursive` | `boolean` | optional. Whether what is in its folders is watched too. |
+
+### `FsWrite`
+
+| Field | Type | |
+|---|---|---|
+| `data` | `string` |  |
+| `options` | `FsWriteOptions` | optional.  |
+| `path` | `string` |  |
+
+### `FsWriteOptions`
+
+| Field | Type | |
+|---|---|---|
+| `encoding` | `Encoding` | optional.  |
+| `mode` | `WriteMode` | optional.  |
 
 ### `GpuMemoryUsage`
 
@@ -202,6 +771,16 @@ What the graphics card is doing: `unavailable` where there is no way to read it.
 | `memory` | `GpuMemoryUsage` | optional. How much of its own memory is used, in bytes; the whole is not known for a card that shares the system's. |
 | `state` | `string` | `read` or `unavailable`. |
 
+### `Grant`
+
+A permission the plugin holds.
+
+| Field | Type | |
+|---|---|---|
+| `permission` | `string` |  |
+| `prompt` | `PromptWhen` |  |
+| `scope` | `string[]` | What it covers, for a kind that has a scope. |
+
 ### `KvKey`
 
 | Field | Type | |
@@ -214,6 +793,12 @@ What the graphics card is doing: `unavailable` where there is no way to read it.
 |---|---|---|
 | `key` | `string` |  |
 | `value` | `Json` |  |
+
+### `LayoutApply`
+
+| Field | Type | |
+|---|---|---|
+| `intent` | `Json` | What to change, as the layout's intents are written. |
 
 ### `MemoryUsage`
 
@@ -252,6 +837,13 @@ What the machine is doing, as one reading has it.
 |---|---|---|
 | `subscription` | `number` |  |
 
+### `NetFetch`
+
+| Field | Type | |
+|---|---|---|
+| `init` | `FetchInit` | optional.  |
+| `url` | `string` |  |
+
 ### `NetworkRates`
 
 | Field | Type | |
@@ -264,6 +856,46 @@ What the machine is doing, as one reading has it.
 Nothing: what a call that takes no arguments is sent.
 
 `Record<string, never>`
+
+### `NoticeLevel`
+
+How a notice looks.
+
+`"info" \| "warning" \| "error"`
+
+### `PaneInfo`
+
+A terminal pane.
+
+| Field | Type | |
+|---|---|---|
+| `focused` | `boolean` | Whether it has the keyboard in its window. |
+| `pane` | `string` |  |
+| `session` | `string` | optional. The session it shows. |
+| `title` | `string` | optional.  |
+
+### `PaneRef`
+
+| Field | Type | |
+|---|---|---|
+| `pane` | `string` |  |
+
+### `PaneStats`
+
+What the programs of a pane use: the one it started and everything it started.
+
+| Field | Type | |
+|---|---|---|
+| `cpu` | `number` | optional. How much of the processor they used since the pane was last asked about, from 0 to 1 over all its cores; null the first time. |
+| `memory` | `number` | Memory in use, in bytes. |
+| `processes` | `number` |  |
+
+### `PaneWrite`
+
+| Field | Type | |
+|---|---|---|
+| `pane` | `string` |  |
+| `text` | `string` | What is typed, as it is: a line ends with `\r` to be run. |
 
 ### `PanelId`
 
@@ -294,6 +926,92 @@ One row of a list panel. Rows hold rows of their own, which open beneath them.
 | `id` | `string` | The panel, by the name the manifest gives it. |
 | `rows` | `PanelRow[]` |  |
 
+### `PermissionsRequest`
+
+| Field | Type | |
+|---|---|---|
+| `permission` | `string` | A kind the manifest lists under `[permissions.optional]`, as `clipboard.read`. |
+| `reason` | `string` | optional. Why the plugin asks, shown to the user under its name. At most 300 characters. |
+| `scope` | `string[]` | optional. What it should cover, for a kind that has a scope: paths, programs, servers or plugins, written as a manifest writes them. |
+
+### `PickItem`
+
+One of the choices of a pick.
+
+| Field | Type | |
+|---|---|---|
+| `detail` | `string` | optional. At most 200 characters. |
+| `id` | `string` |  |
+| `label` | `string` | At most 120 characters. |
+
+### `PickOptions`
+
+| Field | Type | |
+|---|---|---|
+| `placeholder` | `string` | optional. What the field says before anything is typed. |
+| `title` | `string` | optional.  |
+
+### `ProcessExit`
+
+How a program that was started ended.
+
+| Field | Type | |
+|---|---|---|
+| `code` | `number` | optional. Its exit code; null if it was stopped. |
+
+### `ProcessId`
+
+| Field | Type | |
+|---|---|---|
+| `process` | `number` |  |
+
+### `ProcessOptions`
+
+How a program is run.
+
+| Field | Type | |
+|---|---|---|
+| `cwd` | `string` | optional. The folder it starts in: the plugin's own data folder if left out. |
+| `encoding` | `Encoding` | optional. How its input is given and its output given back. |
+| `env` | `Record<string, string>` | optional. Variables added to its environment. |
+| `maxOutput` | `number` | optional. The most output kept of each of its two streams; 4 MiB if left out. |
+| `stdin` | `string` | optional. What is written to its input before it is closed. |
+| `timeoutMs` | `number` | optional. How long it may run before it is stopped; 30 s if left out, 10 minutes at most. |
+
+### `ProcessResult`
+
+How a program that was run ended.
+
+| Field | Type | |
+|---|---|---|
+| `code` | `number` | optional. Its exit code; null if it was stopped. |
+| `stderr` | `string` |  |
+| `stdout` | `string` |  |
+| `timedOut` | `boolean` | Whether it ran out of time and was stopped. |
+| `truncated` | `boolean` | Whether some of its output was left out for being too long. |
+
+### `ProcessRun`
+
+| Field | Type | |
+|---|---|---|
+| `args` | `string[]` | optional.  |
+| `options` | `ProcessOptions` | optional.  |
+| `program` | `string` | The program, by its name alone, as `git`. |
+
+### `ProcessSpawn`
+
+| Field | Type | |
+|---|---|---|
+| `args` | `string[]` | optional.  |
+| `options` | `SpawnOptions` | optional.  |
+| `program` | `string` |  |
+
+### `PromptWhen`
+
+Whether the user is asked before each use of a permission.
+
+`"once" \| "each"`
+
 ### `RowAction`
 
 Something that can be done with a row of a list panel.
@@ -304,6 +1022,40 @@ Something that can be done with a row of a list panel.
 | `command` | `string` | One of the plugin's commands, by the name its manifest gives it. |
 | `icon` | `string` | optional.  |
 | `title` | `string` |  |
+
+### `SecretKey`
+
+| Field | Type | |
+|---|---|---|
+| `key` | `string` |  |
+
+### `SecretSet`
+
+| Field | Type | |
+|---|---|---|
+| `key` | `string` |  |
+| `secret` | `string` |  |
+
+### `ServicesCall`
+
+| Field | Type | |
+|---|---|---|
+| `args` | `Json` | optional.  |
+| `name` | `string` | The service, by the name its manifest gives it. |
+| `plugin` | `string` | The plugin that offers the service, by the id its manifest gives it. |
+
+### `SessionEntry`
+
+A session: a program running in a terminal.
+
+| Field | Type | |
+|---|---|---|
+| `cwd` | `string` | optional. Its working directory, as it last reported it. |
+| `exited` | `boolean` | Whether its program has ended. |
+| `pane` | `string` | optional. The pane that shows it, if one does. |
+| `program` | `string` |  |
+| `session` | `string` |  |
+| `title` | `string` | optional.  |
 
 ### `SessionReport`
 
@@ -316,11 +1068,52 @@ Something a session reported, as a plugin hears it.
 | `pane` | `string` | optional. The pane that shows it, if one does. |
 | `session` | `string` | The session. |
 
+### `SessionSpawnOptions`
+
+| Field | Type | |
+|---|---|---|
+| `cwd` | `string` | optional. The folder it starts in. |
+| `place` | `SpawnPlace` | optional.  |
+
+### `SessionsSpawn`
+
+| Field | Type | |
+|---|---|---|
+| `options` | `SessionSpawnOptions` | optional.  |
+| `profile` | `string` | optional. One of the user's profiles, by its id; the default profile if left out. |
+
 ### `SettingsGet`
 
 | Field | Type | |
 |---|---|---|
 | `key` | `string` | optional. One setting, by its key; all of the plugin's if left out. |
+
+### `SpawnOptions`
+
+A program that is started and left running.
+
+| Field | Type | |
+|---|---|---|
+| `cwd` | `string` | optional.  |
+| `env` | `Record<string, string>` | optional.  |
+
+### `SpawnPlace`
+
+Where a new terminal opens.
+
+`"tab" \| "right" \| "down"`
+
+### `Spawned`
+
+A program that runs, and the streams of its input and output.
+
+| Field | Type | |
+|---|---|---|
+| `pid` | `number` |  |
+| `process` | `number` | The program, for `process.wait` and `process.kill`. |
+| `stderr` | `number` |  |
+| `stdin` | `number` |  |
+| `stdout` | `number` |  |
 
 ### `StatusClear`
 
@@ -355,6 +1148,34 @@ the manifest says what kind of item it is.
 | `tooltip` | `string` | optional. What the pointer is told when it rests on the item. |
 | `value` | `number` | optional. How full a meter is, from 0 to 1. |
 
+### `StreamId`
+
+| Field | Type | |
+|---|---|---|
+| `stream` | `number` |  |
+
+### `StreamRead`
+
+| Field | Type | |
+|---|---|---|
+| `options` | `StreamReadOptions` | optional.  |
+| `stream` | `number` |  |
+
+### `StreamReadOptions`
+
+| Field | Type | |
+|---|---|---|
+| `encoding` | `Encoding` | optional.  |
+| `max` | `number` | optional. The most bytes one read gives; 64 KiB if left out, 1 MiB at most. |
+
+### `StreamWrite`
+
+| Field | Type | |
+|---|---|---|
+| `data` | `string` |  |
+| `encoding` | `Encoding` | optional.  |
+| `stream` | `number` |  |
+
 ### `Subscribe`
 
 | Field | Type | |
@@ -371,5 +1192,46 @@ What a status item's colour says.
 
 What the plugin can hear about.
 
-`"session"`
+`"session" \| "workspace"`
+
+### `UiConfirm`
+
+| Field | Type | |
+|---|---|---|
+| `message` | `string` | At most 1000 characters. |
+| `options` | `ConfirmOptions` | optional.  |
+| `title` | `string` | At most 80 characters. |
+
+### `UiPick`
+
+| Field | Type | |
+|---|---|---|
+| `items` | `PickItem[]` | At most 500. |
+| `options` | `PickOptions` | optional.  |
+
+### `UiToast`
+
+| Field | Type | |
+|---|---|---|
+| `level` | `NoticeLevel` | optional.  |
+| `message` | `string` | At most 300 characters. |
+
+### `WorkspaceInfo`
+
+The workspace in use.
+
+| Field | Type | |
+|---|---|---|
+| `name` | `string` |  |
+| `panes` | `number` |  |
+| `root` | `string` | optional. Its root folder, which the user sets; null where none is set. |
+| `tabs` | `number` |  |
+| `windows` | `number` |  |
+
+### `WriteMode`
+
+How a file is written: in place of what it held, after it, or only where there is
+no such file yet.
+
+`"replace" \| "append" \| "create"`
 

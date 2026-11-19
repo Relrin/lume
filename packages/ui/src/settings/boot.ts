@@ -17,6 +17,7 @@ import type { Notice, ProfileList } from "../core/types.ts";
 import { NoticeStore, sentence } from "../shell/notices.ts";
 import { TauriCarrier, type Carrier } from "../transport/carrier.ts";
 import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
+import type { AddonEntry } from "./addons.ts";
 import { NO_LISTS, type SettingsLists, type SettingWrite } from "./model.ts";
 import { SettingsRegistry } from "./registry.ts";
 
@@ -47,6 +48,12 @@ export interface SettingsApp {
   readonly windowState: WindowStateStore;
   /** The page the window was last asked to show. */
   readonly shown: StoreApi<ShownPage>;
+  /** The plugins installed, in the order they load in; null until they are known. */
+  readonly addons: StoreApi<{ readonly list: readonly AddonEntry[] | null }>;
+  /** Asks for the plugins again, as after a change made here. */
+  refreshAddons(): void;
+  /** Has the user pick a folder to install a plugin from; null if they pick none. */
+  pickFolder(): Promise<string | null>;
   /** Asks the core to make a change to the user's file. */
   write(change: SettingWrite): Promise<void>;
   /** Opens the user's settings file for editing. */
@@ -78,6 +85,9 @@ export async function startSettings(
   const windowState = createWindowStateStore();
   const registry = new SettingsRegistry();
   const lists = createStore<SettingsLists>()(() => NO_LISTS);
+  const addons = createStore<{ readonly list: readonly AddonEntry[] | null }>()(() => ({
+    list: null,
+  }));
   const shown = createStore<ShownPage>()((set, get) => ({
     page: pageInAddress(address),
     asked: 0,
@@ -124,9 +134,26 @@ export async function startSettings(
     lists.setState({ ...lists.getState(), profiles: list.profiles });
   };
 
+  // Answers are numbered so that one that comes late does not undo a newer one.
+  let addonsAsked = 0;
+  const refreshAddons = (): void => {
+    const asked = ++addonsAsked;
+    client.addonsList().then(
+      (listed) => {
+        if (asked === addonsAsked) addons.setState({ list: listed.plugins });
+      },
+      () => undefined,
+    );
+  };
+
   let schemaRevision = 0;
   const follow = (notice: Notice): void => {
     switch (notice.type) {
+      case "plugins_changed":
+      case "contributions_changed":
+      case "plugin_state":
+        refreshAddons();
+        break;
       case "profiles_changed":
         takeProfiles(notice);
         break;
@@ -199,6 +226,7 @@ export async function startSettings(
   onNotice = follow;
   for (const notice of early ?? []) follow(notice);
   early = null;
+  refreshAddons();
 
   return {
     config,
@@ -210,6 +238,18 @@ export async function startSettings(
     notices,
     windowState,
     shown,
+    addons,
+    refreshAddons,
+    pickFolder: async () => {
+      // The system's own folder picker, loaded only when it is wanted.
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const chosen = await open({
+        directory: true,
+        multiple: false,
+        title: "Install a plugin from a folder",
+      });
+      return typeof chosen === "string" ? chosen : null;
+    },
     write: (change) =>
       change.op === "set"
         ? client.configSet(change.path, change.value)

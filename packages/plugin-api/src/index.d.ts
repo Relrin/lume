@@ -20,6 +20,10 @@ export interface CardRow {
   value: string;
 }
 
+export interface ClipboardWrite {
+  text: string;
+}
+
 export interface CommandExecute {
   args?: Json;
   /**
@@ -27,6 +31,17 @@ export interface CommandExecute {
    * name.
    */
   id: string;
+}
+
+export interface ConfirmOptions {
+  /**
+   * The label of the button that goes ahead: `OK` if left out.
+   */
+  confirm?: string;
+  /**
+   * Whether going ahead cannot be taken back, which the button shows.
+   */
+  danger?: boolean;
 }
 
 export interface ContextSet {
@@ -37,6 +52,17 @@ export interface ContextSet {
   key: string;
   value: boolean;
 }
+
+/**
+ * How bytes are written where a call sends or gets back text: as text, or as base64
+ * for what is not text.
+ */
+export type Encoding = "utf8" | "base64";
+
+/**
+ * What a path is: a file, a folder, or something else.
+ */
+export type EntryKind = "file" | "dir" | "other";
 
 /**
  * The kinds of failure a call can have.
@@ -69,7 +95,151 @@ export type ErrorCode =
   /**
    * The command was not handled by the plugin's code.
    */
-  | "unhandled";
+  | "unhandled"
+  /**
+   * What was asked for, or what came back, is larger than the call allows.
+   */
+  | "too_large"
+  /**
+   * What the call needs is not there on this machine, as a keychain.
+   */
+  | "unavailable"
+  /**
+   * It took longer than it may.
+   */
+  | "timed_out";
+
+/**
+ * What a request to a server sends.
+ */
+export interface FetchInit {
+  body?: string;
+  /**
+   * How the body sent and the body given back are written.
+   */
+  encoding?: Encoding;
+  headers?: Record<string, string>;
+  /**
+   * The largest answer taken; 16 MiB if left out.
+   */
+  maxBytes?: number;
+  /**
+   * `GET` if left out.
+   */
+  method?: string;
+  /**
+   * 30 s if left out, 5 minutes at most.
+   */
+  timeoutMs?: number;
+}
+
+/**
+ * A server's answer.
+ */
+export interface FetchResult {
+  body: string;
+  /**
+   * Its headers, by their names in lower case; repeated ones joined with `, `.
+   */
+  headers: Record<string, string>;
+  status: number;
+  /**
+   * Where the answer came from, after any redirects.
+   */
+  url: string;
+}
+
+/**
+ * A server's answer whose body is read from a stream.
+ */
+export interface FetchStreamResult {
+  headers: Record<string, string>;
+  status: number;
+  stream: number;
+  url: string;
+}
+
+/**
+ * What happened to a path that is watched.
+ */
+export type FsChange = "created" | "changed" | "removed" | "other";
+
+/**
+ * One entry of a folder.
+ */
+export interface FsEntry {
+  kind: EntryKind;
+  name: string;
+  size: number;
+}
+
+/**
+ * Something that happened to a file or folder that is watched.
+ */
+export interface FsEvent {
+  kind: FsChange;
+  path: string;
+}
+
+/**
+ * A file or folder, as an absolute path or one that begins with `${workspace}`,
+ * `${home}` or `${plugin-data}`.
+ */
+export interface FsPath {
+  path: string;
+}
+
+export interface FsRead {
+  options?: FsReadOptions;
+  path: string;
+}
+
+export interface FsReadOptions {
+  encoding?: Encoding;
+  /**
+   * The most that is read; a larger file is refused. 16 MiB if left out.
+   */
+  maxBytes?: number;
+}
+
+/**
+ * What is known of a file or folder.
+ */
+export interface FsStat {
+  kind: EntryKind;
+  /**
+   * When it last changed, in milliseconds since 1970, where that is known.
+   */
+  modified?: number;
+  readonly: boolean;
+  /**
+   * Its size in bytes.
+   */
+  size: number;
+}
+
+export interface FsUnwatch {
+  watch: number;
+}
+
+export interface FsWatch {
+  path: string;
+  /**
+   * Whether what is in its folders is watched too.
+   */
+  recursive?: boolean;
+}
+
+export interface FsWrite {
+  data: string;
+  options?: FsWriteOptions;
+  path: string;
+}
+
+export interface FsWriteOptions {
+  encoding?: Encoding;
+  mode?: WriteMode;
+}
 
 export interface GpuMemoryUsage {
   total?: number;
@@ -95,6 +265,18 @@ export interface GpuReading {
   state: string;
 }
 
+/**
+ * A permission the plugin holds.
+ */
+export interface Grant {
+  permission: string;
+  prompt: PromptWhen;
+  /**
+   * What it covers, for a kind that has a scope.
+   */
+  scope: string[];
+}
+
 export interface KvKey {
   key: string;
 }
@@ -102,6 +284,13 @@ export interface KvKey {
 export interface KvSet {
   key: string;
   value: Json;
+}
+
+export interface LayoutApply {
+  /**
+   * What to change, as the layout's intents are written.
+   */
+  intent: Json;
 }
 
 export interface MemoryUsage {
@@ -149,6 +338,11 @@ export interface MetricsUnsubscribe {
   subscription: number;
 }
 
+export interface NetFetch {
+  init?: FetchInit;
+  url: string;
+}
+
 export interface NetworkRates {
   received: number;
   sent: number;
@@ -158,6 +352,55 @@ export interface NetworkRates {
  * Nothing: what a call that takes no arguments is sent.
  */
 export type Nothing = Record<string, never>;
+
+/**
+ * How a notice looks.
+ */
+export type NoticeLevel = "info" | "warning" | "error";
+
+/**
+ * A terminal pane.
+ */
+export interface PaneInfo {
+  /**
+   * Whether it has the keyboard in its window.
+   */
+  focused: boolean;
+  pane: string;
+  /**
+   * The session it shows.
+   */
+  session?: string;
+  title?: string;
+}
+
+export interface PaneRef {
+  pane: string;
+}
+
+/**
+ * What the programs of a pane use: the one it started and everything it started.
+ */
+export interface PaneStats {
+  /**
+   * How much of the processor they used since the pane was last asked about, from 0
+   * to 1 over all its cores; null the first time.
+   */
+  cpu?: number;
+  /**
+   * Memory in use, in bytes.
+   */
+  memory: number;
+  processes: number;
+}
+
+export interface PaneWrite {
+  pane: string;
+  /**
+   * What is typed, as it is: a line ends with `\r` to be run.
+   */
+  text: string;
+}
 
 export interface PanelId {
   id: string;
@@ -208,6 +451,129 @@ export interface PanelsSet {
   rows: PanelRow[];
 }
 
+export interface PermissionsRequest {
+  /**
+   * A kind the manifest lists under `[permissions.optional]`, as `clipboard.read`.
+   */
+  permission: string;
+  /**
+   * Why the plugin asks, shown to the user under its name. At most 300 characters.
+   */
+  reason?: string;
+  /**
+   * What it should cover, for a kind that has a scope: paths, programs, servers or
+   * plugins, written as a manifest writes them.
+   */
+  scope?: string[];
+}
+
+/**
+ * One of the choices of a pick.
+ */
+export interface PickItem {
+  /**
+   * At most 200 characters.
+   */
+  detail?: string;
+  id: string;
+  /**
+   * At most 120 characters.
+   */
+  label: string;
+}
+
+export interface PickOptions {
+  /**
+   * What the field says before anything is typed.
+   */
+  placeholder?: string;
+  title?: string;
+}
+
+/**
+ * How a program that was started ended.
+ */
+export interface ProcessExit {
+  /**
+   * Its exit code; null if it was stopped.
+   */
+  code?: number;
+}
+
+export interface ProcessId {
+  process: number;
+}
+
+/**
+ * How a program is run.
+ */
+export interface ProcessOptions {
+  /**
+   * The folder it starts in: the plugin's own data folder if left out.
+   */
+  cwd?: string;
+  /**
+   * How its input is given and its output given back.
+   */
+  encoding?: Encoding;
+  /**
+   * Variables added to its environment.
+   */
+  env?: Record<string, string>;
+  /**
+   * The most output kept of each of its two streams; 4 MiB if left out.
+   */
+  maxOutput?: number;
+  /**
+   * What is written to its input before it is closed.
+   */
+  stdin?: string;
+  /**
+   * How long it may run before it is stopped; 30 s if left out, 10 minutes at most.
+   */
+  timeoutMs?: number;
+}
+
+/**
+ * How a program that was run ended.
+ */
+export interface ProcessResult {
+  /**
+   * Its exit code; null if it was stopped.
+   */
+  code?: number;
+  stderr: string;
+  stdout: string;
+  /**
+   * Whether it ran out of time and was stopped.
+   */
+  timedOut: boolean;
+  /**
+   * Whether some of its output was left out for being too long.
+   */
+  truncated: boolean;
+}
+
+export interface ProcessRun {
+  args?: string[];
+  options?: ProcessOptions;
+  /**
+   * The program, by its name alone, as `git`.
+   */
+  program: string;
+}
+
+export interface ProcessSpawn {
+  args?: string[];
+  options?: SpawnOptions;
+  program: string;
+}
+
+/**
+ * Whether the user is asked before each use of a permission.
+ */
+export type PromptWhen = "once" | "each";
+
 /**
  * Something that can be done with a row of a list panel.
  */
@@ -219,6 +585,48 @@ export interface RowAction {
   command: string;
   icon?: string;
   title: string;
+}
+
+export interface SecretKey {
+  key: string;
+}
+
+export interface SecretSet {
+  key: string;
+  secret: string;
+}
+
+export interface ServicesCall {
+  args?: Json;
+  /**
+   * The service, by the name its manifest gives it.
+   */
+  name: string;
+  /**
+   * The plugin that offers the service, by the id its manifest gives it.
+   */
+  plugin: string;
+}
+
+/**
+ * A session: a program running in a terminal.
+ */
+export interface SessionEntry {
+  /**
+   * Its working directory, as it last reported it.
+   */
+  cwd?: string;
+  /**
+   * Whether its program has ended.
+   */
+  exited: boolean;
+  /**
+   * The pane that shows it, if one does.
+   */
+  pane?: string;
+  program: string;
+  session: string;
+  title?: string;
 }
 
 /**
@@ -245,11 +653,66 @@ export interface SessionReport {
   session: string;
 }
 
+export interface SessionSpawnOptions {
+  /**
+   * The folder it starts in.
+   */
+  cwd?: string;
+  place?: SpawnPlace;
+}
+
+export interface SessionsSpawn {
+  options?: SessionSpawnOptions;
+  /**
+   * One of the user's profiles, by its id; the default profile if left out.
+   */
+  profile?: string;
+}
+
 export interface SettingsGet {
   /**
    * One setting, by its key; all of the plugin's if left out.
    */
   key?: string;
+}
+
+/**
+ * A program that is started and left running.
+ */
+export interface SpawnOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
+/**
+ * Where a new terminal opens.
+ */
+export type SpawnPlace =
+  /**
+   * A new tab of the window in front.
+   */
+  | "tab"
+  /**
+   * Beside the pane that has the keyboard.
+   */
+  | "right"
+  /**
+   * Below it.
+   */
+  | "down";
+
+/**
+ * A program that runs, and the streams of its input and output.
+ */
+export interface Spawned {
+  pid: number;
+  /**
+   * The program, for `process.wait` and `process.kill`.
+   */
+  process: number;
+  stderr: number;
+  stdin: number;
+  stdout: number;
 }
 
 export interface StatusClear {
@@ -316,6 +779,29 @@ export interface StatusValue {
   value?: number;
 }
 
+export interface StreamId {
+  stream: number;
+}
+
+export interface StreamRead {
+  options?: StreamReadOptions;
+  stream: number;
+}
+
+export interface StreamReadOptions {
+  encoding?: Encoding;
+  /**
+   * The most bytes one read gives; 64 KiB if left out, 1 MiB at most.
+   */
+  max?: number;
+}
+
+export interface StreamWrite {
+  data: string;
+  encoding?: Encoding;
+  stream: number;
+}
+
 export interface Subscribe {
   topic: Topic;
 }
@@ -332,7 +818,59 @@ export type Topic =
   /**
    * What sessions report: titles, directories, commands that start and end.
    */
-  | "session";
+  | "session"
+  /**
+   * The workspace in use: another one, or its root folder changed.
+   */
+  | "workspace";
+
+export interface UiConfirm {
+  /**
+   * At most 1000 characters.
+   */
+  message: string;
+  options?: ConfirmOptions;
+  /**
+   * At most 80 characters.
+   */
+  title: string;
+}
+
+export interface UiPick {
+  /**
+   * At most 500.
+   */
+  items: PickItem[];
+  options?: PickOptions;
+}
+
+export interface UiToast {
+  level?: NoticeLevel;
+  /**
+   * At most 300 characters.
+   */
+  message: string;
+}
+
+/**
+ * The workspace in use.
+ */
+export interface WorkspaceInfo {
+  name: string;
+  panes: number;
+  /**
+   * Its root folder, which the user sets; null where none is set.
+   */
+  root?: string;
+  tabs: number;
+  windows: number;
+}
+
+/**
+ * How a file is written: in place of what it held, after it, or only where there is
+ * no such file yet.
+ */
+export type WriteMode = "replace" | "append" | "create";
 
 /** Something that can be undone, such as listening. */
 export interface Disposable {
@@ -374,6 +912,36 @@ export interface LumeBase {
     /** Hears what sessions report. Needs the `workspace.read` permission. */
     onEvent(listener: (report: SessionReport) => void): Disposable;
   };
+  readonly panes: {
+    /** The same as `sessions.onEvent`: what the panes' sessions report. */
+    onEvent(listener: (report: SessionReport) => void): Disposable;
+  };
+  readonly workspace: {
+    /**
+     * Hears when the workspace in use changes, or its root folder does. Needs the
+     * `workspace.read` permission.
+     */
+    onChange(listener: (workspace: WorkspaceInfo) => void): Disposable;
+  };
+  readonly fs: {
+    /**
+     * Watches a file or folder the plugin may read, and gives the listener what happens
+     * to it, or within it with `recursive`. Fails as `fs.read` does.
+     */
+    watch(
+      path: string,
+      listener: (event: FsEvent) => void,
+      options?: { readonly recursive?: boolean },
+    ): Promise<Disposable>;
+  };
+  readonly services: {
+    /**
+     * Offers a service other plugins call with `lume.services.call`, by the name the
+     * manifest declares under `[[contributes.services]]`. The handler is given the
+     * caller's arguments, or null, and what it returns is given back.
+     */
+    export(name: string, handler: (args: Json) => unknown): Disposable;
+  };
   readonly settings: {
     /** Hears when the plugin's settings change; the listener is given all of them. */
     onChange(listener: (settings: Record<string, Json>) => void): Disposable;
@@ -405,6 +973,20 @@ export interface LumeBase {
 
 /** The calls of the API, by namespace. */
 export interface LumeCalls {
+  readonly clipboard: {
+    /**
+     * The text on the clipboard, or null.
+     *
+     * Needs the `clipboard.read` permission.
+     */
+    read(): Promise<string | null>;
+    /**
+     * Puts text on the clipboard.
+     *
+     * Needs the `clipboard.write` permission.
+     */
+    write(text: string): Promise<void>;
+  };
   readonly commands: {
     /**
      * Runs a command: one of the plugin's own, by its name, or one of the
@@ -417,6 +999,40 @@ export interface LumeCalls {
      * Sets a condition the plugin's keys and menu items can be shown under.
      */
     set(key: string, value: boolean): Promise<void>;
+  };
+  readonly fs: {
+    /**
+     * What a file holds, as text or, when asked, base64. Only files the plugin may
+     *  read, found after links are followed; a file larger than `maxBytes` is refused.
+     *
+     * Needs the `fs.read` permission.
+     */
+    read(path: string, options?: FsReadOptions): Promise<string>;
+    /**
+     * Writes a file the plugin may write. A file with more than one name (a hard
+     *  link) is refused.
+     *
+     * Needs the `fs.write` permission.
+     */
+    write(path: string, data: string, options?: FsWriteOptions): Promise<void>;
+    /**
+     * What is known of a file or folder the plugin may read.
+     *
+     * Needs the `fs.read` permission.
+     */
+    stat(path: string): Promise<FsStat>;
+    /**
+     * What a folder the plugin may read holds: the entries it may read, 10 000 at most.
+     *
+     * Needs the `fs.read` permission.
+     */
+    list(path: string): Promise<FsEntry[]>;
+    /**
+     * Opens a file the plugin may read as a stream, read with `lume.streams.read`.
+     *
+     * Needs the `fs.read` permission.
+     */
+    openStream(path: string): Promise<number>;
   };
   readonly kv: {
     /**
@@ -437,6 +1053,15 @@ export interface LumeCalls {
      */
     list(): Promise<string[]>;
   };
+  readonly layout: {
+    /**
+     * Changes the layout: opens, moves, splits or closes tabs and panes, as a layout
+     *  intent says. What only the application may do is refused.
+     *
+     * Needs the `layout.write` permission.
+     */
+    apply(intent: Json): Promise<Json>;
+  };
   readonly metrics: {
     /**
      * The latest reading of the machine, or null before the first: how busy the
@@ -446,6 +1071,22 @@ export interface LumeCalls {
      * Needs the `system.metrics` permission.
      */
     snapshot(): Promise<MetricsSample | null>;
+  };
+  readonly net: {
+    /**
+     * Asks a server the plugin may reach. Redirects are followed while they stay
+     *  within what it may reach; this computer's own addresses only where they are
+     *  named.
+     *
+     * Needs the `net` permission.
+     */
+    fetch(url: string, init?: FetchInit): Promise<FetchResult>;
+    /**
+     * The same, with the answer's body as a stream.
+     *
+     * Needs the `net` permission.
+     */
+    fetchStream(url: string, init?: FetchInit): Promise<FetchStreamResult>;
   };
   readonly panels: {
     /**
@@ -457,6 +1098,106 @@ export interface LumeCalls {
      * Takes away the rows a list panel shows.
      */
     clear(id: string): Promise<void>;
+  };
+  readonly panes: {
+    /**
+     * The terminal panes of the workspace.
+     *
+     * Needs the `panes.read` permission.
+     */
+    list(): Promise<PaneInfo[]>;
+    /**
+     * What a terminal pane shows.
+     *
+     * Needs the `panes.read` permission.
+     */
+    text(pane: string): Promise<string>;
+    /**
+     * Types into a terminal pane. Where the permission says so, the user is asked
+     *  first, shown the text.
+     *
+     * Needs the `panes.write` permission.
+     */
+    write(pane: string, text: string): Promise<void>;
+    /**
+     * What the programs of a terminal pane use of the machine.
+     *
+     * Needs the `panes.read` permission.
+     */
+    stats(pane: string): Promise<PaneStats>;
+  };
+  readonly permissions: {
+    /**
+     * Asks the user for a permission the manifest lists under
+     *  `[permissions.optional]`, and says whether it was granted.
+     */
+    request(permission: string, scope?: string[], reason?: string): Promise<boolean>;
+    /**
+     * The permissions the plugin holds.
+     */
+    list(): Promise<Grant[]>;
+  };
+  readonly process: {
+    /**
+     * Runs a program the plugin may run, found once on the system's path, and gives
+     *  back how it ended and what it wrote. Where the permission says so, the user is
+     *  asked first, shown the command.
+     *
+     * Needs the `process.run` permission.
+     */
+    run(program: string, args?: string[], options?: ProcessOptions): Promise<ProcessResult>;
+    /**
+     * Starts a program the plugin may run and leaves it running, with its input and
+     *  output as streams.
+     *
+     * Needs the `process.run` permission.
+     */
+    spawn(program: string, args?: string[], options?: SpawnOptions): Promise<Spawned>;
+    /**
+     * Waits for a program the plugin started to end.
+     */
+    wait(process: number): Promise<ProcessExit>;
+    /**
+     * Stops a program the plugin started.
+     */
+    kill(process: number): Promise<void>;
+  };
+  readonly secrets: {
+    /**
+     * One of the plugin's secrets from the system's keychain, or null.
+     */
+    get(key: string): Promise<string | null>;
+    /**
+     * Keeps a secret of the plugin's in the system's keychain. Where there is no
+     *  keychain this fails as `unavailable`; it is never written anywhere else.
+     */
+    set(key: string, secret: string): Promise<void>;
+    /**
+     * Removes one of the plugin's secrets.
+     */
+    delete(key: string): Promise<void>;
+  };
+  readonly services: {
+    /**
+     * Calls a service another plugin offers, as its manifest declares it.
+     *
+     * Needs the `services.use` permission.
+     */
+    call(plugin: string, name: string, args?: Json): Promise<Json>;
+  };
+  readonly sessions: {
+    /**
+     * Opens a terminal from one of the user's profiles.
+     *
+     * Needs the `sessions.spawn` permission.
+     */
+    spawn(profile?: string, options?: SessionSpawnOptions): Promise<PaneInfo>;
+    /**
+     * The sessions of the workspace.
+     *
+     * Needs the `workspace.read` permission.
+     */
+    list(): Promise<SessionEntry[]>;
   };
   readonly settings: {
     /**
@@ -475,6 +1216,51 @@ export interface LumeCalls {
      * Takes back what a status item showed, so it shows what its manifest says.
      */
     clear(id: string, pane?: string): Promise<void>;
+  };
+  readonly streams: {
+    /**
+     * The next bytes of one of the plugin's streams, or null once it has ended. Waits
+     *  until there are some.
+     */
+    read(stream: number, options?: StreamReadOptions): Promise<string | null>;
+    /**
+     * Writes to one of the plugin's streams, as a program's input.
+     */
+    write(stream: number, data: string, encoding?: Encoding): Promise<void>;
+    /**
+     * Closes one of the plugin's streams. A program's input that is closed ends.
+     */
+    close(stream: number): Promise<void>;
+  };
+  readonly ui: {
+    /**
+     * Shows a notice, under the plugin's name.
+     */
+    toast(message: string, level?: NoticeLevel): Promise<void>;
+    /**
+     * Asks the user a question, under the plugin's name, and says whether they went
+     *  ahead.
+     */
+    confirm(title: string, message: string, options?: ConfirmOptions): Promise<boolean>;
+    /**
+     * Has the user choose one of a list, under the plugin's name: its id, or null if
+     *  they chose none.
+     */
+    pick(items: PickItem[], options?: PickOptions): Promise<string | null>;
+  };
+  readonly workspace: {
+    /**
+     * The workspace in use.
+     *
+     * Needs the `workspace.read` permission.
+     */
+    current(): Promise<WorkspaceInfo>;
+    /**
+     * The workspace's root folder, which `${workspace}` stands for, or null.
+     *
+     * Needs the `workspace.read` permission.
+     */
+    root(): Promise<string | null>;
   };
 }
 

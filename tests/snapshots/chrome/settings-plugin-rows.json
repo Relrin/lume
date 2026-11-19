@@ -59,7 +59,19 @@
               },
               {
                 "role": "button",
+                "name": "Manage add-ons"
+              },
+              {
+                "role": "button",
                 "name": "Performance metricsv1.2.0"
+              },
+              {
+                "role": "button",
+                "name": "Toolsv0.4.0"
+              },
+              {
+                "role": "button",
+                "name": "Core toolsv2.0.1"
               }
             ]
           }

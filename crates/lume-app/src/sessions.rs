@@ -209,7 +209,6 @@ impl SessionStates {
     }
 
     /// What a session's reports add up to so far.
-    #[cfg(test)]
     pub fn state(&self, key: &SessionKey) -> Option<SessionState> {
         self.sessions().get(key).map(|known| known.state.clone())
     }

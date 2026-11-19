@@ -50,6 +50,7 @@ import type {
 } from "../layout/types.ts";
 import type { Carrier, CarrierOpened } from "../transport/carrier.ts";
 import { CONTROL_STREAM, HEADER_LEN, Kind } from "../transport/frames.ts";
+import type { AddonEntry } from "../settings/addons.ts";
 
 /** The protocol's sizes, as the core reports them. */
 const LIMITS = {
@@ -221,6 +222,8 @@ export interface FakeCoreOptions {
   };
   /** The settings' schema, as plugins make it. Left out, the application's own. */
   readonly schema?: unknown;
+  /** The plugins installed, as the settings window lists them. Left out, none. */
+  readonly addons?: readonly AddonEntry[];
 }
 
 /** What a window is told plugins add when none is installed. */
@@ -703,6 +706,14 @@ export class FakeCore implements Carrier {
         return answer(this.#options.contributions ?? NO_CONTRIBUTIONS);
       case "ui_visible":
         this.visible = Array.isArray(args["items"]) ? (args["items"] as string[]) : [];
+        return answer(null);
+      case "addons_list":
+        return answer({ plugins: this.#options.addons ?? [] });
+      case "addon_set_enabled":
+      case "addon_remove":
+      case "addon_move":
+      case "addon_cancel":
+        this.ran.push({ id: name, args });
         return answer(null);
       case "themes_list":
         return answer(THEMES);

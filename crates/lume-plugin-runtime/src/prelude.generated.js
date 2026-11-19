@@ -25,6 +25,8 @@
   const pending = new Map();
   let nextCall = 1;
   const handlers = new Map();
+  const services = new Map();
+  const watches = new Map();
   const timers = new Map();
   let nextTimer = 1;
   const listeners = new Map();
@@ -99,6 +101,41 @@
     if (timers.delete(id)) tell("timers.clear", { id });
   }
 
+  async function watchPath(path, listener, options) {
+    if (typeof listener !== "function") throw new TypeError("a listener is a function");
+    const id = await request("fs.watch", {
+      path: String(path),
+      recursive: Boolean(options?.recursive),
+    });
+    watches.set(id, listener);
+    return freeze({
+      dispose: () => {
+        if (watches.delete(id)) request("fs.unwatch", { watch: id }).catch(() => {});
+      },
+    });
+  }
+
+  function run(table, kind, id, data) {
+    const handler = table.get(data.name);
+    if (!handler) {
+      tell("commands.done", {
+        invocation: id,
+        error: { code: "unhandled", message: `the plugin has no ${kind} ${data.name}` },
+      });
+      return;
+    }
+    Promise.resolve()
+      .then(() => handler(data.args ?? null))
+      .then(
+        (value) =>
+          tell("commands.done", { invocation: id, value: value === undefined ? null : value }),
+        (error) => {
+          report(error);
+          tell("commands.done", { invocation: id, error: failure(error) });
+        },
+      );
+  }
+
   const readings = new Map();
 
   function subscribeMetrics(kinds, listener, options) {
@@ -145,6 +182,23 @@
     sessions: {
       onEvent: (listener) => listen("session", listener, true),
     },
+    panes: {
+      onEvent: (listener) => listen("session", listener, true),
+    },
+    workspace: {
+      onChange: (listener) => listen("workspace", listener, true),
+    },
+    fs: {
+      watch: watchPath,
+    },
+    services: {
+      /** Offers a service, by the name the manifest declares it under. */
+      export(name, handler) {
+        if (typeof handler !== "function") throw new TypeError("a service's handler is a function");
+        services.set(String(name), handler);
+        return freeze({ dispose: () => services.delete(String(name)) });
+      },
+    },
     settings: {
       onChange: (listener) => listen("settings", listener, false),
     },
@@ -173,11 +227,22 @@
     return at;
   }
 
+  Object.assign(namespace(["clipboard"]), {
+    read: () => request("clipboard.read", {}),
+    write: (text) => request("clipboard.write", { text }),
+  });
   Object.assign(namespace(["commands"]), {
     execute: (id, args) => request("commands.execute", { id, args }),
   });
   Object.assign(namespace(["context"]), {
     set: (key, value) => request("context.set", { key, value }),
+  });
+  Object.assign(namespace(["fs"]), {
+    read: (path, options) => request("fs.read", { path, options }),
+    write: (path, data, options) => request("fs.write", { path, data, options }),
+    stat: (path) => request("fs.stat", { path }),
+    list: (path) => request("fs.list", { path }),
+    openStream: (path) => request("fs.openStream", { path }),
   });
   Object.assign(namespace(["kv"]), {
     get: (key) => request("kv.get", { key }),
@@ -185,12 +250,47 @@
     delete: (key) => request("kv.delete", { key }),
     list: () => request("kv.list", {}),
   });
+  Object.assign(namespace(["layout"]), {
+    apply: (intent) => request("layout.apply", { intent }),
+  });
   Object.assign(namespace(["metrics"]), {
     snapshot: () => request("metrics.snapshot", {}),
+  });
+  Object.assign(namespace(["net"]), {
+    fetch: (url, init) => request("net.fetch", { url, init }),
+    fetchStream: (url, init) => request("net.fetchStream", { url, init }),
   });
   Object.assign(namespace(["panels"]), {
     set: (id, rows) => request("panels.set", { id, rows }),
     clear: (id) => request("panels.clear", { id }),
+  });
+  Object.assign(namespace(["panes"]), {
+    list: () => request("panes.list", {}),
+    text: (pane) => request("panes.text", { pane }),
+    write: (pane, text) => request("panes.write", { pane, text }),
+    stats: (pane) => request("panes.stats", { pane }),
+  });
+  Object.assign(namespace(["permissions"]), {
+    request: (permission, scope, reason) => request("permissions.request", { permission, scope, reason }),
+    list: () => request("permissions.list", {}),
+  });
+  Object.assign(namespace(["process"]), {
+    run: (program, args, options) => request("process.run", { program, args, options }),
+    spawn: (program, args, options) => request("process.spawn", { program, args, options }),
+    wait: (process) => request("process.wait", { process }),
+    kill: (process) => request("process.kill", { process }),
+  });
+  Object.assign(namespace(["secrets"]), {
+    get: (key) => request("secrets.get", { key }),
+    set: (key, secret) => request("secrets.set", { key, secret }),
+    delete: (key) => request("secrets.delete", { key }),
+  });
+  Object.assign(namespace(["services"]), {
+    call: (plugin, name, args) => request("services.call", { plugin, name, args }),
+  });
+  Object.assign(namespace(["sessions"]), {
+    spawn: (profile, options) => request("sessions.spawn", { profile, options }),
+    list: () => request("sessions.list", {}),
   });
   Object.assign(namespace(["settings"]), {
     get: (key) => request("settings.get", { key }),
@@ -198,6 +298,20 @@
   Object.assign(namespace(["status"]), {
     set: (id, value, pane) => request("status.set", { id, value, pane }),
     clear: (id, pane) => request("status.clear", { id, pane }),
+  });
+  Object.assign(namespace(["streams"]), {
+    read: (stream, options) => request("streams.read", { stream, options }),
+    write: (stream, data, encoding) => request("streams.write", { stream, data, encoding }),
+    close: (stream) => request("streams.close", { stream }),
+  });
+  Object.assign(namespace(["ui"]), {
+    toast: (message, level) => request("ui.toast", { message, level }),
+    confirm: (title, message, options) => request("ui.confirm", { title, message, options }),
+    pick: (items, options) => request("ui.pick", { items, options }),
+  });
+  Object.assign(namespace(["workspace"]), {
+    current: () => request("workspace.current", {}),
+    root: () => request("workspace.root", {}),
   });
 
   function freezeAll(value) {
@@ -254,28 +368,23 @@
         }
         return;
       }
-      case "command": {
-        const handler = handlers.get(data.name);
-        if (!handler) {
-          tell("commands.done", {
-            invocation: id,
-            error: { code: "unhandled", message: `the plugin has no handler for ${data.name}` },
-          });
+      case "command":
+        run(handlers, "handler for", id, data);
+        return;
+      case "service":
+        run(services, "service", id, data);
+        return;
+      case "event": {
+        if (data.topic === "fs") {
+          const listener = watches.get(data.payload.watch);
+          if (!listener) return;
+          try {
+            listener(freeze({ path: data.payload.path, kind: data.payload.kind }));
+          } catch (error) {
+            report(error);
+          }
           return;
         }
-        Promise.resolve()
-          .then(() => handler(data.args ?? null))
-          .then(
-            (value) =>
-              tell("commands.done", { invocation: id, value: value === undefined ? null : value }),
-            (error) => {
-              report(error);
-              tell("commands.done", { invocation: id, error: failure(error) });
-            },
-          );
-        return;
-      }
-      case "event": {
         if (data.topic === "metrics") {
           const reading = data.payload.sample ?? {};
           for (const id of data.payload.to ?? []) {
@@ -319,6 +428,8 @@
         timers.clear();
         listeners.clear();
         handlers.clear();
+        services.clear();
+        watches.clear();
         readings.clear();
         return;
       }

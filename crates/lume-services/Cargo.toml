@@ -9,7 +9,18 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+keyring.workspace = true
+lume-plugin.workspace = true
+notify.workspace = true
 serde.workspace = true
+# Written here rather than through the workspace: the workspace's entry keeps ureq's
+# default features, which bring Mozilla's root certificates. This crate trusts the
+# system's certificates only, through the platform verifier.
+ureq = { version = "3", default-features = false, features = [
+  "_ring",
+  "platform-verifier",
+  "rustls-no-provider",
+] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [
@@ -17,17 +28,28 @@ windows-sys = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_NetworkManagement_IpHelper",
   "Win32_NetworkManagement_Ndis",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
+  "Win32_System_ProcessStatus",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
 ] }
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libloading.workspace = true
 
-[target.'cfg(target_os = "macos")'.dependencies]
-libc.workspace = true
+# The keyring reaches the Secret Service over D-Bus in plain Rust; its session is
+# encrypted with the Rust cryptography crates rather than OpenSSL.
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))'.dependencies]
+zbus-secret-service-keyring-store = { workspace = true, features = ["crypto-rust"] }
 
 [dev-dependencies]
+keyring-core.workspace = true
 serde_json.workspace = true
 
 [lints]

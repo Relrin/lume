@@ -411,6 +411,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     mayRun: (id, args) => mayRun({ layout, config, views, prompts, client, notices }, id, args),
     focusBar: () => focusBar(),
     renameTab: (tab) => tabUi.getState().startRename(tab ?? selectActiveTab(layout.getState())),
+    answerPrompt: (proceed, item) => prompts.answerCurrent(proceed, item),
     failed: (message) => notices.push("error", sentence(message)),
   });
   const cardDrag = new CardDrag({
@@ -530,6 +531,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     return found;
   };
   const target: RemoteTarget = {
+    ask: (ask) => prompts.askPlugin(ask),
     estimate: (intent: Intent) => {
       const box = area.box();
       if (!box) throw new CommandError("no_window", "the window has not been laid out yet");

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Intent } from "../src/layout/types.ts";
+import { visibleKeys } from "../src/Prompts.tsx";
 import {
   answerRequest,
   type Match,
@@ -8,6 +9,7 @@ import {
   type RemoteTarget,
   type Screen,
 } from "../src/terminal/remote.ts";
+import { PromptStore, type PluginAsk } from "../src/terminal/prompts.ts";
 import { CommandError, type TermSize } from "../src/transport/types.ts";
 
 const SESSION = "00000000000000ab";
@@ -52,6 +54,10 @@ class FakeTarget implements RemoteTarget {
     this.calls.push(["resizeTo", target, size]);
     if (this.fail) return Promise.reject(this.fail);
     return Promise.resolve(size);
+  }
+  ask(ask: PluginAsk): Promise<Record<string, unknown>> {
+    this.calls.push(["ask", ask]);
+    return Promise.resolve({ allow: true });
   }
 }
 
@@ -198,5 +204,76 @@ describe("a request from the core", () => {
       id: 9,
       result: { err: { code: "internal", message: "the terminal is gone" } },
     });
+  });
+});
+
+describe("a plugin's question", () => {
+  const plugin = { id: "acme.tools", name: "Tools" };
+
+  it("is read from the core's request and answered as the core takes it", async () => {
+    const target = new FakeTarget();
+    const ask = {
+      kind: "permission",
+      plugin,
+      permission: "clipboard.read",
+      what: "Read what you copy",
+      warning: null,
+      reason: "to paste snippets",
+    };
+    const answer = await answerRequest(target, request(9, { type: "plugin_ask", ask }));
+    expect(answer).toEqual({
+      id: 9,
+      result: { ok: { type: "answered", answer: { allow: true } } },
+    });
+    expect(target.calls).toEqual([["ask", { ...ask, warning: null }]]);
+    const bad = await answerRequest(
+      target,
+      request(10, { type: "plugin_ask", ask: { kind: "permission", plugin } }),
+    );
+    expect(bad).toMatchObject({ id: 10, result: { err: { code: "bad_request" } } });
+  });
+
+  it("waits for the user, and a choice gives the id chosen or none", async () => {
+    const prompts = new PromptStore();
+    const asked = prompts.askPlugin({
+      kind: "each",
+      plugin,
+      permission: "process.run",
+      text: "git status",
+      place: null,
+    });
+    expect(prompts.current()?.kind).toBe("plugin");
+    expect(prompts.answerCurrent(true)).toBe(true);
+    await expect(asked).resolves.toEqual({ allow: true });
+
+    const items = [
+      { id: "a", label: "Alpha" },
+      { id: "b", label: "Beta", detail: "second" },
+    ];
+    const picked = prompts.askPlugin({ kind: "pick", plugin, items });
+    // Something the list does not hold chooses nothing.
+    prompts.answerCurrent(true, "z");
+    await expect(picked).resolves.toEqual({ chosen: null });
+    const again = prompts.askPlugin({ kind: "pick", plugin, items });
+    prompts.answerCurrent(true, "b");
+    await expect(again).resolves.toEqual({ chosen: "b" });
+
+    const confirmed = prompts.askPlugin({
+      kind: "confirm",
+      plugin,
+      title: "Delete?",
+      message: "It cannot be undone",
+      confirm: "Delete",
+      danger: true,
+    });
+    prompts.answerCurrent(false);
+    await expect(confirmed).resolves.toEqual({ ok: false });
+    expect(prompts.answerCurrent(true)).toBe(false);
+  });
+
+  it("shows the keys of text to be typed, so that one that runs a command is seen to", () => {
+    expect(visibleKeys("ls\r")).toBe("ls⏎\n");
+    expect(visibleKeys("a\r\nb\n")).toBe("a⏎\nb⏎\n");
+    expect(visibleKeys("\tx\u001b[A\u0003\u007f")).toBe("⇥x␛[A^C^?");
   });
 });

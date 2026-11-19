@@ -532,6 +532,13 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     ("lume.terminal.copy", "Copy", "Terminal", Runs::Page, true),
+    (
+        "lume.window.answer",
+        "Answer the Question on Show",
+        "Window",
+        Runs::Page,
+        false,
+    ),
     ("lume.terminal.paste", "Paste", "Terminal", Runs::Page, true),
     (
         "lume.terminal.select-all",
@@ -623,6 +630,13 @@ fn arguments(id: &str) -> Option<Value> {
     let object = |properties: Value, required: &[&str]| json!({ "type": "object", "properties": properties, "required": required });
     match id {
         "lume.window.new" => Some(object(json!({ "profile": profile }), &[])),
+        "lume.window.answer" => Some(object(
+            json!({
+                "proceed": { "type": "boolean", "description": "Whether to go ahead, as the button that does would." },
+                "item": { "type": "string", "description": "What to choose, for a choice from a list." },
+            }),
+            &["proceed"],
+        )),
         "lume.tab.new" => Some(object(
             json!({
                 "profile": profile,

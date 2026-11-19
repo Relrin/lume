@@ -1,16 +1,21 @@
-//! The commands a terminal window's page calls about what plugins add to it.
+//! The commands pages call about plugins.
 //!
-//! A page fetches everything the plugins add once, with what their code shows in it
-//! now, and again whenever it is told that changed; what their code shows from then on
-//! reaches it as notices. The page says in turn which of the plugins' things it has on
-//! screen, which starts a plugin that waits for one of its things to be seen and lets
-//! the machine be read for meters only while they are seen.
+//! A terminal window's page fetches everything the plugins add once, with what their
+//! code shows in it now, and again whenever it is told that changed; what their code
+//! shows from then on reaches it as notices. The page says in turn which of the
+//! plugins' things it has on screen, which starts a plugin that waits for one of its
+//! things to be seen and lets the machine be read for meters only while they are seen.
+//!
+//! The settings window manages what is installed: it lists the plugins with how each
+//! fares, turns them on and off, removes them, moves them in the order they load in,
+//! and installs one from a folder once the user has seen what it would be able to do.
 
 use std::sync::Arc;
 
 use serde_json::Value;
 use tauri::{State, WebviewWindow};
 
+use crate::error::CommandError;
 use crate::services::Services;
 
 type Shared<'a> = State<'a, Arc<Services>>;
@@ -32,4 +37,58 @@ pub fn ui_visible(services: Shared<'_>, window: WebviewWindow, items: Vec<String
         .take(512)
         .collect();
     services.plugins.visible(window.label(), items);
+}
+
+/// Every plugin installed, in the order they load in, with how each fares.
+#[tauri::command]
+pub async fn addons_list(services: Shared<'_>) -> Result<Value, CommandError> {
+    Ok(services.plugins.addons().await)
+}
+
+/// Turns a plugin on or off.
+#[tauri::command]
+pub async fn addon_set_enabled(
+    services: Shared<'_>,
+    id: String,
+    enabled: bool,
+) -> Result<(), CommandError> {
+    services.plugins.set_addon_enabled(&id, enabled).await
+}
+
+/// Removes a plugin; its data is kept.
+#[tauri::command]
+pub async fn addon_remove(services: Shared<'_>, id: String) -> Result<(), CommandError> {
+    services.plugins.remove_addon(&id).await
+}
+
+/// Moves a plugin one place earlier or later in the order plugins load in.
+#[tauri::command]
+pub async fn addon_move(
+    services: Shared<'_>,
+    id: String,
+    earlier: bool,
+) -> Result<(), CommandError> {
+    services.plugins.move_addon(&id, earlier).await
+}
+
+/// Copies and checks the package in a folder, and says what installing it would do.
+#[tauri::command]
+pub async fn addon_inspect(
+    services: Shared<'_>,
+    folder: String,
+    install_as: Option<String>,
+) -> Result<Value, CommandError> {
+    services.plugins.inspect_addon(folder, install_as).await
+}
+
+/// Installs a package the user agreed to, by the token its inspection gave.
+#[tauri::command]
+pub async fn addon_install(services: Shared<'_>, token: u64) -> Result<Value, CommandError> {
+    services.plugins.install_addon(token).await
+}
+
+/// Lets go of a package the user did not install.
+#[tauri::command]
+pub fn addon_cancel(services: Shared<'_>, token: u64) {
+    services.plugins.cancel_addon(token);
 }

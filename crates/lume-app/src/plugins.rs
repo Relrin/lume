@@ -19,6 +19,15 @@
 //! Pages say which of the plugins' items they have on screen: that starts a plugin
 //! whose manifest waits for one of its items to be seen, and the machine is read for a
 //! plugin's meters only while they are seen.
+//!
+//! What a plugin's code may reach beyond its own things (files, programs, servers, the
+//! terminals, the workspace, the user's attention, other plugins) is carried out in the
+//! modules below, each call only within what the plugin was granted.
+
+mod asking;
+mod calls;
+mod manage;
+mod system;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::Path;
@@ -28,12 +37,12 @@ use std::time::{Duration, Instant};
 
 use lume_config::Dirs;
 use lume_plugin::Store;
-use lume_plugin::broker::{Broker, allows, append};
+use lume_plugin::broker::{Broker, allows, append, holds};
 use lume_plugin::contributions::{self, Commands, Contributions, Install, PanelDef};
 use lume_plugin::id::{check_name, full_id};
 use lume_plugin::manifest::{Activation, Manifest};
 use lume_plugin::order::{Resolution, State};
-use lume_plugin::permissions::{Kind, Permissions};
+use lume_plugin::permissions::{Kind, Permissions, ScopeKind};
 use lume_plugin::store::{Check, Installed};
 use lume_plugin_api::types::{PanelRow, StatusValue, Topic};
 use lume_plugin_api::{ApiError, Call, ErrorCode};
@@ -43,6 +52,7 @@ use notify::{RecursiveMode, Watcher};
 use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::clipboard::ClipboardThread;
 use crate::configsvc::{ConfigService, PluginConfig};
 use crate::error::CommandError;
 use crate::registry::{CommandSpec, Owner, PluginAccess, Registry, Runs, plugin_access};
@@ -253,6 +263,14 @@ pub struct Plugins {
     /// The machine's readings, from the sampler's thread.
     samples: mpsc::UnboundedSender<Value>,
     sampled: Mutex<Option<mpsc::UnboundedReceiver<Value>>>,
+    /// The way to the clipboard, once the application has opened it.
+    clipboard: OnceLock<ClipboardThread>,
+    /// What plugins' code has open on the machine: streams, watches, programs.
+    system: system::Held,
+    /// The workspace plugins were last told of.
+    told_workspace: Mutex<Option<Value>>,
+    /// Packages the settings window is installing, waiting for the user's word.
+    waiting: manage::Waiting,
 }
 
 fn api_error(code: ErrorCode, message: impl Into<String>) -> ApiError {
@@ -284,7 +302,16 @@ impl Plugins {
             watcher: Mutex::new(None),
             samples,
             sampled: Mutex::new(Some(sampled)),
+            clipboard: OnceLock::new(),
+            system: system::Held::default(),
+            told_workspace: Mutex::new(None),
+            waiting: manage::Waiting::default(),
         })
+    }
+
+    /// Gives plugins the way to the clipboard.
+    pub fn set_clipboard(&self, clipboard: ClipboardThread) {
+        let _ = self.clipboard.set(clipboard);
     }
 
     fn inner(&self) -> MutexGuard<'_, Inner> {
@@ -503,6 +530,7 @@ impl Plugins {
         let mut inner = self.inner();
         let mut old = std::mem::take(&mut inner.loaded);
         let mut starting = Vec::new();
+        let mut released: Vec<String> = Vec::new();
         let mut modified = Vec::new();
         for one in installed {
             let local = one.entry.local.clone();
@@ -537,6 +565,7 @@ impl Plugins {
                         && let Some(running) = previous.running.take()
                     {
                         running.plugin.stop();
+                        released.push(local.clone());
                     }
                     Loaded {
                         installed: one,
@@ -589,12 +618,17 @@ impl Plugins {
             self.registry.unregister_plugin(&local);
             if let Some(running) = gone.running.take() {
                 running.plugin.stop();
+                released.push(local);
             }
         }
         // In the order they load in.
         starting.sort_by_key(|local| resolution.rank(local));
         inner.resolution = resolution;
         drop(inner);
+        // What the stopped ones had open on the machine goes with them.
+        for local in released {
+            self.release(&local);
+        }
         for name in modified {
             self.notice(
                 "error",
@@ -849,6 +883,8 @@ impl Plugins {
         });
         drop(inner);
         self.update_metrics();
+        // So did what it had open on the machine.
+        self.release(local);
         Some(name)
     }
 
@@ -982,10 +1018,17 @@ impl Plugins {
                 .map(|loaded| loaded.grants.clone())
                 .unwrap_or_default();
             let checked = match Kind::parse(permission) {
-                Some(kind) => self
+                Some(kind) if kind.scope() == ScopeKind::None => self
                     .broker
                     .check(local, &granted, kind, None)
                     .map_err(|denied| denied.message),
+                // A kind with a scope is matched where the call is carried out, which
+                // knows what the call reaches; here, only that some of it is held.
+                Some(kind) if holds(&granted, kind) => Ok(()),
+                Some(kind) => {
+                    self.broker.record(local, kind, None, false);
+                    Err(format!("{local} has no permission for {kind}"))
+                }
                 None => Err(format!("{permission} is not a permission")),
             };
             if let Err(message) = checked {
@@ -1147,6 +1190,8 @@ impl Plugins {
                 self.update_metrics();
                 Ok(Value::Null)
             }
+            // What reaches past the plugin's own things.
+            other => self.serve_more(local, other).await,
         }
     }
 
@@ -1507,6 +1552,48 @@ impl Plugins {
                 plugin.event("settings", settings);
             }
         }
+        self.tell_workspace();
+    }
+
+    /// Tells plugins that listen for it when the workspace in use, or its root folder,
+    /// changed.
+    pub fn tell_workspace(&self) {
+        let Ok(info) = self.workspace_info() else {
+            return;
+        };
+        let Ok(now) = serde_json::to_value(&info) else {
+            return;
+        };
+        let changed = {
+            let mut told = self
+                .told_workspace
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            // Only what plugins act on: which workspace, and its root.
+            let key = |value: &Value| (value["name"].clone(), value["root"].clone());
+            let changed = told.as_ref().is_some_and(|before| key(before) != key(&now));
+            *told = Some(now.clone());
+            changed
+        };
+        if !changed {
+            return;
+        }
+        let listening: Vec<Arc<Plugin>> = self
+            .inner()
+            .loaded
+            .values()
+            .filter(|loaded| loaded.topics.contains(&Topic::Workspace))
+            .filter(|loaded| allows(&loaded.grants, Kind::WorkspaceRead, None))
+            .filter_map(|loaded| {
+                loaded
+                    .running
+                    .as_ref()
+                    .map(|running| Arc::clone(&running.plugin))
+            })
+            .collect();
+        for plugin in listening {
+            plugin.event("workspace", now.clone());
+        }
     }
 
     /// Runs one of a plugin's commands: starts its code if need be, gives it the command
@@ -1674,6 +1761,7 @@ impl Plugins {
                 .values()
                 .map(|(local, ..)| local.clone())
                 .collect();
+            let mut stopped = Vec::new();
             for (local, loaded) in &mut inner.loaded {
                 let Some(running) = &loaded.running else {
                     continue;
@@ -1688,17 +1776,25 @@ impl Plugins {
                             .events
                             .iter()
                             .any(|event| matches!(event, Activation::SessionEvent(_))));
+                // What it has open on the machine (a watch, a stream, a program) is
+                // something it is doing.
                 let idle = running.started
                     && stats.idle_for >= IDLE_UNLOAD
                     && stats.timers == 0
                     && stats.calls_in_flight == 0
-                    && !busy.contains(local);
+                    && !busy.contains(local)
+                    && !self.holds_open(local);
                 if idle && comes_back {
                     tracing::debug!(plugin = %local, "a plugin's code was stopped for doing nothing");
                     running.plugin.stop();
                     loaded.running = None;
                     loaded.topics.clear();
+                    stopped.push(local.clone());
                 }
+            }
+            drop(inner);
+            for local in stopped {
+                self.release(&local);
             }
         }
     }
@@ -2012,14 +2108,20 @@ impl Plugins {
     pub fn shutdown(&self) {
         let mut inner = self.inner();
         let mut running = Vec::new();
-        for loaded in inner.loaded.values_mut() {
+        let mut released = Vec::new();
+        for (local, loaded) in &mut inner.loaded {
             if let Some(run) = loaded.running.take() {
                 run.plugin.stop();
                 running.push(run.plugin);
+                released.push(local.clone());
             }
         }
         inner.metrics = Metrics::default();
         drop(inner);
+        // The programs plugins started end with the application.
+        for local in released {
+            self.release(&local);
+        }
         // A moment for their code to hear it is stopping.
         let deadline = Instant::now() + Duration::from_millis(250);
         while Instant::now() < deadline && running.iter().any(|plugin| !plugin.stats().finished) {

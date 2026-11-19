@@ -28,6 +28,7 @@ import type {
   WindowState,
   WorkspaceList,
 } from "./types.ts";
+import type { AddonEntry, Inspection } from "../settings/addons.ts";
 
 /** What a page does with what the core sends it. */
 export interface CoreEvents {
@@ -168,6 +169,41 @@ export class CoreClient {
   /** Says which of the plugins' things this window has on screen, by their ids. */
   uiVisible(items: readonly string[]): Promise<void> {
     return this.transport.command("ui_visible", { items });
+  }
+
+  /** Every plugin installed, in the order they load in, with how each fares. */
+  addonsList(): Promise<{ plugins: AddonEntry[] }> {
+    return this.transport.command("addons_list");
+  }
+
+  /** Turns a plugin on or off. */
+  addonSetEnabled(id: string, enabled: boolean): Promise<void> {
+    return this.transport.command("addon_set_enabled", { id, enabled });
+  }
+
+  /** Removes a plugin; its data is kept. */
+  addonRemove(id: string): Promise<void> {
+    return this.transport.command("addon_remove", { id });
+  }
+
+  /** Moves a plugin one place earlier or later in the order plugins load in. */
+  addonMove(id: string, earlier: boolean): Promise<void> {
+    return this.transport.command("addon_move", { id, earlier });
+  }
+
+  /** Copies and checks the package in a folder, and says what installing it would do. */
+  addonInspect(folder: string, installAs: string | null): Promise<Inspection> {
+    return this.transport.command("addon_inspect", { folder, installAs });
+  }
+
+  /** Installs a package the user agreed to, by the token its inspection gave. */
+  addonInstall(token: number): Promise<{ id: string }> {
+    return this.transport.command("addon_install", { token });
+  }
+
+  /** Lets go of a package the user did not install. */
+  addonCancel(token: number): Promise<void> {
+    return this.transport.command("addon_cancel", { token });
   }
 
   /** Runs a command that is carried out in the core. */

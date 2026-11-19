@@ -1,0 +1,25 @@
+# A plugin for the end-to-end tests: it asks for a permission while it runs, and types
+# into a pane only once the user approves each time.
+schema = 1
+id = "test.asker"
+name = "Asker"
+version = "1.0.0"
+description = "Asks before it does things."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-asker"
+activation = ["onCommand:request", "onCommand:type"]
+
+[permissions]
+"panes.write" = { prompt = "each" }
+
+[permissions.optional]
+"workspace.read" = true
+
+[[contributes.commands]]
+id = "request"
+title = "Ask to see the workspace"
+
+[[contributes.commands]]
+id = "type"
+title = "Type into a pane"

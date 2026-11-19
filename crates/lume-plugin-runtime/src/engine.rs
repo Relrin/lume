@@ -672,6 +672,16 @@ impl Engine {
                         dispatch.call::<_, ()>(("command", invocation as f64, json))
                     })?;
                 }
+                Ok(Inbound::Service {
+                    invocation,
+                    name,
+                    args,
+                }) => {
+                    let json = json!({ "name": name, "args": args }).to_string();
+                    self.turn(|_, dispatch| {
+                        dispatch.call::<_, ()>(("service", invocation as f64, json))
+                    })?;
+                }
                 Ok(Inbound::Event { topic, payload }) => {
                     self.shared.events_queued.fetch_sub(1, Ordering::AcqRel);
                     let json = json!({ "topic": topic, "payload": payload }).to_string();

@@ -208,6 +208,11 @@ enum Inbound {
         name: String,
         args: Value,
     },
+    Service {
+        invocation: u64,
+        name: String,
+        args: Value,
+    },
     Event {
         topic: String,
         payload: Value,
@@ -328,6 +333,17 @@ impl Plugin {
     /// [`Outbound::CommandDone`] with the same invocation.
     pub fn command(&self, invocation: u64, name: &str, args: Value) {
         let _ = self.inbound.send(Inbound::Command {
+            invocation,
+            name: name.to_owned(),
+            args,
+        });
+    }
+
+    /// Calls one of the services the plugin's code offers, by its name. The code
+    /// answers with [`Outbound::CommandDone`] with the same invocation, as for a
+    /// command.
+    pub fn service(&self, invocation: u64, name: &str, args: Value) {
+        let _ = self.inbound.send(Inbound::Service {
             invocation,
             name: name.to_owned(),
             args,

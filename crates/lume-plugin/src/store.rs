@@ -27,7 +27,7 @@ use crate::lock::{Entry, LOCK_FILE, Lock, LockError, Source};
 use crate::manifest::{MANIFEST_FILE, Manifest, Problem};
 use crate::order::{Candidate, Resolution, resolve};
 use crate::package::{self, PackageError, Staged};
-use crate::permissions::{self, Item, Permissions, Request};
+use crate::permissions::{self, Item, Kind, Permissions, Request};
 
 /// The most an SVG picture in a package may hold.
 pub const ICON_MAX_BYTES: u64 = crate::assets::SVG_MAX_BYTES;
@@ -541,6 +541,17 @@ impl Store {
             enabled: prepared.enabled,
             grants: permissions::to_table(&prepared.grants),
             bindings: prepared.bindings.clone(),
+            services: prepared
+                .grants
+                .required
+                .iter()
+                .filter(|request| request.kind == Kind::ServicesUse)
+                .flat_map(|request| request.scope.iter())
+                .map(|wanted| {
+                    let bound = prepared.bindings.get(wanted).unwrap_or(wanted);
+                    (wanted.clone(), bound.clone())
+                })
+                .collect(),
         };
         lock.put(entry.clone());
         if let Err(error) = lock.write(&self.lock_file()) {
@@ -586,6 +597,47 @@ impl Store {
                 .get_mut(local)
                 .ok_or_else(|| StoreError::NotInstalled(local.to_owned()))?;
             entry.enabled = enabled;
+            Ok(())
+        })
+    }
+
+    /// Adds a permission the user granted while the plugin ran to its grants. Its scope
+    /// joins what the install held of that kind; being asked before each use, once
+    /// granted so, stays.
+    pub fn grant(&self, local: &str, request: &Request) -> Result<(), StoreError> {
+        self.change(|lock| {
+            let entry = lock
+                .get_mut(local)
+                .ok_or_else(|| StoreError::NotInstalled(local.to_owned()))?;
+            let mut granted = permissions::parse_table(&entry.grants)
+                .map_err(|problems| StoreError::Refused(problems.join("; ")))?;
+            match granted
+                .required
+                .iter_mut()
+                .find(|held| held.kind == request.kind)
+            {
+                Some(held) => {
+                    let mut scope: std::collections::BTreeSet<String> =
+                        held.scope.drain(..).collect();
+                    scope.extend(request.scope.iter().cloned());
+                    held.scope = scope.into_iter().collect();
+                    held.prompt = held.prompt.max(request.prompt);
+                }
+                None => granted.required.push(request.clone()),
+            }
+            entry.grants = permissions::to_table(&granted);
+            Ok(())
+        })
+    }
+
+    /// Records that the user agreed to an install's using the services of `bound` for
+    /// the plugin its manifest calls `wanted`.
+    pub fn pin_service(&self, local: &str, wanted: &str, bound: &str) -> Result<(), StoreError> {
+        self.change(|lock| {
+            let entry = lock
+                .get_mut(local)
+                .ok_or_else(|| StoreError::NotInstalled(local.to_owned()))?;
+            entry.services.insert(wanted.to_owned(), bound.to_owned());
             Ok(())
         })
     }
@@ -1195,6 +1247,56 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(text.contains("a picture may hold"), "{text}");
+    }
+
+    #[test]
+    fn a_permission_granted_while_it_runs_joins_its_grants_and_a_service_pin_is_kept() {
+        let dir = TempDir::new("grant");
+        let store = store(&dir);
+        let source = package(
+            &dir,
+            "a",
+            "a.x",
+            "1.0.0",
+            "[permissions]\n\"fs.read\" = [\"${plugin-data}/**\"]\n\"services.use\" = [\"core.x\"]\n",
+        );
+        store
+            .commit(store.prepare(&source, InstallOptions::default()).unwrap())
+            .unwrap();
+        // The services it may use are pinned to the install the user agreed to.
+        assert_eq!(
+            store.lock().unwrap().get("a.x").unwrap().services["core.x"],
+            "core.x"
+        );
+
+        let wider = Request {
+            kind: Kind::FsRead,
+            scope: vec!["${workspace}/**".to_owned()],
+            prompt: crate::permissions::Prompt::Once,
+        };
+        store.grant("a.x", &wider).unwrap();
+        let clipboard = Request {
+            kind: Kind::ClipboardRead,
+            scope: Vec::new(),
+            prompt: crate::permissions::Prompt::Once,
+        };
+        store.grant("a.x", &clipboard).unwrap();
+        let lock = store.lock().unwrap();
+        let granted = permissions::parse_table(&lock.get("a.x").unwrap().grants).unwrap();
+        let fs = granted
+            .required
+            .iter()
+            .find(|request| request.kind == Kind::FsRead)
+            .unwrap();
+        assert_eq!(fs.scope, ["${plugin-data}/**", "${workspace}/**"]);
+        assert!(crate::broker::allows(&granted, Kind::ClipboardRead, None));
+        assert!(store.grant("not.there", &clipboard).is_err());
+
+        store.pin_service("a.x", "core.x", "me.core").unwrap();
+        assert_eq!(
+            store.lock().unwrap().get("a.x").unwrap().services["core.x"],
+            "me.core"
+        );
     }
 
     #[test]

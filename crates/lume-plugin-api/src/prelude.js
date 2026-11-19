@@ -23,6 +23,8 @@
   const pending = new Map();
   let nextCall = 1;
   const handlers = new Map();
+  const services = new Map();
+  const watches = new Map();
   const timers = new Map();
   let nextTimer = 1;
   const listeners = new Map();
@@ -97,6 +99,41 @@
     if (timers.delete(id)) tell("timers.clear", { id });
   }
 
+  async function watchPath(path, listener, options) {
+    if (typeof listener !== "function") throw new TypeError("a listener is a function");
+    const id = await request("fs.watch", {
+      path: String(path),
+      recursive: Boolean(options?.recursive),
+    });
+    watches.set(id, listener);
+    return freeze({
+      dispose: () => {
+        if (watches.delete(id)) request("fs.unwatch", { watch: id }).catch(() => {});
+      },
+    });
+  }
+
+  function run(table, kind, id, data) {
+    const handler = table.get(data.name);
+    if (!handler) {
+      tell("commands.done", {
+        invocation: id,
+        error: { code: "unhandled", message: `the plugin has no ${kind} ${data.name}` },
+      });
+      return;
+    }
+    Promise.resolve()
+      .then(() => handler(data.args ?? null))
+      .then(
+        (value) =>
+          tell("commands.done", { invocation: id, value: value === undefined ? null : value }),
+        (error) => {
+          report(error);
+          tell("commands.done", { invocation: id, error: failure(error) });
+        },
+      );
+  }
+
   const readings = new Map();
 
   function subscribeMetrics(kinds, listener, options) {
@@ -142,6 +179,23 @@
     },
     sessions: {
       onEvent: (listener) => listen("session", listener, true),
+    },
+    panes: {
+      onEvent: (listener) => listen("session", listener, true),
+    },
+    workspace: {
+      onChange: (listener) => listen("workspace", listener, true),
+    },
+    fs: {
+      watch: watchPath,
+    },
+    services: {
+      /** Offers a service, by the name the manifest declares it under. */
+      export(name, handler) {
+        if (typeof handler !== "function") throw new TypeError("a service's handler is a function");
+        services.set(String(name), handler);
+        return freeze({ dispose: () => services.delete(String(name)) });
+      },
     },
     settings: {
       onChange: (listener) => listen("settings", listener, false),
@@ -227,28 +281,23 @@
         }
         return;
       }
-      case "command": {
-        const handler = handlers.get(data.name);
-        if (!handler) {
-          tell("commands.done", {
-            invocation: id,
-            error: { code: "unhandled", message: `the plugin has no handler for ${data.name}` },
-          });
+      case "command":
+        run(handlers, "handler for", id, data);
+        return;
+      case "service":
+        run(services, "service", id, data);
+        return;
+      case "event": {
+        if (data.topic === "fs") {
+          const listener = watches.get(data.payload.watch);
+          if (!listener) return;
+          try {
+            listener(freeze({ path: data.payload.path, kind: data.payload.kind }));
+          } catch (error) {
+            report(error);
+          }
           return;
         }
-        Promise.resolve()
-          .then(() => handler(data.args ?? null))
-          .then(
-            (value) =>
-              tell("commands.done", { invocation: id, value: value === undefined ? null : value }),
-            (error) => {
-              report(error);
-              tell("commands.done", { invocation: id, error: failure(error) });
-            },
-          );
-        return;
-      }
-      case "event": {
         if (data.topic === "metrics") {
           const reading = data.payload.sample ?? {};
           for (const id of data.payload.to ?? []) {
@@ -292,6 +341,8 @@
         timers.clear();
         listeners.clear();
         handlers.clear();
+        services.clear();
+        watches.clear();
         readings.clear();
         return;
       }

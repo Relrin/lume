@@ -74,6 +74,11 @@ pub struct Entry {
     /// where that is not the one installed under the same id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bindings: BTreeMap<String, String>,
+    /// For each plugin whose services it may use, by the id its manifest names, the
+    /// install the user agreed to its using. Bound to another install, it is asked
+    /// again.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub services: BTreeMap<String, String>,
 }
 
 /// Where a package was installed from.
@@ -207,6 +212,7 @@ mod tests {
             manifest_hash: "sha256:11".to_owned(),
             enabled: true,
             grants: "\"system.metrics\" = true".parse().unwrap(),
+            services: BTreeMap::new(),
             bindings: BTreeMap::from([("acme.core".to_owned(), "acme.fork".to_owned())]),
         }
     }
