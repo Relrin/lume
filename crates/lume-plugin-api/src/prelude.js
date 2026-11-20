@@ -24,6 +24,7 @@
   let nextCall = 1;
   const handlers = new Map();
   const services = new Map();
+  const viewCalls = new Map();
   const watches = new Map();
   const timers = new Map();
   let nextTimer = 1;
@@ -134,7 +135,7 @@
       return;
     }
     Promise.resolve()
-      .then(() => handler(data.args ?? null))
+      .then(() => (data.from ? handler(data.args ?? null, data.from) : handler(data.args ?? null)))
       .then(
         (value) =>
           tell("commands.done", { invocation: id, value: value === undefined ? null : value }),
@@ -143,6 +144,17 @@
           tell("commands.done", { invocation: id, error: failure(error) });
         },
       );
+  }
+
+  function viewChanges(kind, listener) {
+    if (typeof listener !== "function") throw new TypeError("a listener is a function");
+    return listen(
+      "views",
+      (change) => {
+        if (change.kind === kind) listener(freeze({ ...change.view }));
+      },
+      false,
+    );
   }
 
   const readings = new Map();
@@ -210,6 +222,17 @@
     },
     settings: {
       onChange: (listener) => listen("settings", listener, false),
+    },
+    views: {
+      /** Answers a call the plugin's views make with `host.call(name, args)`. */
+      handle(name, handler) {
+        if (typeof handler !== "function")
+          throw new TypeError("a view call's handler is a function");
+        viewCalls.set(String(name), handler);
+        return freeze({ dispose: () => viewCalls.delete(String(name)) });
+      },
+      onOpen: (listener) => viewChanges("open", listener),
+      onClose: (listener) => viewChanges("close", listener),
     },
     panels: {
       onExpand: (id, listener) => listen(`panel:${String(id)}`, listener, false),
@@ -301,6 +324,9 @@
       case "service":
         run(services, "service", id, data);
         return;
+      case "view":
+        run(viewCalls, "view call", id, data);
+        return;
       case "event": {
         if (data.topic === "fs") {
           const listener = watches.get(data.payload.watch);
@@ -356,6 +382,7 @@
         listeners.clear();
         handlers.clear();
         services.clear();
+        viewCalls.clear();
         watches.clear();
         readings.clear();
         return;

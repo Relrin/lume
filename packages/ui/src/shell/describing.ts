@@ -54,7 +54,11 @@ export function paneFacts(state: LayoutState, pane: PaneId): PaneFacts {
   const entry = state.panes[pane] ?? state.scratch?.parked?.pane;
   const content = entry?.id === pane ? entry.content : undefined;
   const terminal = content?.type === "terminal" ? content : undefined;
-  const name = entry?.id === pane ? entry.title : null;
+  // A pane that shows a plugin's view is called after the view until it is named.
+  const name =
+    entry?.id === pane
+      ? (entry.title ?? (content?.type === "plugin_view" ? content.view : null))
+      : null;
   return {
     name: name === null || name === undefined || name.trim() === "" ? null : name,
     startCwd: terminal?.cwd ?? null,

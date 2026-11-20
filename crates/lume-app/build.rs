@@ -10,6 +10,7 @@
 /// sessions directly, and the last three, are granted only when the application is
 /// started to run a test suite.
 const COMMANDS: &[&str] = &[
+    "frame_token",
     "webview_info",
     "probe_done",
     "carrier_open",
@@ -49,6 +50,9 @@ const COMMANDS: &[&str] = &[
     "ui_visible",
     "ui_assets",
     "ui_panel_expand",
+    "view_opened",
+    "view_closed",
+    "view_call",
     "addons_list",
     "addon_set_enabled",
     "addon_remove",

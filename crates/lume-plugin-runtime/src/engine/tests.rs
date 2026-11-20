@@ -134,6 +134,31 @@ fn a_command_is_carried_out_by_its_handler() {
 }
 
 #[test]
+fn a_view_s_call_reaches_its_handler_with_which_view_made_it() {
+    let (plugin, recorder) = start(spec(
+        r#"
+        const opened = [];
+        lume.views.handle("echo", (args, from) => ({ args, from, opened }));
+        lume.views.onOpen((view) => opened.push(view.instance));
+        lume.views.onClose(() => opened.pop());
+        "#,
+    ));
+    started(&recorder);
+    plugin.event("views", json!({ "kind": "open", "view": { "instance": "w-1/v1", "view": "review", "place": "pane" } }));
+    let from = json!({ "instance": "w-1/v1", "view": "review", "place": "pane" });
+    plugin.view_call(1, "echo", json!({ "n": 1 }), from.clone());
+    assert_eq!(
+        command_result(&recorder, 1),
+        Ok(json!({ "args": { "n": 1 }, "from": from, "opened": ["w-1/v1"] }))
+    );
+    plugin.view_call(2, "missing", Value::Null, from);
+    assert_eq!(
+        command_result(&recorder, 2).unwrap_err().code,
+        crate::ErrorCode::Unhandled
+    );
+}
+
+#[test]
 fn a_call_goes_to_the_host_and_its_answer_comes_back() {
     let (plugin, recorder) = start(spec(
         r#"

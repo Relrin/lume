@@ -88,6 +88,7 @@ export interface LumeBase {
      */
     export(name: string, handler: (args: Json) => unknown): Disposable;
   };
+  readonly views: LumeViews;
   readonly settings: {
     /** Hears when the plugin's settings change; the listener is given all of them. */
     onChange(listener: (settings: Record<string, Json>) => void): Disposable;
@@ -120,6 +121,29 @@ export interface LumeBase {
 /*CALLS*/
 
 /** The whole API. */
+/** Which open view a call came from, or an open view the plugin is told of. */
+export interface ViewFrom {
+  /** What tells this open view from every other; `lume.views.post` reaches it by it. */
+  readonly instance: string;
+  /** The view's name, as the manifest gives it. */
+  readonly view: string;
+  /** Where it is shown: `pane` or `panel`. */
+  readonly place: string;
+}
+
+export interface LumeViews {
+  /**
+   * Answers a call the plugin's views make with `host.call(name, args)`. The handler is
+   * given the arguments and which view called; what it returns (or its promise settles
+   * with) is the answer, and what it throws is the view's error.
+   */
+  handle(name: string, handler: (args: Json, from: ViewFrom) => unknown): Disposable;
+  /** Hears each of the plugin's views as it opens in a window. */
+  onOpen(listener: (view: ViewFrom) => void): Disposable;
+  /** Hears each of the plugin's views as it closes. */
+  onClose(listener: (view: ViewFrom) => void): Disposable;
+}
+
 export type Lume = LumeBase & LumeCalls;
 
 declare global {

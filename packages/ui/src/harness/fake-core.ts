@@ -228,6 +228,8 @@ export interface FakeCoreOptions {
     readonly view: string;
     readonly area: Exclude<Area, "top">;
   };
+  /** Whether the stand-in refuses to open plugins' views, as for a plugin gone. */
+  readonly refuseViews?: boolean;
   /** The settings' schema, as plugins make it. Left out, the application's own. */
   readonly schema?: unknown;
   /** The plugins installed, as the settings window lists them. Left out, none. */
@@ -256,6 +258,8 @@ export const NO_CONTRIBUTIONS: UiContributions = {
   menus: {},
   status: [],
   panels: [],
+  pane_views: [],
+  openers: [],
   images: {},
   motions: [],
   cursor_effects: [],
@@ -731,6 +735,17 @@ export class FakeCore implements Carrier {
         return answer(this.#options.contributions ?? NO_CONTRIBUTIONS);
       case "ui_visible":
         this.visible = Array.isArray(args["items"]) ? (args["items"] as string[]) : [];
+        return answer(null);
+      case "view_opened":
+        this.ran.push({ id: name, args });
+        if (this.#options.refuseViews) {
+          return Promise.reject(new Error("the plugin's view is not there any more"));
+        }
+        return answer(`w-1/${String(args["view"])}`);
+      case "view_closed":
+        return answer(null);
+      case "view_call":
+        this.ran.push({ id: name, args });
         return answer(null);
       case "ui_assets": {
         const held = this.#options.assets ?? {};

@@ -28,6 +28,9 @@ mod asking;
 mod calls;
 mod manage;
 mod system;
+mod views;
+
+pub use views::Place as ViewPlace;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::Path;
@@ -295,6 +298,8 @@ pub struct Plugins {
     clipboard: OnceLock<ClipboardThread>,
     /// What plugins' code has open on the machine: streams, watches, programs.
     system: system::Held,
+    /// The plugins' views open in the windows.
+    views: views::Views,
     /// The workspace plugins were last told of.
     told_workspace: Mutex<Option<Value>>,
     /// Packages the settings window is installing, waiting for the user's word.
@@ -349,6 +354,7 @@ impl Plugins {
             sampled: Mutex::new(Some(sampled)),
             clipboard: OnceLock::new(),
             system: system::Held::default(),
+            views: views::Views::default(),
             told_workspace: Mutex::new(None),
             waiting: manage::Waiting::default(),
             seen: Arc::new(Seen::default()),
@@ -937,6 +943,8 @@ impl Plugins {
                         let _ = waiting.send(Ok(()));
                     }
                 }
+                drop(inner);
+                self.tell_open_views(&local);
             }
             Outbound::Failed { message } => {
                 let name = self.ended(&local, generation, &message);
@@ -1205,6 +1213,8 @@ impl Plugins {
             Call::PanelsSetChildren(set) => {
                 self.panel_children(local, &set.id, &set.path, &set.rows)
             }
+            // Events to views are told at once, in the order the code posted them.
+            Call::ViewsPost(post) => self.view_post(local, post),
             other => return Err(Box::new(other)),
         })
     }
@@ -1276,7 +1286,12 @@ impl Plugins {
             | Call::ContextSet(_)
             | Call::PanelsSet(_)
             | Call::PanelsClear(_)
-            | Call::PanelsSetChildren(_)) => self.show(local, shows).unwrap_or(Ok(Value::Null)),
+            | Call::PanelsSetChildren(_)
+            | Call::ViewsPost(_)) => self.show(local, shows).unwrap_or(Ok(Value::Null)),
+            Call::ViewsInstances(asked) => {
+                serde_json::to_value(self.view_instances(local, asked.view.as_deref()))
+                    .map_err(|error| api_error(ErrorCode::Failed, error.to_string()))
+            }
             Call::CommandsExecute(execute) => self.execute(local, &execute.id, execute.args).await,
             Call::KvGet(get) => {
                 self.kv(local, move |map| {
@@ -2295,6 +2310,41 @@ impl Plugins {
         snapshot
     }
 
+    /// The folder a plugin's pages are served from: only for a plugin that is ready and
+    /// shows pages of its own. With `check`, the package is first looked at against what
+    /// was installed, as code is before it starts; one that changed is not served, and
+    /// what is installed is read again, which says so.
+    pub async fn frame_root(
+        &self,
+        local: &str,
+        check: bool,
+    ) -> Option<crate::plugin_scheme::FrameRoot> {
+        let entry = {
+            let inner = self.inner();
+            let loaded = inner.loaded.get(local).filter(|loaded| loaded.is_ready())?;
+            let contributes = &loaded.manifest()?.contributes;
+            let shows_pages = !contributes.pane_views.is_empty()
+                || contributes.panels.iter().any(|panel| panel.entry.is_some());
+            if !shows_pages {
+                return None;
+            }
+            loaded.installed.entry.clone()
+        };
+        let dir = self.store.package_dir(&entry);
+        if check {
+            let store = self.store.clone();
+            let seen = Arc::clone(&self.seen);
+            let checked = tokio::task::spawn_blocking(move || store.verify_seen(&entry, &seen))
+                .await
+                .ok()?;
+            if checked != Check::Intact {
+                self.read_again.notify_one();
+                return None;
+            }
+        }
+        Some(crate::plugin_scheme::FrameRoot { dir, linked: false })
+    }
+
     /// The list panel of a plugin, by its full id.
     pub fn panel(&self, id: &str) -> Option<PanelDef> {
         self.inner()
@@ -2386,6 +2436,7 @@ impl Plugins {
 
     /// A window closed: what it had on screen is not seen any more.
     pub fn window_gone(self: &Arc<Self>, window: &str) {
+        self.views_of_window_gone(window);
         self.inner().minimised.remove(window);
         self.visible(window, Vec::new());
     }

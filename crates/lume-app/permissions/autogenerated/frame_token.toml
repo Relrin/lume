@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-frame-token"
+description = "Enables the frame_token command without any pre-configured scope."
+commands.allow = ["frame_token"]
+
+[[permission]]
+identifier = "deny-frame-token"
+description = "Denies the frame_token command without any pre-configured scope."
+commands.deny = ["frame_token"]

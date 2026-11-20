@@ -19,6 +19,7 @@ import { panelDropArea, type SideArea } from "../drag/panels.ts";
 import { SIDE_AREAS, selectPanels, TAB_LIST_PANEL } from "../layout/selectors.ts";
 import type { Panel } from "../layout/types.ts";
 import { useSlotMotion } from "../motion/slots.ts";
+import { PluginFrame } from "../plugins/frame/PluginFrame.tsx";
 import { PluginIcon } from "../plugins/PluginIcon.tsx";
 import { DRAG_START_PX } from "../tuning.ts";
 import { useShell } from "./context.ts";
@@ -191,6 +192,14 @@ export function PanelHost({ panel, area }: { panel: Panel; area: SideArea }) {
             <Suspense fallback={null}>
               <ListPanel panel={def} />
             </Suspense>
+          ) : def !== undefined && ready && def.kind === "frame" && def.entry !== undefined ? (
+            <PluginFrame
+              plugin={def.plugin}
+              view={def.view}
+              place="panel"
+              entry={def.entry}
+              title={def.title}
+            />
           ) : (
             <PluginViewPlaceholder plugin={panel.content.plugin} view={panel.content.view} />
           ))}

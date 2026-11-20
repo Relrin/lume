@@ -24,6 +24,8 @@ const EMPTY: UiContributions = {
   menus: {},
   status: [],
   panels: [],
+  pane_views: [],
+  openers: [],
   images: {},
   motions: [],
   cursor_effects: [],

@@ -24,6 +24,7 @@ pub mod package;
 pub mod permissions;
 pub mod placement;
 pub mod places;
+pub mod serve;
 pub mod shader;
 pub mod store;
 

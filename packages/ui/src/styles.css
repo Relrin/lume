@@ -2211,6 +2211,71 @@
     font-family: var(--font-mono);
   }
 
+  /* A plugin's own page, in a sandboxed frame, and what stands in for it while it
+     loads or after it stopped. */
+
+  .pane-plugin {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .plugin-frame {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  .plugin-frame-page {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: transparent;
+    color-scheme: normal;
+  }
+
+  .plugin-frame[data-shown="loading"] .plugin-frame-page {
+    visibility: hidden;
+  }
+
+  .plugin-frame-note {
+    @apply text-ink-muted;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px;
+    font-size: 12px;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .plugin-frame-spinner {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: pane-spin 900ms linear infinite;
+  }
+
+  .plugin-frame-again {
+    @apply text-ink;
+    padding: 4px 10px;
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+  }
+
   /* The tabs as a list down a side of the window. */
 
   .tab-column {

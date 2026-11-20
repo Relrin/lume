@@ -51,8 +51,9 @@ pub const STATUS_KINDS: [&str; 5] = ["text", "icon", "meter", "sparkline", "badg
 /// The dock areas a panel can open in.
 pub const DOCK_AREAS: [&str; 3] = ["left", "right", "bottom"];
 
-/// The kinds of panel: a list of rows the plugin gives, drawn by the application.
-pub const PANEL_KINDS: [&str; 1] = ["list"];
+/// The kinds of panel: a list of rows the plugin gives, drawn by the application, or
+/// the plugin's own page in a sandboxed frame.
+pub const PANEL_KINDS: [&str; 2] = ["list", "frame"];
 
 /// The places a plugin's motion can play in: how the mark of the tab on show moves,
 /// and how menus, notices, the palette, panels, floating panes, the pills of panes put

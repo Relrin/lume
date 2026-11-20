@@ -1,0 +1,9 @@
+body {
+  margin: 0;
+  padding: 8px;
+  font:
+    12px system-ui,
+    sans-serif;
+  color: var(--lume-color-ink, #ccc);
+  background: var(--lume-color-surface, transparent);
+}

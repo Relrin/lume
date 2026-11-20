@@ -36,6 +36,7 @@ pub fn start(app: &App) -> tauri::Result<()> {
     app.add_capability(
         CapabilityBuilder::new("harness")
             .window(crate::window::LABEL)
+            .permission("allow-frame-token")
             // A suite's page starts and ends the sessions it measures itself.
             .permission("allow-carrier-open")
             .permission("allow-carrier-send")

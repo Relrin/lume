@@ -244,6 +244,8 @@ export const PLUGIN_CONTRIBUTIONS: UiContributions = {
       icon: { image: "acme.tools:gear" },
     },
   ],
+  pane_views: [],
+  openers: [],
   images: { "acme.tools:gear": { hash: "gear", tint: true } },
   motions: [],
   cursor_effects: [],
@@ -409,7 +411,74 @@ async function openAppMenu(name: string): Promise<Element> {
   );
 }
 
+/** The fixture's plugins, one of whose panels shows its own page. */
+const WITH_FRAME_PANEL: FakeCoreOptions = {
+  ...WITH_PLUGINS,
+  contributions: {
+    ...PLUGIN_CONTRIBUTIONS,
+    panels: [
+      ...PLUGIN_CONTRIBUTIONS.panels,
+      {
+        id: "acme.tools.preview",
+        plugin: "acme.tools",
+        view: "preview",
+        title: "Preview",
+        kind: "frame",
+        area: "right",
+        order: 1,
+        entry: "ui/preview.html",
+      },
+    ],
+  },
+  pluginPanel: { id: "acme.tools.preview", plugin: "acme.tools", view: "preview", area: "right" },
+};
+
 export const PLUGIN_SCENES: readonly Scene[] = [
+  {
+    // A plugin's own page in a panel, while it loads: the stand-in never answers it.
+    name: "plugin-frame-panel",
+    window: WITH_FRAME_PANEL,
+    prepare: async () => {
+      await until("the panel's frame", () => document.querySelector(".plugin-frame iframe"));
+    },
+    check: (page) => {
+      const frame = page.querySelector<HTMLIFrameElement>(".plugin-frame iframe");
+      if (!frame) return ["the panel has no frame"];
+      const problems: string[] = [];
+      if (frame.getAttribute("sandbox") !== "allow-scripts") {
+        problems.push(`the frame's sandbox is ${frame.getAttribute("sandbox")}`);
+      }
+      if (!frame.src.endsWith("/acme.tools/ui/preview.html")) {
+        problems.push(`the frame shows ${frame.src}`);
+      }
+      if (!page.querySelector('.plugin-frame[data-shown="loading"] .plugin-frame-spinner')) {
+        problems.push("the frame does not say it is loading");
+      }
+      return problems;
+    },
+  },
+  {
+    // A view that could not be opened says so, with a way to try again.
+    name: "plugin-frame-stopped",
+    window: { ...WITH_FRAME_PANEL, refuseViews: true },
+    prepare: async () => {
+      await until("the stopped view", () =>
+        document.querySelector('.plugin-frame[data-shown="stopped"]'),
+      );
+    },
+    check: (page) => {
+      const note = page.querySelector('.plugin-frame[data-shown="stopped"] [role="alert"]');
+      if (!note) return ["the view does not say it stopped"];
+      const problems: string[] = [];
+      if (!note.textContent?.includes("Preview stopped")) {
+        problems.push(`the note says ${note.textContent}`);
+      }
+      if (page.querySelector(".plugin-frame iframe")) problems.push("a frame is still there");
+      if (!page.querySelector(".plugin-frame-again"))
+        problems.push("there is no way to load it again");
+      return problems;
+    },
+  },
   {
     name: "plugin-status",
     window: WITH_PLUGINS,

@@ -2671,3 +2671,110 @@ fn a_plugin_asks_while_it_runs_and_the_user_answers_in_the_window() {
     );
     app.quit();
 }
+
+/// Keeps the first line of every request made to a listener on this machine, from a
+/// thread of its own.
+fn counting_listener() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use std::io::Read;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a listener");
+    let port = listener.local_addr().expect("its address").port();
+    let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let hearing = std::sync::Arc::clone(&heard);
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+            let mut first = [0u8; 256];
+            let read = stream.read(&mut first).unwrap_or(0);
+            let line = String::from_utf8_lossy(&first[..read])
+                .lines()
+                .next()
+                .unwrap_or("(nothing read)")
+                .to_owned();
+            hearing.lock().unwrap().push(line);
+        }
+    });
+    (port, heard)
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_hostile_view_reaches_nothing_but_its_own_host_half() {
+    let (port, connections) = counting_listener();
+    let home = home_with_plugins(&["hostile"]);
+    let config = home.join("config").join("config.toml");
+    let mut written = std::fs::read_to_string(&config).unwrap();
+    written.push_str(&format!("\n[plugins.\"test.hostile\"]\nport = {port}\n"));
+    std::fs::write(&config, written).unwrap();
+    let app = App::start_in(home, false);
+    app.status_with_session();
+    app.until_plugin("test.hostile", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    let sessions_before = app.ctl(&["list"]).ok("list")["sessions"]
+        .as_array()
+        .map_or(0, Vec::len);
+    app.ctl(&[
+        "command",
+        "lume.panel.show",
+        r#"{"panel":"test.hostile.probe"}"#,
+    ])
+    .ok("show the probe");
+    // The page's reports go to its plugin's log.
+    let log = app.home.join("state/plugins/logs/test.hostile.log");
+    let deadline = Instant::now() + START;
+    let report = loop {
+        let text = std::fs::read_to_string(&log).unwrap_or_default();
+        if text.contains("probe done") {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "the probe's report: {text}");
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let lines: Vec<&str> = report
+        .lines()
+        .filter(|line| line.contains("probe A"))
+        .collect();
+    assert!(lines.len() >= 40, "every try is reported:\n{report}");
+    let reached: Vec<&&str> = lines
+        .iter()
+        .filter(|line| line.contains(" reached:"))
+        .collect();
+    assert!(
+        reached.is_empty(),
+        "these got through:\n{reached:#?}\n\n{report}"
+    );
+    assert!(
+        report.contains("view opened probe in a panel"),
+        "the plugin heard its view open:\n{report}"
+    );
+    // The application's commands it tried had no effect: no tab was opened and no
+    // setting written.
+    let sessions_after = app.ctl(&["list"]).ok("list")["sessions"]
+        .as_array()
+        .map_or(0, Vec::len);
+    assert_eq!(sessions_before, sessions_after, "the view opened no tab");
+    let config = std::fs::read_to_string(app.home.join("config").join("config.toml")).unwrap();
+    assert!(
+        !config.contains("font-size = 31"),
+        "the view wrote no setting:
+{config}"
+    );
+    // The page then tried to send its own frame away; neither that nor anything before
+    // it reached the listener.
+    std::thread::sleep(Duration::from_secs(2));
+    let heard = connections.lock().unwrap().clone();
+    assert!(
+        heard.is_empty(),
+        "nothing from the view reaches the network: {heard:#?}"
+    );
+    let log_file = app.log.clone();
+    app.quit();
+    // Whether the system's channel carried the view's requests as far as the
+    // application, where the page's token turned them away, is said for the record.
+    let log = std::fs::read_to_string(&log_file).unwrap_or_default();
+    let refused = log
+        .lines()
+        .filter(|line| line.contains("a command without its page's token was refused"))
+        .count();
+    eprintln!("requests turned away for want of the page's token: {refused}");
+}

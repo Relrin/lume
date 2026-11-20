@@ -867,6 +867,38 @@ pub struct Grant {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct ViewsPost {
+    /// An open view's instance, or a view's name for every open one of it.
+    pub to: String,
+    /// The event's name, as the view listens for it.
+    pub event: String,
+    #[serde(default)]
+    pub payload: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ViewsInstances {
+    /// One view's name; all of the plugin's views when left out.
+    #[serde(default)]
+    pub view: Option<String>,
+}
+
+/// One open view of the plugin's.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ViewInstance {
+    /// What tells this open view from every other: calls from it carry it, and
+    /// `views.post` reaches it by it.
+    pub instance: String,
+    /// The view's name, as the manifest gives it.
+    pub view: String,
+    /// Where it is shown: `pane` or `panel`.
+    pub place: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ServicesCall {
     /// The plugin that offers the service, by the id its manifest gives it.
     pub plugin: String,

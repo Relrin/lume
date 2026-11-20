@@ -1,0 +1,28 @@
+# A plugin for the end-to-end tests whose page tries to get out of its frame: it reaches
+# for the application's commands, the window around it, other plugins' files, the
+# network, storage and the system, and reports what each try came to. Every one should
+# fail. It holds no permissions at all.
+schema = 1
+id = "test.hostile"
+name = "Hostile"
+version = "1.0.0"
+description = "A view that tries everything a view must not be able to do."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-hostile"
+activation = ["onView:probe"]
+
+[[contributes.panels]]
+id = "probe"
+title = "Probe"
+kind = "frame"
+area = "right"
+entry = "ui/index.html"
+
+[[contributes.settings]]
+key = "port"
+type = "integer"
+default = 9
+minimum = 1
+maximum = 65535
+label = "Port a listener waits on"

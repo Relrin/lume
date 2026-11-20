@@ -140,6 +140,37 @@ fn described(app: &AppHandle) -> Result<tauri::utils::config::WindowConfig, Stri
         .ok_or_else(|| "the configuration describes no window".to_owned())
 }
 
+/// What the webview's browser is started with, on Windows; the other systems' webviews
+/// take no such arguments.
+///
+/// The webview never needs the network: the application's pages are its own files, and
+/// everything that goes out (a plugin's requests among it) goes through the
+/// application. Plugins' pages run in the same webview, held by their sandbox and their
+/// policy to their own files; but a browser may still open a connection on its own
+/// account before such a policy turns a request down (to be ready for a page it expects
+/// to load). So every connection the browser would make goes to a proxy that is not
+/// there, loopback addresses included: nothing reaches another machine or a program on
+/// this one, and no name is looked up. While the page comes from the development
+/// server, that server alone is reached directly.
+///
+/// The first part keeps what the webview is otherwise started with: no mini menu over
+/// selected text, no PDF viewer of its own, no SmartScreen lookups of addresses.
+pub fn browser_args() -> String {
+    let mut args = String::from(
+        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,\
+         LoadingPredictorUseLocalPredictions,NavigationPredictor \
+         --proxy-server=http://127.0.0.1:9",
+    );
+    let bypass = if tauri::is_dev() {
+        "--proxy-bypass-list=<-loopback>;localhost:1420;127.0.0.1:1420"
+    } else {
+        "--proxy-bypass-list=<-loopback>"
+    };
+    args.push(' ');
+    args.push_str(bypass);
+    args
+}
+
 /// Keeps a window's title the title of its page. The page names its document after
 /// the terminal's title, and a program in the terminal chooses that title, so it is
 /// checked here as well as in the page.
@@ -157,6 +188,7 @@ pub fn open(app: &App, mode: Mode) -> Result<WebviewWindow, Box<dyn std::error::
         described.url = WebviewUrl::App(HARNESS_PAGE.into());
     }
     let window = WebviewWindowBuilder::from_config(app.handle(), &described)?
+        .additional_browser_args(&browser_args())
         .on_document_title_changed(follow_title)
         .build()?;
     Ok(window)
@@ -325,7 +357,9 @@ impl WindowShell {
         described.min_width = Some(f64::from(SETTINGS_WINDOW_MIN_SIZE.0));
         described.min_height = Some(f64::from(SETTINGS_WINDOW_MIN_SIZE.1));
         // Shown once it is where it belongs, so it is not seen to jump there.
-        let builder = WebviewWindowBuilder::from_config(&self.app, &described)?.visible(false);
+        let builder = WebviewWindowBuilder::from_config(&self.app, &described)?
+            .additional_browser_args(&browser_args())
+            .visible(false);
         let opened = self.with_title_bar(builder).build()?;
         set_corners(&opened, self.config.current().config.window.corners);
 
@@ -397,6 +431,7 @@ impl WindowShell {
         // so that it is not seen to jump there.
         let early = early_place(placement.as_ref(), &screens);
         let mut builder = WebviewWindowBuilder::from_config(&self.app, &described)?
+            .additional_browser_args(&browser_args())
             .on_document_title_changed(follow_title);
         if let Some(color) = self.config.surface_color() {
             builder =

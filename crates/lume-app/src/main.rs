@@ -43,6 +43,7 @@ mod control;
 mod early;
 mod error;
 mod fonts;
+mod frame_token;
 mod frames;
 mod harness;
 mod host;
@@ -50,6 +51,7 @@ mod log;
 mod marks;
 mod opener;
 mod panes;
+mod plugin_scheme;
 mod plugins;
 mod profiles;
 mod registry;
@@ -325,6 +327,14 @@ fn claim_instance(args: &Args, launch: &Launch) -> Result<Instance, String> {
     })
 }
 
+/// Gives the application's commands the runtime they run in.
+fn commands_of<F>(handler: F) -> F
+where
+    F: Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool,
+{
+    handler
+}
+
 fn main() -> ExitCode {
     let marks = Arc::new(Marks::start());
     log::install();
@@ -424,6 +434,68 @@ fn main() -> ExitCode {
     // One thread owns the clipboard; pages and plugins reach it through it.
     let clipboard = ClipboardThread::start();
     let for_plugins = clipboard.clone();
+    // The application's commands, which run only for a request that carries its
+    // page's token (see `frame_token`).
+    let handler = commands_of(tauri::generate_handler![
+        frame_token::frame_token,
+        commands::webview_info,
+        commands::probe_done,
+        commands::carrier_open,
+        commands::carrier_send,
+        commands::session_spawn,
+        commands::session_attach,
+        commands::session_kill,
+        commands::session_list,
+        commands::clipboard_read,
+        commands::clipboard_write,
+        commands::open_link,
+        commands::font_families,
+        commands::page_reply,
+        commands::page_marks,
+        commands::page_shown,
+        commands_layout::layout_view,
+        commands_layout::layout_apply,
+        commands_layout::sessions_start,
+        commands_layout::panes_busy,
+        commands_layout::sessions_detached,
+        commands_layout::commands_list,
+        commands_layout::command_run,
+        commands_config::config_view,
+        commands_config::config_set,
+        commands_config::config_unset,
+        commands_config::config_open,
+        commands_config::config_schema,
+        commands_config::themes_list,
+        commands_config::shells_list,
+        commands_config::profiles_list,
+        commands_config::background_image,
+        commands_window::window_drag,
+        commands_window::window_control,
+        commands_window::window_state,
+        commands_window::workspaces_list,
+        commands_plugins::ui_contributions,
+        commands_plugins::ui_visible,
+        commands_plugins::ui_assets,
+        commands_plugins::ui_panel_expand,
+        commands_plugins::view_opened,
+        commands_plugins::view_closed,
+        commands_plugins::view_call,
+        commands_plugins::addons_list,
+        commands_plugins::addon_set_enabled,
+        commands_plugins::addon_remove,
+        commands_plugins::addon_move,
+        commands_plugins::addon_inspect,
+        commands_plugins::addon_install,
+        commands_plugins::addon_cancel,
+        harness::harness_done,
+        harness::harness_save,
+        harness::harness_read,
+    ]);
+    let tokens = Arc::new(frame_token::FrameTokens::default());
+    let starting = Arc::clone(&tokens);
+    let guarding = Arc::clone(&tokens);
+    let served = Arc::new(plugin_scheme::Served::default());
+    let serving_plugins = Arc::clone(&served);
     let app = tauri::Builder::default()
         // Notifications are shown from the application's side only; no page is granted
         // the plugin's commands.
@@ -433,6 +505,7 @@ fn main() -> ExitCode {
         .manage(Arc::clone(&state))
         .manage(clipboard)
         .manage(Fonts::default())
+        .manage(Arc::clone(&tokens))
         .setup(move |app| {
             marks.setup();
             if matches!(mode, Mode::Harness(_)) {
@@ -482,6 +555,7 @@ fn main() -> ExitCode {
             });
             plugins.set_clipboard(for_plugins);
             app.manage(Arc::clone(&services));
+            serving_plugins.set(&services);
             // Plugins are read once the first terminal has shown its output.
             plugins.start(&services);
             // The theme follows the system's scheme, which only a window can tell.
@@ -545,64 +619,33 @@ fn main() -> ExitCode {
             }
             Ok(())
         })
+        .register_asynchronous_uri_scheme_protocol(plugin_scheme::SCHEME, {
+            let served = Arc::clone(&served);
+            move |context, request, responder| {
+                plugin_scheme::handle(Arc::clone(&served), context, request, responder);
+            }
+        })
         .on_page_load(move |webview, payload| match payload.event() {
             // A page that starts loading replaces whatever page the webview had, and
             // that page's carrier with it. Nothing tells the old page's channel that
-            // its page is gone, so the carrier is retired here.
-            PageLoadEvent::Started => loading.retire(webview.label()),
+            // its page is gone, so the carrier is retired here. The new page gets a
+            // token of its own.
+            PageLoadEvent::Started => {
+                starting.page_started(webview.label());
+                loading.retire(webview.label());
+            }
             PageLoadEvent::Finished => loading.marks().page(),
         })
-        .invoke_handler(tauri::generate_handler![
-            commands::webview_info,
-            commands::probe_done,
-            commands::carrier_open,
-            commands::carrier_send,
-            commands::session_spawn,
-            commands::session_attach,
-            commands::session_kill,
-            commands::session_list,
-            commands::clipboard_read,
-            commands::clipboard_write,
-            commands::open_link,
-            commands::font_families,
-            commands::page_reply,
-            commands::page_marks,
-            commands::page_shown,
-            commands_layout::layout_view,
-            commands_layout::layout_apply,
-            commands_layout::sessions_start,
-            commands_layout::panes_busy,
-            commands_layout::sessions_detached,
-            commands_layout::commands_list,
-            commands_layout::command_run,
-            commands_config::config_view,
-            commands_config::config_set,
-            commands_config::config_unset,
-            commands_config::config_open,
-            commands_config::config_schema,
-            commands_config::themes_list,
-            commands_config::shells_list,
-            commands_config::profiles_list,
-            commands_config::background_image,
-            commands_window::window_drag,
-            commands_window::window_control,
-            commands_window::window_state,
-            commands_window::workspaces_list,
-            commands_plugins::ui_contributions,
-            commands_plugins::ui_visible,
-            commands_plugins::ui_assets,
-            commands_plugins::ui_panel_expand,
-            commands_plugins::addons_list,
-            commands_plugins::addon_set_enabled,
-            commands_plugins::addon_remove,
-            commands_plugins::addon_move,
-            commands_plugins::addon_inspect,
-            commands_plugins::addon_install,
-            commands_plugins::addon_cancel,
-            harness::harness_done,
-            harness::harness_save,
-            harness::harness_read,
-        ])
+        .invoke_handler(move |invoke| {
+            // Every command but the one that hands the token out must carry it.
+            if guarding.refuses(&invoke) {
+                invoke
+                    .resolver
+                    .reject(error::CommandError::forbidden("the request is not the page's own"));
+                return true;
+            }
+            handler(invoke)
+        })
         .build(tauri::generate_context!())
         .expect("error while starting Lume");
 
@@ -613,6 +656,9 @@ fn main() -> ExitCode {
             match event {
                 WindowEvent::Destroyed => {
                     state.retire(&label);
+                    if let Some(tokens) = app.try_state::<Arc<frame_token::FrameTokens>>() {
+                        tokens.forget(&label);
+                    }
                     if let Some(services) = app.try_state::<Arc<Services>>() {
                         services.plugins.window_gone(&label);
                     }

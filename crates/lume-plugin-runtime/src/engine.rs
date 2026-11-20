@@ -720,6 +720,28 @@ impl Engine {
                         dispatch.call::<_, ()>(("service", invocation as f64, json))
                     })?;
                 }
+                Ok(Inbound::View {
+                    invocation,
+                    name,
+                    args,
+                    from,
+                }) => {
+                    #[derive(serde::Serialize)]
+                    struct Called<'a> {
+                        name: &'a str,
+                        args: &'a Value,
+                        from: &'a Value,
+                    }
+                    let json = serde_json::to_string(&Called {
+                        name: &name,
+                        args: &args,
+                        from: &from,
+                    })
+                    .unwrap_or_default();
+                    self.turn(|_, dispatch| {
+                        dispatch.call::<_, ()>(("view", invocation as f64, json))
+                    })?;
+                }
                 Ok(Inbound::Event { topic, payload }) => {
                     self.shared.events_queued.fetch_sub(1, Ordering::AcqRel);
                     let json = delivery(&topic, &payload);

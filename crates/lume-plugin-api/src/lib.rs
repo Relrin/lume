@@ -31,7 +31,7 @@ use types::{
     PaneWrite, PanelId, PanelsSet, PanelsSetChildren, PermissionsRequest, ProcessExit, ProcessId,
     ProcessResult, ProcessRun, ProcessSpawn, SecretKey, SecretSet, ServicesCall, SessionEntry,
     SessionsSpawn, SettingsGet, Spawned, StatusClear, StatusSet, StreamId, StreamRead, StreamWrite,
-    Subscribe, UiConfirm, UiPick, UiToast, WorkspaceInfo,
+    Subscribe, UiConfirm, UiPick, UiToast, ViewInstance, ViewsInstances, ViewsPost, WorkspaceInfo,
 };
 
 /// The major version of the API, which a manifest's `api` names.
@@ -47,6 +47,7 @@ pub const TOLD: &[&str] = &[
     "panels.set",
     "panels.clear",
     "panels.setChildren",
+    "views.post",
 ];
 
 /// One call of the API.
@@ -278,6 +279,13 @@ api! {
     PermissionsList = "permissions.list"(): Nothing => Vec<Grant>;
     /// Calls a service another plugin offers, as its manifest declares it.
     ServicesCall = "services.call"(plugin, name, args): ServicesCall => Value, needs "services.use";
+    /// Sends an event to the plugin's own open views: to one, by its instance, or to
+    /// every open one of a view, by the view's name. A view hears it with
+    /// `host.on(event, …)`; views that are not open miss it.
+    ViewsPost = "views.post"(to, event, payload): ViewsPost => ();
+    /// The plugin's views that are open now, in every window: all of them, or those of
+    /// one view by its name.
+    ViewsInstances = "views.instances"(view): ViewsInstances => Vec<ViewInstance>;
 }
 
 /// The call of this name.

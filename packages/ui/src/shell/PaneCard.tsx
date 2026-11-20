@@ -26,7 +26,8 @@ import type { PaneDescription } from "../events/describe.ts";
 import type { PaneIcon } from "../events/programs.ts";
 import { FLOAT_EDGES } from "../layout/floats.ts";
 import { selectFocus } from "../layout/selectors.ts";
-import type { PaneId } from "../layout/types.ts";
+import type { PaneContent, PaneId } from "../layout/types.ts";
+import { PluginFrame } from "../plugins/frame/PluginFrame.tsx";
 import { SearchBar } from "../search/SearchBar.tsx";
 import { playSlot } from "../motion/slots.ts";
 import { StatusSlotItems } from "../status/StatusItem.tsx";
@@ -34,6 +35,7 @@ import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
 import { describeNow, followPane, mark } from "./describing.ts";
 import { useKeyHint } from "./hints.ts";
+import { PluginViewPlaceholder } from "./PluginViewPlaceholder.tsx";
 import { anchorOf } from "./tab-ui.ts";
 import {
   AgainIcon,
@@ -357,6 +359,106 @@ function PaneHeader({
  * edges to resize it by.
  */
 export function PaneCard({
+  pane,
+  header,
+  floating = false,
+}: {
+  pane: PaneId;
+  header: boolean;
+  floating?: boolean;
+}) {
+  const app = useShell();
+  const plugin = useStore(app.layout, (state) => {
+    const content = state.panes[pane]?.content;
+    return content?.type === "plugin_view" ? content : undefined;
+  });
+  if (plugin !== undefined) {
+    return <PluginPaneCard pane={pane} header={header} floating={floating} content={plugin} />;
+  }
+  return <TerminalPaneCard pane={pane} header={header} floating={floating} />;
+}
+
+/** The content of a pane that shows a plugin's view. */
+type PluginContent = Extract<PaneContent, { type: "plugin_view" }>;
+
+/**
+ * The card of a pane that shows one of a plugin's views: the header every pane has, and
+ * the plugin's page in a frame where a terminal would be.
+ */
+function PluginPaneCard({
+  pane,
+  header,
+  floating,
+  content,
+}: {
+  pane: PaneId;
+  header: boolean;
+  floating: boolean;
+  content: PluginContent;
+}) {
+  const app = useShell();
+  const card = useRef<HTMLElement>(null);
+  const focused = useStore(app.layout, (state) => state.ready && selectFocus(state) === pane);
+  const def = useStore(app.plugins, (state) =>
+    state.shown?.pane_views.find(
+      (one) => one.plugin === content.plugin && one.view === content.view,
+    ),
+  );
+  const ready = useStore(app.plugins, (state) =>
+    def === undefined
+      ? false
+      : (state.shown?.plugins.find((entry) => entry.id === def.plugin)?.ready ?? false),
+  );
+  const headed = header || floating;
+  useLayoutEffect(() => {
+    const element = card.current;
+    if (!element) return undefined;
+    return app.area.registerPane(pane, element);
+  }, [app, pane]);
+  return (
+    <section
+      ref={card}
+      className="pane-card"
+      data-pane={pane}
+      data-focused={focused}
+      data-floating={floating}
+      data-content="plugin"
+      aria-label={`Pane ${pane}`}
+    >
+      {headed && <PaneHeader pane={pane} focused={focused} floating={floating} />}
+      <div className="pane-plugin">
+        {def !== undefined && ready ? (
+          <PluginFrame
+            plugin={def.plugin}
+            view={def.view}
+            place="pane"
+            entry={def.entry}
+            title={def.title}
+            state={content.state}
+          />
+        ) : (
+          <PluginViewPlaceholder plugin={content.plugin} view={content.view} />
+        )}
+      </div>
+      {floating &&
+        FLOAT_EDGES.map((edge) => (
+          <div
+            key={edge}
+            className="float-edge"
+            data-edge={edge}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              app.area.startFloatDrag(pane, edge, event.nativeEvent, event.currentTarget);
+            }}
+          />
+        ))}
+    </section>
+  );
+}
+
+/** The card of a pane that shows a terminal. */
+function TerminalPaneCard({
   pane,
   header,
   floating = false,

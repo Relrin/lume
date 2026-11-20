@@ -5,7 +5,7 @@
 
 import { Vt } from "@lume/vt";
 import wasmUrl from "@lume/vt/ghostty-vt.wasm?url";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./transport/invoke.ts";
 
 export interface WebviewInfo {
   engine: string;

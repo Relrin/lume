@@ -218,6 +218,12 @@ enum Inbound {
         name: String,
         args: Value,
     },
+    View {
+        invocation: u64,
+        name: String,
+        args: Value,
+        from: Value,
+    },
     Event {
         topic: String,
         payload: Value,
@@ -365,6 +371,17 @@ impl Plugin {
             invocation,
             name: name.to_owned(),
             args,
+        });
+    }
+
+    /// Passes on a call one of the plugin's views made. `from` says which view; the
+    /// answer comes back as [`Outbound::CommandDone`], as a command's does.
+    pub fn view_call(&self, invocation: u64, name: &str, args: Value, from: Value) {
+        let _ = self.inbound.send(Inbound::View {
+            invocation,
+            name: name.to_owned(),
+            args,
+            from,
         });
     }
 

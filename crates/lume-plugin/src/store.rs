@@ -1006,6 +1006,22 @@ fn check_contents(root: &Path, manifest: &Manifest) -> Result<(), StoreError> {
     if let Some(main) = &manifest.main {
         need("main", main, &mut problems);
     }
+    for (index, panel) in manifest.contributes.panels.iter().enumerate() {
+        if let Some(entry) = &panel.entry {
+            need(
+                &format!("contributes.panels[{index}].entry"),
+                entry,
+                &mut problems,
+            );
+        }
+    }
+    for (index, view) in manifest.contributes.pane_views.iter().enumerate() {
+        need(
+            &format!("contributes.pane-views[{index}].entry"),
+            &view.entry,
+            &mut problems,
+        );
+    }
     let mut icons: Vec<(String, &str)> = Vec::new();
     if let Some(icon) = &manifest.icon {
         icons.push(("icon".to_owned(), icon));
@@ -1024,6 +1040,11 @@ fn check_contents(root: &Path, manifest: &Manifest) -> Result<(), StoreError> {
     for (index, panel) in contributes.panels.iter().enumerate() {
         if let Some(icon) = &panel.icon {
             icons.push((format!("contributes.panels[{index}].icon"), icon));
+        }
+    }
+    for (index, view) in contributes.pane_views.iter().enumerate() {
+        if let Some(icon) = &view.icon {
+            icons.push((format!("contributes.pane-views[{index}].icon"), icon));
         }
     }
     let images: BTreeSet<&str> = contributes

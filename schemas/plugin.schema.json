@@ -101,6 +101,20 @@
           },
           "type": "array"
         },
+        "openers": {
+          "description": "Files and addresses one of the plugin's pane views can open.",
+          "items": {
+            "$ref": "#/$defs/Opener"
+          },
+          "type": "array"
+        },
+        "pane-views": {
+          "description": "Views the plugin draws itself that can be opened as a pane's content.",
+          "items": {
+            "$ref": "#/$defs/PaneView"
+          },
+          "type": "array"
+        },
         "panels": {
           "items": {
             "$ref": "#/$defs/Panel"
@@ -632,9 +646,81 @@
       ],
       "type": "object"
     },
+    "Opener": {
+      "additionalProperties": false,
+      "description": "Files or addresses that one of the plugin's pane views can open.",
+      "properties": {
+        "patterns": {
+          "default": [],
+          "description": "File name patterns, such as `*.diff`: `*` and `?` within a name, matched without\ncase.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "schemes": {
+          "default": [],
+          "description": "Address schemes, such as `acme` for `acme:…` addresses.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "default": null,
+          "description": "What the choice is called when more than one thing can open them.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "view": {
+          "description": "The pane view that opens them.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view"
+      ],
+      "type": "object"
+    },
+    "PaneView": {
+      "additionalProperties": false,
+      "description": "A view the plugin draws in a sandboxed frame, opened as the content of a pane.",
+      "properties": {
+        "entry": {
+          "description": "The page it shows: an `.html` file in the package.",
+          "type": "string"
+        },
+        "icon": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "persist": {
+          "default": true,
+          "description": "Whether a pane showing it is kept in the workspace and opened again with it.",
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "entry"
+      ],
+      "type": "object"
+    },
     "Panel": {
       "additionalProperties": false,
-      "description": "A panel in a dock area of the window, drawn by Lume from rows the plugin gives.",
+      "description": "A panel in a dock area of the window: drawn by Lume from rows the plugin gives\n(`list`), or by the plugin's own page in a sandboxed frame (`frame`).",
       "properties": {
         "after": {
           "default": null,
@@ -656,6 +742,14 @@
             "null"
           ]
         },
+        "entry": {
+          "default": null,
+          "description": "The page a `frame` panel shows: an `.html` file in the package.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "icon": {
           "default": null,
           "type": [
@@ -667,7 +761,7 @@
           "type": "string"
         },
         "kind": {
-          "description": "How it is drawn: `list`.",
+          "description": "How it is drawn: `list` or `frame`.",
           "type": "string"
         },
         "order": {

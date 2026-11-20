@@ -274,6 +274,12 @@ pub struct Contributes {
     pub themes: Vec<Theme>,
     #[serde(default)]
     pub panels: Vec<Panel>,
+    /// Views the plugin draws itself that can be opened as a pane's content.
+    #[serde(default)]
+    pub pane_views: Vec<PaneView>,
+    /// Files and addresses one of the plugin's pane views can open.
+    #[serde(default)]
+    pub openers: Vec<Opener>,
     #[serde(default)]
     pub services: Vec<Service>,
     /// Pictures in the package, which the plugin's other things and its code name.
@@ -555,7 +561,8 @@ pub struct Theme {
     pub file: String,
 }
 
-/// A panel in a dock area of the window, drawn by Lume from rows the plugin gives.
+/// A panel in a dock area of the window: drawn by Lume from rows the plugin gives
+/// (`list`), or by the plugin's own page in a sandboxed frame (`frame`).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Panel {
@@ -563,10 +570,13 @@ pub struct Panel {
     pub title: String,
     #[serde(default)]
     pub icon: Option<String>,
-    /// How it is drawn: `list`.
+    /// How it is drawn: `list` or `frame`.
     pub kind: String,
     /// The dock area it opens in the first time: `left`, `right` or `bottom`.
     pub area: String,
+    /// The page a `frame` panel shows: an `.html` file in the package.
+    #[serde(default)]
+    pub entry: Option<String>,
     /// The neighbour it goes right before.
     #[serde(default)]
     pub before: Option<String>,
@@ -577,6 +587,39 @@ pub struct Panel {
     /// comes first.
     #[serde(default)]
     pub order: Option<i32>,
+}
+
+/// A view the plugin draws in a sandboxed frame, opened as the content of a pane.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct PaneView {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// The page it shows: an `.html` file in the package.
+    pub entry: String,
+    /// Whether a pane showing it is kept in the workspace and opened again with it.
+    #[serde(default = "yes")]
+    pub persist: bool,
+}
+
+/// Files or addresses that one of the plugin's pane views can open.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Opener {
+    /// The pane view that opens them.
+    pub view: String,
+    /// What the choice is called when more than one thing can open them.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// File name patterns, such as `*.diff`: `*` and `?` within a name, matched without
+    /// case.
+    #[serde(default)]
+    pub patterns: Vec<String>,
+    /// Address schemes, such as `acme` for `acme:…` addresses.
+    #[serde(default)]
+    pub schemes: Vec<String>,
 }
 
 /// A picture in the package, by the name the plugin's things and code give it.
@@ -780,9 +823,10 @@ impl Manifest {
                         }
                         Activation::View(name)
                             if !own.status.contains(name.as_str())
-                                && !own.panels.contains(name.as_str()) =>
+                                && !own.panels.contains(name.as_str())
+                                && !own.pane_views.contains(name.as_str()) =>
                         {
-                            Some("status item or panel")
+                            Some("status item, panel or pane view")
                         }
                         Activation::Service(name) if !own.services.contains(name.as_str()) => {
                             Some("service")
@@ -801,12 +845,12 @@ impl Manifest {
         }
         let needs_code = !contributes.commands.is_empty()
             || !contributes.services.is_empty()
-            || !contributes.panels.is_empty()
+            || contributes.panels.iter().any(|panel| panel.kind == "list")
             || !self.events.is_empty();
         if needs_code && self.main.is_none() {
             p.say(
-                "main: a plugin with commands, services, panels or activation events needs \
-                 its code, named by main"
+                "main: a plugin with commands, services, list panels or activation events \
+                 needs its code, named by main"
                     .to_owned(),
             );
         }
@@ -962,6 +1006,7 @@ struct Own<'a> {
     settings: BTreeSet<&'a str>,
     groups: BTreeSet<&'a str>,
     panels: BTreeSet<&'a str>,
+    pane_views: BTreeSet<&'a str>,
     services: BTreeSet<&'a str>,
     images: BTreeSet<&'a str>,
     /// The submenus that status items can open: those in `menu.status`.
@@ -992,6 +1037,11 @@ impl<'a> Own<'a> {
                 .map(|g| g.id.as_str())
                 .collect(),
             panels: contributes.panels.iter().map(|p| p.id.as_str()).collect(),
+            pane_views: contributes
+                .pane_views
+                .iter()
+                .map(|v| v.id.as_str())
+                .collect(),
             services: contributes
                 .services
                 .iter()
@@ -1485,6 +1535,14 @@ impl Contributes {
                     places::DOCK_AREAS.join(", ")
                 ));
             }
+            match (&panel.entry, panel.kind.as_str()) {
+                (Some(entry), "frame") => p.file(&format!("{key}.entry"), entry, &["html"]),
+                (None, "frame") => p.say(format!(
+                    "{key}.entry: a `frame` panel needs the page it shows"
+                )),
+                (Some(_), _) => p.say(format!("{key}.entry: only a `frame` panel shows a page")),
+                (None, _) => {}
+            }
             if let Some(icon) = &panel.icon {
                 check_icon(p, &format!("{key}.icon"), icon, own);
             }
@@ -1495,6 +1553,53 @@ impl Contributes {
                 Builtin::Places,
                 dependencies,
             );
+        }
+
+        let mut seen: BTreeSet<String> = self.panels.iter().map(|panel| panel.id.clone()).collect();
+        for (index, view) in self.pane_views.iter().enumerate() {
+            let key = format!("contributes.pane-views[{index}]");
+            if seen.contains(&view.id) && own.panels.contains(view.id.as_str()) {
+                p.say(format!(
+                    "{key}.id: `{}` is also a panel's; a view and a panel need names of \
+                     their own",
+                    view.id
+                ));
+            } else {
+                p.name(&format!("{key}.id"), &view.id, &mut seen);
+            }
+            p.text(&format!("{key}.title"), &view.title, LABEL_MAX_CHARS, true);
+            p.file(&format!("{key}.entry"), &view.entry, &["html"]);
+            if let Some(icon) = &view.icon {
+                check_icon(p, &format!("{key}.icon"), icon, own);
+            }
+        }
+
+        for (index, opener) in self.openers.iter().enumerate() {
+            let key = format!("contributes.openers[{index}]");
+            if !own.pane_views.contains(opener.view.as_str()) {
+                p.say(format!(
+                    "{key}.view: `{}` is not one of the plugin's pane views",
+                    opener.view
+                ));
+            }
+            if let Some(title) = &opener.title {
+                p.text(&format!("{key}.title"), title, LABEL_MAX_CHARS, true);
+            }
+            if opener.patterns.is_empty() && opener.schemes.is_empty() {
+                p.say(format!(
+                    "{key}: an opener names the file patterns or address schemes it opens"
+                ));
+            }
+            for (at, pattern) in opener.patterns.iter().enumerate() {
+                if let Err(problem) = check_opener_pattern(pattern) {
+                    p.say(format!("{key}.patterns[{at}]: {problem}"));
+                }
+            }
+            for (at, scheme) in opener.schemes.iter().enumerate() {
+                if let Err(problem) = check_opener_scheme(scheme) {
+                    p.say(format!("{key}.schemes[{at}]: {problem}"));
+                }
+            }
         }
 
         let mut seen = BTreeSet::new();
@@ -1601,6 +1706,55 @@ pub fn check_when_syntax(when: &str) -> Result<(), String> {
 
 /// Checks a path to a file in a package: relative, written with `/`, not going up and
 /// not into a hidden part.
+/// Checks a file name pattern an opener gives: a name (no folders) of at most 64
+/// characters, with `*` and `?`, that is not only wildcards.
+pub fn check_opener_pattern(pattern: &str) -> Result<(), String> {
+    let bad = pattern.is_empty()
+        || pattern.chars().count() > 64
+        || pattern.contains(['/', '\\', ':'])
+        || pattern.chars().all(|c| c == '*' || c == '?' || c == '.')
+        || pattern.chars().any(char::is_control);
+    if bad {
+        Err(format!(
+            "`{pattern}` is not a file name pattern: a name with `*` or `?`, such as `*.diff`"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Checks an address scheme an opener gives: lower-case letters, digits, `+`, `-` and
+/// `.`, beginning with a letter, and not one of the schemes the application or the web
+/// owns.
+pub fn check_opener_scheme(scheme: &str) -> Result<(), String> {
+    const TAKEN: [&str; 9] = [
+        "http",
+        "https",
+        "file",
+        "ftp",
+        "mailto",
+        "data",
+        "javascript",
+        "about",
+        "blob",
+    ];
+    let well_formed = scheme.len() <= 32
+        && scheme
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "+-.".contains(c));
+    if !well_formed {
+        Err(format!("`{scheme}` is not an address scheme"))
+    } else if TAKEN.contains(&scheme) || scheme == "lume" || scheme.starts_with("lume-") {
+        Err(format!("`{scheme}` is not a scheme a plugin may open"))
+    } else {
+        Ok(())
+    }
+}
+
 pub fn check_package_path(path: &str) -> Result<(), String> {
     let bad = path.is_empty()
         || path.starts_with('/')
@@ -1707,6 +1861,48 @@ api = "1"
             found.iter().any(|problem| problem.contains(what)),
             "expected a problem saying {what:?}, got {found:#?}"
         );
+    }
+
+    #[test]
+    fn views_drawn_by_the_plugin_are_read() {
+        let text = format!(
+            r#"{MINIMAL}
+activation = ["onView:review"]
+main = "host.js"
+
+[[contributes.panels]]
+id = "changes"
+title = "Changes"
+kind = "frame"
+area = "right"
+entry = "ui/changes.html"
+
+[[contributes.pane-views]]
+id = "review"
+title = "Review"
+entry = "ui/review.html"
+
+[[contributes.openers]]
+view = "review"
+title = "Review the patch"
+patterns = ["*.diff", "*.PATCH"]
+schemes = ["acme-review"]
+"#
+        );
+        let manifest = Manifest::parse(&text).unwrap();
+        let contributes = &manifest.contributes;
+        assert_eq!(
+            contributes.panels[0].entry.as_deref(),
+            Some("ui/changes.html")
+        );
+        assert_eq!(contributes.pane_views[0].id, "review");
+        assert!(contributes.pane_views[0].persist);
+        assert_eq!(contributes.openers[0].schemes, ["acme-review"]);
+        // A view with no code of its own needs no `main`.
+        let bare = format!(
+            "{MINIMAL}\n[[contributes.pane-views]]\nid = \"v\"\ntitle = \"V\"\nentry = \"v.html\"\n"
+        );
+        assert!(Manifest::parse(&bare).is_ok());
     }
 
     #[test]
@@ -2026,9 +2222,47 @@ name = "latest"
         );
         says(
             &manifest(
-                "[[contributes.panels]]\nid = \"p\"\ntitle = \"P\"\nkind = \"frame\"\narea = \"top\"\n",
+                "[[contributes.panels]]\nid = \"p\"\ntitle = \"P\"\nkind = \"tiles\"\narea = \"top\"\n",
             ),
             "not a kind of panel",
+        );
+        says(
+            &manifest(
+                "[[contributes.panels]]\nid = \"p\"\ntitle = \"P\"\nkind = \"frame\"\narea = \"right\"\n",
+            ),
+            "needs the page it shows",
+        );
+        says(
+            &manifest(
+                "[[contributes.panels]]\nid = \"p\"\ntitle = \"P\"\nkind = \"list\"\narea = \"right\"\nentry = \"p.html\"\n",
+            ),
+            "only a `frame` panel",
+        );
+        says(
+            &manifest(
+                "[[contributes.pane-views]]\nid = \"v\"\ntitle = \"V\"\nentry = \"../v.html\"\n",
+            ),
+            "not a path in the package",
+        );
+        says(
+            &manifest("[[contributes.pane-views]]\nid = \"v\"\ntitle = \"V\"\nentry = \"v.js\"\n"),
+            "must be a .html file",
+        );
+        says(
+            &manifest(
+                "[[contributes.panels]]\nid = \"v\"\ntitle = \"P\"\nkind = \"frame\"\narea = \"right\"\nentry = \"p.html\"\n[[contributes.pane-views]]\nid = \"v\"\ntitle = \"V\"\nentry = \"v.html\"\n",
+            ),
+            "also a panel's",
+        );
+        says(
+            &manifest("[[contributes.openers]]\nview = \"nowhere\"\npatterns = [\"*.diff\"]\n"),
+            "not one of the plugin's pane views",
+        );
+        says(
+            &manifest(
+                "[[contributes.pane-views]]\nid = \"v\"\ntitle = \"V\"\nentry = \"v.html\"\n[[contributes.openers]]\nview = \"v\"\nschemes = [\"https\"]\npatterns = [\"*\"]\n",
+            ),
+            "not a scheme a plugin may open",
         );
         says(
             &manifest(

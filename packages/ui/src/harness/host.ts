@@ -3,7 +3,7 @@
  * files, writing result files, and handing in the report.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../transport/invoke.ts";
 
 import { toCommandError } from "../transport/types.ts";
 

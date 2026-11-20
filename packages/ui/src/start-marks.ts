@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./transport/invoke.ts";
 
 /**
  * How far this page's start has come: the time each step was first reached, on the

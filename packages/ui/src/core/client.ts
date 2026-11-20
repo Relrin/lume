@@ -181,6 +181,24 @@ export class CoreClient {
     return this.transport.command("ui_panel_expand", { panel, path });
   }
 
+  /**
+   * Opens one of a plugin's views in this page, under the page's own name for it; gives
+   * the instance the plugin's code knows it by.
+   */
+  viewOpened(view: string, plugin: string, name: string, place: "pane" | "panel"): Promise<string> {
+    return this.transport.command("view_opened", { view, plugin, name, place });
+  }
+
+  /** Closes one of the page's views. */
+  viewClosed(view: string): Promise<void> {
+    return this.transport.command("view_closed", { view });
+  }
+
+  /** A call one of the page's views makes of its plugin's code. */
+  viewCall(view: string, name: string, args: unknown): Promise<unknown> {
+    return this.transport.command("view_call", { view, name, args: args ?? null });
+  }
+
   /** Every plugin installed, in the order they load in, with how each fares. */
   addonsList(): Promise<{ plugins: AddonEntry[] }> {
     return this.transport.command("addons_list");

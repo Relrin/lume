@@ -4,6 +4,7 @@
   "description": "What the page of a window that shows terminals may call. Nothing from Tauri's core plugins is granted.",
   "windows": ["w-*"],
   "permissions": [
+    "allow-frame-token",
     "allow-webview-info",
     "allow-carrier-open",
     "allow-carrier-send",
@@ -32,6 +33,9 @@
     "allow-ui-visible",
     "allow-ui-assets",
     "allow-ui-panel-expand",
+    "allow-view-opened",
+    "allow-view-closed",
+    "allow-view-call",
     "allow-window-drag",
     "allow-window-control",
     "allow-window-state",

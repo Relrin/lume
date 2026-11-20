@@ -180,6 +180,37 @@ pub struct PanelDef {
     pub order: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<Icon>,
+    /// The page a `frame` panel shows, as a path in the package.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
+}
+
+/// A view a plugin draws in a frame, which a pane can show.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PaneViewDef {
+    /// `<install>.<name>`.
+    pub id: String,
+    pub plugin: String,
+    /// The name its manifest gives it, which the layout calls its view.
+    pub view: String,
+    pub title: String,
+    /// The page it shows, as a path in the package.
+    pub entry: String,
+    pub persist: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Icon>,
+}
+
+/// Files or addresses a plugin's pane view opens.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct OpenerDef {
+    pub plugin: String,
+    /// The pane view's name in its manifest.
+    pub view: String,
+    pub title: String,
+    /// File name patterns, lower case.
+    pub patterns: Vec<String>,
+    pub schemes: Vec<String>,
 }
 
 /// An effect a plugin offers for a place, checked.
@@ -238,6 +269,8 @@ pub struct Contributions {
     pub menus: BTreeMap<String, Vec<MenuNode>>,
     pub status: Vec<StatusDef>,
     pub panels: Vec<PanelDef>,
+    pub pane_views: Vec<PaneViewDef>,
+    pub openers: Vec<OpenerDef>,
     /// The plugins' pictures, by key.
     pub images: BTreeMap<String, ImageOut>,
     pub motions: Vec<MotionOut>,
@@ -342,6 +375,8 @@ impl Contributions {
             "menus": self.menus,
             "status": self.status,
             "panels": self.panels,
+            "pane_views": self.pane_views,
+            "openers": self.openers,
             "images": self.images,
             "motions": self.motions,
             "cursor_effects": self.cursor_effects,
@@ -507,6 +542,7 @@ pub fn build(installs: &[Install<'_>], commands: &dyn Commands, read: &mut Read)
     menus(installs, &by_local, commands, &mut out);
     status(installs, commands, &mut out);
     panels(installs, &mut out);
+    views(installs, &mut out);
     for install in installs {
         let names = Names { install };
         let local = install.local;
@@ -1170,6 +1206,43 @@ fn status(installs: &[Install<'_>], commands: &dyn Commands, out: &mut Contribut
     say(out, warnings);
 }
 
+/// The pane views and openers of every install, in the order installs load in.
+fn views(installs: &[Install<'_>], out: &mut Contributions) {
+    for install in installs {
+        let names = Names { install };
+        let local = install.local;
+        let contributes = &install.manifest.contributes;
+        for view in &contributes.pane_views {
+            out.pane_views.push(PaneViewDef {
+                id: full_id(local, &view.id),
+                plugin: local.to_owned(),
+                view: view.id.clone(),
+                title: view.title.clone(),
+                entry: view.entry.clone(),
+                persist: view.persist,
+                icon: names.icon(view.icon.as_ref(), &out.images),
+            });
+        }
+        for opener in &contributes.openers {
+            let title = opener.title.clone().unwrap_or_else(|| {
+                contributes
+                    .pane_views
+                    .iter()
+                    .find(|view| view.id == opener.view)
+                    .map(|view| view.title.clone())
+                    .unwrap_or_default()
+            });
+            out.openers.push(OpenerDef {
+                plugin: local.to_owned(),
+                view: opener.view.clone(),
+                title,
+                patterns: opener.patterns.iter().map(|p| p.to_lowercase()).collect(),
+                schemes: opener.schemes.clone(),
+            });
+        }
+    }
+}
+
 fn panels(installs: &[Install<'_>], out: &mut Contributions) {
     let mut areas: BTreeMap<String, Vec<Placed<PanelDef>>> = BTreeMap::new();
     for install in installs {
@@ -1185,6 +1258,7 @@ fn panels(installs: &[Install<'_>], out: &mut Contributions) {
                 area: panel.area.clone(),
                 order: 0,
                 icon: names.icon(panel.icon.as_ref(), &out.images),
+                entry: panel.entry.clone(),
             };
             areas.entry(panel.area.clone()).or_default().push(placed(
                 &names,

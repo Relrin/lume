@@ -60,6 +60,54 @@ pub async fn ui_panel_expand(
     services.plugins.expand(&panel, path).await
 }
 
+/// The page opened one of a plugin's views in a frame: a pane view (`place = "pane"`)
+/// or a panel that shows a page (`"panel"`). `view` is the page's own name for it.
+/// Gives the instance the plugin's code knows it by.
+#[tauri::command]
+pub fn view_opened(
+    services: Shared<'_>,
+    window: WebviewWindow,
+    view: String,
+    plugin: String,
+    name: String,
+    place: String,
+) -> Result<String, CommandError> {
+    let place = crate::plugins::ViewPlace::parse(&place)
+        .ok_or_else(|| CommandError::bad_request("a view is in a pane or a panel"))?;
+    services
+        .plugins
+        .view_opened(window.label(), &view, &plugin, &name, place)
+}
+
+/// The page closed one of its views.
+#[tauri::command]
+pub fn view_closed(services: Shared<'_>, window: WebviewWindow, view: String) {
+    services.plugins.view_closed(window.label(), &view);
+}
+
+/// A call one of the page's open views made of its plugin's code. A failure of the
+/// code's comes back with the code's own kind of failure.
+#[tauri::command]
+pub async fn view_call(
+    services: Shared<'_>,
+    window: WebviewWindow,
+    view: String,
+    name: String,
+    args: Value,
+) -> Result<Value, CommandError> {
+    services
+        .plugins
+        .view_call(window.label(), &view, &name, args)
+        .await
+        .map_err(|error| {
+            let code = serde_json::to_value(error.code)
+                .ok()
+                .and_then(|code| code.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "failed".to_owned());
+            CommandError::new(code, error.message)
+        })
+}
+
 /// The plugins' things the calling window has on screen: status items and panels, by
 /// their full ids. A window that is minimised or hidden says it has none.
 // Run beside the main thread, which the windows need while they start.

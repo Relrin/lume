@@ -572,6 +572,33 @@ Has the user choose one of a list, under the plugin's name: its id, or null if
 
 Gives `string \| null`.
 
+## lume.views
+
+### `lume.views.post(to, event, payload?)`
+
+Sends an event to the plugin's own open views: to one, by its instance, or to
+ every open one of a view, by the view's name. A view hears it with
+ `host.on(event, …)`; views that are not open miss it.
+
+| Argument | Type | |
+|---|---|---|
+| `to` | `string` | An open view's instance, or a view's name for every open one of it. |
+| `event` | `string` | The event's name, as the view listens for it. |
+| `payload` | `Json` | optional.  |
+
+Gives `void`.
+
+### `lume.views.instances(view?)`
+
+The plugin's views that are open now, in every window: all of them, or those of
+ one view by its name.
+
+| Argument | Type | |
+|---|---|---|
+| `view` | `string` | optional. One view's name; all of the plugin's views when left out. |
+
+Gives `ViewInstance[]`.
+
 ## lume.workspace
 
 ### `lume.workspace.current()`
@@ -1252,6 +1279,30 @@ What the plugin can hear about.
 |---|---|---|
 | `level` | `NoticeLevel` | optional.  |
 | `message` | `string` | At most 300 characters. |
+
+### `ViewInstance`
+
+One open view of the plugin's.
+
+| Field | Type | |
+|---|---|---|
+| `instance` | `string` | What tells this open view from every other: calls from it carry it, and `views.post` reaches it by it. |
+| `place` | `string` | Where it is shown: `pane` or `panel`. |
+| `view` | `string` | The view's name, as the manifest gives it. |
+
+### `ViewsInstances`
+
+| Field | Type | |
+|---|---|---|
+| `view` | `string` | optional. One view's name; all of the plugin's views when left out. |
+
+### `ViewsPost`
+
+| Field | Type | |
+|---|---|---|
+| `event` | `string` | The event's name, as the view listens for it. |
+| `payload` | `Json` | optional.  |
+| `to` | `string` | An open view's instance, or a view's name for every open one of it. |
 
 ### `WorkspaceInfo`
 

@@ -889,6 +889,44 @@ export interface UiToast {
 }
 
 /**
+ * One open view of the plugin's.
+ */
+export interface ViewInstance {
+  /**
+   * What tells this open view from every other: calls from it carry it, and
+   * `views.post` reaches it by it.
+   */
+  instance: string;
+  /**
+   * Where it is shown: `pane` or `panel`.
+   */
+  place: string;
+  /**
+   * The view's name, as the manifest gives it.
+   */
+  view: string;
+}
+
+export interface ViewsInstances {
+  /**
+   * One view's name; all of the plugin's views when left out.
+   */
+  view?: string;
+}
+
+export interface ViewsPost {
+  /**
+   * The event's name, as the view listens for it.
+   */
+  event: string;
+  payload?: Json;
+  /**
+   * An open view's instance, or a view's name for every open one of it.
+   */
+  to: string;
+}
+
+/**
  * The workspace in use.
  */
 export interface WorkspaceInfo {
@@ -988,6 +1026,7 @@ export interface LumeBase {
      */
     export(name: string, handler: (args: Json) => unknown): Disposable;
   };
+  readonly views: LumeViews;
   readonly settings: {
     /** Hears when the plugin's settings change; the listener is given all of them. */
     onChange(listener: (settings: Record<string, Json>) => void): Disposable;
@@ -1300,6 +1339,19 @@ export interface LumeCalls {
      */
     pick(items: PickItem[], options?: PickOptions): Promise<string | null>;
   };
+  readonly views: {
+    /**
+     * Sends an event to the plugin's own open views: to one, by its instance, or to
+     *  every open one of a view, by the view's name. A view hears it with
+     *  `host.on(event, …)`; views that are not open miss it.
+     */
+    post(to: string, event: string, payload?: Json): Promise<void>;
+    /**
+     * The plugin's views that are open now, in every window: all of them, or those of
+     *  one view by its name.
+     */
+    instances(view?: string): Promise<ViewInstance[]>;
+  };
   readonly workspace: {
     /**
      * The workspace in use.
@@ -1317,6 +1369,29 @@ export interface LumeCalls {
 }
 
 /** The whole API. */
+/** Which open view a call came from, or an open view the plugin is told of. */
+export interface ViewFrom {
+  /** What tells this open view from every other; `lume.views.post` reaches it by it. */
+  readonly instance: string;
+  /** The view's name, as the manifest gives it. */
+  readonly view: string;
+  /** Where it is shown: `pane` or `panel`. */
+  readonly place: string;
+}
+
+export interface LumeViews {
+  /**
+   * Answers a call the plugin's views make with `host.call(name, args)`. The handler is
+   * given the arguments and which view called; what it returns (or its promise settles
+   * with) is the answer, and what it throws is the view's error.
+   */
+  handle(name: string, handler: (args: Json, from: ViewFrom) => unknown): Disposable;
+  /** Hears each of the plugin's views as it opens in a window. */
+  onOpen(listener: (view: ViewFrom) => void): Disposable;
+  /** Hears each of the plugin's views as it closes. */
+  onClose(listener: (view: ViewFrom) => void): Disposable;
+}
+
 export type Lume = LumeBase & LumeCalls;
 
 declare global {

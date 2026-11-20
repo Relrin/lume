@@ -234,7 +234,7 @@ export interface StatusDef {
   readonly slot_setting?: { readonly key: string; readonly slots: readonly string[] };
 }
 
-/** A plugin's list panel, as its manifest says it. */
+/** A plugin's panel, as its manifest says it: a list, or its own page (`frame`). */
 export interface PanelDef {
   readonly id: string;
   readonly plugin: string;
@@ -244,6 +244,32 @@ export interface PanelDef {
   readonly area: string;
   readonly order: number;
   readonly icon?: IconRef;
+  /** The page a `frame` panel shows, as a path in the plugin's package. */
+  readonly entry?: string;
+}
+
+/** A view a plugin draws in a frame, which a pane can show. */
+export interface PaneViewDef {
+  /** `<plugin>.<name>`. */
+  readonly id: string;
+  readonly plugin: string;
+  /** The name its manifest gives it, which the layout calls its view. */
+  readonly view: string;
+  readonly title: string;
+  /** The page it shows, as a path in the plugin's package. */
+  readonly entry: string;
+  readonly persist: boolean;
+  readonly icon?: IconRef;
+}
+
+/** Files or addresses one of a plugin's pane views opens. */
+export interface OpenerDef {
+  readonly plugin: string;
+  readonly view: string;
+  readonly title: string;
+  /** File name patterns, lower case. */
+  readonly patterns: readonly string[];
+  readonly schemes: readonly string[];
 }
 
 /** An easing as the core checked it. */
@@ -343,6 +369,8 @@ export interface UiContributions {
   readonly menus: Readonly<Record<string, readonly MenuNodeData[]>>;
   readonly status: readonly StatusDef[];
   readonly panels: readonly PanelDef[];
+  readonly pane_views: readonly PaneViewDef[];
+  readonly openers: readonly OpenerDef[];
   readonly images: Readonly<Record<string, PluginImage>>;
   readonly motions: readonly MotionDef[];
   readonly cursor_effects: readonly CursorEffectDef[];
@@ -541,6 +569,14 @@ export type Notice =
   | { readonly type: "plugins_changed" }
   /** What the plugins add to the windows changed: the page fetches it again. */
   | { readonly type: "contributions_changed"; readonly revision: number }
+  /** A plugin's code sent one of this page's open views an event. */
+  | {
+      readonly type: "view_event";
+      /** The page's name for the view. */
+      readonly view: string;
+      readonly event: string;
+      readonly payload: unknown;
+    }
   /**
    * What a plugin's code showed since the window was last told, all of it together:
    * status items' values (null where one shows nothing any more), the rows of the

@@ -6,7 +6,8 @@
  * terminal noticing.
  */
 
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { invoke } from "./invoke.ts";
 
 import type { FrameLimits } from "./decoder.ts";
 

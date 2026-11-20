@@ -17,6 +17,7 @@ path = "src/main.rs"
 arboard.workspace = true
 async-trait.workspace = true
 fontdb.workspace = true
+getrandom.workspace = true
 lume-config.workspace = true
 lume-ipc.workspace = true
 lume-layout.workspace = true

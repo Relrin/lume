@@ -4,6 +4,7 @@
   "description": "What the page of the settings window may call: the configuration, what there is to choose from, its own window, and the plugins it manages, with a folder picker to install one from. It starts no session, sees no layout and runs no command. Nothing else from Tauri's core plugins is granted.",
   "windows": ["settings"],
   "permissions": [
+    "allow-frame-token",
     "allow-webview-info",
     "allow-carrier-open",
     "allow-carrier-send",
