@@ -127,7 +127,9 @@ describe("the settings as pages of rows", () => {
     expect(writeSwatch(accent, null)).toEqual({ op: "unset", path: "appearance.accent" });
     expect(typedColor(" #A0b1C2 ")).toBe("#a0b1c2");
     expect(typedColor("a0b1c2")).toBe("#a0b1c2");
-    for (const wrong of ["", "#abc", "#a0b1c2ff", "teal", "#ggg000"]) {
+    // Three digits stand for six: each one twice.
+    expect(typedColor("#7AF")).toBe("#77aaff");
+    for (const wrong of ["", "#ab", "#abcd", "#a0b1c2ff", "teal", "#ggg000"]) {
       expect(typedColor(wrong), wrong).toBeNull();
     }
   });
@@ -477,7 +479,12 @@ describe("the configuration's own schema", () => {
 
   // The schema says nothing of pages until it has been generated with them.
   it.skipIf(pages.length === 0)("describes pages whose every row can be drawn", () => {
-    expect(pages.map((page) => page.id)).toEqual(["general", "appearance", "terminal"]);
+    expect(pages.map((page) => page.id)).toEqual([
+      "general",
+      "appearance",
+      "terminal",
+      "notifications",
+    ]);
     for (const page of pages) {
       expect(page.groups.length, page.id).toBeGreaterThan(0);
       for (const group of page.groups) {

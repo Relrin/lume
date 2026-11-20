@@ -157,7 +157,11 @@ const APP_LUME: &[Builtin] = &[
     ),
     section(
         "workspaces",
-        &[item("new-workspace"), item("open-workspace")],
+        &[
+            item("new-workspace"),
+            item("open-folder"),
+            item("open-workspace"),
+        ],
     ),
     section("preferences", &[item("settings")]),
     section("sessions", &[item("detached")]),

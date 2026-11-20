@@ -12,7 +12,9 @@
 
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 
+import { askColor, startingHex } from "../shell/color-picker.ts";
 import { AgainIcon } from "../shell/icons.tsx";
+import { OwnColorSwatch } from "../shell/OwnColorSwatch.tsx";
 import { roveWithin } from "../shell/roving.ts";
 import { Select } from "./Select.tsx";
 import {
@@ -275,56 +277,28 @@ function paint(color: string | null): (element: HTMLElement | null) => void {
 /**
  * A colour: the theme's own, one of the row's swatches, or one of the user's own. The
  * swatches are one stop for the Tab key and the arrows choose among them, as radio
- * buttons do. The last swatch opens the system's colour picker, and the field after it
- * takes a colour typed as `#rrggbb`.
+ * buttons do. The last swatch opens the colour picker, which takes a colour mixed on
+ * it or typed as `#rgb` or `#rrggbb`, and writes it only when it is applied.
  */
 function Swatches({ row, labelled, write }: ControlProps) {
-  const picker = useRef<HTMLInputElement>(null);
-  const field = useRef<HTMLInputElement>(null);
   const swatches = row.swatches ?? [];
   const current = typeof row.value === "string" ? row.value : null;
   const preset = swatches.find((swatch) => swatch.value === current);
   const own = current !== null && preset === undefined ? typedColor(current) : null;
   const shown = own ?? preset?.color ?? (typeof row.effective === "string" ? row.effective : "");
-  const held = own ?? "";
-  // The field shows the user's own colour whenever that changes, unless it is being
-  // typed in.
-  useEffect(() => {
-    const element = field.current;
-    if (element && document.activeElement !== element) element.value = held;
-  }, [held]);
-  // The picker says what was picked once it is closed: `change`, not `input`, so that
-  // dragging about in it writes nothing until a colour is chosen.
-  useEffect(() => {
-    const element = picker.current;
-    if (!element) return;
-    const picked = () => {
-      const color = typedColor(element.value);
-      if (color !== null && color !== current) write(writeSwatch(row, color));
-    };
-    element.addEventListener("change", picked);
-    return () => element.removeEventListener("change", picked);
-  }, [row, current, write]);
 
   const choose = (value: string | null) => {
     if (value !== current) write(writeSwatch(row, value));
-  };
-  const commit = () => {
-    const typed = field.current?.value ?? "";
-    if (typed.trim() === held) return;
-    const color = typedColor(typed);
-    if (color === null) {
-      if (field.current) field.current.value = held;
-      return;
-    }
-    choose(color);
   };
   const rove = (event: KeyboardEvent<HTMLElement>) => {
     const group = event.currentTarget.parentElement;
     if (!group || !roveWithin(event, group, "[role=radio]", "horizontal")) return;
     event.preventDefault();
     const reached = document.activeElement;
-    if (reached instanceof HTMLElement) reached.click();
+    // The swatch of the user's own takes the keyboard only: pressed, it opens the picker.
+    if (reached instanceof HTMLElement && reached.dataset["ownColor"] === undefined) {
+      reached.click();
+    }
   };
   const pressed = current === null ? "theme" : own !== null ? "own" : current;
   return (
@@ -366,56 +340,20 @@ function Swatches({ row, labelled, write }: ControlProps) {
             onKeyDown={rove}
           />
         ))}
-        <button
-          type="button"
-          role="radio"
-          className="settings-swatch"
-          data-own="true"
-          aria-checked={pressed === "own"}
-          aria-label="Your own colour"
-          title="Your own colour"
-          tabIndex={pressed === "own" ? 0 : -1}
-          ref={paint(own)}
-          onClick={(event) => {
-            event.stopPropagation();
-            picker.current?.click();
-          }}
+        <OwnColorSwatch
+          className="settings-swatch-own"
+          size={18}
+          color={own}
           onKeyDown={rove}
-        />
-        <input
-          ref={picker}
-          type="color"
-          className="settings-swatch-picker"
-          tabIndex={-1}
-          aria-hidden="true"
-          // What it opens at: the colour in use. An empty value opens it at black.
-          value={typedColor(shown) ?? swatches[0]?.color ?? ""}
-          // The picker is read when it is closed; React's own change is every move.
-          onChange={() => undefined}
+          onChoose={(element, event) =>
+            askColor(element, event, {
+              label: row.label,
+              value: typedColor(shown) ?? swatches[0]?.color ?? startingHex(),
+              apply: (color) => choose(color),
+            })
+          }
         />
       </div>
-      <input
-        ref={field}
-        type="text"
-        className="settings-text settings-swatch-field"
-        aria-label={`${row.label}, as #rrggbb`}
-        defaultValue={held}
-        placeholder={typedColor(shown) ?? "#rrggbb"}
-        spellCheck={false}
-        autoComplete="off"
-        maxLength={7}
-        onClick={(event) => event.stopPropagation()}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            commit();
-          } else if (event.key === "Escape") {
-            event.currentTarget.value = held;
-            event.currentTarget.blur();
-            event.stopPropagation();
-          }
-        }}
-      />
     </div>
   );
 }

@@ -23,6 +23,9 @@ const ASKED = [
   ["lume.workspace.delete", "Delete workspace…"],
 ] as const;
 
+/** The command that shows the dialog that opens a folder as a workspace. */
+const OPEN_FOLDER = "lume.workspace.open-folder";
+
 /** The last part of a folder's path, which is what tells folders apart at a glance. */
 function folderName(path: string): string {
   const parts = path.split(/[\\/]/).filter((part) => part !== "");
@@ -86,6 +89,15 @@ export function WorkspaceSwitcher() {
     }
   }
   let separated = items.length > 0;
+  if (known.has(OPEN_FOLDER)) {
+    items.push({
+      key: OPEN_FOLDER,
+      label: "Open folder…",
+      separated,
+      choose: () => app.commands.run(OPEN_FOLDER),
+    });
+    separated = false;
+  }
   for (const [command, label] of ASKED) {
     if (!known.has(command)) continue;
     items.push({

@@ -174,7 +174,7 @@ pub struct WindowConfig {
     pub restore_bounds: bool,
     /// Ask for attention when a program rings the bell in a window that is not in use:
     /// the taskbar button flashes, or the dock icon bounces.
-    #[schemars(extend("x-lume-settings" = Shown::switch("general", "Attention", 10, "Flash the window on a bell")
+    #[schemars(extend("x-lume-settings" = Shown::switch("notifications", "Notify me when", 10, "Flash the window on a bell")
         .help("When a program rings the bell in a window you are not using")))]
     pub bell_attention: bool,
     /// How round the corners of a window's own frame are, where the window system lets
@@ -1140,12 +1140,12 @@ pub struct TerminalConfig {
     pub copy_on_select: bool,
     /// Show a desktop notification when a command that ran for a while ends in a window
     /// that is not in use. It needs the shell to report its commands.
-    #[schemars(extend("x-lume-settings" = Shown::switch("general", "Attention", 20, "Notify when a long command ends")
+    #[schemars(extend("x-lume-settings" = Shown::switch("notifications", "Notify me when", 20, "Notify when a long command ends")
         .help("A desktop notification when a command ends in a window you are not using")))]
     pub notify_long_command: bool,
     /// How long a command runs, in seconds, before its end is notified.
     #[schemars(range(min = LONG_COMMAND_SECONDS_MIN, max = LONG_COMMAND_SECONDS_MAX))]
-    #[schemars(extend("x-lume-settings" = Shown::number("general", "Attention", 30, "Long command", SETTINGS_STEP_SECONDS)
+    #[schemars(extend("x-lume-settings" = Shown::number("notifications", "Notify me when", 30, "Long command", SETTINGS_STEP_SECONDS)
         .help("How long a command runs before its end is notified")
         .seconds()))]
     pub long_command_seconds: u32,

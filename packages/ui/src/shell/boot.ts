@@ -73,6 +73,7 @@ import { createWindowStateStore, type WindowStateStore } from "../window/state.t
 import { closeRequested, confirmRequested, mayRun } from "./closing.ts";
 import { describeTabNow, paneFacts } from "./describing.ts";
 import { focusBar } from "./focus-bar.ts";
+import { folderDialog } from "./open-folder.ts";
 import { createHostLinkStore, type HostLinkStore } from "./host-link.ts";
 import { NoticeStore, sentence } from "./notices.ts";
 import { createTabUiStore, type TabUiStore } from "./tab-ui.ts";
@@ -511,6 +512,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       else tabUi.getState().startRename(layout.getState().paneTabs[pane] ?? null);
     },
     answerPrompt: (proceed, item) => prompts.answerCurrent(proceed, item),
+    openFolder: () => folderDialog.getState().show(false),
     failed: (message) => notices.push("error", sentence(message)),
   });
   const cardDrag = new CardDrag({

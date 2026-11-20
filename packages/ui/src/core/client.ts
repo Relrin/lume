@@ -16,6 +16,7 @@ import type {
   ConfigView,
   ControlMessage,
   DetachedSessions,
+  FolderList,
   HostProbe,
   LayoutApplied,
   LayoutView,
@@ -302,6 +303,11 @@ export class CoreClient {
   /** The workspaces there are, and which of them is on show. */
   workspacesList(): Promise<WorkspaceList> {
     return this.transport.command("workspaces_list");
+  }
+
+  /** The folders inside a folder on this machine; `~` is the home folder. */
+  foldersList(path: string): Promise<FolderList> {
+    return this.transport.command("folders_list", { path });
   }
 
   /** The text on the system clipboard, or nothing when it holds no text. */

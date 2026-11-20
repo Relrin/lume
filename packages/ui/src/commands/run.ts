@@ -49,6 +49,8 @@ export interface CommandServices {
   renameTab(tab: string | null): void;
   /** Opens the field that renames a pane in place: the one named, or the one in use. */
   renamePane(pane: PaneId | null): void;
+  /** Shows the dialog that opens a folder as a workspace. */
+  openFolder(): void;
   /**
    * Answers the question on show as its buttons would: going ahead (with the item of a
    * choice), or not. Says whether there was one.
@@ -196,6 +198,11 @@ export class Commands {
         return;
       case "lume.pane.rename-start":
         this.#services.renamePane(paneOf(args) ?? null);
+        return;
+      case "lume.workspace.open-folder":
+        palette.getState().close();
+        connect.getState().close();
+        this.#services.openFolder();
         return;
       case "lume.window.answer": {
         const fields =

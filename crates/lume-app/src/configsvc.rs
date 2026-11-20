@@ -253,7 +253,7 @@ impl ConfigService {
             "sources": resolved.sources,
             "problems": problems,
             "tokens": tokens.to_json(),
-            "keymap": { "bindings": keymap.bindings },
+            "keymap": { "bindings": keymap.bindings, "removed": keymap.removed },
             "schema_revision": self.schema_revision.load(Ordering::Relaxed),
         })
     }

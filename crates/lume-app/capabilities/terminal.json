@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "terminal",
-  "description": "What the page of a window that shows terminals may call. Nothing from Tauri's core plugins is granted.",
+  "description": "What the page of a window that shows terminals may call, with the system's folder picker for choosing a folder to open as a workspace. Nothing from Tauri's core plugins is granted.",
   "windows": ["w-*"],
   "permissions": [
     "allow-frame-token",
@@ -42,6 +42,8 @@
     "allow-window-drag",
     "allow-window-control",
     "allow-window-state",
-    "allow-workspaces-list"
+    "allow-workspaces-list",
+    "allow-folders-list",
+    "dialog:allow-open"
   ]
 }

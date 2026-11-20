@@ -19,16 +19,24 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode 
 
 import { useSlotMotion } from "../motion/slots.ts";
 import { CheckIcon, ChevronRightIcon } from "./icons.tsx";
+import { OwnColorSwatch } from "./OwnColorSwatch.tsx";
 
 /** One swatch of a row of them. */
 export interface MenuSwatch {
   readonly key: string;
   /** What it is called, for whoever cannot see it. */
   readonly label: string;
-  /** Its colour as CSS, or nothing for the swatch that takes a colour away. */
+  /**
+   * Its colour as CSS, or nothing for the swatch that takes a colour away. For the
+   * swatch of the user's own colour, that colour as `#rrggbb`, or nothing before
+   * there is one.
+   */
   readonly color: string | null;
   readonly checked: boolean;
-  choose(): void;
+  /** Whether it is the swatch that opens the colour picker for a colour of the user's own. */
+  readonly own?: boolean;
+  /** Chooses it. The swatch of the user's own is handed its element and the press. */
+  choose(element: HTMLElement, event: { readonly detail: number }): void;
 }
 
 /** One thing a menu offers. */
@@ -252,23 +260,34 @@ export function Menu({
                   {item.label}
                 </span>
                 <span className="menu-swatch-row">
-                  {(item.swatches ?? []).map((swatch) => (
-                    <button
-                      key={swatch.key}
-                      type="button"
-                      className="menu-swatch"
-                      role="menuitemradio"
-                      aria-checked={swatch.checked}
-                      aria-label={swatch.label}
-                      title={swatch.label}
-                      data-key={`${item.key}:${swatch.key}`}
-                      data-none={swatch.color === null || undefined}
-                      style={swatch.color === null ? undefined : { background: swatch.color }}
-                      tabIndex={-1}
-                      onPointerEnter={() => setOpen(null)}
-                      onClick={() => swatch.choose()}
-                    />
-                  ))}
+                  {(item.swatches ?? []).map((swatch) =>
+                    swatch.own === true ? (
+                      <OwnColorSwatch
+                        key={swatch.key}
+                        role="menuitemradio"
+                        className="menu-swatch"
+                        size={16}
+                        color={swatch.color}
+                        onChoose={(element, event) => swatch.choose(element, event)}
+                      />
+                    ) : (
+                      <button
+                        key={swatch.key}
+                        type="button"
+                        className="menu-swatch"
+                        role="menuitemradio"
+                        aria-checked={swatch.checked}
+                        aria-label={swatch.label}
+                        title={swatch.label}
+                        data-key={`${item.key}:${swatch.key}`}
+                        data-none={swatch.color === null || undefined}
+                        style={swatch.color === null ? undefined : { background: swatch.color }}
+                        tabIndex={-1}
+                        onPointerEnter={() => setOpen(null)}
+                        onClick={(event) => swatch.choose(event.currentTarget, event)}
+                      />
+                    ),
+                  )}
                 </span>
               </div>
             )}

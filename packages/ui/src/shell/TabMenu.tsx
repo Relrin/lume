@@ -28,7 +28,14 @@ import { menuHint } from "./hints.ts";
 import { GroupGlyph, MenuGlyph } from "./icons.tsx";
 import { Menu, type MenuItem } from "./Menu.tsx";
 import { menuRows, nodesOf } from "./menus.ts";
-import { TAB_COLOR_NAMES, tabColorValue, UNNAMED_GROUP } from "./tab-looks.ts";
+import { askColor } from "./color-picker.ts";
+import {
+  isOwnColor,
+  TAB_COLOR_NAMES,
+  tabColorValue,
+  themeHex,
+  UNNAMED_GROUP,
+} from "./tab-looks.ts";
 import type { Anchor } from "./tab-ui.ts";
 
 /** How wide the menu is. */
@@ -71,6 +78,7 @@ export function TabMenu({
     app.views.focus();
   };
   const run = (command: string, args: unknown = { tab }) => app.commands.run(command, args);
+  const ownColor = entry.color !== null && isOwnColor(entry.color) ? entry.color : null;
   const hint = (command: string) => menuHint(view, command);
   const order = selectTabOrder(state, entry.window);
   const at = order.indexOf(tab);
@@ -113,6 +121,23 @@ export function TabMenu({
             checked: entry.color === color,
             choose: () => run("lume.tab.color", { tab, color }),
           })),
+          {
+            key: "own",
+            label: "Custom colour…",
+            own: true,
+            color: ownColor,
+            checked: ownColor !== null,
+            choose: (element: HTMLElement, event: { readonly detail: number }) => {
+              askColor(element, event, {
+                label: `Tab · ${describeTabNow(app, tab).label}`,
+                value:
+                  ownColor ?? (entry.color === null ? themeHex("blue") : themeHex(entry.color)),
+                apply: (color) => run("lume.tab.color", { tab, color }),
+                returnFocus: () => app.views.focus(),
+              });
+              ui.close();
+            },
+          },
         ],
         choose: () => undefined,
       },

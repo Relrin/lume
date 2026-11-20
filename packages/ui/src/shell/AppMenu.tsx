@@ -57,6 +57,7 @@ const OWN_ITEMS: Readonly<Record<string, readonly (readonly [string, string, How
   "new-window": [["lume.window.new", "New window"]],
   "new-tab": [["lume.tab.new", "New tab"]],
   "new-workspace": [["lume.workspace.new", "New workspace…", "ask"]],
+  "open-folder": [["lume.workspace.open-folder", "Open folder…"]],
   "open-workspace": [["lume.workspace.switch", "Open workspace…", "ask"]],
   settings: [
     ["lume.settings.open", "Settings"],

@@ -151,11 +151,15 @@ export interface Tab {
   readonly group?: GroupId;
 }
 
-/** The colours a tab or a group can be given; the theme says how each looks. */
-export type TabColor = "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "purple" | "pink";
+/** The colours a tab or a group can be given by name; the theme says how each looks. */
+export type NamedTabColor =
+  "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "purple" | "pink";
 
-/** Every colour, in the order a tab's menu offers them. */
-export const TAB_COLORS: readonly TabColor[] = [
+/** A colour of a tab or a group: one of the theme's, or one of the user's own as `#rrggbb`. */
+export type TabColor = NamedTabColor | `#${string}`;
+
+/** Every named colour, in the order a tab's menu offers them. */
+export const TAB_COLORS: readonly NamedTabColor[] = [
   "red",
   "orange",
   "yellow",

@@ -134,7 +134,11 @@ export interface ConfigView {
   readonly problems: readonly ConfigProblem[];
   /** Every design token's value. */
   readonly tokens: Tokens;
-  readonly keymap: { readonly bindings: readonly KeyBinding[] };
+  readonly keymap: {
+    readonly bindings: readonly KeyBinding[];
+    /** The bindings that were unbound or replaced, and the source of what did it. */
+    readonly removed?: readonly { readonly binding: KeyBinding; readonly by: unknown }[];
+  };
   /**
    * Who draws the window's title bar: the page, with its own buttons in the top bar,
    * or the window system. Already decided for the platform.
@@ -170,6 +174,28 @@ export interface WorkspaceList {
     /** The folder new terminals of the workspace start in, if it has one. */
     readonly root: string | null;
   }[];
+}
+
+/** A folder inside another, as the core lists it. */
+export interface FolderEntry {
+  readonly name: string;
+  readonly hidden: boolean;
+  /** The branch of a git repository in it, if it holds one. */
+  readonly branch: string | null;
+}
+
+/** The folders inside one folder, as the core lists them. */
+export interface FolderList {
+  readonly home: string | null;
+  readonly separator: string;
+  /** The folder listed, with `~` written out. */
+  readonly path: string;
+  readonly missing: boolean;
+  readonly entries: readonly FolderEntry[];
+  /** Whether there were more than are listed. */
+  readonly more: boolean;
+  /** The branch of a git repository in the folder itself. */
+  readonly branch: string | null;
 }
 
 /** A theme there is to choose, as `themes_list` describes it. */

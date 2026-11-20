@@ -263,9 +263,11 @@ pub(crate) fn is_false(value: &bool) -> bool {
     !*value
 }
 
-/// The colours a tab or a group can be given. A page draws each from its theme.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// The colours a tab or a group can be given. A page draws each named one from its
+/// theme, and a colour the user mixed as it is.
+///
+/// Each is written as a word, such as `"teal"`, or as `"#rrggbb"` for a mixed one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TabColor {
     Red,
     Orange,
@@ -275,6 +277,80 @@ pub enum TabColor {
     Blue,
     Purple,
     Pink,
+    /// A colour of the user's own: red, green and blue.
+    Custom([u8; 3]),
+}
+
+impl TabColor {
+    /// The named colours and the word each is written as.
+    const NAMED: [(TabColor, &'static str); 8] = [
+        (TabColor::Red, "red"),
+        (TabColor::Orange, "orange"),
+        (TabColor::Yellow, "yellow"),
+        (TabColor::Green, "green"),
+        (TabColor::Teal, "teal"),
+        (TabColor::Blue, "blue"),
+        (TabColor::Purple, "purple"),
+        (TabColor::Pink, "pink"),
+    ];
+
+    /// Reads a colour as it is written: a word, or `#rgb` or `#rrggbb` in either case.
+    pub fn parse(written: &str) -> Option<TabColor> {
+        if let Some((color, _)) = Self::NAMED.iter().find(|(_, word)| *word == written) {
+            return Some(*color);
+        }
+        let digits = written.strip_prefix('#')?;
+        if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        let channel = |text: &str| u8::from_str_radix(text, 16).ok();
+        let rgb = match digits.len() {
+            3 => {
+                let mut rgb = [0; 3];
+                for (slot, at) in rgb.iter_mut().zip(0..3) {
+                    // One digit stands for itself twice: `#7af` is `#77aaff`.
+                    *slot = channel(&digits[at..=at])? * 17;
+                }
+                rgb
+            }
+            6 => [
+                channel(&digits[0..2])?,
+                channel(&digits[2..4])?,
+                channel(&digits[4..6])?,
+            ],
+            _ => return None,
+        };
+        Some(TabColor::Custom(rgb))
+    }
+
+    /// The colour as it is written: its word, or `#rrggbb` in small letters.
+    pub fn written(&self) -> String {
+        match self {
+            TabColor::Custom([red, green, blue]) => format!("#{red:02x}{green:02x}{blue:02x}"),
+            named => Self::NAMED
+                .iter()
+                .find(|(color, _)| color == named)
+                .map_or_else(String::new, |(_, word)| (*word).to_owned()),
+        }
+    }
+}
+
+impl Serialize for TabColor {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.written())
+    }
+}
+
+impl<'de> Deserialize<'de> for TabColor {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let written = String::deserialize(deserializer)?;
+        TabColor::parse(&written).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "`{written}` is no colour: name one of red, orange, yellow, green, teal, blue, \
+                 purple and pink, or write #rgb or #rrggbb"
+            ))
+        })
+    }
 }
 
 impl TabColor {

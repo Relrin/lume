@@ -31,6 +31,7 @@ import {
   SearchIcon,
   TerminalIcon,
 } from "../shell/icons.tsx";
+import { ColorPickerHost } from "../shell/ColorPicker.tsx";
 import { Notices } from "../shell/Notices.tsx";
 import { sentence } from "../shell/notices.ts";
 import { roveWithin } from "../shell/roving.ts";
@@ -81,6 +82,10 @@ function PageIcon({ name, image }: { name: string; image?: string | undefined })
       return <Glyph name="puzzle" size={15} />;
     case "commands":
       return <Glyph name="list" size={15} />;
+    case "keys":
+      return <Glyph name="keyboard" size={15} />;
+    case "notify":
+      return <Glyph name="bell" size={15} />;
     case "about":
       return <Glyph name="info" size={15} />;
     default:
@@ -388,6 +393,7 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
           </div>
         </main>
       </div>
+      <ColorPickerHost />
       <Notices store={app.notices} />
     </div>
   );

@@ -35,6 +35,7 @@ mod carrier;
 mod clipboard;
 mod commands;
 mod commands_config;
+mod commands_folders;
 mod commands_layout;
 mod commands_plugins;
 mod commands_window;
@@ -478,6 +479,7 @@ fn main() -> ExitCode {
         commands_window::window_control,
         commands_window::window_state,
         commands_window::workspaces_list,
+        commands_folders::folders_list,
         commands_plugins::ui_contributions,
         commands_plugins::ui_visible,
         commands_plugins::ui_assets,

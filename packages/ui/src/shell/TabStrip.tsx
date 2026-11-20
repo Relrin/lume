@@ -54,7 +54,7 @@ import {
   type DropBox,
   type RowTab,
 } from "./tab-drop.ts";
-import { tabCount, UNNAMED_GROUP } from "./tab-looks.ts";
+import { ownColorStyle, tabCount, UNNAMED_GROUP } from "./tab-looks.ts";
 import { TabMotion } from "./tab-motion.ts";
 import { anchorOf, groupOfLabel, labelId, type DropSide, type TabDrag } from "./tab-ui.ts";
 
@@ -409,6 +409,11 @@ export function TabItem({
       data-color={color ?? undefined}
       data-group={group?.id}
       data-group-color={group?.color}
+      // A colour of the user's own has no rule of its own in the style sheet.
+      style={{
+        ...ownColorStyle("--tab-tint", color),
+        ...ownColorStyle("--group-color", group?.color),
+      }}
       data-group-last={(group !== null && last) || undefined}
       data-tinted={color !== null || group !== null}
       data-folded={folded || undefined}
@@ -564,6 +569,7 @@ export function GroupLabel({
       data-tab-id={labelId(group.id)}
       data-group={group.id}
       data-group-color={group.color}
+      style={ownColorStyle("--group-color", group.color)}
       data-collapsed={folded || undefined}
       data-muted={group.muted || undefined}
       data-empty={

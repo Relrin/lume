@@ -190,3 +190,7 @@ pub const HOST_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 /// often it is looked at meanwhile. It only reads its configuration, so it is quick.
 pub const SSH_CONFIG_WAIT: Duration = Duration::from_secs(2);
 pub const SSH_CONFIG_POLL: Duration = Duration::from_millis(20);
+
+/// How many folders listing one folder gives at most, for choosing one to open as a
+/// workspace. A folder with more is listed in part, and its others are found by typing.
+pub const FOLDERS_LISTED_MAX: usize = 2000;

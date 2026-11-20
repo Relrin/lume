@@ -182,7 +182,7 @@ describe("the settings window's own pages", () => {
     groups: [],
   });
 
-  it("come after the application's others and before a workspace's", () => {
+  it("put what the application is last of its pages, and the keys first of the workspace's", () => {
     const pages = withOwnPages([
       page("general", "Application"),
       page("terminal", "Application"),
@@ -191,20 +191,20 @@ describe("the settings window's own pages", () => {
     expect(pages.map((held) => held.id)).toEqual([
       "general",
       "terminal",
-      COMMANDS_PAGE,
       ABOUT_PAGE,
+      COMMANDS_PAGE,
       "workspace",
     ]);
     expect(pages.filter((held) => held.own !== undefined).map((held) => held.group)).toEqual([
       "Application",
-      "Application",
+      "Workspace",
     ]);
   });
 
   it("stand in for a page that has one of their ids", () => {
     const pages = withOwnPages([page("about", "Application")]);
-    expect(pages.map((held) => held.id)).toEqual([COMMANDS_PAGE, ABOUT_PAGE]);
-    expect(pages[1]?.own).toBe("about");
+    expect(pages.map((held) => held.id)).toEqual([ABOUT_PAGE, COMMANDS_PAGE]);
+    expect(pages[0]?.own).toBe("about");
   });
 });
 

@@ -153,6 +153,7 @@ const MAC_DEFAULTS: &[Row] = &[
     ("cmd+f", "lume.search.open", SEARCH),
     ("cmd+,", "lume.settings.open", ""),
     ("cmd+n", "lume.window.new", ""),
+    ("cmd+o", "lume.workspace.open-folder", ""),
     ("cmd+shift+b", "lume.panel.toggle", ""),
 ];
 

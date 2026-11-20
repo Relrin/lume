@@ -85,6 +85,7 @@ export const BUILTIN_PLACES: Readonly<Record<(typeof MENUS)[number], readonly Bu
     ] },
     { key: "workspaces", kind: "section", children: [
       { key: "new-workspace", kind: "item", children: [] },
+      { key: "open-folder", kind: "item", children: [] },
       { key: "open-workspace", kind: "item", children: [] },
     ] },
     { key: "preferences", kind: "section", children: [

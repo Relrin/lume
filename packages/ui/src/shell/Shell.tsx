@@ -12,11 +12,13 @@ import { Palette } from "../palette/Palette.tsx";
 import { Prompts } from "../Prompts.tsx";
 import { tabStyle, tabStyleName } from "../motion/tab.ts";
 import { Background } from "./Background.tsx";
+import { ColorPickerHost } from "./ColorPicker.tsx";
 import { CursorFxLayer } from "./CursorFxLayer.tsx";
 import type { ShellApp } from "./boot.ts";
 import { ShellContext } from "./context.ts";
 import { DockArea, DockDropPreview } from "./DockArea.tsx";
 import { Notices } from "./Notices.tsx";
+import { OpenFolder } from "./OpenFolder.tsx";
 import { StatusBar } from "./StatusBar.tsx";
 import { TabArea } from "./TabArea.tsx";
 import { TabPopups } from "./TabPopups.tsx";
@@ -55,6 +57,8 @@ export function Shell({ app }: { app: ShellApp }) {
         <TabPopups />
         <Palette />
         <ConnectPalette />
+        <ColorPickerHost />
+        <OpenFolder />
         <Notices store={app.notices} run={(command, args) => app.commands.run(command, args)} />
         <Prompts store={app.prompts} />
       </div>

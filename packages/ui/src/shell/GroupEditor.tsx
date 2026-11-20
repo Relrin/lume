@@ -7,7 +7,7 @@
  * away.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useStore } from "zustand";
 
 import type { WorkspaceList } from "../core/types.ts";
@@ -18,7 +18,18 @@ import { AnchoredMenu } from "./AnchoredMenu.tsx";
 import { useShell } from "./context.ts";
 import { roveWithin } from "./roving.ts";
 import { ChevronRightIcon, GroupGlyph, MenuGlyph } from "./icons.tsx";
-import { GROUP_ICON_NAMES, TAB_COLOR_NAMES, tabColorValue, tabCount } from "./tab-looks.ts";
+import { askColor } from "./color-picker.ts";
+import { OwnColorSwatch } from "./OwnColorSwatch.tsx";
+import {
+  GROUP_ICON_NAMES,
+  isOwnColor,
+  ownColorStyle,
+  TAB_COLOR_NAMES,
+  tabColorValue,
+  tabCount,
+  themeHex,
+  UNNAMED_GROUP,
+} from "./tab-looks.ts";
 import { anchorOf, labelId, type Anchor } from "./tab-ui.ts";
 
 /** How wide the editor is. */
@@ -117,6 +128,16 @@ export function GroupEditor({
       .then(setWorkspaces, () => setWorkspaces({ active: "", workspaces: [] }));
   }, [app, moving, workspaces]);
 
+  const own = entry && isOwnColor(entry.color) ? entry.color : null;
+  /** The arrows choose another colour; the swatch of the user's own only takes the keyboard. */
+  const roveColors = (event: KeyboardEvent<HTMLElement>) => {
+    const colors = event.currentTarget.parentElement;
+    if (!colors || !roveWithin(event, colors, ".group-editor-color", "horizontal")) return;
+    event.preventDefault();
+    const reached = document.activeElement;
+    if (reached instanceof HTMLElement && reached.dataset["ownColor"] === undefined)
+      reached.click();
+  };
   const run = (command: string, args: Record<string, unknown> = {}) =>
     app.commands.run(command, { group, ...args });
 
@@ -172,6 +193,7 @@ export function GroupEditor({
         role="dialog"
         aria-label="Edit tab group"
         data-group-color={entry.color}
+        style={ownColorStyle("--group-color", entry.color)}
         onKeyDown={(event) => {
           if (event.key === "Escape" || (event.key === "Enter" && event.target === field.current)) {
             event.preventDefault();
@@ -248,16 +270,22 @@ export function GroupEditor({
               tabIndex={entry.color === color ? 0 : -1}
               style={{ background: tabColorValue(color) }}
               onClick={() => run("lume.group.set", { color })}
-              onKeyDown={(event) => {
-                const colors = event.currentTarget.parentElement;
-                if (!colors || !roveWithin(event, colors, ".group-editor-color", "horizontal"))
-                  return;
-                event.preventDefault();
-                const reached = document.activeElement;
-                if (reached instanceof HTMLElement) reached.click();
-              }}
+              onKeyDown={roveColors}
             />
           ))}
+          <OwnColorSwatch
+            className="group-editor-color"
+            size={20}
+            color={own}
+            onKeyDown={roveColors}
+            onChoose={(element, event) =>
+              askColor(element, event, {
+                label: `Group · ${entry.name ?? UNNAMED_GROUP}`,
+                value: own ?? themeHex(entry.color),
+                apply: (color) => run("lume.group.set", { color }),
+              })
+            }
+          />
         </div>
         <div className="group-editor-rows" role="menu" aria-label="Group">
           <Row

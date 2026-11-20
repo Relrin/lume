@@ -24,6 +24,10 @@ pub const PAGES_KEY: &str = "x-lume-pages";
 /// The group of pages the application's own are listed under.
 const APPLICATION: &str = "Application";
 
+/// The group of pages about the work in a workspace: its keys and what asks for
+/// attention in it.
+const WORKSPACE: &str = "Workspace";
+
 /// The unit of a length, of a share of a whole, of a count of lines and of a time.
 const PIXELS: &str = "px";
 const PERCENT: &str = "%";
@@ -340,15 +344,15 @@ pub struct Page {
 }
 
 /// The pages of the application's own settings, in the order they are listed.
-pub fn pages() -> [Page; 3] {
+pub fn pages() -> [Page; 4] {
     [
         Page {
             id: "general",
             label: "General",
             icon: "general",
             group: APPLICATION,
-            blurb: "How Lume starts, how it gets your attention, and what closing does.",
-            groups: &["Startup", "Windows", "Attention", "Closing", "Sessions"],
+            blurb: "How Lume starts, its windows, and what closing does.",
+            groups: &["Startup", "Windows", "Closing", "Sessions"],
         },
         Page {
             id: "appearance",
@@ -372,6 +376,14 @@ pub fn pages() -> [Page; 3] {
                 "Buffer",
                 "Closing",
             ],
+        },
+        Page {
+            id: "notifications",
+            label: "Notifications",
+            icon: "notify",
+            group: WORKSPACE,
+            blurb: "When Lume should get your attention.",
+            groups: &["Notify me when"],
         },
     ]
 }

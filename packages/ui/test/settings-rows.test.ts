@@ -55,11 +55,12 @@ describe("a setting drawn as a row", () => {
     // The theme's own is chosen, and it is the one stop for the Tab key.
     expect(unset).toMatch(/aria-checked="true" tabindex="0"[^>]*>Theme</);
     expect(unset).toContain('aria-label="Mint"');
-    expect(unset).toContain('aria-label="Your own colour"');
+    expect(unset).toContain('aria-label="Custom colour…"');
     expect(accent("blue")).toMatch(/aria-checked="true" aria-label="Blue"/);
+    // One's own opens the colour picker, and says which colour it is once there is one.
     const own = accent("#336699");
-    expect(own).toMatch(/data-own="true" aria-checked="true"/);
-    expect(own).toContain('value="#336699"');
+    expect(own).toMatch(/data-own="true" aria-checked="true" aria-label="Custom colour #336699/);
+    expect(own).not.toContain("style=");
   });
 
   it("names its control after the row, and says what is said of the setting", () => {

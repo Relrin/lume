@@ -87,6 +87,33 @@ fn a_tab_is_given_a_colour_and_locked() {
 }
 
 #[test]
+fn a_colour_of_the_users_own_is_written_as_rrggbb_and_read_from_rgb_or_rrggbb() {
+    let mixed = TabColor::Custom([0x77, 0xaa, 0xff]);
+    assert_eq!(TabColor::parse("#7af"), Some(mixed));
+    assert_eq!(TabColor::parse("#77AAFF"), Some(mixed));
+    assert_eq!(TabColor::parse("teal"), Some(TabColor::Teal));
+    for wrong in ["#7a", "#7aff", "#77aaffcc", "77aaff", "#gg0000", "Teal", ""] {
+        assert_eq!(TabColor::parse(wrong), None, "{wrong}");
+    }
+    assert_eq!(serde_json::to_value(mixed).unwrap(), "#77aaff");
+    assert_eq!(serde_json::to_value(TabColor::Teal).unwrap(), "teal");
+    let read: TabColor = serde_json::from_value("#7af".into()).unwrap();
+    assert_eq!(read, mixed);
+    assert!(serde_json::from_value::<TabColor>("mauve".into()).is_err());
+
+    // A tab and a group take it like any other colour.
+    let (mut workspace, _, tab, _) = one_pane();
+    must(
+        &mut workspace,
+        Intent::TabColor {
+            tab,
+            color: Some(mixed),
+        },
+    );
+    assert_eq!(workspace.tab(tab).unwrap().color, Some(mixed));
+}
+
+#[test]
 fn closing_the_tabs_beside_one_passes_over_those_that_are_locked() {
     let (mut workspace, window, [first, second, third, fourth]) = four_tabs();
     must(

@@ -18,6 +18,7 @@ import type { ComponentType } from "react";
 import { describeProblem } from "../config/apply.ts";
 import type { ConfigView, Profile, ShellEntry, ThemeEntry } from "../core/types.ts";
 import { profileChoices } from "../palette/choices.ts";
+import { parseHex } from "../shell/color-picker.ts";
 
 /** What a setting is set to. */
 export type SettingValue = string | number | boolean;
@@ -694,11 +695,11 @@ export function writeText(row: SettingRow, typed: string): SettingWrite {
 
 /**
  * A colour typed for a swatch row, written as the file takes it: `#rrggbb` in small
- * letters. The `#` may be left off. `null` when it is no such colour.
+ * letters. It may be typed as `#rgb` too, and the `#` may be left off. `null` when it
+ * is no such colour.
  */
 export function typedColor(typed: string): string | null {
-  const plain = typed.trim().replace(/^#/, "");
-  return /^[0-9a-f]{6}$/i.test(plain) ? `#${plain.toLowerCase()}` : null;
+  return parseHex(typed);
 }
 
 /** The change choosing a colour of a swatch row asks for: `null` leaves it out. */

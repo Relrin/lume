@@ -2552,11 +2552,11 @@
           "type": "integer",
           "x-lume-settings": {
             "control": "number",
-            "group": "Attention",
+            "group": "Notify me when",
             "help": "How long a command runs before its end is notified",
             "label": "Long command",
             "order": 30,
-            "page": "general",
+            "page": "notifications",
             "step": 1.0,
             "unit": "seconds"
           }
@@ -2567,11 +2567,11 @@
           "type": "boolean",
           "x-lume-settings": {
             "control": "switch",
-            "group": "Attention",
+            "group": "Notify me when",
             "help": "A desktop notification when a command ends in a window you are not using",
             "label": "Notify when a long command ends",
             "order": 20,
-            "page": "general"
+            "page": "notifications"
           }
         },
         "padding": {
@@ -2668,11 +2668,11 @@
           "type": "boolean",
           "x-lume-settings": {
             "control": "switch",
-            "group": "Attention",
+            "group": "Notify me when",
             "help": "When a program rings the bell in a window you are not using",
             "label": "Flash the window on a bell",
             "order": 10,
-            "page": "general"
+            "page": "notifications"
           }
         },
         "close-with-last-tab": {
@@ -2852,12 +2852,11 @@
   "type": "object",
   "x-lume-pages": [
     {
-      "blurb": "How Lume starts, how it gets your attention, and what closing does.",
+      "blurb": "How Lume starts, its windows, and what closing does.",
       "group": "Application",
       "groups": [
         "Startup",
         "Windows",
-        "Attention",
         "Closing",
         "Sessions"
       ],
@@ -2893,6 +2892,16 @@
       "icon": "terminal",
       "id": "terminal",
       "label": "Terminal"
+    },
+    {
+      "blurb": "When Lume should get your attention.",
+      "group": "Workspace",
+      "groups": [
+        "Notify me when"
+      ],
+      "icon": "notify",
+      "id": "notifications",
+      "label": "Notifications"
     }
   ]
 }

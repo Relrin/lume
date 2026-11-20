@@ -2265,6 +2265,780 @@
     outline-offset: 3px;
   }
 
+  /*
+   * The dialog that opens a folder as a workspace: the typed path and the list of
+   * folders below stay in step. Opened from a key it is there at once.
+   */
+  .open-folder-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 72;
+    background: rgb(6 7 9 / 0.45);
+  }
+
+  .open-folder {
+    @apply text-ink;
+    position: fixed;
+    top: 84px;
+    left: 50%;
+    z-index: 73;
+    width: min(720px, calc(100vw - 32px));
+    overflow: hidden;
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--lume-color-popover) 94%, transparent);
+    box-shadow:
+      0 0 0 1px var(--lume-color-border),
+      0 24px 64px rgb(0 0 0 / 0.5);
+    font-size: 13px;
+    translate: -50% 0;
+    backdrop-filter: blur(20px) saturate(1.3);
+  }
+
+  .open-folder[data-animate] {
+    animation: open-folder-in 200ms var(--lume-motion-easing-standard);
+  }
+
+  @keyframes open-folder-in {
+    from {
+      opacity: 0;
+      scale: 0.97;
+    }
+  }
+
+  .open-folder-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px 10px;
+  }
+
+  .open-folder-head h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .open-folder-key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--lume-color-control-active);
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    color: var(--lume-color-text-muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .open-folder-hosts {
+    display: flex;
+    gap: 4px;
+    padding: 0 16px 12px;
+  }
+
+  .open-folder-host {
+    @apply text-ink;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--lume-color-text) 9%, var(--lume-color-popover));
+    font-size: 12px;
+  }
+
+  .open-folder-host i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #c9a6f5;
+  }
+
+  .open-folder-host small {
+    @apply text-ink-muted;
+    font-size: 11px;
+    opacity: 0.75;
+  }
+
+  .open-folder-field {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    margin: 0 16px;
+    padding: 0 6px 0 12px;
+    border-radius: 10px;
+    background: var(--lume-color-control);
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+  }
+
+  .open-folder-field:focus-within {
+    box-shadow:
+      inset 0 0 0 1px #3d6bc2,
+      0 0 0 3px rgb(122 167 255 / 0.14);
+  }
+
+  .open-folder-field > svg {
+    flex-shrink: 0;
+  }
+
+  .open-folder-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+  }
+
+  .open-folder-wrap input,
+  .open-folder-ghost {
+    @apply text-ink;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: none;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 40px;
+    white-space: pre;
+  }
+
+  .open-folder-ghost {
+    overflow: hidden;
+    color: transparent;
+    pointer-events: none;
+  }
+
+  .open-folder-ghost b {
+    color: color-mix(in srgb, var(--lume-color-text-muted) 70%, transparent);
+    font-weight: 400;
+  }
+
+  .open-folder-wrap input::placeholder {
+    color: color-mix(in srgb, var(--lume-color-text-muted) 70%, transparent);
+    font-family: var(--font-ui);
+  }
+
+  .open-folder-button {
+    @apply text-ink;
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--lume-color-text) 9%, var(--lume-color-popover));
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    font-size: 12.5px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      scale 140ms var(--lume-motion-easing-standard),
+      background-color 120ms ease;
+  }
+
+  .open-folder-button[data-primary] {
+    background: #2f5bb5;
+    box-shadow: none;
+    color: #fff;
+  }
+
+  .open-folder-button[data-primary] .open-folder-key {
+    background: rgb(255 255 255 / 0.14);
+    box-shadow: none;
+    color: #fff;
+  }
+
+  .open-folder-button[data-primary]:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .open-folder-button[data-quiet] {
+    @apply text-ink-muted;
+    background: none;
+    box-shadow: none;
+  }
+
+  .open-folder-button[data-waiting] {
+    @apply text-ink-muted;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .open-folder-button:hover {
+      background: color-mix(in srgb, var(--lume-color-text) 13%, var(--lume-color-popover));
+    }
+
+    .open-folder-button[data-primary]:hover {
+      background: #3566c4;
+    }
+
+    .open-folder-button[data-quiet]:hover {
+      @apply bg-control-hover text-ink;
+    }
+  }
+
+  .open-folder-button:active:not(:disabled),
+  .open-folder-row:active {
+    scale: 0.97;
+  }
+
+  .open-folder-spin {
+    width: 12px;
+    height: 12px;
+    border: 1.75px solid var(--lume-color-border);
+    border-top-color: var(--lume-color-text-muted);
+    border-radius: 50%;
+    animation: open-folder-spin 700ms linear infinite;
+  }
+
+  @keyframes open-folder-spin {
+    to {
+      rotate: 360deg;
+    }
+  }
+
+  .open-folder-crumbs {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 30px;
+    padding: 8px 16px 0;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .open-folder-crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .open-folder-crumbs button {
+    padding: 1px 5px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .open-folder-crumbs button:hover {
+      @apply text-ink;
+      background: color-mix(in srgb, var(--lume-color-text) 7%, transparent);
+    }
+  }
+
+  .open-folder-sep {
+    color: color-mix(in srgb, var(--lume-color-text-muted) 70%, transparent);
+  }
+
+  .open-folder-space {
+    flex: 1;
+  }
+
+  .open-folder-crumbs .open-folder-toggle {
+    font-family: var(--font-ui);
+  }
+
+  .open-folder-list {
+    height: 300px;
+    padding: 4px 8px 8px;
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--lume-color-border) transparent;
+  }
+
+  .open-folder-heading {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    height: 26px;
+    padding: 6px 8px 0;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .open-folder-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: 34px;
+    padding: 0 8px;
+    border-radius: 8px;
+    text-align: left;
+    cursor: pointer;
+    transition: scale 120ms var(--lume-motion-easing-standard);
+  }
+
+  .open-folder-row[aria-selected="true"] {
+    background: color-mix(in srgb, var(--lume-color-text) 7%, transparent);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .open-folder-row:hover {
+      background: color-mix(in srgb, var(--lume-color-text) 4%, transparent);
+    }
+
+    .open-folder-row[aria-selected="true"]:hover {
+      background: color-mix(in srgb, var(--lume-color-text) 7%, transparent);
+    }
+  }
+
+  .open-folder-icon {
+    display: flex;
+    flex-shrink: 0;
+    color: var(--lume-color-text-muted);
+  }
+
+  .open-folder-row[data-repo] .open-folder-icon,
+  .open-folder-row[data-recent] .open-folder-icon {
+    color: var(--lume-color-accent);
+  }
+
+  .open-folder-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .open-folder-name mark {
+    @apply text-ink;
+    background: none;
+    font-weight: 600;
+  }
+
+  .open-folder-path {
+    max-width: 280px;
+    overflow: hidden;
+    color: color-mix(in srgb, var(--lume-color-text-muted) 70%, transparent);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .open-folder-branch {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--lume-color-accent) 14%, transparent);
+    color: color-mix(in srgb, var(--lume-color-accent) 70%, var(--lume-color-text));
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .open-folder-go {
+    display: flex;
+    color: color-mix(in srgb, var(--lume-color-text-muted) 70%, transparent);
+    opacity: 0;
+  }
+
+  .open-folder-row[aria-selected="true"] .open-folder-go {
+    opacity: 1;
+  }
+
+  .open-folder-empty {
+    @apply text-ink-muted;
+    padding: 50px 20px;
+    text-align: center;
+  }
+
+  .open-folder-empty b {
+    @apply text-ink;
+    font-weight: 500;
+  }
+
+  .open-folder-more {
+    @apply text-ink-muted;
+    padding: 8px;
+    font-size: 11.5px;
+    text-align: center;
+  }
+
+  .open-folder-foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px 10px 16px;
+    border-top: 1px solid var(--lume-color-border);
+    background: color-mix(in srgb, var(--lume-color-text) 4%, transparent);
+  }
+
+  .open-folder-summary {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .open-folder-summary b {
+    overflow: hidden;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .open-folder-summary b[data-none] {
+    @apply text-ink-muted;
+    font-weight: 400;
+  }
+
+  .open-folder-summary small {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    overflow: hidden;
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .open-folder[data-animate] {
+      animation: fade-in 150ms ease-out;
+    }
+
+    .open-folder-spin {
+      animation-duration: 1.4s;
+    }
+  }
+
+  /* The colour picker: it opens from the swatch that asked for it and applies only on
+     Apply or Enter. Opened from the keyboard it is there at once. */
+  .color-picker-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+  }
+
+  .color-picker {
+    @apply bg-popover text-ink;
+    position: fixed;
+    z-index: 91;
+    box-sizing: border-box;
+    width: 248px;
+    padding: 12px;
+    border-radius: 12px;
+    box-shadow:
+      0 0 0 var(--lume-size-border) var(--lume-color-border),
+      var(--lume-shadow-popover);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .color-picker * {
+    box-sizing: border-box;
+  }
+
+  .color-picker[data-animate] {
+    animation: color-picker-in 160ms var(--lume-motion-easing-standard);
+  }
+
+  @keyframes color-picker-in {
+    from {
+      opacity: 0;
+      scale: 0.96;
+    }
+  }
+
+  .color-picker-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 10px;
+  }
+
+  .color-picker-head b {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  .color-picker-head small {
+    @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 11.5px;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .color-picker-square {
+    position: relative;
+    height: 140px;
+    border-radius: 8px;
+    background-image:
+      linear-gradient(to top, #000, rgb(0 0 0 / 0)),
+      linear-gradient(to right, #fff, rgb(255 255 255 / 0));
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  .color-picker-hue {
+    position: relative;
+    height: 12px;
+    margin: 10px 0 12px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      #f00 0%,
+      #ff0 16.6%,
+      #0f0 33.3%,
+      #0ff 50%,
+      #00f 66.6%,
+      #f0f 83.3%,
+      #f00 100%
+    );
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  .color-picker-knob {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border-radius: 50%;
+    box-shadow:
+      0 0 0 2px #fff,
+      0 0 0 3px rgb(0 0 0 / 0.35),
+      0 1px 4px rgb(0 0 0 / 0.4);
+    pointer-events: none;
+  }
+
+  .color-picker-hue .color-picker-knob {
+    top: 50%;
+  }
+
+  .color-picker-square:focus-visible,
+  .color-picker-hue:focus-visible {
+    outline: 2px solid var(--lume-color-border-focus);
+    outline-offset: 2px;
+  }
+
+  .color-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .color-picker-compare {
+    display: flex;
+    flex-shrink: 0;
+    width: 44px;
+    height: 30px;
+    overflow: hidden;
+    border-radius: 7px;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  }
+
+  .color-picker-compare i {
+    flex: 1;
+  }
+
+  .color-picker-hex {
+    @apply bg-control text-ink-muted;
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    height: 30px;
+    padding: 0 8px;
+    border-radius: 7px;
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+
+  .color-picker-hex:focus-within {
+    box-shadow:
+      inset 0 0 0 1px #3d6bc2,
+      0 0 0 3px rgb(122 167 255 / 0.14);
+  }
+
+  .color-picker-hex[data-wrong] {
+    box-shadow:
+      inset 0 0 0 1px #b4534d,
+      0 0 0 3px rgb(255 123 114 / 0.12);
+  }
+
+  .color-picker-hex input {
+    @apply text-ink;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: none;
+    font: inherit;
+    text-transform: lowercase;
+  }
+
+  .color-picker-icon {
+    @apply text-ink-muted;
+    display: grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    cursor: pointer;
+    transition: scale 120ms var(--lume-motion-easing-standard);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .color-picker-icon:hover {
+      @apply bg-control-hover text-ink;
+    }
+  }
+
+  .color-picker-error {
+    @apply text-danger;
+    margin-top: 6px;
+    font-size: 11.5px;
+  }
+
+  .color-picker-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .color-picker-button {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 7px;
+    background: #2f5bb5;
+    color: #fff;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition:
+      scale 140ms var(--lume-motion-easing-standard),
+      background-color 120ms ease;
+  }
+
+  .color-picker-button[data-quiet] {
+    @apply text-ink-muted;
+    background: none;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .color-picker-button:hover {
+      background: #3566c4;
+    }
+
+    .color-picker-button[data-quiet]:hover {
+      @apply bg-control-hover text-ink;
+    }
+  }
+
+  .color-picker-button:active,
+  .color-picker-icon:active {
+    scale: 0.97;
+  }
+
+  /* The swatch that opens the picker: a wheel of hues with a plus, or the user's own
+     colour once there is one. */
+  .color-wheel {
+    position: relative;
+    display: grid;
+    flex-shrink: 0;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: conic-gradient(
+      from 90deg,
+      #ff7b72,
+      #f0b35a,
+      #e5c07b,
+      #8fd694,
+      #7fdbca,
+      #7aa7ff,
+      #c792ea,
+      #f48fb1,
+      #ff7b72
+    );
+    cursor: pointer;
+    transition:
+      scale 120ms var(--lume-motion-easing-standard),
+      box-shadow 150ms ease;
+  }
+
+  .color-wheel::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: var(--wheel-ground, var(--lume-color-popover));
+  }
+
+  .color-wheel svg {
+    position: relative;
+    z-index: 1;
+    color: var(--lume-color-text-muted);
+  }
+
+  .color-wheel[data-own] {
+    background: var(--own);
+  }
+
+  .color-wheel[data-own]::after,
+  .color-wheel[data-own] svg {
+    display: none;
+  }
+
+  .color-wheel:active {
+    scale: 0.9;
+  }
+
+  .color-wheel[aria-checked="true"] {
+    box-shadow:
+      0 0 0 2px var(--wheel-ground, var(--lume-color-popover)),
+      0 0 0 3.5px var(--own, var(--lume-color-text));
+  }
+
+  .color-wheel:focus-visible {
+    outline: 2px solid var(--lume-color-border-focus);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .color-picker[data-animate] {
+      animation: fade-in 150ms ease-out;
+    }
+  }
+
   .group-editor-rows {
     display: flex;
     flex-direction: column;
@@ -4572,86 +5346,601 @@
     text-align: center;
   }
 
-  /* The list of commands: what each is called, its id beneath, and its keys at the end. */
-
-  .commands-filter {
-    @apply bg-card;
-    width: 100%;
-    height: 30px;
-    margin-bottom: 2px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: var(--lume-radius-control);
-    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
-    color: inherit;
-    font: inherit;
-    font-size: 12.5px;
+  /*
+   * The keybindings page: every command with its keys. Keys are drawn as the command
+   * palette's caps, and their colour says where they come from: grey the default,
+   * blue set by the user, amber shared with another command, dashed and struck a
+   * default the user unbound.
+   */
+  .kb {
+    position: relative;
+    max-width: 708px;
   }
 
-  .commands-filter:focus-visible {
-    outline: none;
-    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border-focus);
-  }
-
-  .commands-count {
+  .kb-blurb {
     @apply text-ink-muted;
-    margin-left: 6px;
+    max-width: 700px;
+    margin: 2px 0 14px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .kb-blurb code {
+    @apply text-ink;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .kb-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .kb-filter {
+    @apply bg-card text-ink-muted;
+    display: flex;
+    flex: 1 1 320px;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 6px 0 10px;
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .kb-filter:focus-within {
+    box-shadow:
+      inset 0 0 0 1px #3d6bc2,
+      0 0 0 3px rgb(122 167 255 / 0.14);
+  }
+
+  .kb-filter input {
+    @apply text-ink;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    border: 0;
+    outline: 0;
+    background: none;
+    font: inherit;
+  }
+
+  .kb-filter input::placeholder {
+    color: color-mix(in srgb, var(--lume-color-text-muted) 70%, transparent);
+  }
+
+  .kb-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 4px;
+  }
+
+  .kb-chip {
+    @apply text-ink-muted;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-size: 12px;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease,
+      scale 140ms var(--lume-motion-easing-standard);
+  }
+
+  .kb-chip b {
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+
+  .kb-chip[aria-pressed="true"] {
+    @apply text-ink;
+    background: var(--settings-pressed);
+    box-shadow: none;
+  }
+
+  @media (hover: hover) {
+    .kb-chip:hover {
+      @apply text-ink;
+    }
+  }
+
+  .kb-legend {
+    @apply text-ink-muted;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 10px 0 0;
+    font-size: 11.5px;
+  }
+
+  .kb-legend > span:not(.kb-keys) {
+    margin-right: 12px;
+  }
+
+  .kb-legend .kb-keys kbd {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    font-size: 10px;
+  }
+
+  .kb-keys {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+  }
+
+  .kb-chord {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .kb-keys kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 5px;
+    background: var(--lume-color-control-active);
+    box-shadow:
+      inset 0 0 0 1px var(--lume-color-border),
+      0 1px 0 color-mix(in srgb, var(--lume-color-overlay) 60%, transparent);
+    color: var(--lume-color-text);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  .kb-then {
+    margin: 0 3px;
+    color: color-mix(in srgb, var(--lume-color-text-muted) 70%, transparent);
+    font-size: 10.5px;
+  }
+
+  .kb-keys[data-kind="user"] kbd {
+    background: color-mix(in srgb, var(--lume-color-status-info) 18%, var(--lume-color-card));
+    box-shadow: inset 0 0 0 1px
+      color-mix(in srgb, var(--lume-color-status-info) 60%, var(--lume-color-card));
+    color: color-mix(in srgb, var(--lume-color-status-info) 55%, var(--lume-color-text));
+  }
+
+  .kb-keys[data-kind="shared"] kbd {
+    background: color-mix(in srgb, var(--lume-color-status-warning) 16%, var(--lume-color-card));
+    box-shadow: inset 0 0 0 1px
+      color-mix(in srgb, var(--lume-color-status-warning) 55%, var(--lume-color-card));
+    color: color-mix(in srgb, var(--lume-color-status-warning) 55%, var(--lume-color-text));
+  }
+
+  .kb-keys[data-kind="off"] kbd {
+    outline: 1px dashed var(--lume-color-border);
+    outline-offset: -1px;
+    background: none;
+    box-shadow: none;
+    color: color-mix(in srgb, var(--lume-color-text-muted) 70%, transparent);
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in srgb, var(--lume-color-text-muted) 70%, transparent);
+  }
+
+  .kb-group {
+    margin: 16px 0 0;
+  }
+
+  .kb-group h2 {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .kb-group h2 span {
+    @apply text-ink-muted;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .kb-card {
+    @apply bg-card;
+    overflow: hidden;
+    border-radius: 10px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .kb-entry + .kb-entry {
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+  }
+
+  .kb-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 7px 10px 7px 12px;
+  }
+
+  /* A command whose keys the user changed has a line of the colour of their keys. */
+  .kb-row[data-changed]::before {
+    content: "";
+    position: absolute;
+    top: 10px;
+    bottom: 10px;
+    left: 0;
+    width: 2px;
+    border-radius: 0 2px 2px 0;
+    background: var(--lume-color-status-info);
+  }
+
+  .kb-row[data-flash] {
+    animation: kb-flash 900ms ease-out;
+  }
+
+  @keyframes kb-flash {
+    from {
+      background: color-mix(in srgb, var(--lume-color-status-info) 14%, transparent);
+    }
+  }
+
+  .kb-name {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .kb-name b {
+    display: block;
     font-weight: 400;
   }
 
-  .command-row {
-    justify-content: space-between;
+  .kb-name code {
+    @apply text-ink-muted;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    user-select: text;
   }
 
-  .command-name {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    gap: 1px;
-  }
-
-  .command-title {
-    font-size: 12.5px;
-  }
-
-  .command-from {
+  .kb-from {
     @apply text-ink-muted;
     margin-left: 8px;
     font-size: 11.5px;
   }
 
-  .command-id {
-    @apply text-ink-muted;
-    overflow: hidden;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    user-select: text;
-  }
-
-  .command-keys {
-    display: flex;
-    flex-shrink: 0;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    max-width: 55%;
+  .kb-badge {
+    @apply text-warning;
+    display: inline-flex;
+    align-items: center;
     gap: 4px;
+    font-size: 11px;
   }
 
-  .command-keys[data-none="true"] {
+  .kb-acts {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  .kb-row:hover .kb-acts,
+  .kb-row:focus-within .kb-acts {
+    opacity: 1;
+  }
+
+  .kb-row[data-recording] .kb-acts {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .kb-binds {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  .kb-bind {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 2px;
+    border-radius: 7px;
+  }
+
+  .kb-edit {
+    display: inline-flex;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .kb-edit:disabled {
+    cursor: default;
+  }
+
+  .kb-x {
+    @apply text-ink;
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--settings-off);
+    box-shadow: 0 0 0 2px var(--lume-color-card);
+    cursor: pointer;
+    opacity: 0;
+    transform: scale(0.85);
+    transition:
+      opacity 120ms ease,
+      transform 120ms var(--lume-motion-easing-standard);
+  }
+
+  .kb-bind:hover .kb-x,
+  .kb-bind:focus-within .kb-x {
+    opacity: 1;
+    transform: none;
+  }
+
+  @media (hover: hover) {
+    .kb-x:hover {
+      background: var(--lume-color-status-danger);
+      color: var(--lume-color-text-inverse);
+    }
+
+    .kb-bind[data-off] .kb-x:hover {
+      background: var(--lume-color-status-info);
+      color: var(--lume-color-text-inverse);
+    }
+  }
+
+  .kb-none {
     @apply text-ink-muted;
-    opacity: 0.6;
+    padding-right: 6px;
+    opacity: 0.7;
   }
 
-  .command-key {
-    padding: 2px 6px;
-    border-radius: min(5px, var(--lume-radius-control));
-    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
-    background: color-mix(in srgb, var(--lume-color-text) 6%, transparent);
-    font-family: inherit;
+  .kb-icon {
+    @apply text-ink-muted;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease,
+      scale 140ms var(--lume-motion-easing-standard);
+  }
+
+  @media (hover: hover) {
+    .kb-icon:hover {
+      @apply bg-control-hover text-ink;
+    }
+  }
+
+  .kb-icon[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--lume-color-status-info) 14%, transparent);
+    color: var(--lume-color-status-info);
+  }
+
+  .kb-button {
+    @apply text-ink;
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 6px;
+    background: var(--settings-raised);
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    font-size: 12px;
+    cursor: pointer;
+    transition:
+      scale 140ms var(--lume-motion-easing-standard),
+      background-color 120ms ease;
+  }
+
+  .kb-button[data-quiet] {
+    @apply text-ink-muted;
+    background: none;
+    box-shadow: none;
+  }
+
+  .kb-button[data-inherit] {
+    color: inherit;
+  }
+
+  @media (hover: hover) {
+    .kb-button[data-quiet]:hover {
+      @apply bg-control-hover text-ink;
+    }
+  }
+
+  .kb-icon:active,
+  .kb-button:active,
+  .kb-chip:active {
+    scale: 0.97;
+  }
+
+  /* The key being recorded: a field that takes the next keys pressed. */
+  .kb-recorder {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 150px;
+    height: 28px;
+    padding: 0 6px 0 10px;
+    border-radius: 7px;
+    background: var(--lume-color-control);
+    box-shadow:
+      inset 0 0 0 1px #3d6bc2,
+      0 0 0 3px rgb(122 167 255 / 0.14);
+    transform-origin: right center;
+    animation: kb-recorder-in 160ms var(--lume-motion-easing-standard);
+  }
+
+  .kb-recorder kbd {
+    animation: kb-cap-in 140ms var(--lume-motion-easing-standard);
+  }
+
+  .kb-recorder-wait {
+    @apply text-ink-muted;
+    font-size: 12px;
+  }
+
+  .kb-caret {
+    width: 1.5px;
+    height: 14px;
+    background: var(--lume-color-status-info);
+    animation: kb-blink 1s steps(1) infinite;
+  }
+
+  @keyframes kb-recorder-in {
+    from {
+      opacity: 0;
+      scale: 0.96;
+    }
+  }
+
+  @keyframes kb-cap-in {
+    from {
+      opacity: 0;
+      transform: translateY(2px) scale(0.92);
+    }
+  }
+
+  @keyframes kb-blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  .kb-hint {
+    @apply text-ink-muted;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: -4px;
+    padding: 0 12px 9px;
     font-size: 11.5px;
-    white-space: nowrap;
+  }
+
+  .kb-hint kbd,
+  .kb-toast kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--lume-color-control-active);
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    color: var(--lume-color-text-muted);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .kb-clash {
+    @apply text-warning;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: -2px 12px 9px;
+    padding: 6px 6px 6px 10px;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--lume-color-status-warning) 12%, transparent);
+    font-size: 12px;
+  }
+
+  .kb-clash b {
+    font-weight: 500;
+  }
+
+  .kb-space {
+    flex: 1;
+  }
+
+  .kb-empty {
+    @apply text-ink-muted;
+    padding: 40px 0;
+  }
+
+  .kb-foot {
+    @apply text-ink-muted;
+    position: sticky;
+    bottom: -32px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 20px;
+    padding: 10px 0;
+    background: linear-gradient(transparent, var(--lume-color-surface) 30%);
+    font-size: 12px;
+  }
+
+  .kb-foot-space {
+    height: 80px;
+  }
+
+  .kb-toast {
+    @apply text-ink;
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 38px;
+    padding: 0 6px 0 14px;
+    border-radius: 10px;
+    background: var(--lume-color-popover);
+    box-shadow:
+      0 0 0 1px var(--lume-color-border),
+      var(--lume-shadow-popover);
+    font-size: 12.5px;
+    animation: kb-toast-in 220ms var(--lume-motion-easing-standard);
+  }
+
+  @keyframes kb-toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .kb-toast,
+    .kb-recorder,
+    .kb-recorder kbd,
+    .kb-row[data-flash],
+    .kb-caret {
+      animation: none;
+    }
   }
 
   /* What the application is. */
@@ -5018,11 +6307,6 @@
     transition: scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
   }
 
-  /* The user's own colour before one is chosen: a ring of the hues it may be. */
-  .settings-swatch[data-own="true"]:not([aria-checked="true"]) {
-    background: conic-gradient(#ef8f8f, #f0b35a, #e5c07b, #7fe3b8, #7aa7ff, #c9a6f5, #ef8f8f);
-  }
-
   .settings-swatch:active {
     scale: 0.9;
   }
@@ -5041,12 +6325,15 @@
     background: var(--swatch);
   }
 
-  .settings-swatch-picker {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    opacity: 0;
-    pointer-events: none;
+  /* The swatch that opens the colour picker sits on the row's card. */
+  .settings-swatch-own {
+    --wheel-ground: var(--lume-color-card);
+  }
+
+  .settings-swatch-own[aria-checked="true"] {
+    box-shadow:
+      0 0 0 2px var(--lume-color-card),
+      0 0 0 4px var(--own);
   }
 
   .settings-text {
@@ -5067,11 +6354,6 @@
   }
 
   /* The colour typed for a swatch row: just wide enough for #rrggbb. */
-  .settings-swatch-field {
-    flex: 0 0 84px;
-    font-family: var(--lume-font-family);
-  }
-
   /* A typed number: the digits at the right, the unit after them, and before the field
      the button that gives the setting back to the theme. */
   .settings-number-group {

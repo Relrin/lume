@@ -48,6 +48,7 @@ const COMMANDS: &[&str] = &[
     "window_control",
     "window_state",
     "workspaces_list",
+    "folders_list",
     "ui_contributions",
     "ui_visible",
     "ui_assets",

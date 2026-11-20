@@ -59,12 +59,14 @@ export type LineGlyphName =
   | "fold-horizontal"
   | "folder"
   | "folder-input"
+  | "folder-open"
   | "gauge"
   | "git-branch"
   | "globe"
   | "hard-drive"
   | "heart"
   | "info"
+  | "keyboard"
   | "layers"
   | "list"
   | "lock"
@@ -83,11 +85,13 @@ export type LineGlyphName =
   | "pause"
   | "pencil"
   | "pin"
+  | "pipette"
   | "play"
   | "plus"
   | "puzzle"
   | "refresh-cw"
   | "rocket"
+  | "rotate-ccw"
   | "rotate-cw"
   | "rows-2"
   | "search"
@@ -452,6 +456,9 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["path", {"d":"M2 13h10"}],
     ["path", {"d":"m9 16 3-3-3-3"}],
   ],
+  "folder-open": [
+    ["path", {"d":"m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"}],
+  ],
   "gauge": [
     ["path", {"d":"m12 14 4-4"}],
     ["path", {"d":"M3.34 19a10 10 0 1 1 17.32 0"}],
@@ -479,6 +486,17 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["circle", {"cx":"12","cy":"12","r":"10"}],
     ["path", {"d":"M12 16v-4"}],
     ["path", {"d":"M12 8h.01"}],
+  ],
+  "keyboard": [
+    ["path", {"d":"M10 8h.01"}],
+    ["path", {"d":"M12 12h.01"}],
+    ["path", {"d":"M14 8h.01"}],
+    ["path", {"d":"M16 12h.01"}],
+    ["path", {"d":"M18 8h.01"}],
+    ["path", {"d":"M6 8h.01"}],
+    ["path", {"d":"M7 16h10"}],
+    ["path", {"d":"M8 12h.01"}],
+    ["rect", {"width":"20","height":"16","x":"2","y":"4","rx":"2"}],
   ],
   "layers": [
     ["path", {"d":"M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"}],
@@ -583,6 +601,11 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["path", {"d":"M12 17v5"}],
     ["path", {"d":"M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"}],
   ],
+  "pipette": [
+    ["path", {"d":"m12 9-8.414 8.414A2 2 0 0 0 3 18.828v1.344a2 2 0 0 1-.586 1.414A2 2 0 0 1 3.828 21h1.344a2 2 0 0 0 1.414-.586L15 12"}],
+    ["path", {"d":"m18 9 .4.4a1 1 0 1 1-3 3l-3.8-3.8a1 1 0 1 1 3-3l.4.4 3.4-3.4a1 1 0 1 1 3 3z"}],
+    ["path", {"d":"m2 22 .414-.414"}],
+  ],
   "play": [
     ["path", {"d":"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"}],
   ],
@@ -604,6 +627,10 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["path", {"d":"M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09"}],
     ["path", {"d":"M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z"}],
     ["path", {"d":"M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05"}],
+  ],
+  "rotate-ccw": [
+    ["path", {"d":"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"}],
+    ["path", {"d":"M3 3v5h5"}],
   ],
   "rotate-cw": [
     ["path", {"d":"M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"}],

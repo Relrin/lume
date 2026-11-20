@@ -510,6 +510,13 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.workspace.open-folder",
+        "Open Folder as Workspace",
+        "Workspace",
+        Runs::Page,
+        true,
+    ),
+    (
         "lume.workspace.set-root",
         "Set Workspace Folder",
         "Workspace",
