@@ -111,7 +111,19 @@ running:
                                  id, beside a plugin of the same id; --name names it.
                                  The same plugin at another version replaces itself,
                                  asking only about what it newly needs
-  list                           what is installed, in the order it loads in, and
+  install <git address | owner/repo>[#<ref>] [--path <folder>] [--ref <ref>] ...
+                                 the same from a repository, fetched with git: the
+                                 package may be in a folder of it (--path), at a branch
+                                 or tag (#<ref> or --ref); the commit is recorded
+  update [<id>] [--yes]          fetch the repository a plugin was installed from
+                                 again, or every such plugin's, and install what is
+                                 new; an update that would let the plugin do more is
+                                 always asked about
+  link <folder> [--as <id>] [--name <name>]
+                                 use a plugin's folder where it lies, while working on
+                                 it: nothing is copied, it is given what its manifest
+                                 asks for, and a running Lume reloads it as files change
+  list                          what is installed, in the order it loads in, and
                                  whether each can be used
   remove <id> [--purge]          remove a plugin; --purge removes its data and log too
   enable <id> | disable <id>     turn a plugin on or off

@@ -105,6 +105,17 @@
             "name": "Install from folder…"
           },
           {
+            "role": "textbox"
+          },
+          {
+            "role": "textbox",
+            "name": "The folder of the repository the plugin is in"
+          },
+          {
+            "role": "button",
+            "name": "Look at it…"
+          },
+          {
             "role": "heading",
             "name": "Installed"
           },
@@ -133,6 +144,10 @@
           {
             "role": "button",
             "name": "Load Tools later"
+          },
+          {
+            "role": "button",
+            "name": "Check for update"
           },
           {
             "role": "button",

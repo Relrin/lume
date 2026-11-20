@@ -11,7 +11,8 @@
  * A frame that loads a second time navigated away from its page, which a view never
  * needs to do; it is taken down rather than handed another channel. One that does not
  * say it is ready within ten seconds, that fails, or that breaks the bridge's rules, is
- * shown as stopped, with a button to load it again.
+ * shown as stopped, with a button to load it again. The frames of a plugin that is
+ * being worked on are loaded again whenever its files change.
  *
  * A view may ask to have something kept for it. That is handed back to it whenever it
  * starts again: after the application was closed, after its pane was moved to where a
@@ -29,7 +30,7 @@ import { CSS_VARIABLES } from "@lume/tokens";
 import { useShell } from "../../shell/context.ts";
 import { FrameStreams, STREAM_WINDOW } from "../../transport/view-streams.ts";
 import { FrameBridge, type Hello, pageUrl, pluginBase } from "./bridge.ts";
-import { keepFrame, keepPaneFrame, nextViewName } from "./registry.ts";
+import { keepFrame, keepFrameReload, keepPaneFrame, nextViewName } from "./registry.ts";
 
 /** How long a frame has to say it is ready. */
 export const READY_WAIT_MS = 10_000;
@@ -97,6 +98,11 @@ export function PluginFrame(props: PluginFrameProps) {
   const keep = useCallback((state: unknown) => {
     kept.current = { state };
   }, []);
+
+  // Loaded again from what it kept when its plugin's files change; one that is asleep
+  // loads the new files when it is next shown anyway.
+  const { plugin } = props;
+  useEffect(() => keepFrameReload(plugin, () => setAttempt((n) => n + 1)), [plugin]);
 
   if (asleep) return <div className="plugin-frame" data-shown="asleep" />;
   return (

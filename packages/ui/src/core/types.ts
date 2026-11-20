@@ -338,6 +338,8 @@ export interface PluginEntry {
   readonly ready: boolean;
   /** What went wrong with it last, if anything did. */
   readonly problem: string | null;
+  /** Whether it is a folder used where it lies, for a plugin being worked on. */
+  readonly dev?: boolean;
 }
 
 /** One row of a list panel, as a plugin gave it. */
@@ -569,6 +571,8 @@ export type Notice =
   | { readonly type: "plugins_changed" }
   /** What the plugins add to the windows changed: the page fetches it again. */
   | { readonly type: "contributions_changed"; readonly revision: number }
+  /** The files of a plugin being worked on changed: its open views load again. */
+  | { readonly type: "plugin_view_reload"; readonly plugin: string }
   /** A plugin's code sent one of this page's open views an event. */
   | {
       readonly type: "view_event";

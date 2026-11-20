@@ -9,7 +9,8 @@
 //!
 //! The settings window manages what is installed: it lists the plugins with how each
 //! fares, turns them on and off, removes them, moves them in the order they load in,
-//! and installs one from a folder once the user has seen what it would be able to do.
+//! and installs one from a folder or a repository once the user has seen what it would
+//! be able to do.
 
 use std::sync::Arc;
 
@@ -198,6 +199,33 @@ pub async fn addon_inspect(
     install_as: Option<String>,
 ) -> Result<Value, CommandError> {
     services.plugins.inspect_addon(folder, install_as).await
+}
+
+/// Fetches the package in a repository, checks it, and says what installing it would
+/// do.
+#[tauri::command]
+pub async fn addon_inspect_git(
+    services: Shared<'_>,
+    source: String,
+    path: Option<String>,
+    install_as: Option<String>,
+) -> Result<Value, CommandError> {
+    if source.len() > 2048 || path.as_ref().is_some_and(|path| path.len() > 1024) {
+        return Err(CommandError::bad_request(
+            "that is not a repository's address",
+        ));
+    }
+    services
+        .plugins
+        .inspect_addon_git(source, path, install_as)
+        .await
+}
+
+/// Looks in the repository a plugin was installed from for something newer, and says
+/// what installing it would do.
+#[tauri::command]
+pub async fn addon_check_update(services: Shared<'_>, id: String) -> Result<Value, CommandError> {
+    services.plugins.check_addon_update(id).await
 }
 
 /// Installs a package the user agreed to, by the token its inspection gave.

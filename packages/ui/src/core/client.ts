@@ -28,7 +28,7 @@ import type {
   WindowState,
   WorkspaceList,
 } from "./types.ts";
-import type { AddonEntry, Inspection } from "../settings/addons.ts";
+import type { AddonEntry, Inspection, InstallPreview, UpdateCurrent } from "../settings/addons.ts";
 
 /** What a page does with what the core sends it. */
 export interface CoreEvents {
@@ -236,6 +236,19 @@ export class CoreClient {
   }
 
   /** Installs a package the user agreed to, by the token its inspection gave. */
+  addonInspectGit(
+    source: string,
+    path: string | null,
+    installAs: string | null,
+  ): Promise<Inspection> {
+    return this.transport.command("addon_inspect_git", { source, path, installAs });
+  }
+
+  /** Looks in the repository a plugin was installed from for something newer. */
+  addonCheckUpdate(id: string): Promise<InstallPreview | UpdateCurrent> {
+    return this.transport.command("addon_check_update", { id });
+  }
+
   addonInstall(token: number): Promise<{ id: string }> {
     return this.transport.command("addon_install", { token });
   }

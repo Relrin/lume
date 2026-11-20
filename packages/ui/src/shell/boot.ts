@@ -46,7 +46,12 @@ import { PaneLooks } from "../panes/looks.ts";
 import { PaneTitles } from "../panes/titles.ts";
 import { PaneViews } from "../panes/views.ts";
 import { setMotionSource } from "../motion/slots.ts";
-import { deliverViewEvent, focusPaneFrame, onPaneFrameReady } from "../plugins/frame/registry.ts";
+import {
+  deliverViewEvent,
+  focusPaneFrame,
+  onPaneFrameReady,
+  reloadPluginFrames,
+} from "../plugins/frame/registry.ts";
 import { openersFor } from "../plugins/openers.ts";
 import { followPluginStatus } from "../plugins/status.ts";
 import { createPluginsStore, type PluginsStore } from "../plugins/store.ts";
@@ -572,6 +577,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         break;
       case "view_event":
         deliverViewEvent(notice.view, notice.event, notice.payload);
+        break;
+      case "plugin_view_reload":
+        reloadPluginFrames(notice.plugin);
         break;
       case "commands_changed":
         // Plugins came or went: the palette and the menus offer what there is now.

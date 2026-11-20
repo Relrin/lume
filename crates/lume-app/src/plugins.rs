@@ -10,7 +10,8 @@
 //! A plugin that goes over its limits is stopped; it starts again when it is next
 //! wanted. Three times in a minute and it is turned off until the user turns it on.
 //! Changes made with `lume plugin` reach the application through the lock file, which is
-//! watched.
+//! watched. So are the folders of plugins that are being worked on, which are loaded
+//! again as their files change (see `linked`).
 //!
 //! What the plugins add to the windows (menus, status items, panels, pictures, motion,
 //! cursor effects) is worked out here from their manifests, without their code, and
@@ -26,6 +27,7 @@
 
 mod asking;
 mod calls;
+mod linked;
 mod manage;
 mod openers;
 mod system;
@@ -301,6 +303,8 @@ pub struct Plugins {
     system: system::Held,
     /// The plugins' views open in the windows.
     views: views::Views,
+    /// The folders of plugins being worked on, which are watched.
+    linked: linked::Linked,
     /// The workspace plugins were last told of.
     told_workspace: Mutex<Option<Value>>,
     /// Packages the settings window is installing, waiting for the user's word.
@@ -356,6 +360,7 @@ impl Plugins {
             clipboard: OnceLock::new(),
             system: system::Held::default(),
             views: views::Views::default(),
+            linked: linked::Linked::default(),
             told_workspace: Mutex::new(None),
             waiting: manage::Waiting::default(),
             seen: Arc::new(Seen::default()),
@@ -462,6 +467,7 @@ impl Plugins {
             Err(_) => return,
         };
         let starting = self.apply(installed, resolution);
+        self.follow_links();
         self.rebuild().await;
         self.state.broadcast(&json!({ "type": "commands_changed" }));
         self.state.broadcast(&json!({ "type": "plugins_changed" }));
@@ -629,10 +635,18 @@ impl Plugins {
             let grants =
                 lume_plugin::permissions::parse_table(&one.entry.grants).unwrap_or_default();
             let previous = old.remove(&local);
+            // A linked folder's files change as they are worked on, and what follows
+            // from each change is seen to as it happens; here it is the same plugin for
+            // as long as its manifest is.
             let same = previous.as_ref().is_some_and(|previous| {
-                previous.installed.entry.content_hash == one.entry.content_hash
-                    && previous.is_ready()
-                    && state == State::Ready
+                let unchanged = if one.entry.is_link() {
+                    previous.installed.entry.is_link()
+                        && previous.installed.entry.manifest_hash == one.entry.manifest_hash
+                        && previous.installed.entry.dir == one.entry.dir
+                } else {
+                    previous.installed.entry.content_hash == one.entry.content_hash
+                };
+                unchanged && previous.is_ready() && state == State::Ready
             });
             let mut loaded = match previous {
                 Some(mut previous) if same => {
@@ -2244,12 +2258,17 @@ impl Plugins {
                         "missed": stats.events_missed,
                     })
                 });
+                let reloaded = self.reloaded(local).map(|reloaded| {
+                    json!({ "times": reloaded.times, "tookMs": reloaded.took_ms })
+                });
                 json!({
                     "id": local,
                     "name": loaded.installed.name(),
                     "version": loaded.installed.entry.version,
                     "state": state,
                     "reason": reason,
+                    "linked": loaded.installed.entry.is_link(),
+                    "reloaded": reloaded,
                     "running": running,
                     "starts": loaded.health.starts,
                     "breaches": loaded.health.breaches.len(),
@@ -2296,6 +2315,7 @@ impl Plugins {
                     "version": loaded.installed.entry.version,
                     "ready": loaded.is_ready(),
                     "problem": loaded.health.last_problem,
+                    "dev": loaded.installed.entry.is_link(),
                 })
             })
             .collect();
@@ -2352,7 +2372,8 @@ impl Plugins {
             loaded.installed.entry.clone()
         };
         let dir = self.store.package_dir(&entry);
-        if check {
+        let linked = entry.is_link();
+        if check && !linked {
             let store = self.store.clone();
             let seen = Arc::clone(&self.seen);
             let checked = tokio::task::spawn_blocking(move || store.verify_seen(&entry, &seen))
@@ -2363,7 +2384,7 @@ impl Plugins {
                 return None;
             }
         }
-        Some(crate::plugin_scheme::FrameRoot { dir, linked: false })
+        Some(crate::plugin_scheme::FrameRoot { dir, linked })
     }
 
     /// The list panel of a plugin, by its full id.

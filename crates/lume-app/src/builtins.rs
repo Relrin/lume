@@ -603,6 +603,16 @@ const COMMANDS: &[Row] = &[
         Runs::Core,
         false,
     ),
+    // For authors, in builds made for development only: the window's developer tools,
+    // where each view of a plugin is a page of its own to look into.
+    #[cfg(debug_assertions)]
+    (
+        "lume.view.inspect",
+        "Inspect the Views of Linked Plugins",
+        "Plugins",
+        Runs::Core,
+        true,
+    ),
     (
         "lume.view.zoom-in",
         "Increase Font Size",

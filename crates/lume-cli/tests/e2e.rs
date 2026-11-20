@@ -3147,3 +3147,198 @@ fn a_view_out_of_sight_is_kept_for_a_while_and_then_started_again_from_what_it_k
     plugin_log_until(&home, "test.echo-view", at, "echo started pane count 8");
     app.quit();
 }
+
+/// How long a linked plugin may take to be loaded again after one of its files changed.
+const RELOAD_LIMIT: Duration = Duration::from_secs(1);
+
+/// Writes the files of a plugin that is being worked on into `folder`: code that says
+/// `word` when it starts, and a panel whose page says `word` and how often it started.
+fn write_work_plugin(folder: &Path, version: &str, host_word: &str, view_word: &str) {
+    std::fs::create_dir_all(folder.join("ui")).expect("the plugin's folders");
+    let write = |name: &str, text: String| {
+        std::fs::write(folder.join(name), text).expect("the plugin's file is written");
+    };
+    write(
+        "plugin.toml",
+        format!(
+            "schema = 1\nid = \"test.work\"\nname = \"Work\"\nversion = \"{version}\"\n\
+             api = \"1\"\nmain = \"host.js\"\nactivation = [\"onStartup\", \"onView:side\"]\n\n\
+             [[contributes.panels]]\nid = \"side\"\ntitle = \"Work\"\nkind = \"frame\"\n\
+             area = \"right\"\nentry = \"ui/index.html\"\n"
+        ),
+    );
+    write(
+        "host.js",
+        format!(
+            "lume.log.info(\"host {host_word}\");\n\
+             lume.views.handle(\"said\", (args) => {{\n  lume.log.info(`view ${{args.line}}`);\n  \
+             return null;\n}});\n"
+        ),
+    );
+    write(
+        "ui/index.html",
+        "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    \
+         <title>Work</title>\n    <script src=\"view.js\" defer></script>\n  </head>\n  \
+         <body></body>\n</html>\n"
+            .to_owned(),
+    );
+    write(
+        "ui/view.js",
+        format!(
+            "\"use strict\";\nwindow.addEventListener(\"message\", (event) => {{\n  \
+             if (!event.data || event.data.lume !== \"connect\" || event.ports.length !== 1) return;\n  \
+             const port = event.ports[0];\n  port.onmessage = () => undefined;\n  \
+             const count = event.data.state?.count ?? 0;\n  port.postMessage({{ t: \"ready\" }});\n  \
+             port.postMessage({{ t: \"state\", state: {{ count: count + 1 }} }});\n  \
+             port.postMessage({{\n    t: \"call\",\n    id: 1,\n    name: \"said\",\n    \
+             args: {{ line: `{view_word} count ${{count}}` }},\n  }});\n}});\n"
+        ),
+    );
+}
+
+/// Waits until a plugin's log says `mark` after byte `from`, looking often; says how
+/// long that took.
+fn plugin_log_within(home: &Path, id: &str, from: usize, mark: &str) -> Duration {
+    let log = home.join(format!("state/plugins/logs/{id}.log"));
+    let began = Instant::now();
+    loop {
+        let text = std::fs::read_to_string(&log).unwrap_or_default();
+        if text.get(from..).unwrap_or_default().contains(mark) {
+            return began.elapsed();
+        }
+        assert!(
+            began.elapsed() < START,
+            "{id} never logged {mark:?} (from byte {from}):\n{text}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_linked_plugin_is_loaded_again_within_a_second_of_a_change() {
+    let home = home_with_plugins(&[]);
+    let work = home.join("work");
+    write_work_plugin(&work, "0.1.0", "one", "one");
+    // What a build installs is not looked at, however much of it there is.
+    std::fs::create_dir_all(work.join("node_modules/dep")).unwrap();
+    std::fs::write(work.join("node_modules/dep/index.js"), "// a dependency").unwrap();
+    let linked = Command::new(lume())
+        .args(["plugin", "link"])
+        .arg(&work)
+        .env("LUME_CONFIG_DIR", home.join("config"))
+        .env("LUME_STATE_DIR", home.join("state"))
+        .output()
+        .expect("lume runs");
+    assert!(
+        linked.status.success(),
+        "the folder is linked: {}{}",
+        String::from_utf8_lossy(&linked.stdout),
+        String::from_utf8_lossy(&linked.stderr)
+    );
+
+    // One file of the folder written again with some of its text changed.
+    let change = |name: &str, from: &str, to: &str| {
+        let file = work.join(name);
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains(from), "{name} holds {from:?}");
+        std::fs::write(&file, text.replace(from, to)).unwrap();
+    };
+
+    let endpoint = format!("e2e-{}-link", std::process::id());
+    let app = App::start_on(home.clone(), true, endpoint);
+    app.status_with_session();
+    let plugin = app.until_plugin("test.work", "the linked plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    assert_eq!(plugin["linked"], true, "{plugin}");
+    plugin_log_until(&home, "test.work", 0, "host one");
+    app.ctl(&[
+        "command",
+        "lume.panel.show",
+        r#"{"panel":"test.work.side"}"#,
+    ])
+    .ok("show the panel");
+    plugin_log_until(&home, "test.work", 0, "view one count 0");
+
+    // Its code changes: the code starts again, and the view that is open stays.
+    let at = plugin_log_len(&home, "test.work");
+    change("host.js", "host one", "host two");
+    let code = plugin_log_within(&home, "test.work", at, "host two");
+    assert!(
+        code < RELOAD_LIMIT,
+        "the changed code started after {code:?}"
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    let log = std::fs::read_to_string(home.join("state/plugins/logs/test.work.log")).unwrap();
+    assert!(
+        !log[at..].contains("view "),
+        "changed code leaves the view as it is:\n{}",
+        &log[at..]
+    );
+
+    // Its page changes: the view loads again, from what it kept.
+    std::thread::sleep(Duration::from_millis(500));
+    let at = plugin_log_len(&home, "test.work");
+    change("ui/view.js", "`one count", "`two count");
+    let page = plugin_log_within(&home, "test.work", at, "view two count 1");
+    assert!(
+        page < RELOAD_LIMIT,
+        "the changed page loaded after {page:?}"
+    );
+    let log = std::fs::read_to_string(home.join("state/plugins/logs/test.work.log")).unwrap();
+    assert!(
+        !log[at..].contains("host two"),
+        "a changed page leaves the code running:\n{}",
+        &log[at..]
+    );
+
+    // Both at once, as a build writes them.
+    std::thread::sleep(Duration::from_millis(500));
+    let at = plugin_log_len(&home, "test.work");
+    change("host.js", "host two", "host three");
+    change("ui/view.js", "`two count", "`three count");
+    let both = plugin_log_within(&home, "test.work", at, "view three count 2");
+    assert!(
+        both < RELOAD_LIMIT,
+        "both halves were loaded after {both:?}"
+    );
+    plugin_log_until(&home, "test.work", at, "host three");
+
+    // Its manifest changes: what is installed follows it, and its code starts again.
+    std::thread::sleep(Duration::from_millis(500));
+    let at = plugin_log_len(&home, "test.work");
+    change("plugin.toml", "0.1.0", "0.2.0");
+    let manifest = plugin_log_within(&home, "test.work", at, "host three");
+    let plugin = app.until_plugin("test.work", "the new version to be read", |plugin| {
+        plugin["version"] == "0.2.0"
+    });
+    assert!(
+        plugin["reloaded"]["times"].as_u64().unwrap_or(0) >= 4,
+        "{plugin}"
+    );
+    println!(
+        "linked plugin loaded again: code {} ms, page {} ms, both {} ms, manifest {} ms",
+        code.as_millis(),
+        page.as_millis(),
+        both.as_millis(),
+        manifest.as_millis()
+    );
+
+    // A file that is nothing to the running plugin starts nothing again.
+    std::thread::sleep(Duration::from_millis(500));
+    let at = plugin_log_len(&home, "test.work");
+    std::fs::write(work.join("node_modules/dep/index.js"), "// changed").unwrap();
+    std::fs::create_dir_all(work.join("src")).unwrap();
+    std::fs::write(work.join("src/view.ts"), "// a source file").unwrap();
+    std::thread::sleep(Duration::from_secs(1));
+    let log = std::fs::read_to_string(home.join("state/plugins/logs/test.work.log")).unwrap();
+    assert!(
+        !log[at..].contains("host ") && !log[at..].contains("view "),
+        "{}",
+        &log[at..]
+    );
+    app.quit();
+    // The folder is the author's: nothing of it was touched.
+    assert!(work.join("plugin.toml").is_file());
+}

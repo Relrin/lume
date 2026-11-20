@@ -27,6 +27,7 @@ import type { PaneIcon } from "../events/programs.ts";
 import { FLOAT_EDGES } from "../layout/floats.ts";
 import { selectFocus } from "../layout/selectors.ts";
 import type { PaneContent, PaneId } from "../layout/types.ts";
+import { DevBadge } from "../plugins/DevBadge.tsx";
 import { PluginFrame } from "../plugins/frame/PluginFrame.tsx";
 import { focusPaneFrame } from "../plugins/frame/registry.ts";
 import { SearchBar } from "../search/SearchBar.tsx";
@@ -243,10 +244,13 @@ function PaneHeader({
   pane,
   focused,
   floating,
+  dev = false,
 }: {
   pane: PaneId;
   focused: boolean;
   floating: boolean;
+  /** Whether the pane shows the view of a plugin that is being worked on. */
+  dev?: boolean;
 }) {
   const app = useShell();
   const header = useRef<HTMLElement>(null);
@@ -293,6 +297,7 @@ function PaneHeader({
         <span className="pane-activity" aria-hidden="true" />
       </span>
       <span className="pane-title" ref={name} />
+      {dev && <DevBadge />}
       <span className="pane-cwd" ref={where} hidden />
       <span className="pane-spacer" />
       <HeaderMarksView pane={pane} marks={marks} />
@@ -429,6 +434,10 @@ function PluginPaneCard({
       ? false
       : (state.shown?.plugins.find((entry) => entry.id === def.plugin)?.ready ?? false),
   );
+  const dev = useStore(
+    app.plugins,
+    (state) => state.shown?.plugins.find((entry) => entry.id === content.plugin)?.dev ?? false,
+  );
   const headed = (header || floating) && !parked;
   useLayoutEffect(() => {
     const element = card.current;
@@ -462,7 +471,7 @@ function PluginPaneCard({
         focusPaneFrame(pane);
       }}
     >
-      {headed && <PaneHeader pane={pane} focused={focused} floating={floating} />}
+      {headed && <PaneHeader pane={pane} focused={focused} floating={floating} dev={dev} />}
       <div className="pane-plugin">
         {def !== undefined && ready ? (
           <PluginFrame

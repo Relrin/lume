@@ -19,6 +19,7 @@ import { panelDropArea, type SideArea } from "../drag/panels.ts";
 import { SIDE_AREAS, selectPanels, TAB_LIST_PANEL } from "../layout/selectors.ts";
 import type { Panel } from "../layout/types.ts";
 import { useSlotMotion } from "../motion/slots.ts";
+import { DevBadge } from "../plugins/DevBadge.tsx";
 import { PluginFrame } from "../plugins/frame/PluginFrame.tsx";
 import { PluginIcon } from "../plugins/PluginIcon.tsx";
 import { DRAG_START_PX } from "../tuning.ts";
@@ -71,6 +72,11 @@ export function PanelHost({ panel, area }: { panel: Panel; area: SideArea }) {
       : (state.shown?.plugins.find((plugin) => plugin.id === def.plugin)?.ready ?? false),
   );
   const images = useStore(app.plugins, (state) => state.shown?.images);
+  const dev = useStore(app.plugins, (state) =>
+    def === undefined
+      ? false
+      : (state.shown?.plugins.find((entry) => entry.id === def.plugin)?.dev ?? false),
+  );
 
   /** The side of the window the pointer holds the panel over. */
   const targetAt = (event: React.PointerEvent<HTMLElement>): SideArea | null => {
@@ -160,6 +166,7 @@ export function PanelHost({ panel, area }: { panel: Panel; area: SideArea }) {
           </span>
         )}
         <span className="panel-title">{titleOf(panel, def)}</span>
+        {dev && <DevBadge />}
         {panel.content.type === "plugin_view" && (
           <button
             type="button"

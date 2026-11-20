@@ -12,6 +12,7 @@ import {
   RATE_BURST,
   readMessage,
 } from "../src/plugins/frame/bridge.ts";
+import { keepFrameReload, reloadPluginFrames } from "../src/plugins/frame/registry.ts";
 
 class FakePort implements PortLike {
   sent: unknown[] = [];
@@ -177,6 +178,25 @@ describe("a frame's bridge", () => {
     new FrameBridge(port, made, () => 0);
     port.receive({ t: "error", message: "boom" });
     expect(seen.stopped).toEqual(["it failed: boom"]);
+  });
+});
+
+describe("the frames of a plugin that is being worked on", () => {
+  it("are loaded again by their plugin, for as long as each is there", () => {
+    const loaded: string[] = [];
+    const first = keepFrameReload("me.work", () => loaded.push("first"));
+    const second = keepFrameReload("me.work", () => loaded.push("second"));
+    const other = keepFrameReload("acme.tools", () => loaded.push("other"));
+    reloadPluginFrames("me.work");
+    expect(loaded).toEqual(["first", "second"]);
+    first();
+    reloadPluginFrames("me.work");
+    expect(loaded).toEqual(["first", "second", "second"]);
+    second();
+    other();
+    reloadPluginFrames("me.work");
+    reloadPluginFrames("acme.tools");
+    expect(loaded).toHaveLength(3);
   });
 });
 

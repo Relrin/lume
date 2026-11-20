@@ -21,9 +21,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
+use crate::git::{self, GitError, GitSource};
 use crate::hash::{self, HashError};
 use crate::id::{check_plugin_id, overlap};
-use crate::lock::{Entry, LOCK_FILE, Lock, LockError, Source};
+use crate::lock::{Entry, LOCK_FILE, Lock, LockError, SOURCE_GIT, SOURCE_LINK, Source};
 use crate::manifest::{MANIFEST_FILE, Manifest, Problem};
 use crate::order::{Candidate, Resolution, resolve};
 use crate::package::{self, PackageError, Staged};
@@ -51,6 +52,8 @@ pub enum StoreError {
     Package(#[from] PackageError),
     #[error(transparent)]
     Hash(#[from] HashError),
+    #[error(transparent)]
+    Git(#[from] GitError),
     #[error("{path}: {error}")]
     Io {
         path: PathBuf,
@@ -92,6 +95,39 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> StoreError + '_ {
     move |error| StoreError::Io {
         path: path.to_owned(),
         error,
+    }
+}
+
+/// Where a package is taken from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PackageSource {
+    /// A folder or a `.tar.gz` archive on this machine.
+    Path(PathBuf),
+    /// A repository, fetched with git.
+    Git(GitSource),
+}
+
+impl From<&Path> for PackageSource {
+    fn from(path: &Path) -> Self {
+        Self::Path(path.to_owned())
+    }
+}
+
+impl From<&PathBuf> for PackageSource {
+    fn from(path: &PathBuf) -> Self {
+        Self::Path(path.clone())
+    }
+}
+
+impl From<PathBuf> for PackageSource {
+    fn from(path: PathBuf) -> Self {
+        Self::Path(path)
+    }
+}
+
+impl From<GitSource> for PackageSource {
+    fn from(source: GitSource) -> Self {
+        Self::Git(source)
     }
 }
 
@@ -139,6 +175,9 @@ pub struct Prepared {
     pub warnings: Vec<String>,
     pub source: Source,
     pub content_hash: String,
+    /// Whether what is installed under its id is this very package already: the same
+    /// files, and for a repository the same commit.
+    pub unchanged: bool,
     manifest_hash: String,
     /// The bindings the install it replaces had.
     bindings: std::collections::BTreeMap<String, String>,
@@ -330,23 +369,64 @@ impl Store {
         Ok((manifest, hash::of_bytes(text.as_bytes())))
     }
 
-    /// Copies the package at `source`, checks it, and works out what installing it would
-    /// change. Nothing is installed until [`Store::commit`].
-    pub fn prepare(&self, source: &Path, options: InstallOptions) -> Result<Prepared, StoreError> {
-        let source = std::path::absolute(source).map_err(io(source))?;
+    /// Copies the package of `source` into the staging folder: a folder or an archive
+    /// as it is, a repository by fetching its commit first. What was fetched beside the
+    /// package is removed again.
+    fn stage(&self, source: &PackageSource) -> Result<(Staged, Source), StoreError> {
         let staging = self.root.join("staging").join(format!(
             "{}-{}",
             std::process::id(),
             STAGING.fetch_add(1, Ordering::Relaxed)
         ));
         let _ = std::fs::remove_dir_all(&staging);
-        let staged = match package::stage(&source, &staging) {
-            Ok(staged) => staged,
-            Err(error) => {
-                let _ = std::fs::remove_dir_all(&staging);
-                return Err(error.into());
+        let staged = || -> Result<(Staged, Source), StoreError> {
+            match source {
+                PackageSource::Path(path) => {
+                    let path = std::path::absolute(path).map_err(io(path))?;
+                    let staged = package::stage(&path, &staging)?;
+                    let kind = if package::is_archive(&path) {
+                        "archive"
+                    } else {
+                        "folder"
+                    };
+                    Ok((staged, Source::local(kind, path.display().to_string())))
+                }
+                PackageSource::Git(source) => {
+                    std::fs::create_dir_all(&staging).map_err(io(&staging))?;
+                    let fetching = staging.join("fetched");
+                    let fetched = git::fetch(source, &fetching)?;
+                    let mut staged = package::stage(&fetched.package, &staging.join("package"))?;
+                    remove_fetched(&fetching);
+                    staged.folder.clone_from(&staging);
+                    let from = Source {
+                        kind: SOURCE_GIT.to_owned(),
+                        path: source.shown(),
+                        url: Some(source.url.clone()),
+                        reference: source.reference.clone(),
+                        commit: Some(fetched.commit),
+                        subdir: source.subdir.clone(),
+                    };
+                    Ok((staged, from))
+                }
             }
-        };
+        }();
+        if staged.is_err() {
+            remove_fetched(&staging);
+            if let Some(parent) = staging.parent() {
+                let _ = std::fs::remove_dir(parent);
+            }
+        }
+        staged
+    }
+
+    /// Copies the package of `source`, checks it, and works out what installing it would
+    /// change. Nothing is installed until [`Store::commit`].
+    pub fn prepare(
+        &self,
+        source: impl Into<PackageSource>,
+        options: InstallOptions,
+    ) -> Result<Prepared, StoreError> {
+        let (staged, from) = self.stage(&source.into())?;
         let root = staged.root.clone();
         // From here a failure drops the prepared install, which removes the copy.
         let mut prepared = Prepared {
@@ -358,16 +438,9 @@ impl Store {
             grants: Permissions::default(),
             left_out: staged.left_out.clone(),
             warnings: Vec::new(),
-            source: Source {
-                kind: if package::is_archive(&source) {
-                    "archive"
-                } else {
-                    "folder"
-                }
-                .to_owned(),
-                path: source.display().to_string(),
-            },
+            source: from,
             content_hash: String::new(),
+            unchanged: false,
             manifest_hash: String::new(),
             bindings: std::collections::BTreeMap::new(),
             enabled: true,
@@ -380,15 +453,7 @@ impl Store {
 
         let local = options.local.clone().unwrap_or_else(|| manifest.id.clone());
         check_plugin_id(&local).map_err(StoreError::BadId)?;
-        if let Some(name) = &options.name
-            && (name.trim().is_empty()
-                || name.chars().count() > 64
-                || name.chars().any(char::is_control))
-        {
-            return Err(StoreError::Refused(
-                "a plugin's name is one line of 64 characters at most".to_owned(),
-            ));
-        }
+        check_shown_name(options.name.as_deref())?;
         let lock = self.lock()?;
         if let Some(other) = lock
             .plugins
@@ -411,6 +476,9 @@ impl Store {
                 };
             }
             Some(existing) => {
+                prepared.unchanged = !existing.is_link()
+                    && existing.content_hash == prepared.content_hash
+                    && existing.source.commit == prepared.source.commit;
                 let installed = Self::read_manifest(&self.package_dir(existing)).ok();
                 let same_plugin = existing.manifest_id == manifest.id
                     && match &installed {
@@ -437,9 +505,16 @@ impl Store {
                          plugin is taken from its id alone"
                     ));
                 }
-                let granted = permissions::parse_table(&existing.grants)
-                    .unwrap_or_default()
-                    .required;
+                // A folder that was linked was given what its manifest asked without
+                // the user's being shown it, so a package that takes its place is shown
+                // whole.
+                let granted = if existing.is_link() {
+                    Vec::new()
+                } else {
+                    permissions::parse_table(&existing.grants)
+                        .unwrap_or_default()
+                        .required
+                };
                 prepared.new_permissions = permissions::new_items(&granted, &wanted);
                 // What the user granted while it ran stays, where the new version may
                 // still ask for it.
@@ -562,14 +637,117 @@ impl Store {
             return Err(error.into());
         }
         let _ = std::fs::remove_dir_all(&set_aside);
+        // A linked folder is the user's own and stays where it is.
         if let Some(previous) = previous
             && previous.dir != entry.dir
+            && !previous.is_link()
         {
             let _ = std::fs::remove_dir_all(self.root.join(&previous.dir));
         }
         Ok(Installed {
             entry,
             manifest: Ok(prepared.manifest.clone()),
+            check: Check::Intact,
+        })
+    }
+
+    /// The repository an install was taken from and follows, if it was taken from one.
+    pub fn git_source(&self, local: &str) -> Result<GitSource, StoreError> {
+        let lock = self.lock()?;
+        let entry = lock
+            .get(local)
+            .ok_or_else(|| StoreError::NotInstalled(local.to_owned()))?;
+        match (&entry.source.kind, &entry.source.url) {
+            (kind, Some(url)) if kind == SOURCE_GIT => Ok(GitSource {
+                url: url.clone(),
+                reference: entry.source.reference.clone(),
+                subdir: entry.source.subdir.clone(),
+            }),
+            _ => Err(StoreError::Refused(format!(
+                "{local} was not installed from a repository, so there is nowhere to look \
+                 for a newer one; install it again from where it came"
+            ))),
+        }
+    }
+
+    /// Fetches the repository an install follows again and works out what installing
+    /// what is there now would change. Nothing is installed until [`Store::commit`].
+    pub fn prepare_update(&self, local: &str) -> Result<Prepared, StoreError> {
+        let source = self.git_source(local)?;
+        self.prepare(
+            source,
+            InstallOptions {
+                local: Some(local.to_owned()),
+                name: None,
+            },
+        )
+    }
+
+    /// Uses the package in `folder` where it lies, for a plugin that is being worked
+    /// on: nothing is copied, its files are not held to a hash, and it is given what
+    /// its manifest asks for, now and whenever the manifest changes. It takes the place
+    /// of a link under the same id, and of nothing else.
+    pub fn link(&self, folder: &Path, options: InstallOptions) -> Result<Installed, StoreError> {
+        let folder = std::path::absolute(folder).map_err(io(folder))?;
+        if !folder.is_dir() {
+            return Err(StoreError::Refused(format!(
+                "{} is not a folder",
+                folder.display()
+            )));
+        }
+        let (manifest, manifest_hash) = Self::read_manifest(&folder)?;
+        check_contents(&folder, &manifest)?;
+        let local = options.local.clone().unwrap_or_else(|| manifest.id.clone());
+        check_plugin_id(&local).map_err(StoreError::BadId)?;
+        check_shown_name(options.name.as_deref())?;
+        let _busy = self.busy()?;
+        let mut lock = self.lock()?;
+        if let Some(other) = lock
+            .plugins
+            .iter()
+            .find(|entry| entry.local != local && overlap(&entry.local, &local))
+        {
+            return Err(StoreError::Overlap {
+                local,
+                other: other.local.clone(),
+            });
+        }
+        let previous = lock.get(&local).cloned();
+        if let Some(previous) = &previous
+            && !previous.is_link()
+        {
+            return Err(StoreError::Refused(format!(
+                "{local} is installed already, from {}. Remove it first, or link the folder \
+                 beside it under a name of its own with --as <id>",
+                previous.source.path
+            )));
+        }
+        let mut entry = Entry {
+            local: local.clone(),
+            manifest_id: manifest.id.clone(),
+            name: options
+                .name
+                .or_else(|| previous.as_ref().and_then(|previous| previous.name.clone())),
+            version: manifest.version.clone(),
+            dir: folder.display().to_string(),
+            source: Source::local(SOURCE_LINK, folder.display().to_string()),
+            // Not what it is held to: a link's files change as they are worked on.
+            content_hash: String::new(),
+            manifest_hash,
+            enabled: previous.as_ref().is_none_or(|previous| previous.enabled),
+            grants: toml::Table::new(),
+            bindings: previous
+                .as_ref()
+                .map(|previous| previous.bindings.clone())
+                .unwrap_or_default(),
+            services: std::collections::BTreeMap::new(),
+        };
+        lock.put(entry.clone());
+        lock.write(&self.lock_file())?;
+        follow_manifest(&mut entry, &manifest, &folder);
+        Ok(Installed {
+            entry,
+            manifest: Ok(manifest),
             check: Check::Intact,
         })
     }
@@ -644,15 +822,7 @@ impl Store {
 
     /// Gives an install a name of the user's, or takes it away.
     pub fn rename(&self, local: &str, name: Option<String>) -> Result<(), StoreError> {
-        if let Some(name) = &name
-            && (name.trim().is_empty()
-                || name.chars().count() > 64
-                || name.chars().any(char::is_control))
-        {
-            return Err(StoreError::Refused(
-                "a plugin's name is one line of 64 characters at most".to_owned(),
-            ));
-        }
+        check_shown_name(name.as_deref())?;
         self.change(|lock| {
             let entry = lock
                 .get_mut(local)
@@ -742,6 +912,10 @@ impl Store {
         if !folder.is_dir() {
             return Check::Missing;
         }
+        // A linked folder is used as it is found.
+        if entry.is_link() {
+            return Check::Intact;
+        }
         match hash::of_package(&folder) {
             Ok(found) if found == entry.content_hash => Check::Intact,
             Ok(_) | Err(HashError::NotAFile(_)) => Check::Modified,
@@ -753,6 +927,9 @@ impl Store {
     /// run has not hashed it since its files were last touched. A package that cannot
     /// be looked at from outside is hashed, which says why.
     pub fn verify_seen(&self, entry: &Entry, seen: &Seen) -> Check {
+        if entry.is_link() {
+            return self.verify(entry);
+        }
         let folder = self.package_dir(entry);
         let look = hash::fingerprint(&folder).ok();
         if let Some(look) = &look
@@ -777,11 +954,23 @@ impl Store {
         entries
             .into_iter()
             .zip(checks)
-            .map(|(entry, check)| {
-                let manifest = Self::read_manifest(&self.package_dir(&entry))
-                    .map(|(manifest, _)| manifest)
+            .map(|(mut entry, check)| {
+                let folder = self.package_dir(&entry);
+                let manifest = Self::read_manifest(&folder)
+                    .and_then(|(manifest, hash)| {
+                        if entry.is_link() {
+                            check_contents(&folder, &manifest)?;
+                            entry.manifest_hash = hash;
+                            follow_manifest(&mut entry, &manifest, &folder);
+                        }
+                        Ok(manifest)
+                    })
                     .map_err(|error| match error {
                         StoreError::Manifest(problems) => problems,
+                        StoreError::Contents(problems) => problems
+                            .into_iter()
+                            .map(|message| Problem { at: None, message })
+                            .collect(),
                         other => vec![Problem {
                             at: None,
                             message: other.to_string(),
@@ -888,6 +1077,95 @@ impl Store {
         let resolution = resolve(&candidates, order);
         (installed, resolution)
     }
+}
+
+/// A name the user gives an install is one line, and short.
+fn check_shown_name(name: Option<&str>) -> Result<(), StoreError> {
+    match name {
+        Some(name)
+            if name.trim().is_empty()
+                || name.chars().count() > 64
+                || name.chars().any(char::is_control) =>
+        {
+            Err(StoreError::Refused(
+                "a plugin's name is one line of 64 characters at most".to_owned(),
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Removes what git fetched. Git marks its own files as not to be written, which on
+/// some systems keeps a folder from being removed, so the marks are taken off first
+/// where removing it fails.
+fn remove_fetched(folder: &Path) {
+    if std::fs::remove_dir_all(folder).is_ok() || !folder.exists() {
+        return;
+    }
+    let mut folders = vec![folder.to_owned()];
+    while let Some(next) = folders.pop() {
+        let Ok(entries) = std::fs::read_dir(&next) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.is_dir() {
+                folders.push(path);
+            } else {
+                let mut permissions = metadata.permissions();
+                if permissions.readonly() {
+                    #[allow(clippy::permissions_set_readonly_false)]
+                    permissions.set_readonly(false);
+                    let _ = std::fs::set_permissions(&path, permissions);
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(folder);
+}
+
+/// Makes a linked install's entry say what its manifest says now: its version, what it
+/// is allowed (what the manifest asks for, and what the user granted while it ran where
+/// the manifest may still ask for that), the installs whose services it may use, and a
+/// mark of how its files look in place of a hash, so that what was read of the package
+/// before is not taken for what is there now. The lock file is not written.
+fn follow_manifest(entry: &mut Entry, manifest: &Manifest, folder: &Path) {
+    entry.version.clone_from(&manifest.version);
+    entry.manifest_id.clone_from(&manifest.id);
+    let mut required = manifest.requested.required.clone();
+    let granted = permissions::parse_table(&entry.grants)
+        .unwrap_or_default()
+        .required;
+    let kept: Vec<Request> = granted
+        .into_iter()
+        .filter(|old| {
+            !required.iter().any(|new| new.kind == old.kind)
+                && manifest
+                    .requested
+                    .optional
+                    .iter()
+                    .any(|optional| optional.kind == old.kind)
+        })
+        .collect();
+    required.extend(kept);
+    for request in required
+        .iter()
+        .filter(|request| request.kind == Kind::ServicesUse)
+    {
+        for wanted in &request.scope {
+            let bound = entry.bindings.get(wanted).unwrap_or(wanted).clone();
+            entry.services.entry(wanted.clone()).or_insert(bound);
+        }
+    }
+    entry.grants = permissions::to_table(&Permissions {
+        required,
+        optional: Vec::new(),
+    });
+    let look = hash::fingerprint_without(folder, &package::LEFT_OUT).unwrap_or_default();
+    entry.content_hash = format!("link:{look}");
 }
 
 /// How many packages are hashed at a time.
@@ -1536,6 +1814,195 @@ mod tests {
             store.lock().unwrap().get("a.x").unwrap().services["core.x"],
             "me.core"
         );
+    }
+
+    #[test]
+    fn a_package_from_a_repository_is_pinned_to_its_commit_and_an_update_asks_for_what_is_new() {
+        use crate::git::testing::{address, commit_all};
+
+        let dir = TempDir::new("git-install");
+        let store = store(&dir);
+        package(
+            &dir,
+            "origin/plugins/x",
+            "acme.x",
+            "1.0.0",
+            "[permissions]\n\"system.metrics\" = true\n",
+        );
+        dir.write("origin/README.md", "not part of the package");
+        let origin = dir.path().join("origin");
+        let first = commit_all(&origin, "first");
+        let source = GitSource::parse(&address(&origin), None, Some("plugins/x")).unwrap();
+
+        let prepared = store
+            .prepare(source.clone(), InstallOptions::default())
+            .unwrap();
+        assert_eq!(prepared.change, Change::New);
+        assert!(!prepared.unchanged);
+        let installed = store.commit(prepared).unwrap();
+        let entry = &installed.entry;
+        assert_eq!(entry.source.kind, "git");
+        assert_eq!(entry.source.commit.as_deref(), Some(first.as_str()));
+        assert_eq!(entry.source.subdir.as_deref(), Some("plugins/x"));
+        assert_eq!(entry.source.url.as_deref(), Some(source.url.as_str()));
+        assert_eq!(store.verify(entry), Check::Intact);
+        // The package alone was installed: nothing else of the repository, nor git's
+        // own folder; and nothing that was fetched is left.
+        let folder = store.package_dir(entry);
+        assert!(folder.join("host.js").is_file());
+        assert!(!folder.join(".git").exists());
+        assert!(!folder.join("README.md").exists());
+        assert!(!store.root().join("staging").exists());
+        // The lock file is read back with where it came from.
+        assert_eq!(store.lock().unwrap().get("acme.x").unwrap(), entry);
+
+        // Nothing new in the repository: the same commit, the same files.
+        let again = store.prepare_update("acme.x").unwrap();
+        assert!(again.unchanged);
+        assert!(again.new_permissions.is_empty());
+        drop(again);
+
+        // A commit that touches nothing of the package is another commit of the same
+        // files; one that asks for more says what is new.
+        dir.write("origin/README.md", "changed");
+        let second = commit_all(&origin, "second");
+        let moved = store.prepare_update("acme.x").unwrap();
+        assert!(!moved.unchanged);
+        assert_eq!(moved.source.commit.as_deref(), Some(second.as_str()));
+        assert_eq!(moved.content_hash, entry.content_hash);
+        drop(moved);
+
+        package(
+            &dir,
+            "origin/plugins/x",
+            "acme.x",
+            "1.1.0",
+            "[permissions]\n\"system.metrics\" = true\n\"clipboard.write\" = true\n",
+        );
+        let third = commit_all(&origin, "third");
+        let update = store.prepare_update("acme.x").unwrap();
+        assert_eq!(
+            update.change,
+            Change::Replace {
+                from: "1.0.0".to_owned(),
+                direction: Direction::Newer
+            }
+        );
+        let new: Vec<_> = update
+            .new_permissions
+            .iter()
+            .map(|item| item.kind)
+            .collect();
+        assert_eq!(new, [permissions::Kind::ClipboardWrite]);
+        let updated = store.commit(update).unwrap();
+        assert_eq!(updated.entry.source.commit.as_deref(), Some(third.as_str()));
+        assert_eq!(updated.entry.version, "1.1.0");
+        assert!(!store.root().join("staging").exists());
+
+        // A package that was not taken from a repository has nowhere to look.
+        let plain = package(&dir, "plain", "acme.y", "1.0.0", "");
+        store
+            .commit(store.prepare(&plain, InstallOptions::default()).unwrap())
+            .unwrap();
+        assert!(matches!(
+            store.prepare_update("acme.y"),
+            Err(StoreError::Refused(_))
+        ));
+        // A repository without the package leaves nothing behind.
+        let empty = GitSource::parse(&address(&origin), None, None).unwrap();
+        assert!(store.prepare(empty, InstallOptions::default()).is_err());
+        assert!(!store.root().join("staging").exists());
+    }
+
+    #[test]
+    fn a_linked_folder_is_used_where_it_lies_and_follows_its_manifest() {
+        let dir = TempDir::new("link");
+        let store = store(&dir);
+        let folder = package(
+            &dir,
+            "work",
+            "acme.x",
+            "0.1.0",
+            "[permissions]\n\"system.metrics\" = true\n",
+        );
+        dir.write("work/node_modules/dep/index.js", "// not looked at");
+        let linked = store.link(&folder, InstallOptions::default()).unwrap();
+        assert!(linked.entry.is_link());
+        assert_eq!(store.package_dir(&linked.entry), folder);
+        assert!(!store.root().join("packages").exists());
+
+        let (installed, resolution) = store.resolve(true).unwrap();
+        assert!(resolution.is_ready("acme.x"));
+        assert_eq!(installed[0].check, Check::Intact);
+        assert!(installed[0].entry.grants.contains_key("system.metrics"));
+        let before = installed[0].entry.content_hash.clone();
+        assert!(before.starts_with("link:"));
+
+        // A changed file is no reason not to use it, and is seen; the packages a build
+        // installs are not looked at.
+        dir.write("work/host.js", "// changed, and longer");
+        dir.write(
+            "work/node_modules/dep/index.js",
+            "// changed too, and longer",
+        );
+        dir.write(
+            "work/plugin.toml",
+            &std::fs::read_to_string(folder.join("plugin.toml"))
+                .unwrap()
+                .replace("0.1.0", "0.2.0")
+                .replace("\"system.metrics\"", "\"clipboard.write\""),
+        );
+        let (installed, resolution) = store.resolve_seen(&Seen::default()).unwrap();
+        assert!(resolution.is_ready("acme.x"));
+        let entry = &installed[0].entry;
+        assert_eq!(entry.version, "0.2.0");
+        assert!(entry.grants.contains_key("clipboard.write"));
+        assert!(!entry.grants.contains_key("system.metrics"));
+        assert_ne!(entry.content_hash, before);
+        let only_modules = entry.content_hash.clone();
+        dir.write(
+            "work/node_modules/dep/index.js",
+            "// and once more, longer still",
+        );
+        let (installed, _) = store.resolve(false).unwrap();
+        assert_eq!(installed[0].entry.content_hash, only_modules);
+
+        // A manifest that cannot be read keeps it from being used, and says why.
+        dir.write("work/plugin.toml", "schema = 1\n");
+        let (installed, resolution) = store.resolve(true).unwrap();
+        assert!(installed[0].manifest.is_err());
+        assert!(!resolution.is_ready("acme.x"));
+
+        // A package cannot be installed over nothing it was shown for, and a link does
+        // not take the place of an installed package.
+        let real = package(
+            &dir,
+            "real",
+            "acme.x",
+            "1.0.0",
+            "[permissions]\n\"system.metrics\" = true\n",
+        );
+        package(&dir, "work", "acme.x", "0.2.0", "");
+        let prepared = store.prepare(&real, InstallOptions::default()).unwrap();
+        assert_eq!(prepared.new_permissions.len(), 1);
+        store.commit(prepared).unwrap();
+        // The folder that was linked is still there.
+        assert!(folder.join("host.js").is_file());
+        let error = store.link(&folder, InstallOptions::default()).unwrap_err();
+        assert!(error.to_string().contains("--as"), "{error}");
+        let beside = store
+            .link(
+                &folder,
+                InstallOptions {
+                    local: Some("me.x".to_owned()),
+                    name: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(beside.entry.local, "me.x");
+        // Removing a link removes nothing of the folder.
+        store.remove("me.x", true).unwrap();
+        assert!(folder.join("plugin.toml").is_file());
     }
 
     #[test]

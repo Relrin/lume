@@ -75,7 +75,8 @@ pub enum PluginAccess {
 }
 
 /// Commands only the user may run.
-const USER_ONLY: [&str; 11] = [
+const USER_ONLY: [&str; 12] = [
+    "lume.view.inspect",
     "lume.workspace.delete",
     "lume.window.answer",
     "lume.app.quit",

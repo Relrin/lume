@@ -135,6 +135,9 @@ describe("the settings window", () => {
       modified: false,
       missing: false,
       source: "D:/plugins/tools",
+      sourceKind: "folder",
+      commit: null,
+      dev: false,
       dependencies: [{ id: "acme.core", optional: false, bound: "acme.core-2", rebound: true }],
       permissions: [
         {
@@ -170,7 +173,35 @@ describe("the settings window", () => {
       audit: [],
       log: [],
     };
-    const manage = markup(app(view(), "addons", [tools, changed]));
+    const fetched: AddonEntry = {
+      ...changed,
+      id: "acme.fetched",
+      manifestId: "acme.fetched",
+      name: "Fetched",
+      modified: false,
+      source: "https://example.org/fetched.git#v2 (plugins/fetched)",
+      sourceKind: "git",
+      commit: "4f9d2c81a07be35d6c1e9a0b7f2d4c6e8a1b3d5f",
+    };
+    const linked: AddonEntry = {
+      ...changed,
+      id: "me.work",
+      manifestId: "me.work",
+      name: "Work",
+      modified: false,
+      source: "D:/src/work",
+      sourceKind: "link",
+      dev: true,
+    };
+    const manage = markup(app(view(), "addons", [tools, changed, fetched, linked]));
+    expect(manage).toContain("Install from git");
+    // Only what came from a repository can be looked for a newer one of.
+    expect(manage.match(/Check for update/g)).toHaveLength(1);
+    expect(manage).toContain(
+      "From https://example.org/fetched.git#v2 (plugins/fetched), at commit 4f9d2c81a07b",
+    );
+    expect(manage).toContain("Linked to D:/src/work");
+    expect(manage.match(/class="dev-badge"/g)).toHaveLength(1);
     expect(manage).toContain("<h4>Add-ons</h4>");
     expect(manage).toContain("<h1>Manage add-ons</h1>");
     expect(manage).toContain("Install from folder…");

@@ -83,6 +83,11 @@ pub trait Shell: Send + Sync + 'static {
     fn request_attention(&self, window: WindowId);
     /// Shows a notification on the desktop.
     fn notify(&self, title: &str, body: &str);
+    /// Opens the developer tools of the window that shows a window of the layout,
+    /// where this build has them. Says whether it did.
+    fn inspect(&self, _window: WindowId) -> bool {
+        false
+    }
 }
 
 /// What a request needs to be carried out.

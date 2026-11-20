@@ -83,7 +83,7 @@ The other plugin is named by the id its manifest gives it, whatever id it is ins
 | ----------------------- | -------------------------------------------------------------------------- |
 | `onStartup`             | Lume has started and its first terminal has shown its first output.        |
 | `onCommand:<name>`      | One of the plugin's commands is run. `<name>` must be one of its commands. |
-| `onView:<name>`         | One of the plugin's status items or panels comes on screen.                |
+| `onView:<name>`         | One of the plugin's status items, panels or pane views comes on screen.    |
 | `onSessionEvent:<kind>` | A session reports something of this kind.                                  |
 | `onService:<name>`      | Another plugin calls one of the plugin's services.                         |
 
@@ -276,19 +276,52 @@ A theme file in the package. See [themes](settings.md#themes).
 
 ## `[[contributes.panels]]`
 
-A panel in a dock area of the window, drawn by Lume from rows the plugin gives. See
-[panels](placement.md#panels).
+A panel in a dock area of the window: a `list`, drawn by Lume from rows the plugin gives (see
+[panels](placement.md#panels)), or a `frame`, which shows a page of the plugin's own (see
+[views](views.md)).
 
-| Key      | Type    | Default | What it is                                                             |
-| -------- | ------- | ------- | ---------------------------------------------------------------------- |
-| `id`     | string  | needed  | The panel's name.                                                      |
-| `title`  | string  | needed  | What it is called. 64 characters at most.                              |
-| `kind`   | string  | needed  | How it is drawn: `list`.                                               |
-| `area`   | string  | needed  | The dock area it opens in the first time: `left`, `right` or `bottom`. |
-| `icon`   | string  | none    | A [picture](motion.md#pictures).                                       |
-| `before` | string  | none    | The panel it goes right before.                                        |
-| `after`  | string  | none    | The panel it goes right after.                                         |
-| `order`  | integer | none    | Where it goes when no neighbour is named.                              |
+| Key      | Type    | Default | What it is                                                                                             |
+| -------- | ------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `id`     | string  | needed  | The panel's name.                                                                                      |
+| `title`  | string  | needed  | What it is called. 64 characters at most.                                                              |
+| `kind`   | string  | needed  | How it is drawn: `list` or `frame`.                                                                    |
+| `entry`  | string  | none    | The page a `frame` panel shows: an `.html` file in the package. Needed for `frame`, refused otherwise. |
+| `area`   | string  | needed  | The dock area it opens in the first time: `left`, `right` or `bottom`.                                 |
+| `icon`   | string  | none    | A [picture](motion.md#pictures).                                                                       |
+| `before` | string  | none    | The panel it goes right before.                                                                        |
+| `after`  | string  | none    | The panel it goes right after.                                                                         |
+| `order`  | integer | none    | Where it goes when no neighbour is named.                                                              |
+
+A `list` panel needs the plugin to have code (`main`), which gives its rows. A `frame` panel does
+not.
+
+## `[[contributes.pane-views]]`
+
+A page of the plugin's own that is shown in a pane, where a terminal would be. See
+[views](views.md).
+
+| Key       | Type    | Default | What it is                                                                   |
+| --------- | ------- | ------- | ---------------------------------------------------------------------------- |
+| `id`      | string  | needed  | The view's name. A pane view and a panel of one plugin may not share a name. |
+| `title`   | string  | needed  | What its pane is called until the plugin titles it. 64 characters at most.   |
+| `entry`   | string  | needed  | The page: an `.html` file in the package.                                    |
+| `icon`    | string  | none    | A [picture](motion.md#pictures).                                             |
+| `persist` | boolean | `true`  | Whether what the view asks to have kept is saved with the workspace.         |
+
+## `[[contributes.openers]]`
+
+Files and addresses one of the plugin's pane views opens. When the user opens a file or an address
+that an opener matches, the view is offered for it; where it is the only thing that opens it, the
+view opens at once. The view starts with what was opened as its [state](views.md#state).
+
+| Key        | Type            | Default | What it is                                                                                                                                 |
+| ---------- | --------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `view`     | string          | needed  | One of the plugin's pane views.                                                                                                            |
+| `title`    | string          | none    | What the choice is called where the user is asked; the view's title if left out.                                                           |
+| `patterns` | list of strings | none    | File names it opens, such as `*.diff`. `*` and `?` stand for any characters within a name; upper and lower case are the same.              |
+| `schemes`  | list of strings | none    | Kinds of address it opens, such as `acme-review` for `acme-review:…`. The schemes of the web, of files and of Lume itself cannot be taken. |
+
+An opener names at least one pattern or scheme.
 
 ## `[[contributes.services]]`
 

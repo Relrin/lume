@@ -343,10 +343,7 @@ mod tests {
             name: None,
             version: manifest.version.clone(),
             dir: String::new(),
-            source: Source {
-                kind: "folder".to_owned(),
-                path: String::new(),
-            },
+            source: Source::local("folder", String::new()),
             content_hash: String::new(),
             manifest_hash: String::new(),
             enabled: true,

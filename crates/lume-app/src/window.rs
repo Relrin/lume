@@ -583,6 +583,16 @@ impl WindowShell {
 }
 
 impl Shell for WindowShell {
+    fn inspect(&self, window: WindowId) -> bool {
+        #[cfg(debug_assertions)]
+        if let Some(webview) = self.app.get_webview_window(&label_of(window)) {
+            webview.open_devtools();
+            return true;
+        }
+        let _ = window;
+        false
+    }
+
     fn activate(&self) {
         let Some(window) = self.front() else {
             return;

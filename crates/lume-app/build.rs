@@ -60,6 +60,8 @@ const COMMANDS: &[&str] = &[
     "addon_remove",
     "addon_move",
     "addon_inspect",
+    "addon_inspect_git",
+    "addon_check_update",
     "addon_install",
     "addon_cancel",
     "harness_done",

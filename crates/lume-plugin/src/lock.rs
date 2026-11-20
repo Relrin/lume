@@ -85,9 +85,61 @@ pub struct Entry {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Source {
-    /// `folder` or `archive`.
+    /// `folder`, `archive`, `git` or `link`.
     pub kind: String,
+    /// Where it came from, as the user is shown it: the folder or archive, or the
+    /// repository's address.
     pub path: String,
+    /// For `git`: the repository's address as git was given it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// For `git`: the branch or tag that is followed; none is the repository's own
+    /// default branch.
+    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    /// For `git`: the commit the installed package was taken from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    /// For `git`: the folder of the repository the package is in, where that is not
+    /// its top.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subdir: Option<String>,
+}
+
+/// The kind of a source that is a repository fetched with git.
+pub const SOURCE_GIT: &str = "git";
+
+/// The kind of a source that is a folder used where it lies, for a plugin being
+/// worked on.
+pub const SOURCE_LINK: &str = "link";
+
+impl Source {
+    /// A folder or an archive on this machine.
+    pub fn local(kind: &str, path: String) -> Self {
+        Self {
+            kind: kind.to_owned(),
+            path,
+            url: None,
+            reference: None,
+            commit: None,
+            subdir: None,
+        }
+    }
+
+    pub fn is_link(&self) -> bool {
+        self.kind == SOURCE_LINK
+    }
+
+    pub fn is_git(&self) -> bool {
+        self.kind == SOURCE_GIT
+    }
+}
+
+impl Entry {
+    /// Whether the install is a folder used where it lies.
+    pub fn is_link(&self) -> bool {
+        self.source.is_link()
+    }
 }
 
 /// Why a lock file cannot be used.
@@ -204,10 +256,7 @@ mod tests {
             name: None,
             version: "1.0.0".to_owned(),
             dir: format!("packages/{local}/1.0.0"),
-            source: Source {
-                kind: "folder".to_owned(),
-                path: r"D:\src\x".to_owned(),
-            },
+            source: Source::local("folder", r"D:\src\x".to_owned()),
             content_hash: "sha256:00".to_owned(),
             manifest_hash: "sha256:11".to_owned(),
             enabled: true,

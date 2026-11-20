@@ -4,17 +4,20 @@ Plugins are installed and managed with `lume plugin`, or under **Add-ons** in th
 commands work on what is installed and need no Lume running. A running Lume sees what they change
 and follows it without being started again.
 
-| Command                                               | What it does                                     |
-| ----------------------------------------------------- | ------------------------------------------------ |
-| `lume plugin install <folder or archive>`             | Installs a package, or updates an installed one. |
-| `lume plugin list`                                    | Lists what is installed, in the order it loads.  |
-| `lume plugin enable <id>`, `lume plugin disable <id>` | Turns a plugin on or off.                        |
-| `lume plugin remove <id>`                             | Removes a plugin.                                |
-| `lume plugin rename <id> <name>`                      | Gives a plugin a name of the user's.             |
-| `lume plugin order <id> <where>`                      | Moves a plugin in the order plugins load in.     |
-| `lume plugin bind <id> <dependency>=<installed id>`   | Binds a dependency to another install.           |
-| `lume plugin logs <id>`                               | Shows the end of a plugin's log.                 |
-| `lume plugin audit <id>`                              | Shows what a plugin was allowed and refused.     |
+| Command                                               | What it does                                      |
+| ----------------------------------------------------- | ------------------------------------------------- |
+| `lume plugin install <folder or archive>`             | Installs a package, or updates an installed one.  |
+| `lume plugin install <repository>`                    | The same, from a repository fetched with git.     |
+| `lume plugin update [<id>]`                           | Looks in the repository for something newer.      |
+| `lume plugin link <folder>`                           | Uses a folder where it lies, while working on it. |
+| `lume plugin list`                                    | Lists what is installed, in the order it loads.   |
+| `lume plugin enable <id>`, `lume plugin disable <id>` | Turns a plugin on or off.                         |
+| `lume plugin remove <id>`                             | Removes a plugin.                                 |
+| `lume plugin rename <id> <name>`                      | Gives a plugin a name of the user's.              |
+| `lume plugin order <id> <where>`                      | Moves a plugin in the order plugins load in.      |
+| `lume plugin bind <id> <dependency>=<installed id>`   | Binds a dependency to another install.            |
+| `lume plugin logs <id>`                               | Shows the end of a plugin's log.                  |
+| `lume plugin audit <id>`                              | Shows what a plugin was allowed and refused.      |
 
 `<id>` is always the id the plugin is installed under.
 
@@ -58,6 +61,60 @@ Each of these stops the install:
 After the copy, the manifest is read and checked, and every file the manifest names is checked
 too: the code is there, pictures and shaders keep their rules, theme files read without problems.
 All the problems found are listed together.
+
+## From a repository
+
+A package can be installed straight from a git repository:
+
+```sh
+lume plugin install https://example.com/acme/metrics.git
+lume plugin install acme/metrics                 # a repository on GitHub
+lume plugin install acme/tools#v1.2 --path plugins/metrics
+```
+
+| Part              | What it is                                                                |
+| ----------------- | ------------------------------------------------------------------------- |
+| the address       | Anything `git fetch` takes over https or ssh, or `owner/repo` for GitHub. |
+| `#<ref>`, `--ref` | A branch or a tag to take. Without one, the repository's default branch.  |
+| `--path <folder>` | The folder of the repository the package is in, when that is not its top. |
+
+Lume fetches with the `git` on this machine, so whatever lets you fetch the repository yourself
+(keys, a credential helper) works here too. It fetches one commit without its history, checks it
+out in a folder of its own, and copies the package from there as it copies any folder. Nothing of
+the repository is run: its hooks are not, submodules are not followed, and git may not stop to ask
+for a password.
+
+A name that is a folder or an archive on this machine is always taken as that. `--path` and `--ref`
+go with a repository only.
+
+The package is installed **as it is fetched**. Nothing is built, so a repository must hold the
+built files its manifest names.
+
+The install is pinned to the commit that was fetched, beside its [content hash](#the-content-hash).
+The prompt names the commit, and `lume plugin list` shows it:
+
+```text
+  acme.metrics  Metrics 1.0.0  ready  [https://example.com/acme/metrics.git at 4f9d2c81a07b]
+```
+
+### Updates
+
+```sh
+lume plugin update                 # every plugin that came from a repository
+lume plugin update acme.metrics
+```
+
+`update` fetches the repository again, at the branch or tag the install follows. When the commit
+and the files are the ones installed, it says so and does nothing. Otherwise it shows the prompt of
+an [update](#updating) (the versions, the new commit, and what the plugin would newly be able to
+do) and asks.
+
+`--yes` agrees ahead to an update that asks for nothing new. An update that would let the plugin do
+more than the user agreed to is **always** asked about: with nobody to ask, it is left alone, and
+the command says what it would have asked.
+
+A plugin that followed a tag stays on that tag. To move to another, install from the repository
+again with the new `#<ref>`.
 
 ## The install prompt
 
@@ -120,8 +177,8 @@ acme.metrics  Metrics 1.0.0  not used: its files have changed since it was insta
 The user is told once. Nothing of the plugin is shown and none of its code runs until it is
 installed again.
 
-This is why editing an installed copy does not work, and why development goes through
-`lume plugin install` after every change.
+This is why editing an installed copy does not work. While a plugin is being worked on, link its
+folder instead of installing it: see [developing](develop.md).
 
 ## Updating
 
@@ -348,7 +405,9 @@ lines are warnings about things that could not be placed or read as the manifest
 
 From there a plugin can be:
 
-- installed from a folder, with the same check and the same question as `lume plugin install`;
+- installed from a folder or from a repository (**Install from git**), with the same check and the
+  same question as `lume plugin install`;
+- looked for a newer one of, where it came from a repository (**Check for update**);
 - turned on and off;
 - removed, keeping its data;
 - moved earlier or later in the user's order.
@@ -356,4 +415,6 @@ From there a plugin can be:
 A package whose id is taken by another plugin is refused there too, with an id suggested to install
 it under beside the first.
 
-Renaming, binding and purging are done with `lume plugin`.
+A plugin whose folder is linked is marked **Dev** there, and says which folder.
+
+Renaming, binding, linking and purging are done with `lume plugin`.

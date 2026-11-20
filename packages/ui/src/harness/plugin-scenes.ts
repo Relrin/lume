@@ -912,6 +912,9 @@ export const FIXTURE_ADDONS: readonly AddonEntry[] = [
     modified: false,
     missing: false,
     source: "D:/plugins/metrics",
+    sourceKind: "folder",
+    commit: null,
+    dev: false,
     dependencies: [],
     permissions: [
       {
@@ -941,7 +944,10 @@ export const FIXTURE_ADDONS: readonly AddonEntry[] = [
     state: { ready: true, reason: null },
     modified: false,
     missing: false,
-    source: "D:/plugins/tools",
+    source: "https://github.com/acme/tools.git#v2 (plugins/tools)",
+    sourceKind: "git",
+    commit: "4f9d2c81a07be35d6c1e9a0b7f2d4c6e8a1b3d5f",
+    dev: false,
     dependencies: [{ id: "acme.core", optional: false, bound: "acme.core", rebound: false }],
     permissions: [
       {
@@ -981,6 +987,9 @@ export const FIXTURE_ADDONS: readonly AddonEntry[] = [
     modified: true,
     missing: false,
     source: "D:/plugins/core",
+    sourceKind: "folder",
+    commit: null,
+    dev: false,
     dependencies: [],
     permissions: [],
     later: [],

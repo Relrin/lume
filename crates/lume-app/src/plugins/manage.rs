@@ -1,6 +1,7 @@
 //! The plugins as the settings window manages them: what is installed and how each
 //! fares, turning one on or off, removing it, moving it in the order plugins load in,
-//! and installing one from a folder.
+//! and installing one from a folder or from a repository, which is fetched with git
+//! and can be looked at again later for something newer.
 //!
 //! Installing goes as `lume plugin install` does: the package is copied and checked
 //! first, and the user is shown what it would be able to do before anything is
@@ -12,11 +13,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use lume_plugin::git::GitSource;
 use lume_plugin::id::overlap;
 use lume_plugin::order::State;
 use lume_plugin::permissions;
 use lume_plugin::store::{
-    Change, Check, Direction, InstallOptions, Position, Prepared, StoreError,
+    Change, Check, Direction, InstallOptions, PackageSource, Position, Prepared, StoreError,
 };
 use serde_json::{Value, json};
 
@@ -190,6 +192,9 @@ impl Plugins {
                     "modified": loaded.installed.check == Check::Modified,
                     "missing": loaded.installed.check == Check::Missing,
                     "source": entry.source.path,
+                    "sourceKind": entry.source.kind,
+                    "commit": entry.source.commit,
+                    "dev": entry.is_link(),
                     "dependencies": dependencies,
                     "permissions": granted,
                     "later": later,
@@ -259,13 +264,48 @@ impl Plugins {
         folder: String,
         install_as: Option<String>,
     ) -> Result<Value, CommandError> {
+        self.inspect(PackageSource::Path(PathBuf::from(folder)), install_as)
+            .await
+    }
+
+    /// The same for a package in a repository, which is fetched with git: `source` is
+    /// its address, with `#<ref>` after it for a branch or a tag, and `path` the folder
+    /// of the repository the package is in, if not its top.
+    pub async fn inspect_addon_git(
+        &self,
+        source: String,
+        path: Option<String>,
+        install_as: Option<String>,
+    ) -> Result<Value, CommandError> {
+        let path = path.filter(|path| !path.trim().is_empty());
+        let source = GitSource::parse(source.trim(), None, path.as_deref())
+            .map_err(|error| CommandError::bad_request(error.to_string()))?;
+        self.inspect(PackageSource::Git(source), install_as).await
+    }
+
+    /// Fetches the repository an install was taken from again, and says what installing
+    /// what is there now would do; `current` when it is what is installed.
+    pub async fn check_addon_update(&self, local: String) -> Result<Value, CommandError> {
         let store = self.store.clone();
-        let asked = install_as.clone();
+        let prepared =
+            joined(tokio::task::spawn_blocking(move || store.prepare_update(&local)).await)?;
+        if prepared.unchanged {
+            return Ok(json!({ "current": true, "version": prepared.manifest.version }));
+        }
+        Ok(self.wait_for_word(prepared))
+    }
+
+    async fn inspect(
+        &self,
+        source: PackageSource,
+        install_as: Option<String>,
+    ) -> Result<Value, CommandError> {
+        let store = self.store.clone();
         let prepared = tokio::task::spawn_blocking(move || {
             store.prepare(
-                &PathBuf::from(folder),
+                source,
                 InstallOptions {
-                    local: asked,
+                    local: install_as,
                     name: None,
                 },
             )
@@ -289,6 +329,12 @@ impl Plugins {
             }
             Err(error) => return Err(store_error(error)),
         };
+        Ok(self.wait_for_word(prepared))
+    }
+
+    /// Keeps a package that was copied and checked until the user says whether to
+    /// install it, and says what installing it would do, with the token to say so by.
+    fn wait_for_word(&self, prepared: Prepared) -> Value {
         let manifest = &prepared.manifest;
         let (change, from) = match &prepared.change {
             Change::New => ("new", None),
@@ -322,6 +368,8 @@ impl Plugins {
                 .collect::<Vec<_>>(),
             "warnings": prepared.warnings,
             "leftOut": prepared.left_out,
+            "source": prepared.source.path,
+            "commit": prepared.source.commit,
         });
         let token = self.next();
         self.waiting
@@ -331,7 +379,7 @@ impl Plugins {
             .insert(token, prepared);
         let mut answer = answer;
         answer["token"] = json!(token);
-        Ok(answer)
+        answer
     }
 
     /// Installs a package the user agreed to, by the token its inspection gave.

@@ -5,14 +5,23 @@
 //!
 //! Installing asks first. It shows what the plugin may do, in plain words, and installs
 //! nothing until the user says yes; `--yes` says yes ahead, for scripts.
+//!
+//! A package is a folder or an archive on this machine, or a repository fetched with
+//! git, which is then pinned to the commit that was fetched. `update` fetches such a
+//! repository again; an update that would let the plugin do more than the user agreed
+//! to is always asked about, whatever was said ahead. `link` uses a folder where it
+//! lies, for a plugin being worked on.
 
 use std::io::{BufRead, Write};
 use std::path::Path;
 
 use lume_config::Dirs;
+use lume_plugin::git::{GitSource, looks_like_git};
 use lume_plugin::order::State;
 use lume_plugin::permissions::{self, Item};
-use lume_plugin::store::{Change, Check, Direction, InstallOptions, Position, Prepared};
+use lume_plugin::store::{
+    Change, Check, Direction, InstallOptions, PackageSource, Position, Prepared,
+};
 use lume_plugin::{Installed, Store};
 use serde_json::{Value, json};
 
@@ -37,9 +46,23 @@ pub struct PluginCommand {
 pub enum Action {
     Install {
         source: String,
+        /// The folder of a repository the package is in.
+        path: Option<String>,
+        /// The branch or tag of a repository to take.
+        reference: Option<String>,
         local: Option<String>,
         name: Option<String>,
         yes: bool,
+    },
+    Update {
+        /// The install to update; none is every install that follows a repository.
+        local: Option<String>,
+        yes: bool,
+    },
+    Link {
+        folder: String,
+        local: Option<String>,
+        name: Option<String>,
     },
     List,
     Remove {
@@ -87,7 +110,7 @@ pub fn parse(words: impl Iterator<Item = String>) -> Result<PluginCommand, Strin
     let mut words = rest.into_iter();
     let command = words
         .next()
-        .ok_or("lume plugin needs a command: install, list, remove, enable, disable, rename, bind, order, audit or logs")?;
+        .ok_or("lume plugin needs a command: install, update, link, list, remove, enable, disable, rename, bind, order, audit or logs")?;
     let id = |words: &mut std::vec::IntoIter<String>, what: &str| -> Result<String, String> {
         words
             .next()
@@ -96,7 +119,12 @@ pub fn parse(words: impl Iterator<Item = String>) -> Result<PluginCommand, Strin
     };
     let action = match command.as_str() {
         "install" => {
-            let source = id(&mut words, "the folder or the .tar.gz archive to install")?;
+            let source = id(
+                &mut words,
+                "the folder, the .tar.gz archive or the repository to install",
+            )?;
+            let mut path = None;
+            let mut reference = None;
             let mut local = None;
             let mut name = None;
             let mut yes = false;
@@ -104,15 +132,58 @@ pub fn parse(words: impl Iterator<Item = String>) -> Result<PluginCommand, Strin
                 match word.as_str() {
                     "--as" => local = Some(words.next().ok_or("--as needs an id")?),
                     "--name" => name = Some(words.next().ok_or("--name needs a name")?),
+                    "--path" => {
+                        path = Some(
+                            words
+                                .next()
+                                .ok_or("--path needs a folder of the repository")?,
+                        );
+                    }
+                    "--ref" => {
+                        reference = Some(words.next().ok_or("--ref needs a branch or a tag")?);
+                    }
                     "--yes" | "-y" => yes = true,
                     other => return Err(format!("lume plugin install does not take {other}")),
                 }
             }
             Action::Install {
                 source,
+                path,
+                reference,
                 local,
                 name,
                 yes,
+            }
+        }
+        "update" => {
+            let mut local = None;
+            let mut yes = false;
+            for word in words.by_ref() {
+                match word.as_str() {
+                    "--yes" | "-y" => yes = true,
+                    other if other.starts_with("--") || local.is_some() => {
+                        return Err(format!("lume plugin update does not take {other}"));
+                    }
+                    other => local = Some(other.to_owned()),
+                }
+            }
+            Action::Update { local, yes }
+        }
+        "link" => {
+            let folder = id(&mut words, "the folder of the plugin being worked on")?;
+            let mut local = None;
+            let mut name = None;
+            while let Some(word) = words.next() {
+                match word.as_str() {
+                    "--as" => local = Some(words.next().ok_or("--as needs an id")?),
+                    "--name" => name = Some(words.next().ok_or("--name needs a name")?),
+                    other => return Err(format!("lume plugin link does not take {other}")),
+                }
+            }
+            Action::Link {
+                folder,
+                local,
+                name,
             }
         }
         "list" => Action::List,
@@ -185,8 +256,8 @@ pub fn parse(words: impl Iterator<Item = String>) -> Result<PluginCommand, Strin
         }
         other => {
             return Err(format!(
-                "{other} is not something lume plugin does (install, list, remove, enable, \
-                 disable, rename, bind, order, audit, logs)"
+                "{other} is not something lume plugin does (install, update, link, list, \
+                 remove, enable, disable, rename, bind, order, audit, logs)"
             ));
         }
     };
@@ -222,18 +293,41 @@ pub fn run(
     let result = match command.action {
         Action::Install {
             source,
+            path,
+            reference,
             local,
             name,
             yes,
-        } => install(
-            &store,
-            Path::new(&source),
-            InstallOptions { local, name },
-            yes,
-            json,
-            asker,
-            out,
-        ),
+        } => package_source(&source, path.as_deref(), reference.as_deref()).and_then(|source| {
+            install(
+                &store,
+                source,
+                InstallOptions { local, name },
+                yes,
+                json,
+                asker,
+                out,
+            )
+        }),
+        Action::Update { local, yes } => update(&store, local.as_deref(), yes, json, asker, out),
+        Action::Link {
+            folder,
+            local,
+            name,
+        } => store
+            .link(Path::new(&folder), InstallOptions { local, name })
+            .map(|installed| {
+                let mut outcome = Outcome::done(format!(
+                    "{} is linked to {}, and is given what its manifest asks for. Lume \
+                     follows the folder: a change to its files is loaded as it is saved.",
+                    installed.entry.local, installed.entry.source.path
+                ));
+                outcome
+                    .extra
+                    .insert("plugin".to_owned(), describe_installed(&installed, None));
+                outcome
+            })
+            .map_err(|error| error.to_string()),
         Action::List => list(&store, json, out),
         Action::Remove { local, purge } => store
             .remove(&local, purge)
@@ -380,6 +474,9 @@ fn describe_install(prepared: &Prepared) -> String {
         "{heading}{under}, from {}.\n",
         prepared.source.path
     ));
+    if let Some(commit) = &prepared.source.commit {
+        text.push_str(&format!("Commit {commit}.\n"));
+    }
     if let Some(description) = &manifest.description {
         text.push_str(&format!("{description}\n"));
     }
@@ -415,9 +512,162 @@ fn describe_install(prepared: &Prepared) -> String {
     text
 }
 
+/// What the user named as a package: a folder or an archive on this machine, or a
+/// repository. `--path` and `--ref` belong to a repository only.
+fn package_source(
+    source: &str,
+    path: Option<&str>,
+    reference: Option<&str>,
+) -> Result<PackageSource, String> {
+    if looks_like_git(source) {
+        return GitSource::parse(source, reference, path)
+            .map(PackageSource::Git)
+            .map_err(|error| error.to_string());
+    }
+    if path.is_some() || reference.is_some() {
+        return Err(format!(
+            "--path and --ref go with a repository, and {source} is on this machine"
+        ));
+    }
+    Ok(PackageSource::Path(Path::new(source).to_owned()))
+}
+
+/// Asks whether to go ahead with what `description` says. Nobody to ask is a refusal
+/// that says how to be asked.
+fn agreed(
+    description: &str,
+    what: &str,
+    json: bool,
+    asker: &mut Asker<'_>,
+    out: &mut dyn Write,
+) -> Result<bool, String> {
+    if json || !asker.interactive {
+        return Err(format!(
+            "{what} asks first; run it in a terminal, or pass --yes to agree ahead"
+        ));
+    }
+    let _ = write!(out, "{description}\nGo ahead? [y/N] ");
+    let _ = out.flush();
+    let mut answer = String::new();
+    let _ = asker.input.read_line(&mut answer);
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
+/// Fetches the repositories installs follow again, and installs what is new there.
+/// Saying yes ahead covers an update that asks for nothing new; one that would let the
+/// plugin do more is asked about, and is left alone where there is nobody to ask.
+fn update(
+    store: &Store,
+    only: Option<&str>,
+    yes: bool,
+    json: bool,
+    asker: &mut Asker<'_>,
+    out: &mut dyn Write,
+) -> Result<Outcome, String> {
+    let locals: Vec<String> = match only {
+        Some(local) => {
+            store.git_source(local).map_err(|error| error.to_string())?;
+            vec![local.to_owned()]
+        }
+        None => store
+            .lock()
+            .map_err(|error| error.to_string())?
+            .plugins
+            .iter()
+            .filter(|entry| entry.source.is_git())
+            .map(|entry| entry.local.clone())
+            .collect(),
+    };
+    if locals.is_empty() {
+        return Ok(Outcome::done(
+            "No plugin was installed from a repository, so there is nothing to update.".to_owned(),
+        ));
+    }
+    let mut results = Vec::new();
+    let mut lines = Vec::new();
+    let mut failed = false;
+    for local in locals {
+        let (word, line) = match update_one(store, &local, yes, json, asker, out) {
+            Ok(done) => done,
+            Err(problem) => {
+                failed = true;
+                ("failed", format!("{local}: {problem}"))
+            }
+        };
+        results.push(json!({ "id": local, "result": word, "effect": line }));
+        lines.push(line);
+    }
+    let mut outcome = Outcome::done(lines.join("\n"));
+    outcome.extra.insert("updates".to_owned(), json!(results));
+    if failed {
+        outcome.status = FAILED;
+    }
+    Ok(outcome)
+}
+
+fn update_one(
+    store: &Store,
+    local: &str,
+    yes: bool,
+    json: bool,
+    asker: &mut Asker<'_>,
+    out: &mut dyn Write,
+) -> Result<(&'static str, String), String> {
+    let prepared = store
+        .prepare_update(local)
+        .map_err(|error| error.to_string())?;
+    if prepared.unchanged {
+        return Ok((
+            "current",
+            format!(
+                "{local} {} is what its repository has",
+                prepared.manifest.version
+            ),
+        ));
+    }
+    let widens = !prepared.new_permissions.is_empty();
+    if widens || !yes {
+        let description = describe_install(&prepared);
+        let asked = if widens && yes {
+            agreed(
+                &description,
+                "an update that asks for more",
+                false,
+                asker,
+                out,
+            )
+            .map_err(|_| {
+                format!(
+                    "the update would let it do more than you agreed to ({}); run lume \
+                         plugin update {local} in a terminal to see it and agree",
+                    granted_lines(&prepared.new_permissions).join("; ")
+                )
+            })?
+        } else {
+            agreed(&description, "updating", json, asker, out)?
+        };
+        if !asked {
+            return Ok(("declined", format!("{local} was left as it is")));
+        }
+    }
+    let commit = prepared.source.commit.clone().unwrap_or_default();
+    let installed = store.commit(prepared).map_err(|error| error.to_string())?;
+    Ok((
+        "updated",
+        format!(
+            "{local} is updated to {} (commit {})",
+            installed.entry.version,
+            commit.get(..12).unwrap_or(&commit)
+        ),
+    ))
+}
+
 fn install(
     store: &Store,
-    source: &Path,
+    source: PackageSource,
     options: InstallOptions,
     yes: bool,
     json: bool,
@@ -428,23 +678,10 @@ fn install(
         .prepare(source, options)
         .map_err(|error| error.to_string())?;
     let description = describe_install(&prepared);
-    if !yes {
-        if json || !asker.interactive {
-            return Err(
-                "installing asks first; run lume plugin install in a terminal, or pass --yes \
-                 to agree ahead"
-                    .to_owned(),
-            );
-        }
-        let _ = write!(out, "{description}\nGo ahead? [y/N] ");
-        let _ = out.flush();
-        let mut answer = String::new();
-        let _ = asker.input.read_line(&mut answer);
-        if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-            let mut outcome = Outcome::done("Nothing was installed.".to_owned());
-            outcome.status = FAILED;
-            return Ok(outcome);
-        }
+    if !yes && !agreed(&description, "installing", json, asker, out)? {
+        let mut outcome = Outcome::done("Nothing was installed.".to_owned());
+        outcome.status = FAILED;
+        return Ok(outcome);
     }
     let local = prepared.local.clone();
     let installed = store.commit(prepared).map_err(|error| error.to_string())?;
@@ -488,8 +725,12 @@ fn describe_installed(one: &Installed, state: Option<&State>) -> Value {
         "enabled": one.entry.enabled,
         "check": check_word(&one.check),
         "source": one.entry.source.path,
+        "kind": one.entry.source.kind,
         "dir": one.entry.dir,
     });
+    if let Some(commit) = &one.entry.source.commit {
+        value["commit"] = json!(commit);
+    }
     if let Some(manifest) = manifest {
         value["permissions"] = json!(
             manifest
@@ -606,9 +847,20 @@ fn list(store: &Store, json: bool, out: &mut dyn Write) -> Result<Outcome, Strin
         } else {
             format!(" (from {})", one.entry.manifest_id)
         };
+        let from = if one.entry.is_link() {
+            format!("  [dev, linked to {}]", one.entry.source.path)
+        } else if let Some(commit) = &one.entry.source.commit {
+            format!(
+                "  [{} at {}]",
+                one.entry.source.path,
+                commit.get(..12).unwrap_or(commit)
+            )
+        } else {
+            String::new()
+        };
         let _ = writeln!(
             out,
-            "  {local}{alias}  {} {}  {state}",
+            "  {local}{alias}  {} {}  {state}{from}",
             one.name(),
             one.entry.version
         );
@@ -687,6 +939,8 @@ mod tests {
             Ok(PluginCommand {
                 action: Action::Install {
                     source: "./p".to_owned(),
+                    path: None,
+                    reference: None,
                     local: Some("me.x".to_owned()),
                     name: Some("Mine".to_owned()),
                     yes: true
@@ -695,6 +949,41 @@ mod tests {
             })
         );
         assert_eq!(parsed(&["list"]).unwrap().action, Action::List);
+        assert_eq!(
+            parsed(&["install", "acme/tools#v1", "--path", "plugins/x", "-y"])
+                .unwrap()
+                .action,
+            Action::Install {
+                source: "acme/tools#v1".to_owned(),
+                path: Some("plugins/x".to_owned()),
+                reference: None,
+                local: None,
+                name: None,
+                yes: true
+            }
+        );
+        assert_eq!(
+            parsed(&["update"]).unwrap().action,
+            Action::Update {
+                local: None,
+                yes: false
+            }
+        );
+        assert_eq!(
+            parsed(&["update", "a.x", "--yes"]).unwrap().action,
+            Action::Update {
+                local: Some("a.x".to_owned()),
+                yes: true
+            }
+        );
+        assert_eq!(
+            parsed(&["link", "./work", "--as", "me.x"]).unwrap().action,
+            Action::Link {
+                folder: "./work".to_owned(),
+                local: Some("me.x".to_owned()),
+                name: None
+            }
+        );
         assert_eq!(
             parsed(&["disable", "a.x"]).unwrap().action,
             Action::Enable {
@@ -730,7 +1019,10 @@ mod tests {
             &["order", "a.x"],
             &["bind", "a.x", "core.x"],
             &["list", "extra"],
-            &["update", "a.x"],
+            &["update", "a.x", "b.x"],
+            &["update", "--force"],
+            &["link"],
+            &["link", "./work", "--yes"],
             &[],
         ] {
             assert!(parsed(bad).is_err(), "{bad:?}");
@@ -843,5 +1135,124 @@ mod tests {
         );
         let (status, _, _) = run_with(&dirs, &["remove", "acme.metrics", "--purge"], "", false);
         assert_eq!(status, DONE);
+
+        // --path and --ref go with a repository.
+        let (status, _, err) = run_with(
+            &dirs,
+            &["install", &source, "--path", "x", "--yes"],
+            "",
+            false,
+        );
+        assert_eq!(status, FAILED);
+        assert!(err.contains("go with a repository"), "{err}");
+    }
+
+    fn git(folder: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .current_dir(folder)
+            .args(["-c", "user.name=Test", "-c", "user.email=test@example.org"])
+            .args(["-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn an_update_that_lets_the_plugin_do_more_is_asked_about_whatever_was_said_ahead() {
+        let dir = scratch("update");
+        let dirs = Dirs {
+            config: dir.0.join("config"),
+            state: dir.0.join("state"),
+        };
+        let origin = dir.0.join("src");
+        let manifest = |version: &str, permissions: &str| {
+            std::fs::write(
+                origin.join("plugin.toml"),
+                format!(
+                    "schema = 1\nid = \"acme.metrics\"\nname = \"Metrics\"\n\
+                     version = \"{version}\"\napi = \"1\"\n[permissions]\n{permissions}"
+                ),
+            )
+            .unwrap();
+        };
+        manifest("1.0.0", "\"system.metrics\" = true\n");
+        git(&origin, &["init", "--quiet"]);
+        git(&origin, &["add", "-A"]);
+        git(&origin, &["commit", "--quiet", "-m", "one"]);
+        let address = format!(
+            "file:///{}",
+            origin
+                .display()
+                .to_string()
+                .replace('\\', "/")
+                .trim_start_matches('/')
+        );
+
+        let (status, out, err) = run_with(&dirs, &["install", &address, "--yes"], "", false);
+        assert_eq!(status, DONE, "{out}{err}");
+        let (_, out, _) = run_with(&dirs, &["list", "--json"], "", false);
+        let listed: Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(listed["plugins"][0]["kind"], "git");
+        assert_eq!(listed["plugins"][0]["commit"].as_str().unwrap().len(), 40);
+
+        let (status, out, _) = run_with(&dirs, &["update"], "", false);
+        assert_eq!(status, DONE);
+        assert!(out.contains("is what its repository has"), "{out}");
+
+        // A newer version that asks for nothing new goes in on a yes said ahead.
+        manifest("1.1.0", "\"system.metrics\" = true\n");
+        git(&origin, &["commit", "--quiet", "-am", "two"]);
+        let (status, out, _) = run_with(&dirs, &["update", "acme.metrics"], "", false);
+        assert_eq!(status, FAILED);
+        assert!(out.contains("--yes"), "{out}");
+        let (status, out, _) = run_with(&dirs, &["update", "acme.metrics", "--yes"], "", false);
+        assert_eq!(status, DONE, "{out}");
+        assert!(out.contains("is updated to 1.1.0"), "{out}");
+
+        // One that asks for more does not: with nobody to ask it is left alone, and
+        // asked, it shows what is new.
+        manifest(
+            "1.2.0",
+            "\"system.metrics\" = true\n\"clipboard.write\" = true\n",
+        );
+        git(&origin, &["commit", "--quiet", "-am", "three"]);
+        let (status, out, _) = run_with(&dirs, &["update", "--yes"], "", false);
+        assert_eq!(status, FAILED, "{out}");
+        assert!(out.contains("more than you agreed to"), "{out}");
+        let (_, out, _) = run_with(&dirs, &["list", "--json"], "", false);
+        let listed: Value = serde_json::from_str(out.trim()).unwrap();
+        assert_eq!(listed["plugins"][0]["version"], "1.1.0");
+
+        let (status, out, _) = run_with(&dirs, &["update", "--yes"], "n\n", true);
+        assert_eq!(status, DONE, "{out}");
+        assert!(out.contains("Update Metrics from 1.1.0 to 1.2.0"), "{out}");
+        assert!(out.contains("It will also be able to:"), "{out}");
+        assert!(out.contains("was left as it is"), "{out}");
+        let (status, out, _) = run_with(&dirs, &["update", "--yes"], "y\n", true);
+        assert_eq!(status, DONE, "{out}");
+        assert!(out.contains("is updated to 1.2.0"), "{out}");
+
+        // A linked folder is listed as one, and has nothing to update from.
+        let work = dir.0.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(
+            work.join("plugin.toml"),
+            "schema = 1\nid = \"me.dev\"\nname = \"Dev\"\nversion = \"0.1.0\"\napi = \"1\"\n",
+        )
+        .unwrap();
+        let work = work.display().to_string();
+        let (status, out, err) = run_with(&dirs, &["link", &work], "", false);
+        assert_eq!(status, DONE, "{out}{err}");
+        assert!(out.contains("me.dev is linked to"), "{out}");
+        let (_, out, _) = run_with(&dirs, &["list"], "", false);
+        assert!(out.contains("[dev, linked to"), "{out}");
+        let (status, _, err) = run_with(&dirs, &["update", "me.dev"], "", false);
+        assert_eq!(status, FAILED);
+        assert!(err.contains("not installed from a repository"), "{err}");
     }
 }

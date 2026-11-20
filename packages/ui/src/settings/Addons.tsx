@@ -3,10 +3,11 @@
  * plugin's own page shows after its settings.
  *
  * Managing them is turning each on or off, moving it earlier or later in the order
- * they load in, removing it, and installing one from a folder. Installing shows what
- * the package would be able to do before anything is installed, as `lume plugin
- * install` does, and offers the same choices: to replace the same plugin, or to
- * install another under a new id beside the one installed.
+ * they load in, removing it, and installing one from a folder or from a repository,
+ * which is fetched with git. Installing shows what the package would be able to do
+ * before anything is installed, as `lume plugin install` does, and offers the same
+ * choices: to replace the same plugin, or to install another under a new id beside the
+ * one installed. A plugin that came from a repository can be looked for a newer one of.
  *
  * A plugin's page then says what it may do, how it fares, and what it did lately. Its
  * words come from its manifest and its log, and are shown as text.
@@ -16,12 +17,15 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 
 import { Glyph } from "../icons/Glyph.tsx";
+import { DevBadge } from "../plugins/DevBadge.tsx";
 import { sentence } from "../shell/notices.ts";
 import type { SettingsApp } from "./boot.ts";
 import {
   installHeading,
+  sourceWords,
   type AddonEntry,
   type AddonPermission,
+  type InstallFrom,
   type InstallPreview,
   type InstallTaken,
 } from "./addons.ts";
@@ -126,14 +130,18 @@ function AddonRow({
   addon,
   first,
   last,
+  update,
 }: {
   app: SettingsApp;
   addon: AddonEntry;
   first: boolean;
   last: boolean;
+  /** Looks for a newer one where it came from. */
+  update: () => void;
 }) {
   const label = useId();
   const [removing, setRemoving] = useState(false);
+  const from = sourceWords(addon);
   const act = (asked: Promise<unknown>) => {
     asked.then(
       () => app.refreshAddons(),
@@ -150,8 +158,10 @@ function AddonRow({
         <div id={label}>
           {addon.name}
           <span className="settings-from">v{addon.version}</span>
+          {addon.dev && <DevBadge />}
         </div>
         <div>{under}</div>
+        {from !== null && <div className="addon-text">{from}</div>}
         {dependencies !== null && <div>{dependencies}</div>}
         {status !== null && (
           <div className={status.problem ? "settings-problem" : "settings-note"}>{status.text}</div>
@@ -186,6 +196,7 @@ function AddonRow({
             >
               <Glyph name="arrow-down" size={14} />
             </button>
+            {addon.sourceKind === "git" && <Button onPress={update}>Check for update</Button>}
             <Button onPress={() => setRemoving(true)}>Remove</Button>
             <button
               type="button"
@@ -202,13 +213,13 @@ function AddonRow({
   );
 }
 
-/** Where installing a package from a folder has got to. */
+/** Where installing a package has got to. */
 type Installing =
-  | { readonly kind: "looking"; readonly folder: string }
+  | { readonly kind: "looking"; readonly from: InstallFrom }
   | { readonly kind: "preview"; readonly preview: InstallPreview }
   | {
       readonly kind: "taken";
-      readonly folder: string;
+      readonly from: InstallFrom;
       readonly taken: InstallTaken["taken"];
       readonly as: string;
     };
@@ -222,7 +233,7 @@ function InstallPanel({
 }: {
   app: SettingsApp;
   installing: Installing;
-  inspect: (folder: string, as: string | null) => void;
+  inspect: (from: InstallFrom, as: string | null) => void;
   done: () => void;
 }) {
   const field = useId();
@@ -230,7 +241,13 @@ function InstallPanel({
   if (installing.kind === "looking") {
     return (
       <Group label="Install">
-        <Line label="Looking at the package…" />
+        <Line
+          label={
+            installing.from.kind === "folder"
+              ? "Looking at the package…"
+              : "Fetching the repository…"
+          }
+        />
       </Group>
     );
   }
@@ -259,7 +276,7 @@ function InstallPanel({
           </div>
           <div className="addon-actions">
             <Button onPress={done}>Cancel</Button>
-            <Button primary onPress={() => inspect(installing.folder, as.trim() || null)}>
+            <Button primary onPress={() => inspect(installing.from, as.trim() || null)}>
               Continue
             </Button>
           </div>
@@ -293,6 +310,10 @@ function InstallPanel({
               : `${preview.id}, installed as ${preview.local}`}
           </div>
           {preview.description !== null && <div>{preview.description}</div>}
+          <div className="addon-text">
+            From {preview.source}
+            {preview.commit !== null && `, at commit ${preview.commit.slice(0, 12)}`}
+          </div>
         </div>
       </div>
       <Line
@@ -336,14 +357,30 @@ export function AddonsManager({ app }: { app: SettingsApp }) {
   const [installing, setInstalling] = useState<Installing | null>(null);
   useFresh(app, "manage");
 
-  const inspect = (folder: string, as: string | null) => {
-    setInstalling({ kind: "looking", folder });
-    app.client.addonInspect(folder, as).then(
+  const [git, setGit] = useState("");
+  const [gitPath, setGitPath] = useState("");
+  const gitField = useId();
+
+  const inspect = (from: InstallFrom, as: string | null) => {
+    setInstalling({ kind: "looking", from });
+    const asked =
+      from.kind === "folder"
+        ? app.client.addonInspect(from.folder, as)
+        : from.kind === "git"
+          ? app.client.addonInspectGit(from.source, from.path, as)
+          : app.client.addonCheckUpdate(from.id);
+    asked.then(
       (inspected) => {
-        if ("taken" in inspected) {
+        if ("current" in inspected) {
+          setInstalling(null);
+          app.notices.push(
+            "info",
+            `Version ${inspected.version} is what its repository has: there is nothing newer.`,
+          );
+        } else if ("taken" in inspected) {
           setInstalling({
             kind: "taken",
-            folder,
+            from,
             taken: inspected.taken,
             as: inspected.taken.suggestion ?? "",
           });
@@ -357,10 +394,15 @@ export function AddonsManager({ app }: { app: SettingsApp }) {
       },
     );
   };
+  const lookAtGit = () => {
+    const source = git.trim();
+    if (source === "") return;
+    inspect({ kind: "git", source, path: gitPath.trim() || null }, null);
+  };
   const pick = () => {
     app.pickFolder().then(
       (folder) => {
-        if (folder !== null) inspect(folder, null);
+        if (folder !== null) inspect({ kind: "folder", folder }, null);
       },
       (error: unknown) => app.notices.push("error", sentence(reason(error))),
     );
@@ -380,6 +422,46 @@ export function AddonsManager({ app }: { app: SettingsApp }) {
             </div>
             <Button onPress={pick}>Install from folder…</Button>
           </div>
+          <form
+            className="settings-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              lookAtGit();
+            }}
+          >
+            <div className="settings-label">
+              <div>
+                <label htmlFor={gitField}>Install from git</label>
+              </div>
+              <div>
+                A repository&apos;s address, or owner/repo for one on GitHub, with #branch or #tag
+                after it if you want one; and the folder the plugin is in, if the repository holds
+                more. It is fetched with the git on this machine, and the commit is recorded.
+              </div>
+              <div className="addon-git">
+                <input
+                  id={gitField}
+                  type="text"
+                  spellCheck={false}
+                  autoComplete="off"
+                  placeholder="owner/repo#v1.0"
+                  value={git}
+                  onChange={(event) => setGit(event.target.value)}
+                />
+                <input
+                  className="addon-git-path"
+                  type="text"
+                  spellCheck={false}
+                  autoComplete="off"
+                  aria-label="The folder of the repository the plugin is in"
+                  placeholder="folder (optional)"
+                  value={gitPath}
+                  onChange={(event) => setGitPath(event.target.value)}
+                />
+                <Button onPress={lookAtGit}>Look at it…</Button>
+              </div>
+            </div>
+          </form>
         </Group>
       ) : (
         <InstallPanel
@@ -400,6 +482,7 @@ export function AddonsManager({ app }: { app: SettingsApp }) {
             addon={addon}
             first={index === 0}
             last={index === list.length - 1}
+            update={() => inspect({ kind: "update", id: addon.id }, null)}
           />
         ))}
       </Group>

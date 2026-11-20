@@ -14,6 +14,7 @@ pub mod appender;
 pub mod assets;
 pub mod broker;
 pub mod contributions;
+pub mod git;
 pub mod hash;
 pub mod id;
 pub mod lock;

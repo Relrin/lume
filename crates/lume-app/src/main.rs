@@ -487,6 +487,8 @@ fn main() -> ExitCode {
         commands_plugins::addon_remove,
         commands_plugins::addon_move,
         commands_plugins::addon_inspect,
+        commands_plugins::addon_inspect_git,
+        commands_plugins::addon_check_update,
         commands_plugins::addon_install,
         commands_plugins::addon_cancel,
         harness::harness_done,

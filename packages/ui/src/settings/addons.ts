@@ -50,6 +50,13 @@ export interface AddonEntry {
   readonly missing: boolean;
   /** Where it was installed from. */
   readonly source: string;
+  /** How it came: a folder, an archive, a repository (`git`), or a folder used where
+   *  it lies while it is worked on (`link`). */
+  readonly sourceKind: string;
+  /** The commit it was taken from, for one from a repository. */
+  readonly commit: string | null;
+  /** Whether it is a folder used where it lies, for a plugin being worked on. */
+  readonly dev: boolean;
   readonly dependencies: readonly AddonDependency[];
   readonly permissions: readonly AddonPermission[];
   /** What it may ask for while it runs. */
@@ -88,6 +95,35 @@ export interface InstallPreview {
   readonly later: readonly string[];
   readonly warnings: readonly string[];
   readonly leftOut: readonly string[];
+  /** Where the package came from. */
+  readonly source: string;
+  /** The commit that was fetched, for one from a repository. */
+  readonly commit: string | null;
+}
+
+/** A repository that holds nothing newer than what is installed from it. */
+export interface UpdateCurrent {
+  readonly current: true;
+  readonly version: string;
+}
+
+/** Where a package to install is taken from. */
+export type InstallFrom =
+  | { readonly kind: "folder"; readonly folder: string }
+  /** A repository: its address, with `#<ref>` after it for a branch or a tag, and the
+   *  folder of it the package is in, if not its top. */
+  | { readonly kind: "git"; readonly source: string; readonly path: string | null }
+  /** The repository an install was taken from, looked at again. */
+  | { readonly kind: "update"; readonly id: string };
+
+/** Where an install came from, in a few words, where that says more than its id. */
+export function sourceWords(addon: AddonEntry): string | null {
+  if (addon.dev) return `Linked to ${addon.source}`;
+  if (addon.sourceKind === "git") {
+    const commit = addon.commit === null ? "" : `, at commit ${addon.commit.slice(0, 12)}`;
+    return `From ${addon.source}${commit}`;
+  }
+  return null;
 }
 
 /** A package whose id another package is installed under. */

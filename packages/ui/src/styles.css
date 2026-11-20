@@ -2021,6 +2021,57 @@
     height: 24px;
   }
 
+  /* Marks what comes from a plugin that is being worked on, wherever it is named. */
+  .dev-badge {
+    @apply text-ink-muted;
+    flex: 0 0 auto;
+    padding: 0 5px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: min(4px, var(--lume-radius-control));
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 15px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .settings-from + .dev-badge,
+  .settings-label .dev-badge {
+    display: inline-block;
+    margin-left: 6px;
+    vertical-align: 1px;
+  }
+
+  .addon-git {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  .addon-git input {
+    @apply bg-control text-ink;
+    flex: 1 1 220px;
+    min-width: 0;
+    height: 28px;
+    padding: 0 8px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: min(6px, var(--lume-radius-control));
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .addon-git input.addon-git-path {
+    flex: 0 1 160px;
+  }
+
+  .addon-git input:focus-visible {
+    border-color: var(--lume-color-border-focus);
+    outline: none;
+  }
+
   .panel-icon {
     @apply text-ink-muted;
     display: flex;

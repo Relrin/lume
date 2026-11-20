@@ -12,24 +12,28 @@ standard library, a global `lume` object and `console`. It has no files, no netw
 and no modules of its own. Everything it does beyond its own memory is a call to `lume`, and Lume
 checks each call against the permissions the user granted.
 
-A plugin has no user interface of its own. It cannot draw, and it has no HTML and no styles.
-Everything it shows is drawn by Lume from data the plugin gives: a status item's value, a panel's
-rows, a question's text.
+Most of what a plugin shows is drawn by Lume from data the plugin gives: a status item's value, a
+list panel's rows, a question's text. A plugin that needs to draw for itself adds a view: a page of
+its own in a panel or a pane, shown in a sandboxed frame that can reach nothing but the plugin's
+own code.
 
 ## Pages
 
-| Page                                  | What it covers                                                                            |
-| ------------------------------------- | ----------------------------------------------------------------------------------------- |
-| [Getting started](getting-started.md) | A first plugin from nothing, in plain JavaScript and then in TypeScript.                  |
-| [The manifest](manifest.md)           | Every key of `plugin.toml`, with its type, default and limits.                            |
-| [The environment](environment.md)     | What the code can use, the budgets it is held to, logs, errors.                           |
-| [Placement](placement.md)             | Menus, sections, submenus, status items and panels, and how they are ordered.             |
-| [Settings](settings.md)               | Settings and settings pages, themes, keybindings.                                         |
-| [Pictures and motion](motion.md)      | Pictures, motion for the window's own places, cursor effects drawn by shaders.            |
-| [Permissions](permissions.md)         | Each permission and its scope, per-use approval, the audit log, services.                 |
-| [Installing](install.md)              | Packages, the install prompt, updates, side-by-side installs, the `lume plugin` commands. |
-| [Performance](performance.md)         | How to write a plugin that costs nothing while it has nothing to do.                      |
-| [API reference](api.md)               | Every call of the `lume` object and every type, generated from Lume itself.               |
+| Page                                  | What it covers                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| [Getting started](getting-started.md) | A first plugin from nothing, in plain JavaScript and then in TypeScript.                                |
+| [The manifest](manifest.md)           | Every key of `plugin.toml`, with its type, default and limits.                                          |
+| [The environment](environment.md)     | What the code can use, the budgets it is held to, logs, errors.                                         |
+| [Placement](placement.md)             | Menus, sections, submenus, status items and panels, and how they are ordered.                           |
+| [Settings](settings.md)               | Settings and settings pages, themes, keybindings.                                                       |
+| [Pictures and motion](motion.md)      | Pictures, motion for the window's own places, cursor effects drawn by shaders.                          |
+| [Views](views.md)                     | Pages of the plugin's own in panels and panes: what they may load, how they reach the code.             |
+| [The plugin kit](kit.md)              | `@lume/plugin-kit`: the client, hooks and controls a view is built with, and the template.              |
+| [Developing](develop.md)              | Linking a folder, what is loaded again as files change, looking into a view.                            |
+| [Permissions](permissions.md)         | Each permission and its scope, per-use approval, the audit log, services.                               |
+| [Installing](install.md)              | Packages, repositories, the install prompt, updates, side-by-side installs, the `lume plugin` commands. |
+| [Performance](performance.md)         | How to write a plugin that costs nothing while it has nothing to do.                                    |
+| [API reference](api.md)               | Every call of the `lume` object and every type, generated from Lume itself.                             |
 
 ## Names
 

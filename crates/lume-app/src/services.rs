@@ -170,6 +170,24 @@ impl Services {
         if id == "lume.app.open" {
             return self.plugins.open_target(window, args).await;
         }
+        if id == "lume.view.inspect" {
+            // Only where a plugin is being worked on: the tools show the whole window.
+            if !self.plugins.any_linked() {
+                return Err(CommandError::new(
+                    "failed",
+                    "no plugin is linked; link the folder of the one you are working on \
+                     with `lume plugin link <folder>`",
+                ));
+            }
+            return if self.shell.inspect(window) {
+                Ok(())
+            } else {
+                Err(CommandError::new(
+                    "failed",
+                    "this build has no developer tools",
+                ))
+            };
+        }
         if id == "lume.view.open" {
             let text = |key: &str| {
                 args.get(key).and_then(Value::as_str).ok_or_else(|| {

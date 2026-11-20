@@ -44,13 +44,20 @@ pub fn write(kind: GeneratedKind, command: &str) -> Result<()> {
     Ok(())
 }
 
-/// Packs `@lume/plugin-api` into `target/plugin-api/`, as a tarball a plugin's own
-/// repository installs its typings from. The typings are the ones generated now.
+/// Packs the packages a plugin's own repository builds against, each as a tarball:
+/// `@lume/plugin-api` into `target/plugin-api/`, with the typings generated now, and
+/// `@lume/plugin-kit` into `target/plugin-kit/`, built as it is packed.
 pub fn pack_api() -> Result<()> {
+    pack("plugin-api")?;
+    pack("plugin-kit")
+}
+
+/// Packs `packages/<name>` into `target/<name>/`.
+fn pack(name: &str) -> Result<()> {
     let root = paths::root();
-    let out = root.join("target").join("plugin-api");
+    let out = root.join("target").join(name);
     fs::create_dir_all(&out).with_context(|| format!("creating {}", out.display()))?;
-    let package = root.join("packages").join("plugin-api");
+    let package = root.join("packages").join(name);
     let mut cmd = if cfg!(windows) {
         let mut c = std::process::Command::new("cmd");
         c.arg("/C").arg("npm");
@@ -67,6 +74,6 @@ pub fn pack_api() -> Result<()> {
     if !status.success() {
         bail!("npm pack failed in {}", package.display());
     }
-    println!("api: packed @lume/plugin-api into {}", out.display());
+    println!("api: packed @lume/{name} into {}", out.display());
     Ok(())
 }

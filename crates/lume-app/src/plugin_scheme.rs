@@ -72,6 +72,9 @@ async fn answer(services: &Services, path: &str) -> Response<Vec<u8>> {
     };
     let install = asked.install.clone();
     let file_path = asked.path.clone();
+    if root.linked {
+        services.plugins.note_served(&install, &file_path);
+    }
     let read = tokio::task::spawn_blocking(move || {
         let file = serve::locate(&root.dir, &asked)?;
         std::fs::read(file).map_err(|_| Refused::Missing)

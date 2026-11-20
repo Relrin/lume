@@ -44,6 +44,13 @@ pub enum HashError {
 
 /// Every file under `root`, as paths inside it written with `/`, in byte order.
 pub fn files(root: &Path) -> Result<Vec<String>, HashError> {
+    files_without(root, &[])
+}
+
+/// Every file under `root` that is not in a folder of one of the names in `left_out`.
+/// With folders left out the folder is someone's working copy, where what is neither a
+/// file nor a folder is passed over rather than refused.
+fn files_without(root: &Path, left_out: &[&str]) -> Result<Vec<String>, HashError> {
     let mut found = Vec::new();
     let mut folders = vec![PathBuf::new()];
     while let Some(relative) = folders.pop() {
@@ -64,10 +71,13 @@ pub fn files(root: &Path) -> Result<Vec<String>, HashError> {
                 error,
             })?;
             if kind.is_dir() {
-                folders.push(path);
+                let name = entry.file_name();
+                if !left_out.iter().any(|left| name == *left) {
+                    folders.push(path);
+                }
             } else if kind.is_file() {
                 found.push(slashed(&path));
-            } else {
+            } else if left_out.is_empty() {
                 return Err(HashError::NotAFile(root.join(path)));
             }
         }
@@ -89,8 +99,14 @@ pub fn slashed(path: &Path) -> String {
 /// say the files were very likely not touched in between; it is no proof, so it only
 /// ever spares hashing a package again that this run has hashed already.
 pub fn fingerprint(root: &Path) -> Result<String, HashError> {
+    fingerprint_without(root, &[])
+}
+
+/// What a working folder's files look like from outside, leaving out the folders named
+/// in `left_out` wherever they are.
+pub fn fingerprint_without(root: &Path, left_out: &[&str]) -> Result<String, HashError> {
     let mut whole = Sha256::new();
-    for relative in files(root)? {
+    for relative in files_without(root, left_out)? {
         let path = root.join(&relative);
         let metadata = std::fs::symlink_metadata(&path).map_err(|error| HashError::Io {
             path: path.clone(),

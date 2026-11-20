@@ -58,6 +58,27 @@ export function focusPaneFrame(pane: string): boolean {
   return true;
 }
 
+/** What loads each plugin's frames again, by frame. */
+const reloads = new Map<() => void, string>();
+
+/**
+ * Keeps the way to load one of a plugin's frames again, for as long as the frame is
+ * there; gives what takes it back out.
+ */
+export function keepFrameReload(plugin: string, reload: () => void): () => void {
+  reloads.set(reload, plugin);
+  return () => {
+    reloads.delete(reload);
+  };
+}
+
+/** Loads every frame of a plugin again, each from what it kept. */
+export function reloadPluginFrames(plugin: string): void {
+  for (const [reload, of] of [...reloads]) {
+    if (of === plugin) reload();
+  }
+}
+
 /** Every open frame, for telling all of them something. */
 export function openFrames(): readonly FrameBridge[] {
   return [...open.values()];
