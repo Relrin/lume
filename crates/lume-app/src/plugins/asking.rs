@@ -76,6 +76,9 @@ impl Plugins {
             .map(|loaded| loaded.installed.name())
             .unwrap_or_else(|| local.to_owned());
         ask["plugin"] = json!({ "id": local, "name": name });
+        // While the question is on show, no call into a plugin's code is running out
+        // of time.
+        let _asking = self.asked.begin();
         match page.ask(PageRequestBody::PluginAsk { ask }, ASK_WAIT).await {
             Ok(AppReplyBody::Answered { answer }) => Ok(answer),
             Ok(_) => Err(api_error(

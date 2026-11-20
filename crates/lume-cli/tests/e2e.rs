@@ -138,6 +138,16 @@ impl App {
     /// are in `home`. An application on the endpoint of one before it uses the session
     /// host that one used.
     fn start_on(home: PathBuf, keep_home: bool, endpoint: String) -> Self {
+        Self::start_on_with(home, keep_home, endpoint, &[])
+    }
+
+    /// The same, with these variables added to the application's environment.
+    fn start_on_with(
+        home: PathBuf,
+        keep_home: bool,
+        endpoint: String,
+        environment: &[(&str, String)],
+    ) -> Self {
         let log = std::env::temp_dir().join(format!("lume-{endpoint}.log"));
         let _ = std::fs::remove_file(&log);
         let child = Command::new(application())
@@ -146,6 +156,7 @@ impl App {
             .env("LUME_LOG_FILE", &log)
             .env("LUME_CONFIG_DIR", home.join("config"))
             .env("LUME_STATE_DIR", home.join("state"))
+            .envs(environment.iter().map(|(name, value)| (*name, value)))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -1965,7 +1976,25 @@ fn a_full_screen_program_comes_back_after_a_crash_and_takes_input() {
     app.ctl(&["send", "--pane", &pane, "--escapes", "ifu11-k7q-before\\e"])
         .ok("typing into the editor");
     app.wait_text_in(&pane, "fu11-k7q-before");
-    let before = app.ctl(&["capture", "--pane", &pane]).ok("capture");
+    // The text is on the screen before the editor has taken the Escape after it: its
+    // last line says it is still inserting until then, and would not say so afterwards.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let before = loop {
+        let captured = app.ctl(&["capture", "--pane", &pane]).ok("capture");
+        let inserting = captured["lines"].as_array().is_some_and(|lines| {
+            lines
+                .iter()
+                .any(|line| line.to_string().contains("-- INSERT"))
+        });
+        if !inserting {
+            break captured;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the editor never left its insert mode: {captured}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
     assert_eq!(
         before["alternate"], true,
         "the editor is not full screen: {before}"
@@ -3343,4 +3372,549 @@ fn a_linked_plugin_is_loaded_again_within_a_second_of_a_change() {
     app.quit();
     // The folder is the author's: nothing of it was touched.
     assert!(work.join("plugin.toml").is_file());
+}
+
+/// A plugin's log from byte `from` on.
+fn plugin_log_from(home: &Path, id: &str, from: usize) -> String {
+    let text = std::fs::read_to_string(home.join(format!("state/plugins/logs/{id}.log")))
+        .unwrap_or_default();
+    text.get(from..).unwrap_or_default().to_owned()
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_panel_and_a_view_take_the_windows_new_look_and_go_on_as_they_were() {
+    let home = home_with_plugins(&["echo-view"]);
+    let config = home.join("config").join("config.toml");
+    let base = std::fs::read_to_string(&config).unwrap();
+    let look = |theme: &str| {
+        std::fs::write(
+            &config,
+            format!("{base}\n[appearance]\ntheme = \"{theme}\"\n"),
+        )
+        .unwrap();
+    };
+    look("lume-dark");
+    let endpoint = format!("e2e-{}-look", std::process::id());
+    let app = App::start_on(home.clone(), true, endpoint.clone());
+    app.status_with_session();
+    app.until_plugin("test.echo-view", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    app.ctl(&[
+        "command",
+        "lume.panel.show",
+        r#"{"panel":"test.echo-view.side"}"#,
+    ])
+    .ok("show the side panel");
+    plugin_log_until(&home, "test.echo-view", 0, "echo started panel count 0");
+    app.ctl(&[
+        "command",
+        "lume.view.open",
+        r#"{"plugin":"test.echo-view","view":"echo","state":{"count":3}}"#,
+    ])
+    .ok("open the view");
+    plugin_log_until(&home, "test.echo-view", 0, "echo started pane count 3");
+
+    // The settings name another theme: both views are given the new look, and neither
+    // is started again for it.
+    let colour_of = |log: &str, mark: &str| -> String {
+        log.lines()
+            .rev()
+            .find_map(|line| line.split(mark).nth(1))
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
+    };
+    let at = plugin_log_len(&home, "test.echo-view");
+    look("lume-light");
+    plugin_log_until(&home, "test.echo-view", at, "echo look pane light ");
+    let log = plugin_log_until(&home, "test.echo-view", at, "echo look panel light ");
+    let light = colour_of(&log[at..], "echo look pane light ");
+    assert!(light.starts_with('#') || light.contains('('), "{log}");
+    assert_eq!(
+        light,
+        colour_of(&log[at..], "echo look panel light "),
+        "both views were given the same colours"
+    );
+
+    // And back again.
+    let back = plugin_log_len(&home, "test.echo-view");
+    look("lume-dark");
+    plugin_log_until(&home, "test.echo-view", back, "echo look panel dark ");
+    let log = plugin_log_until(&home, "test.echo-view", back, "echo look pane dark ");
+    assert_ne!(colour_of(&log[back..], "echo look pane dark "), light);
+    let since = plugin_log_from(&home, "test.echo-view", at);
+    assert!(
+        !since.contains("started") && !since.contains("view closed"),
+        "a new look leaves the views running:\n{since}"
+    );
+
+    // A neighbour is split off beside the view, and the window is given the light look
+    // once more: the view is still the one that was started first.
+    let view = view_panes(&app.layout())
+        .into_iter()
+        .find(|(_, view, _)| view == "echo")
+        .expect("the view has a pane")
+        .0;
+    let split = serde_json::json!({ "pane": view }).to_string();
+    app.ctl(&["command", "lume.pane.split-right", &split])
+        .ok("split a terminal off beside the view");
+    let again = plugin_log_len(&home, "test.echo-view");
+    look("lume-light");
+    plugin_log_until(&home, "test.echo-view", again, "echo look pane light ");
+    let since = plugin_log_from(&home, "test.echo-view", at);
+    assert!(!since.contains("started"), "{since}");
+
+    // Closed and started again in the light look, the views come back with what they
+    // kept, and a change of look reaches them as before.
+    app.ctl(&["command", "lume.workspace.save"]).ok("save");
+    app.quit();
+    let at = plugin_log_len(&home, "test.echo-view");
+    let app = App::start_on(home.clone(), false, endpoint);
+    app.until_plugin("test.echo-view", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    plugin_log_until(&home, "test.echo-view", at, "echo started pane count 4");
+    plugin_log_until(&home, "test.echo-view", at, "echo started panel count 1");
+    let at = plugin_log_len(&home, "test.echo-view");
+    look("lume-dark");
+    plugin_log_until(&home, "test.echo-view", at, "echo look pane dark ");
+    plugin_log_until(&home, "test.echo-view", at, "echo look panel dark ");
+    app.quit();
+}
+
+/// Runs git in `folder` as somebody with a name, and gives back what it printed.
+fn git_in(folder: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(folder)
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.org"])
+        .args(["-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"])
+        .args(args)
+        .output()
+        .expect("git runs");
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// Runs `lume plugin` with these words on the folders of `home`, with nobody to answer
+/// a question. Gives back whether it succeeded and what it printed.
+fn plugin_command(home: &Path, args: &[&str]) -> (bool, String) {
+    let output = Command::new(lume())
+        .arg("plugin")
+        .args(args)
+        .env("LUME_CONFIG_DIR", home.join("config"))
+        .env("LUME_STATE_DIR", home.join("state"))
+        .stdin(Stdio::null())
+        .output()
+        .expect("lume runs");
+    (
+        output.status.success(),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+    )
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_from_a_repository_is_pinned_and_an_update_that_asks_for_more_waits_for_a_yes() {
+    if !on_path("git") {
+        println!("skipped: there is no git on this machine");
+        return;
+    }
+    let home = home_with_plugins(&[]);
+    let origin = home.join("origin");
+    std::fs::create_dir_all(&origin).unwrap();
+    let write = |version: &str, permissions: &str, word: &str| {
+        std::fs::write(
+            origin.join("plugin.toml"),
+            format!(
+                "schema = 1\nid = \"test.fetched\"\nname = \"Fetched\"\nversion = \"{version}\"\n\
+                 api = \"1\"\nmain = \"host.js\"\nactivation = [\"onStartup\"]\n\
+                 [permissions]\n{permissions}"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            origin.join("host.js"),
+            format!("lume.log.info(\"host {word}\");\n"),
+        )
+        .unwrap();
+    };
+    write("1.0.0", "\"system.metrics\" = true\n", "one");
+    git_in(&origin, &["init", "--quiet"]);
+    git_in(&origin, &["add", "-A"]);
+    git_in(&origin, &["commit", "--quiet", "-m", "one"]);
+    let first = git_in(&origin, &["rev-parse", "HEAD"]);
+    let address = format!(
+        "file:///{}",
+        origin
+            .display()
+            .to_string()
+            .replace('\\', "/")
+            .trim_start_matches('/')
+    );
+
+    // What is installed says which commit it is and what its files hashed to.
+    let (done, said) = plugin_command(&home, &["install", &address, "--yes"]);
+    assert!(done, "{said}");
+    let installed = || -> Value {
+        let (done, said) = plugin_command(&home, &["list", "--json"]);
+        assert!(done, "{said}");
+        let listed: Value = serde_json::from_str(said.trim()).expect("the list is JSON");
+        listed["plugins"][0].clone()
+    };
+    let lock_file = home.join("state/plugins/lock.toml");
+    let lock = std::fs::read_to_string(&lock_file).unwrap();
+    assert_eq!(installed()["kind"], "git");
+    assert_eq!(installed()["commit"], first.as_str());
+    assert!(lock.contains(&first), "the commit is in the lock:\n{lock}");
+    assert!(lock.contains("content-hash = \"sha256:"), "{lock}");
+
+    let app = App::start_in(home.clone(), false);
+    app.status_with_session();
+    app.until_plugin("test.fetched", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready" && plugin["version"] == "1.0.0"
+    });
+    plugin_log_until(&home, "test.fetched", 0, "host one");
+
+    // Nothing new in the repository: nothing changes.
+    let (done, said) = plugin_command(&home, &["update", "--yes"]);
+    assert!(done, "{said}");
+    assert_eq!(std::fs::read_to_string(&lock_file).unwrap(), lock);
+
+    // A newer commit that asks for nothing more goes in on a yes said ahead, and the
+    // running application takes it up.
+    write("1.1.0", "\"system.metrics\" = true\n", "two");
+    git_in(&origin, &["commit", "--quiet", "-am", "two"]);
+    let second = git_in(&origin, &["rev-parse", "HEAD"]);
+    let at = plugin_log_len(&home, "test.fetched");
+    let (done, said) = plugin_command(&home, &["update", "--yes"]);
+    assert!(done, "{said}");
+    assert_eq!(installed()["commit"], second.as_str());
+    app.until_plugin("test.fetched", "the update to be read", |plugin| {
+        plugin["version"] == "1.1.0"
+    });
+    plugin_log_until(&home, "test.fetched", at, "host two");
+
+    // One that asks for more is not installed on a yes said ahead: with nobody there
+    // to ask, it is left alone, and the application goes on with what it had.
+    write(
+        "1.2.0",
+        "\"system.metrics\" = true\n\"clipboard.write\" = true\n",
+        "three",
+    );
+    git_in(&origin, &["commit", "--quiet", "-am", "three"]);
+    let at = plugin_log_len(&home, "test.fetched");
+    let before = std::fs::read_to_string(&lock_file).unwrap();
+    let (done, said) = plugin_command(&home, &["update", "--yes"]);
+    assert!(!done, "{said}");
+    assert!(said.contains("more than you agreed to"), "{said}");
+    assert_eq!(std::fs::read_to_string(&lock_file).unwrap(), before);
+    assert_eq!(installed()["commit"], second.as_str());
+    assert!(!before.contains("clipboard.write"), "{before}");
+    std::thread::sleep(Duration::from_secs(1));
+    let plugin = app.until_plugin("test.fetched", "the plugin as it was", |_| true);
+    assert_eq!(plugin["version"], "1.1.0", "{plugin}");
+    assert!(
+        !plugin_log_from(&home, "test.fetched", at).contains("host three"),
+        "the wider version did not run"
+    );
+    app.quit();
+}
+
+/// Where the add-ons repository is on this machine: where `LUME_ADDONS` says, or beside
+/// this repository.
+fn addons() -> Option<PathBuf> {
+    let folder = std::env::var_os("LUME_ADDONS").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../lume-addons"),
+        PathBuf::from,
+    );
+    let folder = folder.canonicalize().ok()?;
+    // A canonical path on Windows begins with `\\?\`, which git and the command line
+    // are better off without.
+    let plain = folder.display().to_string();
+    Some(PathBuf::from(
+        plain.strip_prefix(r"\\?\").unwrap_or(&plain).to_owned(),
+    ))
+}
+
+/// A port on this machine that nothing listens on now.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|listener| listener.local_addr())
+        .expect("a port on this machine")
+        .port()
+}
+
+/// The pages of an application that was started with a debugging port, looked into
+/// from outside. Only WebView2 has such a port.
+struct Pages {
+    port: u16,
+}
+
+/// All the text of a page, the text inside its components' own trees included, with
+/// nothing put between the pieces.
+const PAGE_TEXT: &str = "(() => { const out = []; const walk = (node) => { \
+    if (node.nodeName === 'STYLE' || node.nodeName === 'SCRIPT') return;     if (node.nodeType === 3) out.push(node.nodeValue); \
+    if (node.shadowRoot) walk(node.shadowRoot); \
+    for (const child of node.childNodes) walk(child); }; \
+    walk(document.documentElement); return out.join(''); })()";
+
+impl Pages {
+    /// What `expression` gives in the page whose address holds `part`; nothing while
+    /// there is no such page or it does not answer.
+    fn evaluate(&self, part: &str, expression: &str) -> Option<Value> {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/frame.mjs");
+        let output = Command::new("node")
+            .arg(script)
+            .args([&self.port.to_string(), part, expression])
+            .stdin(Stdio::null())
+            .output()
+            .expect("node runs: the tests that look into a view need it");
+        if !output.status.success() {
+            return None;
+        }
+        serde_json::from_slice(&output.stdout).ok()
+    }
+
+    /// Waits until the text of the page whose address holds `part` holds every one of
+    /// `wanted`, and gives the text back.
+    fn until_text(&self, part: &str, wanted: &[&str]) -> String {
+        let deadline = Instant::now() + START;
+        loop {
+            let text = self
+                .evaluate(part, PAGE_TEXT)
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            if wanted.iter().all(|one| text.contains(one)) {
+                return text;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the page {part} never showed {wanted:?}:\n{text}"
+            );
+            std::thread::sleep(Duration::from_millis(300));
+        }
+    }
+}
+
+/// The words of the status item `item` of a plugin as `ctl plugins` lists it.
+fn status_text(plugin: &Value, item: &str) -> Option<String> {
+    plugin["status"]
+        .as_array()?
+        .iter()
+        .find(|one| one["item"] == item)?["value"]["text"]
+        .as_str()
+        .map(str::to_owned)
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn the_git_review_plugin_shows_the_changes_of_a_real_repository() {
+    const ID: &str = "addons.git-review";
+    let Some(plugin) = addons()
+        .map(|folder| folder.join("plugins").join("git-review"))
+        .filter(|plugin| plugin.join("dist").join("host.js").is_file())
+    else {
+        println!(
+            "skipped: the add-ons repository is not beside this one, and LUME_ADDONS names \
+             none with plugins/git-review built in it"
+        );
+        return;
+    };
+    if !on_path("git") {
+        println!("skipped: there is no git on this machine");
+        return;
+    }
+
+    // A repository with one commit, one file changed since and one that is new.
+    let home = home_with_plugins(&[]);
+    let repository = home.join("repository");
+    std::fs::create_dir_all(&repository).unwrap();
+    std::fs::write(
+        repository.join("notes.txt"),
+        "first line\nlumeOldWord stays here\nthird line\n",
+    )
+    .unwrap();
+    git_in(&repository, &["init", "--quiet"]);
+    git_in(&repository, &["add", "-A"]);
+    git_in(&repository, &["commit", "--quiet", "-m", "one"]);
+    std::fs::write(
+        repository.join("notes.txt"),
+        "first line\nlumeNewWord came instead\nthird line\n",
+    )
+    .unwrap();
+    std::fs::write(repository.join("fresh.txt"), "lumeFreshWord\n").unwrap();
+
+    // The plugin as it is in its repository, built: nothing is made for the test.
+    let (done, said) = plugin_command(&home, &["link", &plugin.display().to_string()]);
+    assert!(done, "{said}");
+
+    // On Windows the application's pages can be looked into from outside, with a
+    // browser of its own so that the port is this application's.
+    let pages = cfg!(windows).then(|| Pages { port: free_port() });
+    let environment: Vec<(&str, String)> = pages
+        .iter()
+        .flat_map(|pages| {
+            [
+                (
+                    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+                    format!("--remote-debugging-port={}", pages.port),
+                ),
+                (
+                    "WEBVIEW2_USER_DATA_FOLDER",
+                    home.join("webview").display().to_string(),
+                ),
+            ]
+        })
+        .collect();
+    let endpoint = format!("e2e-{}-review", std::process::id());
+    let app = App::start_on_with(home.clone(), true, endpoint.clone(), &environment);
+    app.status_with_session();
+    app.until_plugin(ID, "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    // The tests' shell does not say which folder it is in, so the workspace does.
+    let root = serde_json::json!({ "root": repository }).to_string();
+    app.ctl(&["command", "lume.workspace.set-root", &root])
+        .ok("set the workspace's folder");
+
+    // The button's command opens the review in a pane; the changes are a panel.
+    app.ctl(&["command", "addons.git-review.open"])
+        .ok("open the review");
+    app.ctl(&[
+        "command",
+        "lume.panel.show",
+        r#"{"panel":"addons.git-review.changes"}"#,
+    ])
+    .ok("show the changes");
+    let deadline = Instant::now() + START;
+    while !view_panes(&app.layout())
+        .iter()
+        .any(|(_, view, _)| view == "review")
+    {
+        assert!(Instant::now() < deadline, "the review has no pane");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    // The button counts the files that changed.
+    app.until_plugin(ID, "two changed files to be counted", |plugin| {
+        status_text(plugin, "git").as_deref() == Some("2")
+    });
+
+    if let Some(pages) = &pages {
+        // The panel lists both files. Pressing one shows it in the review.
+        pages.until_text("ui/changes.html", &["notes.txt", "fresh.txt"]);
+        let press = |name: &str| {
+            let pressed = pages.evaluate(
+                "ui/changes.html",
+                &format!(
+                    "(() => {{ const row = [...document.querySelectorAll('.rv-trow')]\
+                     .find((one) => one.textContent.includes('{name}')); \
+                     const button = row?.querySelector('button.rv-tpick'); \
+                     if (!button) return false; button.click(); return true; }})()"
+                ),
+            );
+            assert_eq!(
+                pressed,
+                Some(Value::Bool(true)),
+                "{name} has a row to press"
+            );
+        };
+        // The file that git does not know yet is shown as all new.
+        press("fresh.txt");
+        let review = pages.until_text("ui/review.html", &["fresh.txt", "lumeFreshWord"]);
+        assert!(!review.contains("lumeNewWord"), "{review}");
+        // The changed one, with the line that went, the line that came and a line
+        // that stayed.
+        press("notes.txt");
+        let review = pages.until_text(
+            "ui/review.html",
+            &["notes.txt", "lumeOldWord", "lumeNewWord", "third line"],
+        );
+        assert!(!review.contains("lumeFreshWord"), "{review}");
+        // The diff is drawn by the library, in a tree of its own inside the page.
+        let drawn = pages.evaluate(
+            "ui/review.html",
+            "[...document.querySelectorAll('.rv-hunk *')].filter((one) => one.shadowRoot).length",
+        );
+        assert!(
+            drawn.as_ref().and_then(Value::as_u64).unwrap_or(0) >= 1,
+            "a hunk is drawn: {drawn:?}"
+        );
+    } else {
+        println!("not looked at here: what the views draw (only WebView2 has a port for it)");
+    }
+
+    // A commit made outside, as a terminal would make it, is followed.
+    git_in(&repository, &["add", "-A"]);
+    git_in(&repository, &["commit", "--quiet", "-m", "two"]);
+    app.until_plugin(ID, "the commit to be seen", |plugin| {
+        status_text(plugin, "git").as_deref() == Some("0")
+    });
+    if let Some(pages) = &pages {
+        pages.until_text("ui/review.html", &["Everything is committed."]);
+    }
+
+    // After the application was closed and started again the review is where it was,
+    // and reads the repository as it is by then.
+    std::fs::write(repository.join("later.txt"), "lumeLaterWord\n").unwrap();
+    app.ctl(&["command", "lume.workspace.save"]).ok("save");
+    app.quit();
+    let app = App::start_on_with(home.clone(), false, endpoint, &environment);
+    app.until_plugin(ID, "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    assert!(
+        view_panes(&app.layout())
+            .iter()
+            .any(|(_, view, _)| view == "review"),
+        "the review came back with the layout"
+    );
+    app.until_plugin(ID, "the new file to be counted", |plugin| {
+        status_text(plugin, "git").as_deref() == Some("1")
+    });
+    if let Some(pages) = &pages {
+        pages.until_text("ui/changes.html", &["later.txt"]);
+    }
+    app.quit();
+    // The plugin's folder is its author's: nothing was written into it.
+    assert!(plugin.join("plugin.toml").is_file());
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn the_time_a_question_is_on_show_is_not_taken_from_what_a_command_may_take() {
+    let home = home_with_plugins(&["asker"]);
+    let app = App::start_in(home, false);
+    let status = app.status_with_session();
+    let pane = status["focused"]["pane"].as_str().unwrap().to_owned();
+    app.until_plugin("test.asker", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+
+    // The command types into a pane, which the user approves first; the user takes
+    // longer over it than a command has. (An answer is taken once the question is up,
+    // and waited for until then, so what is slept here is all time before the answer.)
+    let text = serde_json::json!({ "pane": pane, "text": "echo lume-waited\r" }).to_string();
+    let began = Instant::now();
+    let typed = app.ctl_in_background(&["command", "test.asker.type", &text]);
+    std::thread::sleep(Duration::from_secs(33));
+    app.answer_prompt(true);
+    let answer = typed.join().unwrap();
+    assert!(
+        began.elapsed() > Duration::from_secs(30),
+        "{:?}",
+        began.elapsed()
+    );
+    answer.ok("the command, approved late");
+    app.wait_text_in(&pane, "lume-waited");
+    app.quit();
 }

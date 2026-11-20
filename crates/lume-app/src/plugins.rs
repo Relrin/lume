@@ -32,6 +32,7 @@ mod manage;
 mod openers;
 mod system;
 mod views;
+mod waits;
 
 pub use views::Place as ViewPlace;
 
@@ -70,7 +71,8 @@ use lume_proto::app::SessionNews;
 /// How long after the start the plugins are read when no terminal shows any output.
 const WITHOUT_OUTPUT: Duration = Duration::from_secs(2);
 
-/// How long a plugin's code has to start, and to carry out a command.
+/// How long a plugin's code has to start, and to carry out a command or answer a call.
+/// The time the user is being asked something is not counted against the second.
 const START_WAIT: Duration = Duration::from_secs(10);
 const COMMAND_WAIT: Duration = Duration::from_secs(30);
 
@@ -323,6 +325,8 @@ pub struct Plugins {
     read: Arc<Mutex<contributions::Read>>,
     /// The audit entries the settings window was last shown.
     audited: Mutex<manage::Audited>,
+    /// The questions on show to the user, whose time no call is charged with.
+    asked: waits::Asked,
     /// Rung when what is installed should be read again though the lock file did not
     /// change: a package found changed as its code was about to start.
     read_again: tokio::sync::Notify,
@@ -368,6 +372,7 @@ impl Plugins {
             reloading: tokio::sync::Mutex::new(()),
             read: Arc::new(Mutex::new(contributions::Read::default())),
             audited: Mutex::new(manage::Audited::default()),
+            asked: waits::Asked::default(),
             read_again: tokio::sync::Notify::new(),
         })
     }
@@ -1996,17 +2001,17 @@ impl Plugins {
             .invocations
             .insert(invocation, (local.clone(), generation, sender));
         plugin.command(invocation, &name, args.clone());
-        match tokio::time::timeout(COMMAND_WAIT, receiver).await {
-            Ok(Ok(Ok(_))) => Ok(()),
-            Ok(Ok(Err(error))) => Err(CommandError::new(
+        match self.asked.within(COMMAND_WAIT, receiver).await {
+            Some(Ok(Ok(_))) => Ok(()),
+            Some(Ok(Err(error))) => Err(CommandError::new(
                 "failed",
                 format!("{id}: {}", error.message),
             )),
-            Ok(Err(_)) => Err(CommandError::new(
+            Some(Err(_)) => Err(CommandError::new(
                 "failed",
                 format!("{local} stopped while it ran {id}"),
             )),
-            Err(_) => {
+            None => {
                 self.inner().invocations.remove(&invocation);
                 Err(CommandError::new(
                     lume_proto::app::codes::TIMEOUT,

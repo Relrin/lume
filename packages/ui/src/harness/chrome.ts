@@ -288,7 +288,11 @@ export async function mountWindow(
     root.render(createElement(Shell, { app }));
     await until("the page attaching to its sessions", limitMs, () => core.attached());
     const first = core.tabs[0];
-    const drawn = (first ? core.panesOf(first).length : 0) + (asked.floating === true ? 1 : 0);
+    // A pane that shows a plugin's view has no session, and no terminal is drawn in it.
+    const terminals = first
+      ? core.panesOf(first).filter((pane) => core.sessionOf(pane) !== undefined).length
+      : 0;
+    const drawn = terminals + (asked.floating === true ? 1 : 0);
     await until("its panes being drawn", limitMs, () => {
       return container.querySelectorAll(".pane-card canvas").length === drawn;
     });

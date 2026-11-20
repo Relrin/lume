@@ -433,7 +433,58 @@ const WITH_FRAME_PANEL: FakeCoreOptions = {
   pluginPanel: { id: "acme.tools.preview", plugin: "acme.tools", view: "preview", area: "right" },
 };
 
+/** The fixture's plugins, one of which has a view for panes, shown beside a terminal. */
+const WITH_FRAME_PANE: FakeCoreOptions = {
+  ...WITH_PLUGINS,
+  contributions: {
+    ...PLUGIN_CONTRIBUTIONS,
+    pane_views: [
+      {
+        id: "acme.tools.report",
+        plugin: "acme.tools",
+        view: "report",
+        title: "Report",
+        entry: "ui/report.html",
+        persist: true,
+      },
+    ],
+  },
+  pluginPane: { pane: "p2", plugin: "acme.tools", view: "report" },
+};
+
 export const PLUGIN_SCENES: readonly Scene[] = [
+  {
+    // A plugin's own page in a pane beside a terminal, while it loads: the pane has the
+    // header of any pane, called by the view's name until it is given a title, and no
+    // terminal in it.
+    name: "plugin-frame-pane",
+    window: WITH_FRAME_PANE,
+    prepare: async () => {
+      await until("the pane's frame", () => document.querySelector(".pane-plugin iframe"));
+    },
+    check: (page) => {
+      const card = page.querySelector(".pane-plugin")?.closest(".pane-card");
+      const frame = card?.querySelector<HTMLIFrameElement>(".plugin-frame iframe");
+      if (!card || !frame) return ["the pane has no frame"];
+      const problems: string[] = [];
+      if (frame.getAttribute("sandbox") !== "allow-scripts") {
+        problems.push(`the frame's sandbox is ${frame.getAttribute("sandbox")}`);
+      }
+      if (!frame.src.endsWith("/acme.tools/ui/report.html")) {
+        problems.push(`the frame shows ${frame.src}`);
+      }
+      if (card.querySelector(".pane-title")?.textContent !== "report") {
+        problems.push(`the pane is called ${card.querySelector(".pane-title")?.textContent}`);
+      }
+      if (card.querySelector(".terminal")) {
+        problems.push("a terminal is drawn in the view's pane");
+      }
+      if (page.querySelectorAll(".pane-card").length !== 2) {
+        problems.push(`there are ${page.querySelectorAll(".pane-card").length} panes`);
+      }
+      return problems;
+    },
+  },
   {
     // A plugin's own page in a panel, while it loads: the stand-in never answers it.
     name: "plugin-frame-panel",

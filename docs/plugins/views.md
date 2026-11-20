@@ -171,7 +171,8 @@ lume.views.onClose((view) => lume.log.info(`${view.view} closed`));
 await lume.views.post("changes", "refreshed", { count: 3 });
 ```
 
-A call waits for its answer for 30 seconds. Events reach a view in the order they were posted.
+A call waits for its answer for 30 seconds, not counting the time the user is being asked
+something (a prompt, a confirmation, a choice). Events reach a view in the order they were posted.
 
 A failure of the code comes back as `error`. Its `code` is one of the application's codes, or the
 name the plugin's code gave the failure when it threw a `LumeError` of its own; `data` is what the

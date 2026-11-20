@@ -228,6 +228,12 @@ export interface FakeCoreOptions {
     readonly view: string;
     readonly area: Exclude<Area, "top">;
   };
+  /** One of the fixture's panes that shows a plugin's view rather than a terminal. */
+  readonly pluginPane?: {
+    readonly pane: PaneId;
+    readonly plugin: string;
+    readonly view: string;
+  };
   /** Whether the stand-in refuses to open plugins' views, as for a plugin gone. */
   readonly refuseViews?: boolean;
   /** The settings' schema, as plugins make it. Left out, the application's own. */
@@ -295,7 +301,8 @@ function arrange(options: FakeCoreOptions): Arrangement {
   const pane = (): PaneNode => {
     panes += 1;
     const id = `p${panes}`;
-    sessions.set(id, sessionOfNumber(panes));
+    // A pane that shows a plugin's view has no session.
+    if (options.pluginPane?.pane !== id) sessions.set(id, sessionOfNumber(panes));
     return terminal(id, sessionOfNumber(panes), options.panes?.[id]);
   };
   const split = (): SplitId => {
@@ -515,7 +522,7 @@ export class FakeCore implements Carrier {
     return undefined;
   }
 
-  /** Every pane of the fixture, those of the tabs first. */
+  /** Every pane of the fixture that shows a terminal, those of the tabs first. */
   get panes(): readonly PaneId[] {
     return [...this.#fixture.sessions.keys()];
   }
@@ -569,6 +576,25 @@ export class FakeCore implements Carrier {
     return { panels, size: this.#dockSizes.get(area) ?? DOCK_SIZE, collapsed: false };
   }
 
+  /** A tab's tree, with the pane that shows a plugin's view showing it. */
+  #withView(node: Node): Node {
+    const shown = this.#options.pluginPane;
+    if (!shown) return node;
+    if (node.type === "split") {
+      return { ...node, children: node.children.map((child) => this.#withView(child)) };
+    }
+    if (node.id !== shown.pane) return node;
+    return {
+      ...node,
+      content: {
+        type: "plugin_view" as const,
+        plugin: shown.plugin,
+        view: shown.view,
+        state: null,
+      },
+    };
+  }
+
   /** The workspace as it is now. */
   #workspace(): Workspace {
     const shares = (split: SplitId): readonly number[] => this.#shares.get(split) ?? [HALF, HALF];
@@ -580,7 +606,7 @@ export class FakeCore implements Carrier {
         {
           id: tab.id,
           title: facts?.title ?? null,
-          root: tab.root(shares),
+          root: this.#withView(tab.root(shares)),
           zoomed: null,
           last_focus: tab.panes[0] ?? null,
           ...(facts?.color ? { color: facts.color } : {}),

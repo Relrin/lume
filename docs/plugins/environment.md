@@ -46,8 +46,11 @@ Calls the code makes during a turn are handed to Lume when the turn is over, so 
 runs in the middle of the code's work. What a turn shows appears together: see
 [Performance](performance.md#one-turn-is-one-step).
 
-The code has 10 seconds to start, and 30 seconds to carry out a command or answer a service call.
-After that the command fails as timed out.
+The code has 10 seconds to start, and 30 seconds to carry out a command or answer a call of a view
+or of a service. After that the command or the call fails as timed out. The time the user is being
+asked something is not counted: a prompt for a permission, the approval of a use, a `ui.confirm` or
+a `ui.pick`. So a handler may ask first and then do its work. Work that is slow by itself, like
+talking to a server, should answer at once and say how it went with an event.
 
 ## The parts of `lume` that are not plain calls
 

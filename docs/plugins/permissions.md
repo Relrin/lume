@@ -352,7 +352,8 @@ const answer = await lume.services.call("acme.provider", "double", { n: 21 });
 - The plugin is named by the id its manifest gives it.
 - The arguments and the answer are JSON.
 - The offering plugin is started to answer, if it is not running.
-- The handler may be `async`. It has 30 seconds.
+- The handler may be `async`. It has 30 seconds, not counting the time the user is being asked
+  something.
 - The call fails as `denied` without `services.use` over that plugin, and as `not_found` when the
   plugin is not installed, cannot be used, or declares no such service.
 

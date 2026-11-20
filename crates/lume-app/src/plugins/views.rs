@@ -704,13 +704,13 @@ impl Plugins {
             .insert(invocation, (local.clone(), generation, sender));
         let from = serde_json::to_value(described(window, page, &open)).unwrap_or(Value::Null);
         plugin.view_call(invocation, name, args, from);
-        match tokio::time::timeout(COMMAND_WAIT, receiver).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(api_error(
+        match self.asked.within(COMMAND_WAIT, receiver).await {
+            Some(Ok(result)) => result,
+            Some(Err(_)) => Err(api_error(
                 ErrorCode::Stopped,
                 format!("{local} stopped while it answered {name}"),
             )),
-            Err(_) => {
+            None => {
                 self.inner().invocations.remove(&invocation);
                 Err(api_error(
                     ErrorCode::TimedOut,

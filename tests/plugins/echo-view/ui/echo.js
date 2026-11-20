@@ -11,6 +11,10 @@ const waiting = new Map();
 const listeners = new Map();
 const lines = [];
 
+// The look the window last gave this page: light or dark, and the colour behind it.
+let look = null;
+const lookOf = (given) => `${given.scheme} ${given.tokens?.["--lume-color-surface"] ?? "none"}`;
+
 function post(message, transfer) {
   port.postMessage(message, transfer ?? []);
 }
@@ -232,6 +236,7 @@ window.addEventListener("message", (event) => {
     return;
   hello = event.data;
   port = event.ports[0];
+  look = lookOf(hello);
   port.onmessage = (message) => {
     const data = message.data;
     if (data.t === "event") {
@@ -240,6 +245,16 @@ window.addEventListener("message", (event) => {
     }
     if (data.t === "focus") {
       document.getElementById("field").focus();
+      return;
+    }
+    if (data.t === "tokens") {
+      // The window's look changed: said once for each look, with where it was seen.
+      const now = lookOf(data);
+      if (now !== look) {
+        look = now;
+        say(`look ${hello.place} ${now}`);
+        report();
+      }
       return;
     }
     const found = waiting.get(data.id);

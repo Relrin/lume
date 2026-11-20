@@ -504,13 +504,13 @@ impl Plugins {
             .invocations
             .insert(invocation, (bound.clone(), generation, sender));
         plugin.service(invocation, &asked.name, asked.args.unwrap_or(Value::Null));
-        match tokio::time::timeout(COMMAND_WAIT, receiver).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(api_error(
+        match self.asked.within(COMMAND_WAIT, receiver).await {
+            Some(Ok(result)) => result,
+            Some(Err(_)) => Err(api_error(
                 ErrorCode::Stopped,
                 format!("{bound} stopped while it served {}", asked.name),
             )),
-            Err(_) => {
+            None => {
                 self.inner().invocations.remove(&invocation);
                 Err(api_error(
                     ErrorCode::TimedOut,
