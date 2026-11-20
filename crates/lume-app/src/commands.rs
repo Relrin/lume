@@ -53,18 +53,22 @@ pub struct WebviewInfo {
     update: bool,
 }
 
-// Run beside the main thread, which the windows need while they start.
-#[tauri::command(async)]
-pub fn webview_info(args: State<'_, Args>) -> WebviewInfo {
-    let engine = if cfg!(windows) {
+/// The webview this platform gives the application.
+fn webview_engine() -> &'static str {
+    if cfg!(windows) {
         "WebView2"
     } else if cfg!(target_os = "macos") {
         "WKWebView"
     } else {
         "WebKitGTK"
-    };
+    }
+}
+
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
+pub fn webview_info(args: State<'_, Args>) -> WebviewInfo {
     WebviewInfo {
-        engine,
+        engine: webview_engine(),
         version: tauri::webview_version().ok(),
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
@@ -76,6 +80,67 @@ pub fn webview_info(args: State<'_, Args>) -> WebviewInfo {
         },
         update: args.update,
     }
+}
+
+/// The session host, as the page that says what the application is shows it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AboutHost {
+    /// The version the host said it is when the application connected to it.
+    version: String,
+    /// The version of the protocol the two agreed on.
+    proto: u32,
+    /// Whether the host runs on its own, as opposed to inside the application.
+    daemon: bool,
+    connected: bool,
+}
+
+/// What the application is, for the page that says so and for a report of a fault.
+///
+/// Everything here is a version, or a word for a kind of thing. Nothing names the
+/// machine, the user, a host, a folder or a session, so the whole of it can be put in
+/// a report that is passed on.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AboutInfo {
+    app_version: &'static str,
+    os: &'static str,
+    arch: &'static str,
+    /// `WebView2`, `WKWebView` or `WebKitGTK`.
+    engine: &'static str,
+    /// The engine's version as the platform reports it, if it can be read.
+    engine_version: Option<String>,
+    /// The version of the protocol the application speaks to a session host.
+    proto: u32,
+    /// The session host in use, if the application has one.
+    host: Option<AboutHost>,
+    /// The version of the Rex server installed on this machine, if one is.
+    rex_version: Option<String>,
+}
+
+/// What the application is: its version and its parts', and the version of the Rex
+/// server on this machine if one is installed.
+#[tauri::command]
+pub async fn about_info(state: App<'_>) -> Result<AboutInfo, CommandError> {
+    let host = state.locals().first().map(|local| {
+        let hello = local.hello();
+        AboutHost {
+            version: hello.version,
+            proto: hello.proto,
+            daemon: local.is_daemon(),
+            connected: local.is_connected(),
+        }
+    });
+    Ok(AboutInfo {
+        app_version: env!("CARGO_PKG_VERSION"),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        engine: webview_engine(),
+        engine_version: tauri::webview_version().ok(),
+        proto: lume_proto::PROTO_VERSION,
+        host,
+        rex_version: crate::rex::version().await,
+    })
 }
 
 /// Called once by a page when it has drawn its first output, with the steps of its start

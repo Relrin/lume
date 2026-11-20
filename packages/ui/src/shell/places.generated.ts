@@ -114,9 +114,11 @@ export const BUILTIN_PLACES: Readonly<Record<(typeof MENUS)[number], readonly Bu
   ],
   "menu.app.help": [
     { key: "about", kind: "section", children: [
+      { key: "about-lume", kind: "item", children: [] },
       { key: "whats-new", kind: "item", children: [] },
     ] },
     { key: "support", kind: "section", children: [
+      { key: "commands", kind: "item", children: [] },
       { key: "report-issue", kind: "item", children: [] },
       { key: "show-logs", kind: "item", children: [] },
     ] },
@@ -152,6 +154,7 @@ export const BUILTIN_PLACES: Readonly<Record<(typeof MENUS)[number], readonly Bu
       { key: "move-into", kind: "item", children: [] },
     ] },
     { key: "closing", kind: "section", children: [
+      { key: "mute", kind: "item", children: [] },
       { key: "lock", kind: "item", children: [] },
       { key: "close-left", kind: "item", children: [] },
       { key: "close-right", kind: "item", children: [] },

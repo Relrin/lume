@@ -55,6 +55,7 @@ mod plugin_scheme;
 mod plugins;
 mod profiles;
 mod registry;
+mod rex;
 mod services;
 mod sessions;
 mod state;
@@ -425,6 +426,7 @@ fn main() -> ExitCode {
     if let Some(terminals) = &terminals {
         host::tell_of_an_older_host(&state, &terminals.panes);
     }
+    host::watch_link(&state);
     let config = terminals
         .as_ref()
         .map(|terminals| Arc::clone(&terminals.config));
@@ -439,6 +441,7 @@ fn main() -> ExitCode {
     let handler = commands_of(tauri::generate_handler![
         frame_token::frame_token,
         commands::webview_info,
+        commands::about_info,
         commands::probe_done,
         commands::carrier_open,
         commands::carrier_send,

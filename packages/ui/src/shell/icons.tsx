@@ -41,6 +41,11 @@ export function LockIcon({ size = 12 }: { size?: number }) {
   return <Glyph name="lock" size={size} weight={1.9} />;
 }
 
+/** A bell struck through: a tab or a group that does not ask for attention. */
+export function BellOffIcon({ size = 12 }: { size?: number }) {
+  return <Glyph name="bell-off" size={size} weight={1.9} />;
+}
+
 /** A shell's prompt: what a terminal is. */
 export function TerminalIcon({ size = 13 }: { size?: number }) {
   return <Glyph name="terminal" size={size} />;

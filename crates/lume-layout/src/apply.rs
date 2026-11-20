@@ -521,6 +521,7 @@ fn open_tab(
             last_focus: Some(pane_id),
             color: None,
             locked: false,
+            muted: false,
             group: None,
         },
     );
@@ -947,6 +948,10 @@ fn change(
             let (window, index) = tab_index(workspace, tab)?;
             workspace.windows[window].centre.tabs[index].locked = on;
         }
+        Intent::TabMute { tab, on } => {
+            let (window, index) = tab_index(workspace, tab)?;
+            workspace.windows[window].centre.tabs[index].muted = on;
+        }
         Intent::TabMerge { tab, into } => {
             if tab == into {
                 return Err(IntentError::SameTab(tab));
@@ -1029,6 +1034,7 @@ fn change(
                 icon: None,
                 collapsed: false,
                 kept: false,
+                muted: false,
             });
             centre.tabs[index].group = Some(id);
             created.group = Some(id);
@@ -1040,6 +1046,7 @@ fn change(
             icon,
             collapsed,
             kept,
+            muted,
         } => {
             let window = group_window(workspace, group)?;
             let window = &mut workspace.windows[window];
@@ -1081,6 +1088,9 @@ fn change(
             }
             if let Some(kept) = kept {
                 found.kept = kept;
+            }
+            if let Some(muted) = muted {
+                found.muted = muted;
             }
         }
         Intent::GroupMove { group, index } => {

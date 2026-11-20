@@ -38,11 +38,14 @@ pub enum LayoutChange {
     },
     /// A tab was named, or lost its name.
     TabTitle { tab: TabId, title: Option<String> },
-    /// A tab's colour, its lock, or the group it is in changed.
+    /// A tab's colour, its lock, whether it is muted, or the group it is in changed.
     TabState {
         tab: TabId,
         color: Option<TabColor>,
         locked: bool,
+        /// Left out while the tab is not muted.
+        #[serde(default, skip_serializing_if = "crate::model::is_false")]
+        muted: bool,
         group: Option<GroupId>,
     },
     /// The groups of a window's tabs changed: which there are, their order, or how

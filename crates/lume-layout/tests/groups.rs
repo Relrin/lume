@@ -70,6 +70,7 @@ fn a_tab_is_given_a_colour_and_locked() {
             tab,
             color: Some(TabColor::Teal),
             locked: false,
+            muted: false,
             group: None,
         }]
     );
@@ -321,6 +322,7 @@ fn the_tab_on_show_is_never_folded_away() {
             icon: None,
             collapsed: Some(true),
             kept: None,
+            muted: None,
         },
     );
     assert_eq!(active(&workspace, window), Some(fourth));
@@ -343,6 +345,7 @@ fn the_tab_on_show_is_never_folded_away() {
         icon: None,
         collapsed: Some(true),
         kept: None,
+        muted: None,
     };
     assert_eq!(
         refused(&mut workspace, fold),
@@ -361,6 +364,7 @@ fn a_group_is_named_coloured_and_given_a_picture() {
         icon,
         collapsed: None,
         kept: Some(true),
+        muted: None,
     };
     must(
         &mut workspace,
@@ -499,6 +503,7 @@ fn a_kept_group_is_put_away_and_opened_again_with_new_sessions() {
             icon: None,
             collapsed: None,
             kept: Some(true),
+            muted: None,
         },
     );
 

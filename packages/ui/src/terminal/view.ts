@@ -432,7 +432,7 @@ export class TerminalView implements FrameView {
     document.addEventListener("visibilitychange", visibility);
     this.#stopListening.push(() => document.removeEventListener("visibilitychange", visibility));
 
-    const observer = new ResizeObserver(() => this.#measure());
+    const observer = new ResizeObserver(() => this.#measure(true));
     observer.observe(root);
     this.#stopListening.push(() => observer.disconnect());
     this.#watchPixelRatio();
@@ -681,16 +681,28 @@ export class TerminalView implements FrameView {
     this.#measure();
   }
 
-  #measure(): void {
+  /**
+   * Takes the size of the view's element. With `now`, a view that changed size is drawn
+   * before this returns: asked for by whoever is called between the page's layout and
+   * its painting, so that the picture is painted at its new size together with the
+   * element. Drawn a frame later, it would trail the pane's edge while a window is
+   * dragged to another size.
+   */
+  #measure(now = false): void {
     const elements = this.#elements;
     const renderer = this.#renderer;
     if (!elements || !renderer) return;
     const size = { width: elements.root.clientWidth, height: elements.root.clientHeight };
     if (size.width === 0 || size.height === 0) return;
+    const dpr = window.devicePixelRatio;
+    const resized =
+      size.width !== this.#cssSize.width ||
+      size.height !== this.#cssSize.height ||
+      dpr !== this.#dpr;
     this.#cssSize = size;
-    this.#dpr = window.devicePixelRatio;
+    this.#dpr = dpr;
     // The picture follows the element at once. The grid follows when the session has
-    // answered, so until then the old grid is drawn in the new space.
+    // answered, so until then the old grid is drawn in the new space, at its own size.
     renderer.resize(size, this.#dpr);
     this.#remeasured = true;
     // Another grid fits now: the window or the font changed, and that is the newer wish.
@@ -699,6 +711,7 @@ export class TerminalView implements FrameView {
     this.#scheduleReport();
     this.#markDirty();
     for (const resolve of this.#measured.splice(0)) resolve();
+    if (now && resized && this.needsFrame()) this.frame();
   }
 
   /**
@@ -713,7 +726,7 @@ export class TerminalView implements FrameView {
       const changed = () => {
         stop();
         if (stopped) return;
-        this.#measure();
+        this.#measure(true);
         arm();
       };
       query.addEventListener("change", changed);

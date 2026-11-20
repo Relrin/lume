@@ -206,6 +206,14 @@ export function TabMenu({
       choose: () => setStep("move"),
     },
     {
+      // The tab's own mute. Its group's is in the group's editor.
+      key: "mute",
+      label: entry.muted ? "Unmute tab" : "Mute tab",
+      icon: <MenuGlyph name={entry.muted ? "bell" : "bell-off"} />,
+      hint: hint("lume.tab.mute"),
+      choose: () => run("lume.tab.mute"),
+    },
+    {
       key: "lock",
       label: entry.locked ? "Unlock session" : "Lock session",
       icon: <MenuGlyph name="lock" />,

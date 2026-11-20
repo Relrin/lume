@@ -189,9 +189,11 @@ export class PlainFollower {
         // Left out when they say nothing, as the core writes a tab.
         delete tab.color;
         delete tab.locked;
+        delete tab.muted;
         delete tab.group;
         if (change.color !== null) tab.color = change.color;
         if (change.locked) tab.locked = true;
+        if (change.muted) tab.muted = true;
         if (change.group !== null) tab.group = change.group;
         return;
       }

@@ -54,6 +54,14 @@
                 }
               },
               {
+                "role": "button",
+                "name": "Commands"
+              },
+              {
+                "role": "button",
+                "name": "About"
+              },
+              {
                 "role": "heading",
                 "name": "Add-ons"
               },

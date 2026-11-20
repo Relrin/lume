@@ -37,9 +37,11 @@ import { roveWithin } from "../shell/roving.ts";
 import { WindowButtons } from "../shell/WindowControls.tsx";
 import { currentPlatform, KeyLayout } from "../terminal/keyboard.ts";
 import { TRAFFIC_LIGHTS_INSET_PX } from "../tuning.ts";
+import { AboutPage } from "./About.tsx";
 import { withAddons } from "./addons.ts";
 import { AddonSections, AddonsManager } from "./Addons.tsx";
 import type { SettingsApp } from "./boot.ts";
+import { CommandsPage } from "./Commands.tsx";
 import {
   searchSettings,
   settingsPages,
@@ -47,6 +49,7 @@ import {
   type SettingsPage,
   type SettingWrite,
 } from "./model.ts";
+import { withOwnPages } from "./own-pages.ts";
 import { allPages, navOf } from "./registry.ts";
 import { Button, Row } from "./rows.tsx";
 
@@ -76,6 +79,10 @@ function PageIcon({ name, image }: { name: string; image?: string | undefined })
       return <TerminalIcon size={15} />;
     case "plugin":
       return <Glyph name="puzzle" size={15} />;
+    case "commands":
+      return <Glyph name="list" size={15} />;
+    case "about":
+      return <Glyph name="info" size={15} />;
     default:
       return <CollapseIcon size={15} />;
   }
@@ -161,7 +168,9 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
   );
   const pages = useMemo(
     () =>
-      view ? withAddons(allPages(settingsPages(schema, view, lists), registered), addons) : [],
+      view
+        ? withAddons(allPages(withOwnPages(settingsPages(schema, view, lists)), registered), addons)
+        : [],
     [schema, view, lists, registered, addons],
   );
   const nav = useMemo(() => navOf(pages), [pages]);
@@ -359,6 +368,8 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
                             {group.rows.map((row) => rowOf(row))}
                           </Group>
                         ))}
+                      {current.own === "commands" && <CommandsPage app={app} />}
+                      {current.own === "about" && <AboutPage app={app} />}
                       {current.manage === true && <AddonsManager app={app} />}
                       {current.addon !== undefined && (
                         <AddonSections app={app} id={current.addon} />

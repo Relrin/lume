@@ -73,6 +73,7 @@ import { createWindowStateStore, type WindowStateStore } from "../window/state.t
 import { closeRequested, confirmRequested, mayRun } from "./closing.ts";
 import { describeTabNow, paneFacts } from "./describing.ts";
 import { focusBar } from "./focus-bar.ts";
+import { createHostLinkStore, type HostLinkStore } from "./host-link.ts";
 import { NoticeStore, sentence } from "./notices.ts";
 import { createTabUiStore, type TabUiStore } from "./tab-ui.ts";
 
@@ -117,6 +118,8 @@ export interface ShellApp {
   readonly expandRow: (panel: string, path: readonly string[]) => Promise<void>;
   /** What the window is doing on the desktop. */
   readonly windowState: WindowStateStore;
+  /** Whether the session host is connected. */
+  readonly hostLink: HostLinkStore;
   /** Moves cards about the window by their headers. */
   readonly cardDrag: CardDrag;
   /** The panel that is being dragged to another side of the window, if one is. */
@@ -210,6 +213,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   const status = createStatusStore();
   const plugins = createPluginsStore();
   const windowState = createWindowStateStore();
+  const hostLink = createHostLinkStore();
   // The user looks at the pane that has the keyboard, while the window is the one in use.
   const attended = (pane: PaneId): boolean => {
     const state = layout.getState();
@@ -282,6 +286,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   commandStore.getState().set(commandList);
   applyConfig(configView);
   const machine = layoutView.machine ?? UNKNOWN_MACHINE;
+  hostLink.getState().set(layoutView.host?.connected ?? true);
   made.client = client;
   // Looking at the machine takes the core a moment; nothing waits for it.
   client.profilesList().then(
@@ -567,6 +572,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       case "notice":
         notices.push(notice.level, notice.message, notice.action);
         break;
+      case "host_link":
+        hostLink.getState().set(notice.connected);
+        break;
       case "contributions_changed":
         contributionsAnnounced = Math.max(contributionsAnnounced, notice.revision);
         if (notice.revision > contributionsRevision) fetchContributions();
@@ -816,6 +824,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     visible,
     expandRow: (panel, path) => client.uiPanelExpand(panel, path),
     windowState,
+    hostLink,
     cardDrag,
     panelDrag,
     search,

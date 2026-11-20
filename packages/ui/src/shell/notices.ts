@@ -6,6 +6,12 @@
  * A notice is shown beside the user's work, not over it, and goes by itself after a
  * while. The text of a notice may come from a program or a file, so it is only ever
  * shown as text.
+ *
+ * What shows the notices is the page's toaster (see `Notices.tsx`), which keeps them
+ * in a stack and takes each away when its time is up. This holds only what was said
+ * before there was a toaster to show it, and names each notice by what it says, so a
+ * fault that repeats is one notice and not a window full of them. Nothing here touches
+ * the page, so it is tested with plain functions.
  */
 
 import type { NoticeAction } from "../core/types.ts";
@@ -14,14 +20,25 @@ import { NOTICE_INFO_MS, NOTICE_PROBLEM_MS, NOTICES_MAX } from "../tuning.ts";
 /** How much a notice matters. */
 export type NoticeLevel = "info" | "warning" | "error";
 
-/** One notice on show. */
+/** One notice, as it is handed over to be shown. */
 export interface ShownNotice {
-  /** Tells the notices of one store apart. */
-  readonly id: number;
+  /**
+   * Tells the notices of a page apart by what they say: a notice shown again under the
+   * key of one on show takes that one's place.
+   */
+  readonly key: string;
   readonly level: NoticeLevel;
   readonly message: string;
   /** What the user may do about it, as a button beside the message. */
   readonly action?: NoticeAction;
+  /** How long it stays before it goes by itself, in milliseconds. */
+  readonly stays: number;
+}
+
+/** What shows the notices: the page's toaster. */
+export interface NoticeSurface {
+  show(notice: ShownNotice): void;
+  hide(key: string): void;
 }
 
 /**
@@ -32,73 +49,53 @@ export function sentence(message: string): string {
   return message.charAt(0).toUpperCase() + message.slice(1);
 }
 
-/** No notices: the list a store holds while it shows none. */
-const NONE: readonly ShownNotice[] = [];
+/** The key of a notice: what tells it from one that says something else. */
+export function noticeKey(level: NoticeLevel, message: string, action?: NoticeAction): string {
+  return [level, action?.command ?? "", message].join("\u0000");
+}
 
-/** Holds the notices on show, oldest first, and takes each away when its time is up. */
+/** Hands the page's notices to what shows them, keeping the early ones until it can. */
 export class NoticeStore {
-  #shown: readonly ShownNotice[] = NONE;
-  #next = 1;
-  readonly #timers = new Map<number, ReturnType<typeof setTimeout>>();
-  readonly #listeners = new Set<() => void>();
-
-  /** The notices on show. The same list until it changes. */
-  readonly current = (): readonly ShownNotice[] => this.#shown;
-
-  /** Calls `listener` whenever the notices on show change. Returns how to stop. */
-  readonly subscribe = (listener: () => void): (() => void) => {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  };
+  #surface: NoticeSurface | null = null;
+  /** What was said before anything could show it, oldest first. */
+  #waiting: ShownNotice[] = [];
 
   /**
-   * Shows a notice. One that says what a notice on show already says only renews
-   * that notice's time, so a fault that repeats does not fill the window.
+   * Shows a notice. One that says what a notice on show already says takes that
+   * notice's place, so a fault that repeats does not fill the window.
    */
   push(level: NoticeLevel, message: string, action?: NoticeAction): void {
-    const same = this.#shown.find((held) => held.level === level && held.message === message);
-    if (same && same.action?.command === action?.command) {
-      this.#arm(same);
-      return;
-    }
+    const key = noticeKey(level, message, action);
+    const stays = level === "info" ? NOTICE_INFO_MS : NOTICE_PROBLEM_MS;
     const notice: ShownNotice =
       action === undefined
-        ? { id: this.#next++, level, message }
-        : { id: this.#next++, level, message, action };
-    const kept = this.#shown.slice(-(NOTICES_MAX - 1));
-    for (const dropped of this.#shown) {
-      if (!kept.includes(dropped)) this.#disarm(dropped.id);
+        ? { key, level, message, stays }
+        : { key, level, message, action, stays };
+    if (this.#surface) {
+      this.#surface.show(notice);
+      return;
     }
-    this.#shown = [...kept, notice];
-    this.#arm(notice);
-    this.#changed();
+    const others = this.#waiting.filter((held) => held.key !== key);
+    this.#waiting = [...others, notice].slice(-NOTICES_MAX);
   }
 
-  /** Takes a notice away. */
-  dismiss(id: number): void {
-    if (!this.#shown.some((held) => held.id === id)) return;
-    this.#disarm(id);
-    const left = this.#shown.filter((held) => held.id !== id);
-    this.#shown = left.length === 0 ? NONE : left;
-    this.#changed();
+  /** Takes a notice away, by its key. */
+  dismiss(key: string): void {
+    this.#waiting = this.#waiting.filter((held) => held.key !== key);
+    this.#surface?.hide(key);
   }
 
-  #arm(notice: ShownNotice): void {
-    this.#disarm(notice.id);
-    const stays = notice.level === "info" ? NOTICE_INFO_MS : NOTICE_PROBLEM_MS;
-    this.#timers.set(
-      notice.id,
-      setTimeout(() => this.dismiss(notice.id), stays),
-    );
-  }
-
-  #disarm(id: number): void {
-    const timer = this.#timers.get(id);
-    if (timer !== undefined) clearTimeout(timer);
-    this.#timers.delete(id);
-  }
-
-  #changed(): void {
-    for (const listener of [...this.#listeners]) listener();
+  /**
+   * Says what shows the notices from now on, and hands it the ones that waited.
+   * Returns how to take it away again.
+   */
+  connect(surface: NoticeSurface): () => void {
+    this.#surface = surface;
+    const waited = this.#waiting;
+    this.#waiting = [];
+    for (const notice of waited) surface.show(notice);
+    return () => {
+      if (this.#surface === surface) this.#surface = null;
+    };
   }
 }
