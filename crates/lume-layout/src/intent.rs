@@ -116,6 +116,9 @@ pub enum Intent {
     },
     /// Locks a tab against being closed, or unlocks it.
     TabLock { tab: TabId, on: bool },
+    /// Mutes a tab, so that what runs in it does not ask for attention, or lets it
+    /// ask again.
+    TabMute { tab: TabId, on: bool },
     /// Moves the panes of a tab into another tab of its window, beside that tab's
     /// panes, and closes the tab.
     TabMerge { tab: TabId, into: TabId },
@@ -130,7 +133,7 @@ pub enum Intent {
     /// Gathers a tab into a new group of its own, taking it out of any other.
     GroupNew { tab: TabId },
     /// Changes what a group is called and how it looks, folds or opens it, or sets
-    /// whether it is kept. What is left out stays as it is; a name or an icon given as
+    /// whether it is kept or muted. What is left out stays as it is; a name or an icon given as
     /// null is taken away. Folding the group that holds the tab on show first shows
     /// the nearest tab outside it.
     GroupSet {
@@ -153,6 +156,8 @@ pub enum Intent {
         collapsed: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kept: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        muted: Option<bool>,
     },
     /// Moves a group's tabs together to another place among the window's tabs:
     /// `index` is where its first tab goes among the tabs that are not in it. A group

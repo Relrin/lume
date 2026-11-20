@@ -21,6 +21,7 @@ use crate::carrier::SessionKey;
 use crate::error::CommandError;
 use crate::panes::Panes;
 use crate::state::AppState;
+use crate::tuning::HOST_LINK_POLL;
 use crate::window::label_of;
 
 /// How long ending every session may take before the application goes on regardless.
@@ -89,6 +90,38 @@ pub fn tell_of_an_older_host(state: &AppState, panes: &Panes) {
             Some(json!({ "label": "Restart", "command": RESTART_COMMAND })),
         );
     }
+}
+
+/// Whether every session host is connected. A host inside the application always is.
+pub fn link_up(state: &AppState) -> bool {
+    state.locals().iter().all(|local| local.is_connected())
+}
+
+/// Tells the pages whenever the connection to the session host is lost or made again,
+/// for as long as the application runs. A page that starts later reads how things
+/// stand with its layout.
+///
+/// Nothing is done about a lost connection here: it is made again when the host is
+/// next used, and making it starts a host that has gone, which is not this watcher's
+/// to decide while the application may be closing.
+pub fn watch_link(state: &Arc<AppState>) {
+    let watched = Arc::downgrade(state);
+    state.runtime().spawn(async move {
+        let mut last = true;
+        loop {
+            tokio::time::sleep(HOST_LINK_POLL).await;
+            let Some(state) = watched.upgrade() else {
+                return;
+            };
+            let connected = link_up(&state);
+            if connected == last {
+                continue;
+            }
+            last = connected;
+            tracing::info!(connected, "the connection to the session host changed");
+            state.broadcast(&json!({ "type": "host_link", "connected": connected }));
+        }
+    });
 }
 
 /// The sessions of the local backends that no pane of any workspace names and no page

@@ -89,6 +89,8 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
   #lost: string | undefined;
   /** Whether a tier before the one in use may have become available. */
   #upgrade = false;
+  /** The canvas in use is still laid out at the size it had before the last `resize`. */
+  #laidOutStale = false;
   #disposed = false;
 
   constructor(
@@ -128,7 +130,10 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
   resize(px: Size, dpr: number): void {
     this.#size = { width: px.width, height: px.height };
     this.#dpr = dpr;
-    this.#surface.setCssSize(this.#canvas, this.#size);
+    // The canvas is laid out anew when the next frame is drawn, together with its
+    // pixels. Laid out at the new size while it still holds the old picture, it would
+    // show that picture stretched: text of another size than the one asked for.
+    this.#laidOutStale = true;
     this.#inner.resize(px, dpr);
   }
 
@@ -195,6 +200,7 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
     if (this.#lost === undefined) {
       try {
         this.#inner.draw(frame);
+        if (this.#laidOutStale) this.#layOut(this.#canvas);
         return;
       } catch (error) {
         // A tier that throws while drawing is as lost as one that says so.
@@ -209,6 +215,20 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
     this.#disposed = true;
     this.#inner.dispose();
     this.#surface.remove(this.#canvas);
+  }
+
+  /**
+   * Lays a canvas out at the size its pixels were last drawn for. One pixel of the
+   * canvas is one pixel of the screen: the size is that of its whole device pixels, which
+   * at a fractional pixel ratio is not quite the size it was told in CSS pixels.
+   */
+  #layOut(canvas: Canvas): void {
+    const dpr = this.#dpr;
+    this.#surface.setCssSize(canvas, {
+      width: Math.max(0, Math.round(this.#size.width * dpr)) / dpr,
+      height: Math.max(0, Math.round(this.#size.height * dpr)) / dpr,
+    });
+    if (canvas === this.#canvas) this.#laidOutStale = false;
   }
 
   /**
@@ -241,7 +261,8 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
       inner.setHighlights(this.#highlights);
       inner.setCentred(this.#centred);
       if (this.#size.width > 0 && this.#size.height > 0) {
-        this.#surface.setCssSize(canvas, this.#size);
+        // Not on show yet: it is drawn on before it is.
+        this.#layOut(canvas);
         inner.resize(this.#size, this.#dpr);
       }
       return { inner, canvas, index };
@@ -286,6 +307,8 @@ export class ManagedRenderer<Canvas> implements CellRenderer {
     this.#canvas = next.canvas;
     this.#index = next.index;
     this.#lost = undefined;
+    // The new canvas was laid out at the current size when it was made.
+    this.#laidOutStale = false;
     this.#surface.show(next.canvas);
     old.inner.dispose();
     this.#surface.remove(old.canvas);

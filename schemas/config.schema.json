@@ -2159,6 +2159,7 @@
       "default": {
         "close-on-exit": "clean",
         "confirm-close": "never",
+        "copy-on-select": false,
         "cursor-blink": true,
         "cursor-effect-length": 1.0,
         "cursor-pulse": "none",
@@ -2250,6 +2251,19 @@
               }
             ],
             "order": 20,
+            "page": "terminal"
+          }
+        },
+        "copy-on-select": {
+          "default": false,
+          "description": "Copy text to the clipboard as soon as it is selected with the pointer.",
+          "type": "boolean",
+          "x-lume-settings": {
+            "control": "switch",
+            "group": "Clipboard",
+            "help": "Text selected with the pointer is copied at once, with no key pressed",
+            "label": "Copy on select",
+            "order": 10,
             "page": "terminal"
           }
         },
@@ -2871,6 +2885,7 @@
       "groups": [
         "New terminals",
         "Cursor",
+        "Clipboard",
         "History",
         "Buffer",
         "Closing"

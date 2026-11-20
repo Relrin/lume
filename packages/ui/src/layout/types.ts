@@ -145,6 +145,8 @@ export interface Tab {
   readonly color?: TabColor;
   /** Locked against being closed. Left out when not. */
   readonly locked?: boolean;
+  /** Muted: what runs in it does not ask for attention. Left out when not. */
+  readonly muted?: boolean;
   /** The group the tab is in. Left out when none. */
   readonly group?: GroupId;
 }
@@ -191,6 +193,8 @@ export interface Group {
   readonly collapsed?: boolean;
   /** Put away when closed, to be opened again, instead of being forgotten. */
   readonly kept?: boolean;
+  /** Muted: none of its tabs asks for attention, whatever each says of itself. */
+  readonly muted?: boolean;
 }
 
 /** A kept group that was closed, with its tabs as they were. */
@@ -361,6 +365,7 @@ export type Intent =
     }
   | { readonly type: "tab_color"; readonly tab: TabId; readonly color?: TabColor | null }
   | { readonly type: "tab_lock"; readonly tab: TabId; readonly on: boolean }
+  | { readonly type: "tab_mute"; readonly tab: TabId; readonly on: boolean }
   | { readonly type: "tab_merge"; readonly tab: TabId; readonly into: TabId }
   | { readonly type: "tab_rename"; readonly tab: TabId; readonly title?: string | null }
   | { readonly type: "tab_activate"; readonly target: TabTarget }
@@ -375,6 +380,7 @@ export type Intent =
       readonly icon?: GroupIcon | null;
       readonly collapsed?: boolean;
       readonly kept?: boolean;
+      readonly muted?: boolean;
     }
   | { readonly type: "group_move"; readonly group: GroupId; readonly index: number }
   | { readonly type: "group_ungroup"; readonly group: GroupId }
@@ -456,6 +462,8 @@ export type LayoutChange =
       readonly tab: TabId;
       readonly color: TabColor | null;
       readonly locked: boolean;
+      /** Left out while the tab is not muted. */
+      readonly muted?: boolean;
       readonly group: GroupId | null;
     }
   | { readonly type: "groups"; readonly window: WindowId; readonly groups: readonly Group[] }

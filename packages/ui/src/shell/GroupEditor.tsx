@@ -327,6 +327,13 @@ export function GroupEditor({
             pressed={entry.kept === true}
             onChoose={() => run("lume.group.set", { kept: !entry.kept })}
           />
+          <Row
+            glyph={entry.muted ? "bell-off" : "bell"}
+            label="Mute group"
+            hint={entry.muted ? "On" : "Off"}
+            pressed={entry.muted === true}
+            onChoose={() => run("lume.group.mute")}
+          />
           <div className="menu-separator" role="separator" />
           <Row
             glyph="ungroup"

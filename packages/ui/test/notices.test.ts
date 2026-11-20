@@ -1,94 +1,94 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { NoticeStore } from "../src/shell/notices.ts";
+import { noticeKey, NoticeStore, type ShownNotice } from "../src/shell/notices.ts";
 import { NOTICE_INFO_MS, NOTICE_PROBLEM_MS, NOTICES_MAX } from "../src/tuning.ts";
 import { createWindowStateStore } from "../src/window/state.ts";
 
+/** Something that shows notices, and what it was handed. */
+function surface() {
+  const shown: ShownNotice[] = [];
+  const hidden: string[] = [];
+  const messages = () => shown.map((notice) => notice.message);
+  return {
+    shown,
+    hidden,
+    messages,
+    show: (notice: ShownNotice) => void shown.push(notice),
+    hide: (key: string) => void hidden.push(key),
+  };
+}
+
 describe("the window's notices", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  const messages = (store: NoticeStore) => store.current().map((notice) => notice.message);
-
-  it("shows a notice and tells whoever listens", () => {
+  it("hands a notice to what shows them, with how long it stays", () => {
     const store = new NoticeStore();
-    let told = 0;
-    const stop = store.subscribe(() => (told += 1));
-    store.push("info", "saved");
-    expect(store.current()).toMatchObject([{ level: "info", message: "saved" }]);
-    expect(told).toBe(1);
-    stop();
-    store.push("info", "again");
-    expect(told).toBe(1);
-  });
-
-  it("takes a notice away after a while, a problem later than a piece of news", () => {
-    const store = new NoticeStore();
+    const toaster = surface();
+    store.connect(toaster);
     store.push("info", "saved");
     store.push("error", "could not save");
-    vi.advanceTimersByTime(NOTICE_INFO_MS - 1);
-    expect(messages(store)).toEqual(["saved", "could not save"]);
-    vi.advanceTimersByTime(1);
-    expect(messages(store)).toEqual(["could not save"]);
-    vi.advanceTimersByTime(NOTICE_PROBLEM_MS - NOTICE_INFO_MS);
-    expect(messages(store)).toEqual([]);
+    expect(toaster.shown).toMatchObject([
+      { level: "info", message: "saved", stays: NOTICE_INFO_MS },
+      { level: "error", message: "could not save", stays: NOTICE_PROBLEM_MS },
+    ]);
   });
 
-  it("renews a notice that is said again instead of showing it twice", () => {
+  it("keeps what is said before anything can show it, and hands it over then", () => {
     const store = new NoticeStore();
-    store.push("warning", "the pane is too small");
-    const [first] = store.current();
-    vi.advanceTimersByTime(NOTICE_PROBLEM_MS - 100);
-    store.push("warning", "the pane is too small");
-    expect(store.current()).toEqual([first]);
-    vi.advanceTimersByTime(NOTICE_PROBLEM_MS - 100);
-    expect(messages(store)).toEqual(["the pane is too small"]);
-    vi.advanceTimersByTime(100);
-    expect(messages(store)).toEqual([]);
+    store.push("warning", "early");
+    store.push("info", "also early");
+    const toaster = surface();
+    store.connect(toaster);
+    expect(toaster.messages()).toEqual(["early", "also early"]);
+    // Handed over once: what shows them next is not told of them again.
+    const next = surface();
+    store.connect(next);
+    expect(next.shown).toEqual([]);
   });
 
-  it("tells the same words apart when they matter differently", () => {
-    const store = new NoticeStore();
-    store.push("info", "reloaded");
-    store.push("error", "reloaded");
-    expect(store.current()).toHaveLength(2);
-  });
-
-  it("makes room for a new notice by dropping the oldest", () => {
+  it("keeps only the newest of what waits, and one of what is said twice", () => {
     const store = new NoticeStore();
     for (let number = 0; number < NOTICES_MAX + 2; number++) store.push("error", `fault ${number}`);
-    expect(store.current()).toHaveLength(NOTICES_MAX);
-    expect(messages(store)[0]).toBe("fault 2");
-    expect(messages(store).at(-1)).toBe(`fault ${NOTICES_MAX + 1}`);
-    // The ones that were dropped leave no timer behind to take another away.
-    vi.advanceTimersByTime(NOTICE_PROBLEM_MS);
-    expect(messages(store)).toEqual([]);
+    store.push("error", `fault ${NOTICES_MAX + 1}`);
+    const toaster = surface();
+    store.connect(toaster);
+    expect(toaster.shown).toHaveLength(NOTICES_MAX);
+    expect(toaster.messages()[0]).toBe("fault 2");
+    expect(toaster.messages().at(-1)).toBe(`fault ${NOTICES_MAX + 1}`);
   });
 
-  it("takes a notice away when it is dismissed, and nothing when it is not there", () => {
+  it("names a notice said again by the same key, so it takes the first one's place", () => {
+    const store = new NoticeStore();
+    const toaster = surface();
+    store.connect(toaster);
+    store.push("warning", "the pane is too small");
+    store.push("warning", "the pane is too small");
+    expect(toaster.shown).toHaveLength(2);
+    expect(toaster.shown[0]!.key).toBe(toaster.shown[1]!.key);
+  });
+
+  it("tells the same words apart when they matter differently or offer something", () => {
+    const undo = { label: "Undo", command: "lume.group.bring-back" };
+    const keys = new Set([
+      noticeKey("info", "reloaded"),
+      noticeKey("error", "reloaded"),
+      noticeKey("info", "reloaded", undo),
+    ]);
+    expect(keys.size).toBe(3);
+  });
+
+  it("takes a notice away by its key, shown or still waiting", () => {
     const store = new NoticeStore();
     store.push("info", "one");
     store.push("info", "two");
-    const [one] = store.current();
-    let told = 0;
-    store.subscribe(() => (told += 1));
-    store.dismiss(one!.id);
-    expect(messages(store)).toEqual(["two"]);
-    store.dismiss(one!.id);
-    store.dismiss(999);
-    expect(told).toBe(1);
-  });
-
-  it("holds one and the same empty list while it shows nothing", () => {
-    const store = new NoticeStore();
-    const empty = store.current();
-    store.push("info", "one");
-    store.dismiss(store.current()[0]!.id);
-    expect(store.current()).toBe(empty);
+    store.dismiss(noticeKey("info", "one"));
+    const toaster = surface();
+    const stop = store.connect(toaster);
+    expect(toaster.messages()).toEqual(["two"]);
+    store.dismiss(noticeKey("info", "two"));
+    expect(toaster.hidden).toEqual([noticeKey("info", "two")]);
+    // What no longer shows them is told nothing more.
+    stop();
+    store.push("info", "three");
+    expect(toaster.messages()).toEqual(["two"]);
   });
 });
 

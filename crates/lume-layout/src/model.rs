@@ -250,12 +250,16 @@ pub struct Tab {
     /// beside it or its group. Its panes still close on their own.
     #[serde(default, skip_serializing_if = "is_false")]
     pub locked: bool,
+    /// A muted tab does not ask for attention: what runs in it rings no bell on the
+    /// desktop and is not marked as waiting. So is every tab of a muted group.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub muted: bool,
     /// The group of the window's tabs this tab is in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<GroupId>,
 }
 
-fn is_false(value: &bool) -> bool {
+pub(crate) fn is_false(value: &bool) -> bool {
     !*value
 }
 
@@ -320,6 +324,10 @@ pub struct Group {
     /// of being forgotten.
     #[serde(default, skip_serializing_if = "is_false")]
     pub kept: bool,
+    /// The tabs of a muted group do not ask for attention, whatever each says of
+    /// itself.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub muted: bool,
 }
 
 /// A kept group that was closed, with its tabs as they were. Its panes have no
@@ -803,6 +811,26 @@ impl Workspace {
             }
             Location::Parked => None,
         }
+    }
+
+    /// Whether a pane is in a muted tab: one that is muted itself, or whose group is.
+    /// What runs in such a pane does not ask for attention. A pane that floats, and one
+    /// the workspace does not have, is in no tab and so is not.
+    pub fn pane_muted(&self, pane: PaneId) -> bool {
+        self.windows.iter().any(|window| {
+            let centre = &window.centre;
+            centre
+                .tabs
+                .iter()
+                .find(|tab| tab.contains(pane))
+                .is_some_and(|tab| {
+                    tab.muted
+                        || tab
+                            .group
+                            .and_then(|group| centre.group(group))
+                            .is_some_and(|group| group.muted)
+                })
+        })
     }
 
     /// The window a group of tabs is in, by index.

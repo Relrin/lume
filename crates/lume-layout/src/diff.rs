@@ -175,11 +175,14 @@ fn diff_tab(old: &Tab, new: &Tab, changes: &mut Vec<LayoutChange>) {
             title: new.title.clone(),
         });
     }
-    if (old.color, old.locked, old.group) != (new.color, new.locked, new.group) {
+    if (old.color, old.locked, old.muted, old.group)
+        != (new.color, new.locked, new.muted, new.group)
+    {
         changes.push(LayoutChange::TabState {
             tab: new.id,
             color: new.color,
             locked: new.locked,
+            muted: new.muted,
             group: new.group,
         });
     }

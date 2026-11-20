@@ -103,6 +103,10 @@ pub const DEFAULT_SPAWN_ROWS: u16 = 24;
 /// The workspace the application opens.
 pub const WORKSPACE_NAME: &str = "default";
 
+/// How often the connection to the session host is looked at, to tell the pages when it
+/// is lost or made again. Looking costs nothing; a second is soon enough to be told.
+pub const HOST_LINK_POLL: Duration = Duration::from_secs(1);
+
 /// How many notices wait for a page that has not connected yet. More than a start can
 /// have reason to say.
 pub const PENDING_NOTICES_MAX: usize = 16;

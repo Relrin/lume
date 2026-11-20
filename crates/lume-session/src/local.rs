@@ -480,6 +480,12 @@ impl LocalBackend {
         self.daemon.is_some()
     }
 
+    /// Whether the connection to the host is open. One that was lost is made again when
+    /// the backend is next used, so this says how things stand, not how they will.
+    pub fn is_connected(&self) -> bool {
+        self.current().connection.is_open()
+    }
+
     /// The connection to use: the one there is, or, if it has been lost and the host
     /// can be reached again, a new one.
     async fn connection(&self) -> Result<Arc<Connection>> {

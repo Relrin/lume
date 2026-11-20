@@ -170,6 +170,11 @@ export interface SettingsPage {
   readonly addon?: string;
   /** Whether the page is the one that manages the plugins. */
   readonly manage?: boolean;
+  /**
+   * What the window draws on the page itself, for a page that sets nothing: the list
+   * of commands, or what the application is.
+   */
+  readonly own?: "commands" | "about";
 }
 
 /** What only the machine knows that settings are chosen from. */

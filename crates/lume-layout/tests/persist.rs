@@ -356,6 +356,7 @@ fn groups_and_what_was_put_away_come_back_and_a_first_version_file_still_reads()
             icon: Some(Some(lume_layout::GroupIcon::Server)),
             collapsed: None,
             kept: Some(true),
+            muted: None,
         },
     );
     must(&mut workspace, Intent::GroupClose { group: kept });

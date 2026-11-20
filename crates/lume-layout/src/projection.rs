@@ -98,11 +98,13 @@ impl Projection {
                 tab,
                 color,
                 locked,
+                muted,
                 group,
             } => {
                 if let Some(tab) = tab_mut(workspace, *tab) {
                     tab.color = *color;
                     tab.locked = *locked;
+                    tab.muted = *muted;
                     tab.group = *group;
                 }
             }

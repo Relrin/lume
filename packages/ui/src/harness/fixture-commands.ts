@@ -97,6 +97,20 @@ export const SESSION_COMMANDS: readonly CommandSpec[] = [
     palette: false,
   },
   {
+    id: "lume.pane.rename",
+    title: "Rename Pane",
+    category: "Pane",
+    runs: "core",
+    palette: false,
+  },
+  {
+    id: "lume.pane.rename-start",
+    title: "Rename Pane…",
+    category: "Pane",
+    runs: "page",
+    palette: true,
+  },
+  {
     id: "lume.pane.show-in-new-tab",
     title: "Show Pane in New Tab",
     category: "Pane",

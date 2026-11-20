@@ -14,6 +14,7 @@
 
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -240,6 +241,55 @@ function HeaderButton({
   );
 }
 
+/**
+ * A pane being renamed: a field in the place of its name. Left empty, it takes the
+ * name away, and the pane is called after what runs in it again.
+ */
+function RenameField({ pane, shown }: { pane: PaneId; shown: string }) {
+  const app = useShell();
+  const field = useRef<HTMLInputElement>(null);
+  const done = useRef(false);
+  const held = useRef("");
+  useEffect(() => {
+    const element = field.current;
+    if (!element) return;
+    held.current = app.layout.getState().panes[pane]?.title ?? "";
+    element.value = held.current;
+    element.focus();
+    element.select();
+  }, [app, pane]);
+  const finish = (keep: boolean) => {
+    if (done.current) return;
+    done.current = true;
+    const title = field.current?.value.trim() ?? "";
+    if (keep && title !== held.current) {
+      app.commands.run("lume.pane.rename", { pane, title: title === "" ? null : title });
+    }
+    app.tabUi.getState().endPaneRename();
+    app.views.focus();
+  };
+  return (
+    <input
+      ref={field}
+      className="pane-rename"
+      aria-label="Pane name"
+      placeholder={shown}
+      spellCheck={false}
+      autoComplete="off"
+      // A press in the field is for the field: it does not move the card.
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onBlur={() => finish(true)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") finish(true);
+        else if (event.key === "Escape") finish(false);
+        // What is typed here is the name, not a key for the shell.
+        event.stopPropagation();
+      }}
+    />
+  );
+}
+
 function PaneHeader({
   pane,
   focused,
@@ -257,6 +307,7 @@ function PaneHeader({
   const name = useRef<HTMLSpanElement>(null);
   const where = useRef<HTMLSpanElement>(null);
   const marks = usePaneHeader(app, pane, header, name, where);
+  const renaming = useStore(app.tabUi, (state) => state.renamingPane === pane);
   const zoomed = useStore(
     app.layout,
     (state) => state.tabs[state.paneTabs[pane] ?? ""]?.zoomed === pane,
@@ -275,13 +326,27 @@ function PaneHeader({
       ref={header}
       className="pane-header"
       onPointerDown={(event) => {
-        if (event.button !== 0 || (event.target as Element).closest("button")) return;
+        if (event.button !== 0 || (event.target as Element).closest("button, input")) return;
         // The keyboard stays with the terminal while its card is moved.
         event.preventDefault();
         if (floating) app.area.startFloatDrag(pane, "move", event.nativeEvent, event.currentTarget);
         else app.cardDrag.start(pane, event.nativeEvent, event.currentTarget);
       }}
+      onDoubleClick={(event) => {
+        // Pressed twice on its name, a pane is renamed there. The press is told by
+        // where it was: while a card is moved its header is given every press on it.
+        const rect = name.current?.getBoundingClientRect();
+        if (!rect || rect.width === 0) return;
+        const inside =
+          event.clientX >= rect.left &&
+          event.clientX <= rect.right &&
+          event.clientY >= rect.top &&
+          event.clientY <= rect.bottom;
+        if (inside) app.tabUi.getState().startPaneRename(pane);
+      }}
       onContextMenu={(event) => {
+        // The field's own menu, to cut and paste with, is the system's.
+        if ((event.target as Element).closest("input")) return;
         event.preventDefault();
         // A menu asked for from the keyboard comes with no place of the pointer's, and
         // opens under the header.
@@ -296,7 +361,8 @@ function PaneHeader({
         <ProgramTile tile={marks.icon} place="header" />
         <span className="pane-activity" aria-hidden="true" />
       </span>
-      <span className="pane-title" ref={name} />
+      <span className="pane-title" ref={name} hidden={renaming} />
+      {renaming && <RenameField pane={pane} shown={name.current?.textContent ?? ""} />}
       {dev && <DevBadge />}
       <span className="pane-cwd" ref={where} hidden />
       <span className="pane-spacer" />

@@ -44,7 +44,7 @@ import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
 import { describeTabNow, followTab, mark } from "./describing.ts";
 import { useKeyHint } from "./hints.ts";
-import { CloseIcon, GroupGlyph, LockIcon, ProgramTile } from "./icons.tsx";
+import { BellOffIcon, CloseIcon, GroupGlyph, LockIcon, ProgramTile } from "./icons.tsx";
 import { NewTabButton } from "./NewTabButton.tsx";
 import { roveWithin } from "./roving.ts";
 import {
@@ -381,6 +381,7 @@ export function TabItem({
   const closeHint = useKeyHint("lume.tab.close");
   const color = entry?.color ?? null;
   const locked = entry?.locked === true;
+  const muted = entry?.muted === true;
 
   // A new colour, or a new group, is a new colour for the mark.
   useLayoutEffect(() => row.restyled(), [row, color, group?.color]);
@@ -412,6 +413,7 @@ export function TabItem({
       data-group-last={(group !== null && last) || undefined}
       data-tinted={color !== null || group !== null}
       data-folded={folded || undefined}
+      data-muted={muted || undefined}
       data-dragging={look.dragging || undefined}
       data-drop-side={look.drop}
       data-joining={look.joining || undefined}
@@ -477,6 +479,11 @@ export function TabItem({
             </span>
           )}
         </button>
+      )}
+      {muted && (
+        <span className="tab-muted" title="Muted: the tab does not ask for attention">
+          <BellOffIcon />
+        </span>
       )}
       {locked ? (
         <span className="tab-lock" title="Locked: the tab is not closed by closing tabs">
@@ -559,7 +566,10 @@ export function GroupLabel({
       data-group={group.id}
       data-group-color={group.color}
       data-collapsed={folded || undefined}
-      data-empty={(group.name === undefined && group.icon === undefined) || undefined}
+      data-muted={group.muted || undefined}
+      data-empty={
+        (group.name === undefined && group.icon === undefined && !group.muted) || undefined
+      }
       data-dragging={look.dragging || undefined}
       data-drop-side={look.drop}
       data-joining={look.joining || undefined}
@@ -592,6 +602,11 @@ export function GroupLabel({
         </span>
       )}
       {group.name !== undefined && <span className="tab-group-name">{group.name}</span>}
+      {group.muted && (
+        <span className="tab-group-muted" title="Muted: its tabs do not ask for attention">
+          <BellOffIcon size={11} />
+        </span>
+      )}
       <span className="tab-group-count">
         <span>
           <span className="tab-group-waiting" title="A tab in this group is waiting for you" />

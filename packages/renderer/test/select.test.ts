@@ -136,6 +136,35 @@ describe("choosing a tier", () => {
     expect(surface.shown!.css).toEqual({ width: 320, height: 160 });
     expect(made.webgpu[0]!.configured).toEqual([[640, 320]]);
   });
+
+  it("lays the canvas out at a new size only with the frame drawn for it", () => {
+    const surface = new FakeSurface();
+    const { factories, made } = tiers();
+    const renderer = new ManagedRenderer(surface, factories, new FakeFonts(), TEST_THEME);
+    renderer.resize({ width: 320, height: 160 }, 1);
+    renderer.draw(frame());
+    renderer.resize({ width: 400, height: 200 }, 1);
+    // Still the old picture: laid out larger, it would be shown stretched.
+    expect(surface.shown!.css).toEqual({ width: 320, height: 160 });
+    expect(made.webgpu[0]!.configured).toEqual([[320, 160]]);
+    renderer.draw(frame());
+    expect(surface.shown!.css).toEqual({ width: 400, height: 200 });
+    expect(made.webgpu[0]!.configured).toEqual([
+      [320, 160],
+      [400, 200],
+    ]);
+  });
+
+  it("lays the canvas out at its whole device pixels", () => {
+    const surface = new FakeSurface();
+    const { factories, made } = tiers();
+    const renderer = new ManagedRenderer(surface, factories, new FakeFonts(), TEST_THEME);
+    // 501 CSS pixels are 626.25 device pixels: the canvas has 626 of them.
+    renderer.resize({ width: 501, height: 301 }, 1.25);
+    renderer.draw(frame());
+    expect(made.webgpu[0]!.configured).toEqual([[626, 376]]);
+    expect(surface.shown!.css).toEqual({ width: 626 / 1.25, height: 376 / 1.25 });
+  });
 });
 
 describe("losing a tier", () => {

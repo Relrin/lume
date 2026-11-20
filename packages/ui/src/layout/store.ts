@@ -81,6 +81,8 @@ export interface TabEntry {
   readonly color: TabColor | null;
   /** Whether the tab is locked against being closed. */
   readonly locked: boolean;
+  /** Whether the tab itself is muted. Its group may be, too: see `isTabMuted`. */
+  readonly muted: boolean;
   /** The group the tab is in. */
   readonly group: GroupId | null;
 }
@@ -314,11 +316,16 @@ function dropTree(draft: Draft, tab: TabId, old: TreeNode, kept: TreeNode | unde
 }
 
 /** What a tab entry holds besides its name and its tree. */
-type TabFacts = Pick<TabEntry, "color" | "locked" | "group">;
+type TabFacts = Pick<TabEntry, "color" | "locked" | "muted" | "group">;
 
 /** A tab's facts, with what the core leaves out when it says nothing of it. */
-function factsOf(tab: Pick<Tab, "color" | "locked" | "group">): TabFacts {
-  return { color: tab.color ?? null, locked: tab.locked ?? false, group: tab.group ?? null };
+function factsOf(tab: Pick<Tab, "color" | "locked" | "muted" | "group">): TabFacts {
+  return {
+    color: tab.color ?? null,
+    locked: tab.locked ?? false,
+    muted: tab.muted ?? false,
+    group: tab.group ?? null,
+  };
 }
 
 /** Puts a tab's tree in place of the one it had, if it had one. */
@@ -339,6 +346,7 @@ function setTree(
     before.zoomed === tab.zoomed &&
     before.color === facts.color &&
     before.locked === facts.locked &&
+    before.muted === facts.muted &&
     before.group === facts.group &&
     before.root === root;
   if (!same) {
@@ -350,6 +358,7 @@ function setTree(
       zoomed: tab.zoomed,
       color: facts.color,
       locked: facts.locked,
+      muted: facts.muted,
       group: facts.group,
     });
   }
@@ -499,13 +508,18 @@ function follow(draft: Draft, change: LayoutChange): void {
     case "tab_state": {
       const tab = draft.data.tabs[change.tab];
       if (!tab) return;
+      const muted = change.muted ?? false;
       const same =
-        tab.color === change.color && tab.locked === change.locked && tab.group === change.group;
+        tab.color === change.color &&
+        tab.locked === change.locked &&
+        tab.muted === muted &&
+        tab.group === change.group;
       if (!same) {
         draft.set("tabs", tab.id, {
           ...tab,
           color: change.color,
           locked: change.locked,
+          muted,
           group: change.group,
         });
       }
@@ -671,6 +685,7 @@ export function toWorkspace(state: LayoutState): Workspace {
           // Left out when they say nothing, as the core writes a tab.
           ...(tab.color === null ? {} : { color: tab.color }),
           ...(tab.locked ? { locked: true } : {}),
+          ...(tab.muted ? { muted: true } : {}),
           ...(tab.group === null ? {} : { group: tab.group }),
         },
       ];

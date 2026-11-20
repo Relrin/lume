@@ -203,11 +203,14 @@ describe("a notice that offers something to do", () => {
   it("keeps what it offers, and is told apart from the same words offering nothing", async () => {
     const { NoticeStore } = await import("../src/shell/notices.ts");
     const store = new NoticeStore();
+    const shown: { key: string; action?: unknown }[] = [];
+    store.connect({ show: (notice) => void shown.push(notice), hide: () => undefined });
     const undo = { label: "Undo", command: "lume.group.bring-back", args: { group: "g12" } };
     store.push("info", "Moved Billing to acme", undo);
-    expect(store.current()[0]?.action).toEqual(undo);
+    expect(shown[0]?.action).toEqual(undo);
     store.push("info", "Moved Billing to acme");
-    expect(store.current().length).toBe(2);
-    expect(store.current()[1]?.action).toBeUndefined();
+    expect(shown.length).toBe(2);
+    expect(shown[1]?.action).toBeUndefined();
+    expect(shown[1]?.key).not.toBe(shown[0]?.key);
   });
 });

@@ -109,6 +109,10 @@ enum Op {
         tab: usize,
         on: bool,
     },
+    TabMute {
+        tab: usize,
+        on: bool,
+    },
     TabsClose {
         tabs: Vec<usize>,
     },
@@ -254,6 +258,7 @@ fn ops() -> impl Strategy<Value = Vec<Op>> {
         1 => (position.clone(), proptest::option::of(0usize..8))
             .prop_map(|(tab, color)| Op::TabColor { tab, color }),
         2 => (position.clone(), any::<bool>()).prop_map(|(tab, on)| Op::TabLock { tab, on }),
+        1 => (position.clone(), any::<bool>()).prop_map(|(tab, on)| Op::TabMute { tab, on }),
         1 => proptest::collection::vec(position.clone(), 0..4)
             .prop_map(|tabs| Op::TabsClose { tabs }),
         4 => (position.clone(), position.clone())
@@ -599,6 +604,10 @@ fn resolve(workspace: &Workspace, op: &Op) -> Intent {
             tab: tab(position),
             on: *on,
         },
+        Op::TabMute { tab: position, on } => Intent::TabMute {
+            tab: tab(position),
+            on: *on,
+        },
         Op::TabsClose { tabs: positions } => Intent::TabsClose {
             tabs: positions.iter().map(tab).collect(),
         },
@@ -646,6 +655,7 @@ fn resolve(workspace: &Workspace, op: &Op) -> Intent {
             icon: None,
             collapsed: *collapsed,
             kept: *kept,
+            muted: None,
         },
         Op::GroupMove {
             group: position,
@@ -809,6 +819,7 @@ fn start() -> Workspace {
             icon: None,
             collapsed: None,
             kept: Some(true),
+            muted: None,
         },
     );
     must(&mut workspace, Intent::GroupClose { group });
@@ -974,6 +985,7 @@ fn the_sequences_exercise_every_kind_of_intent() {
         "tab_place",
         "tab_color",
         "tab_lock",
+        "tab_mute",
         "tabs_close",
         "tab_merge",
         "group_new",
