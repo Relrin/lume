@@ -1,5 +1,5 @@
 /**
- * The menu of a tab or of a pane, or the editor of a group, whichever is open, wherever
+ * The menu of a tab, of a pane or of a terminal, or the editor of a group, whichever is open, wherever
  * the tabs are listed; and the editor of a group just made, once its label is on show.
  */
 
@@ -13,6 +13,7 @@ import { GroupEditor } from "./GroupEditor.tsx";
 import { anchorOf, labelId } from "./tab-ui.ts";
 import { PaneMenu } from "./PaneMenu.tsx";
 import { TabMenu } from "./TabMenu.tsx";
+import { TerminalMenu } from "./TerminalMenu.tsx";
 
 export function TabPopups() {
   const app = useShell();
@@ -58,6 +59,16 @@ export function TabPopups() {
         pane={popup.pane}
         anchor={popup.anchor}
         keyboard={popup.keyboard}
+      />
+    );
+  }
+  if (popup.kind === "terminal") {
+    return (
+      <TerminalMenu
+        key={`${popup.pane}:${popup.anchor.left}:${popup.anchor.top}`}
+        pane={popup.pane}
+        anchor={popup.anchor}
+        selection={popup.selection}
       />
     );
   }

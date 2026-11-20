@@ -248,6 +248,8 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   // once it has them; a change the copies already hold is passed over there.
   // What is made further on, for what is called back before it is.
   const made: { shell?: ShellApp; views?: PaneViews; client?: CoreClient } = {};
+  // What the user is doing with the tabs and the panes' menus. The terminals open one too.
+  const tabUi = createTabUiStore();
   let early: Notice[] | null = [];
   let onNotice = (notice: Notice): void => void early?.push(notice);
   let ready: () => void = () => undefined;
@@ -458,6 +460,13 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       if (layout.getState().floats[pane]) contexts.add("floating");
       return shortcuts.handle(event, withPlugins(contexts));
     },
+    menu: (pane, at, selection) =>
+      tabUi.getState().open({
+        kind: "terminal",
+        pane,
+        anchor: { left: at.clientX, top: at.clientY, bottom: at.clientY },
+        selection,
+      }),
     keyboard: (pane) => search.setKeyboard(pane, "terminal"),
     searched: (pane) => search.touched(pane),
   });
@@ -478,7 +487,6 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     clearTimer: (timer) => window.clearTimeout(timer),
     now: () => performance.now(),
   });
-  const tabUi = createTabUiStore();
   const commands = new Commands({
     store: commandStore,
     client,

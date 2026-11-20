@@ -155,6 +155,16 @@
           },
           {
             "role": "heading",
+            "name": "Clipboard"
+          },
+          {
+            "role": "switch",
+            "state": {
+              "checked": "false"
+            }
+          },
+          {
+            "role": "heading",
             "name": "History"
           },
           {

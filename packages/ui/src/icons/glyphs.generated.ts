@@ -39,6 +39,7 @@ export type LineGlyphName =
   | "chevron-right"
   | "circle"
   | "circle-check"
+  | "clipboard"
   | "clock"
   | "cloud"
   | "columns-2"
@@ -87,6 +88,7 @@ export type LineGlyphName =
   | "settings"
   | "sparkles"
   | "square"
+  | "square-dashed-text"
   | "square-plus"
   | "square-x"
   | "star"
@@ -341,6 +343,10 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["circle", {"cx":"12","cy":"12","r":"10"}],
     ["path", {"d":"m16 9-5.5 5.5L8 12"}],
   ],
+  "clipboard": [
+    ["rect", {"width":"8","height":"4","x":"8","y":"2","rx":"1","ry":"1"}],
+    ["path", {"d":"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"}],
+  ],
   "clock": [
     ["circle", {"cx":"12","cy":"12","r":"10"}],
     ["path", {"d":"M12 6v6l4 2"}],
@@ -594,6 +600,23 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
   ],
   "square": [
     ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
+  ],
+  "square-dashed-text": [
+    ["path", {"d":"M14 21h1"}],
+    ["path", {"d":"M14 3h1"}],
+    ["path", {"d":"M19 3a2 2 0 0 1 2 2"}],
+    ["path", {"d":"M21 14v1"}],
+    ["path", {"d":"M21 19a2 2 0 0 1-2 2"}],
+    ["path", {"d":"M21 9v1"}],
+    ["path", {"d":"M3 14v1"}],
+    ["path", {"d":"M3 9v1"}],
+    ["path", {"d":"M5 21a2 2 0 0 1-2-2"}],
+    ["path", {"d":"M5 3a2 2 0 0 0-2 2"}],
+    ["path", {"d":"M7 12h10"}],
+    ["path", {"d":"M7 16h6"}],
+    ["path", {"d":"M7 8h8"}],
+    ["path", {"d":"M9 21h1"}],
+    ["path", {"d":"M9 3h1"}],
   ],
   "square-plus": [
     ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],

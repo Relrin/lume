@@ -47,6 +47,14 @@ export type TabPopup =
       readonly pane: PaneId;
       readonly anchor: Anchor;
       readonly keyboard: boolean;
+    }
+  | {
+      /** The menu of one pane's terminal, opened with the other button in it. */
+      readonly kind: "terminal";
+      readonly pane: PaneId;
+      readonly anchor: Anchor;
+      /** Whether text was selected in the terminal when the menu was asked for. */
+      readonly selection: boolean;
     };
 
 /** Which side of what it is let go over a dragged tab or group lands on. */

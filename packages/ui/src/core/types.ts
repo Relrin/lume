@@ -98,6 +98,8 @@ export interface ConfigSettings {
     readonly "hidden-release-seconds"?: number;
     readonly "cursor-style": "block" | "bar" | "underline";
     readonly "cursor-blink": boolean;
+    /** Copy what the pointer selects at once. A core that does not say means off. */
+    readonly "copy-on-select"?: boolean;
     /** What the cursor leaves behind when it jumps. A core that does not say means none. */
     readonly "cursor-trail"?: CursorTrail | Contributed;
     /** What the cursor gives off when it changes shape. A core that does not say means none. */

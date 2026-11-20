@@ -364,7 +364,14 @@ pub fn pages() -> [Page; 3] {
             icon: "terminal",
             group: APPLICATION,
             blurb: "The terminal new tabs open, the cursor, scrollback and what happens when a program ends.",
-            groups: &["New terminals", "Cursor", "History", "Buffer", "Closing"],
+            groups: &[
+                "New terminals",
+                "Cursor",
+                "Clipboard",
+                "History",
+                "Buffer",
+                "Closing",
+            ],
         },
     ]
 }
