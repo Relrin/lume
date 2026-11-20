@@ -95,6 +95,24 @@ describe("what the Connect palette lists", () => {
     expect(marked.map((entry) => entry.profile.id)).toEqual(["auto.pwsh"]);
   });
 
+  it("lists the pinned profiles first, in a group of their own", () => {
+    const groups = connectGroups(LIST, "", "all", new Set(["auto.ssh.dev-staging", "nu"]));
+    expect(groups.map((group) => group.kind)).toEqual(["pinned", "local", "wsl", "ssh"]);
+    expect(groups[0]?.entries.map((entry) => entry.profile.id)).toEqual([
+      "nu",
+      "auto.ssh.dev-staging",
+    ]);
+    expect(groups[0]?.entries.every((entry) => entry.pinned)).toBe(true);
+    // A pinned profile is not listed twice.
+    const ids = groups.flatMap((group) => group.entries.map((entry) => entry.profile.id));
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("leaves out a kind whose only profile is pinned", () => {
+    const groups = connectGroups(LIST, "", "all", new Set(["auto.wsl.Ubuntu"]));
+    expect(groups.map((group) => group.label)).toEqual(["Pinned", "Local shells", "SSH hosts"]);
+  });
+
   it("lists the user's own profiles first in each group, whatever order they came in", () => {
     const shuffled = { ...LIST, profiles: [STAGING, PWSH, UBUNTU, BOX, NU] };
     const groups = connectGroups(shuffled, "", "all");

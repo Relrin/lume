@@ -41,6 +41,17 @@
           },
           {
             "role": "button",
+            "name": "Activity, 2 new",
+            "state": {
+              "expanded": "false"
+            }
+          },
+          {
+            "role": "button",
+            "name": "Command palette"
+          },
+          {
+            "role": "button",
             "name": "New tab"
           }
         ]

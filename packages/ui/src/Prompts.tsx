@@ -9,6 +9,7 @@
 import { lazy, Suspense, useEffect, useRef, useSyncExternalStore } from "react";
 
 import { closingText, closingTitle } from "./shell/closing.ts";
+import { CloseQuestion } from "./shell/CloseQuestion.tsx";
 import type { PluginQuestion, Prompt, PromptStore } from "./terminal/prompts.ts";
 
 // The list a plugin asks the user to choose from is loaded when one first does.
@@ -38,6 +39,9 @@ export function Prompts({ store }: { store: PromptStore }) {
         <PluginPickDialog key={numberOf(prompt)} prompt={prompt} />
       </Suspense>
     );
+  }
+  if (prompt.kind === "close") {
+    return <CloseQuestion key={numberOf(prompt)} closing={prompt.closing} answer={prompt.answer} />;
   }
   return <PromptDialog prompt={prompt} />;
 }

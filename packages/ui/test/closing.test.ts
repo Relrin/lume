@@ -167,6 +167,38 @@ describe("asking before closing what still runs a program", () => {
     expect(asked).toEqual([{ what: "tab", running: 2 }]);
   });
 
+  it("names what is at work, what waits on the user first", async () => {
+    const { app, answer, asked } = page("always");
+    answer(false);
+    const named: ClosingApp = {
+      ...app,
+      work: (id) => ({
+        pane: id,
+        tab: "t1",
+        tabLabel: "t1",
+        who: id === "p1" ? "cargo" : "claude",
+        line: "",
+        state: id === "p1" ? "work" : "wait",
+        agent: id === "p2",
+        unread: false,
+      }),
+    };
+    expect(await mayRun(named, "lume.tab.close", null)).toBe(false);
+    expect(asked[0]?.busy).toEqual([
+      { pane: "p2", who: "claude", rest: "is waiting for your answer", waiting: true, agent: true },
+      { pane: "p1", who: "cargo", rest: "is still running", waiting: false, agent: false },
+    ]);
+  });
+
+  it("says a program the page has no word of is still running", async () => {
+    const { app, answer, asked } = page("always");
+    answer(false);
+    await mayRun({ ...app, work: () => null }, "lume.pane.close", null);
+    expect(asked[0]?.busy).toEqual([
+      { pane: "p1", who: "A program", rest: "is still running", waiting: false, agent: false },
+    ]);
+  });
+
   it("closes a window it was asked about once the user agrees", async () => {
     const { app, answer, asked, closed } = page("never");
     answer(true);

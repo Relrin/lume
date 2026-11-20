@@ -114,6 +114,43 @@ function usePaneHeader(
   return JSON.parse(marks) as HeaderMarks;
 }
 
+/**
+ * Has a header do without as few of its buttons as it must for what it shows to fit:
+ * none, then each step of buttons that give way in turn, until nothing runs past its
+ * edge. Close never gives way.
+ */
+function fitButtons(element: HTMLElement): void {
+  for (let step = 0; step <= 3; step += 1) {
+    if (step === 0) delete element.dataset["givesWay"];
+    else element.dataset["givesWay"] = String(step);
+    // Reading the widths lays the header out again with the buttons just hidden.
+    if (element.scrollWidth <= element.clientWidth) return;
+  }
+}
+
+/**
+ * Keeps a header's buttons fitting it: when the header is resized, when what its name
+ * or place says changes size, and whenever it is rendered with other buttons.
+ */
+function useFittedButtons(
+  header: RefObject<HTMLElement | null>,
+  parts: readonly RefObject<HTMLElement | null>[],
+): void {
+  useLayoutEffect(() => {
+    const element = header.current;
+    if (element) fitButtons(element);
+  });
+  useLayoutEffect(() => {
+    const element = header.current;
+    if (!element || typeof ResizeObserver === "undefined") return undefined;
+    const watcher = new ResizeObserver(() => fitButtons(element));
+    watcher.observe(element);
+    for (const part of parts) if (part.current) watcher.observe(part.current);
+    return () => watcher.disconnect();
+    // The parts are refs, which stay the same objects.
+  }, [header]);
+}
+
 /** Gives an element `text`, unless it has it already. */
 function writeText(element: HTMLElement | null, text: string): void {
   if (element && element.textContent !== text) element.textContent = text;
@@ -206,7 +243,7 @@ function HeaderButton({
   label,
   hint,
   pressed,
-  spare = false,
+  givesWay,
   lit = false,
   onPress,
   children,
@@ -214,20 +251,25 @@ function HeaderButton({
   label: string;
   hint: string;
   pressed?: boolean;
-  /** Whether a header too narrow for every button does without this one. */
-  spare?: boolean;
+  /**
+   * When a header too narrow for every button does without this one: `1` first (the
+   * splits), then `2` (float and minimise), then `3` (zoom), leaving only Close.
+   * Without it the button always stays.
+   */
+  givesWay?: 1 | 2 | 3;
   /** Whether the button, while pressed, is lit in the colour of a floating card's edge. */
   lit?: boolean;
   onPress: () => void;
   children: React.ReactNode;
 }) {
   const classes = ["control", "pane-button"];
-  if (spare) classes.push("pane-button-spare");
+  const attributes = givesWay === undefined ? {} : { "data-gives-way": givesWay };
   if (lit) classes.push("pane-button-lit");
   return (
     <button
       type="button"
       className={classes.join(" ")}
+      {...attributes}
       aria-label={label}
       aria-pressed={pressed}
       title={`${label}${hint}`}
@@ -307,6 +349,7 @@ function PaneHeader({
   const name = useRef<HTMLSpanElement>(null);
   const where = useRef<HTMLSpanElement>(null);
   const marks = usePaneHeader(app, pane, header, name, where);
+  useFittedButtons(header, [name, where]);
   const renaming = useStore(app.tabUi, (state) => state.renamingPane === pane);
   const zoomed = useStore(
     app.layout,
@@ -374,7 +417,7 @@ function PaneHeader({
             <HeaderButton
               label="Split right"
               hint={hints.right}
-              spare
+              givesWay={1}
               onPress={run("lume.pane.split-right")}
             >
               <SplitRightIcon />
@@ -382,7 +425,7 @@ function PaneHeader({
             <HeaderButton
               label="Split down"
               hint={hints.down}
-              spare
+              givesWay={1}
               onPress={run("lume.pane.split-down")}
             >
               <SplitDownIcon />
@@ -393,7 +436,7 @@ function PaneHeader({
           label={floating ? "Dock back into the layout" : "Float above other panes"}
           hint={hints.float}
           pressed={floating}
-          spare={!floating}
+          givesWay={floating ? 3 : 2}
           lit
           onPress={run("lume.pane.float")}
         >
@@ -404,6 +447,7 @@ function PaneHeader({
             label={zoomed ? "Restore layout" : "Zoom pane"}
             hint={hints.zoom}
             pressed={zoomed}
+            givesWay={3}
             onPress={run("lume.pane.zoom")}
           >
             <ZoomIcon />
@@ -412,7 +456,7 @@ function PaneHeader({
         <HeaderButton
           label="Minimise to the corner"
           hint={hints.minimise}
-          spare={!floating}
+          givesWay={2}
           onPress={run("lume.pane.minimise")}
         >
           <PutAwayIcon />

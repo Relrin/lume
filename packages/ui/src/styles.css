@@ -541,6 +541,423 @@
   }
 
   /*
+   * The tools at the right end of the bar: Activity, the command palette, a new tab.
+   * Activity's dot says something new waits in its list.
+   */
+  .top-tools {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 2px;
+  }
+
+  .top-tool {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    border-radius: min(8px, var(--lume-radius-control));
+  }
+
+  .top-tool:hover,
+  .top-tool[aria-expanded="true"] {
+    @apply text-ink;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .top-tool-dot {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--lume-color-status-info);
+    box-shadow: 0 0 0 2px var(--lume-color-surface);
+  }
+
+  .activity-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+  }
+
+  .activity {
+    @apply bg-popover;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 46;
+    width: 340px;
+    max-width: calc(100vw - 16px);
+    padding: 6px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 4px));
+    box-shadow: var(--lume-shadow-popover);
+    transform-origin: calc(100% - 79px) 0;
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  .activity-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .activity-read {
+    @apply text-ink-muted;
+    margin-left: auto;
+    padding: 3px 6px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 400;
+    cursor: pointer;
+  }
+
+  .activity-read:hover:not(:disabled) {
+    @apply text-ink;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .activity-read:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .activity-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 9px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .activity-row:hover,
+  .activity-row:focus-visible {
+    outline: none;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .activity-tile {
+    --tile-tone: var(--lume-color-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    margin-top: 1px;
+    border-radius: 7px;
+    color: var(--tile-tone);
+    background: color-mix(in srgb, var(--tile-tone) 13%, transparent);
+  }
+
+  .activity-tile[data-state="wait"] {
+    --tile-tone: var(--lume-color-status-warning);
+  }
+
+  .activity-tile[data-state="done"] {
+    --tile-tone: var(--lume-color-status-info);
+  }
+
+  .activity-tile[data-state="failed"] {
+    --tile-tone: var(--lume-color-status-danger);
+  }
+
+  .activity-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  .activity-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+  }
+
+  .activity-title > span,
+  .activity-line {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .activity-line {
+    @apply text-ink-muted;
+    font-size: 11.5px;
+  }
+
+  .activity-unread {
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--lume-color-status-info);
+  }
+
+  .activity-when {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    opacity: 0.8;
+  }
+
+  .activity-empty {
+    @apply text-ink-muted;
+    padding: 14px 10px;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .activity-foot {
+    @apply text-ink-muted;
+    padding: 6px 10px 4px;
+    font-size: 11px;
+    opacity: 0.8;
+  }
+
+  /* A ring with a gap that turns: something is at work. */
+  .busy-spinner {
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: 11px;
+    height: 11px;
+    border: 1.5px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: busy-turn 900ms linear infinite;
+  }
+
+  @keyframes busy-turn {
+    to {
+      rotate: 360deg;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .activity {
+      animation: none;
+    }
+
+    .busy-spinner {
+      animation-duration: 2.4s;
+    }
+  }
+
+  /*
+   * The question asked before closing something still at work. It hangs under the
+   * button the close was asked from, with a nub pointing at it.
+   */
+  .close-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    cursor: default;
+  }
+
+  .close-question {
+    @apply bg-popover;
+    position: fixed;
+    box-sizing: border-box;
+    width: 300px;
+    padding: 16px 14px 14px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 6px));
+    box-shadow: var(--lume-shadow-popover);
+    text-align: center;
+    transform-origin: var(--nub) 0;
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  .close-question[data-anchored]::before {
+    content: "";
+    position: absolute;
+    top: -6px;
+    left: calc(var(--nub) - 6px);
+    width: 11px;
+    height: 11px;
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+    border-left: var(--lume-size-border) solid var(--lume-color-border);
+    border-top-left-radius: 2px;
+    background: var(--lume-color-popover);
+    rotate: 45deg;
+  }
+
+  .close-question h2 {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .close-text {
+    @apply text-ink-muted;
+    margin: 10px 0 14px;
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+
+  .close-whys {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 12px 0 14px;
+  }
+
+  .close-why {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 46px;
+    padding: 7px 8px 7px 12px;
+    border-radius: 10px;
+    background-color: color-mix(in srgb, var(--lume-color-control-hover) 55%, transparent);
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .close-why:hover,
+  .close-why:focus-visible {
+    outline: none;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .close-why .busy-spinner {
+    color: var(--lume-color-accent);
+  }
+
+  .close-why .busy-spinner[data-agent] {
+    color: var(--lume-color-status-warning);
+  }
+
+  .close-why-wait {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--lume-color-status-warning);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--lume-color-status-warning) 18%, transparent);
+  }
+
+  .close-why-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    gap: 1px;
+    line-height: 1.35;
+  }
+
+  .close-why-text b,
+  .close-why-text span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .close-why-text b {
+    @apply text-ink;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .close-why-text span {
+    font-size: 12px;
+  }
+
+  .close-why-go {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 4px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    transition:
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .close-why:hover .close-why-go {
+    @apply text-ink;
+    background-color: var(--lume-color-control-active);
+  }
+
+  .close-more {
+    @apply text-ink-muted;
+    font-size: 11.5px;
+  }
+
+  .close-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .close-actions button {
+    flex: 1;
+    height: 34px;
+    border-radius: 10px;
+    background-color: color-mix(in srgb, var(--lume-color-text) 9%, transparent);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition:
+      transform var(--lume-motion-duration-fast) var(--lume-motion-easing-standard),
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .close-actions button:hover {
+    background-color: color-mix(in srgb, var(--lume-color-text) 13%, transparent);
+  }
+
+  .close-actions button:active {
+    transform: scale(0.97);
+  }
+
+  /* A ring inside the button, so that the button with the keyboard is no larger. */
+  .close-actions button:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lume-color-text) 35%, transparent);
+  }
+
+  .close-actions .close-proceed {
+    @apply text-danger;
+    background-color: color-mix(in srgb, var(--lume-color-status-danger) 16%, transparent);
+  }
+
+  .close-actions .close-proceed:hover {
+    background-color: color-mix(in srgb, var(--lume-color-status-danger) 24%, transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .close-question {
+      animation: none;
+    }
+
+    .close-actions button,
+    .close-why,
+    .close-why-go {
+      transition: none;
+    }
+  }
+
+  /*
    * Status items. An item's tone colours what it draws, not what it is called: the
    * name of a meter stays quiet whatever colour its bar is.
    */
@@ -710,6 +1127,50 @@
   .status-picture {
     display: flex;
     color: var(--status-tone);
+  }
+
+  /*
+   * A badge with a picture in the top bar looks like the bar's own tools: the picture
+   * on a square button, its count in a small round mark over the top right corner.
+   * With nothing to count there is no mark.
+   */
+  .status-item[data-tool] {
+    position: relative;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    margin: 0;
+    padding: 0;
+    border-radius: min(8px, var(--lume-radius-control));
+  }
+
+  .status-item[data-tool]:hover {
+    @apply text-ink;
+  }
+
+  .status-item[data-tool] .status-picture {
+    color: inherit;
+  }
+
+  .status-item[data-tool] .status-badge {
+    position: absolute;
+    top: 1px;
+    right: 0;
+    min-width: 13px;
+    height: 13px;
+    padding: 0 3px;
+    border: none;
+    border-radius: 7px;
+    background: var(--lume-color-status-info);
+    box-shadow: 0 0 0 2px var(--lume-color-surface);
+    color: var(--lume-color-text-inverse);
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 13px;
+  }
+
+  .status-item[data-tool] .status-badge:empty {
+    display: none;
   }
 
   /* An item of a plugin whose code was stopped is held up, and says why when asked. */
@@ -1009,12 +1470,6 @@
     border-radius: calc(var(--lume-radius-control) - 2px);
     outline: none;
     user-select: text;
-  }
-
-  .tab-new {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--lume-radius-control);
   }
 
   /*
@@ -2548,10 +3003,16 @@
     }
   }
 
-  @container (max-width: 210px) {
-    .pane-button-spare {
-      display: none;
-    }
+  /*
+   * A header with no room for every button does without them a few at a time, so the
+   * ones left are whole and inside the card: the splits first, then float and
+   * minimise, leaving zoom and close, and at last zoom, leaving close alone. The
+   * header measures what fits and says how far it went in `data-gives-way`.
+   */
+  .pane-header[data-gives-way] .pane-button[data-gives-way="1"],
+  .pane-header:is([data-gives-way="2"], [data-gives-way="3"]) .pane-button[data-gives-way="2"],
+  .pane-header[data-gives-way="3"] .pane-button[data-gives-way="3"] {
+    display: none;
   }
 
   @container (max-width: 130px) {
@@ -3293,7 +3754,10 @@
     }
   }
 
-  /* The command palette: a field and a list, near the top of the window. */
+  /*
+   * The command palette: a wide field and a list, a little way down the window, on a
+   * frosted card. Its rows are a picture, a title, the command's kind and its keys.
+   */
 
   .palette-backdrop {
     position: fixed;
@@ -3302,31 +3766,36 @@
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    padding: calc(var(--lume-size-topbar) + 10px) 16px 16px;
-    background: color-mix(in srgb, var(--lume-color-overlay) 30%, transparent);
+    padding: max(calc(var(--lume-size-topbar) + 10px), 13vh) 16px 16px;
+    background: color-mix(in srgb, var(--lume-color-overlay) 35%, transparent);
     cursor: default;
   }
 
   .palette {
-    @apply bg-popover;
     display: flex;
     flex-direction: column;
-    width: min(560px, 100%);
-    max-height: min(420px, 100%);
+    width: min(640px, 100%);
+    max-height: min(470px, 100%);
     overflow: hidden;
-    border: var(--lume-size-border) solid var(--lume-color-border);
-    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 2px));
-    box-shadow: var(--lume-shadow-popover);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 6px));
+    background: color-mix(in srgb, var(--lume-color-popover) 92%, transparent);
+    backdrop-filter: blur(20px) saturate(1.3);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--lume-color-text) 7%, transparent),
+      0 0 0 var(--lume-size-border) var(--lume-color-border),
+      var(--lume-shadow-popover);
+    font-size: 13px;
   }
 
   .palette-field {
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    gap: 10px;
-    height: 44px;
-    padding: 0 14px;
-    border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+    gap: 11px;
+    height: 50px;
+    padding: 0 12px 0 16px;
+    border-bottom: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
   }
 
   .palette-field-icon {
@@ -3352,25 +3821,95 @@
     min-width: 0;
     height: 100%;
     background: transparent;
+    font-size: 15px;
     outline: none;
     user-select: text;
   }
 
   .palette-input::placeholder {
-    color: var(--lume-color-text-muted);
+    color: color-mix(in srgb, var(--lume-color-text-muted) 80%, transparent);
+  }
+
+  /* What is searched, as a row of chips under the field, each with its count. */
+  .palette-chips {
+    display: flex;
+    flex-shrink: 0;
+    gap: 6px;
+    padding: 0 12px 10px;
+    overflow-x: auto;
+    border-bottom: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+    scrollbar-width: none;
+  }
+
+  .palette-chip {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      transform var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
+  }
+
+  .palette-chip:hover {
+    @apply text-ink;
+  }
+
+  .palette-chip:active {
+    transform: scale(0.96);
+  }
+
+  /*
+   * The label, its picture and its count sit on one centre line: each is its own box
+   * one line high, so the monospaced count does not ride on a baseline of its own.
+   */
+  .palette-chip > * {
+    display: block;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+
+  .palette-chip-count {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+
+  .palette-chip[aria-pressed="true"] {
+    @apply text-accent;
+    background-color: color-mix(in srgb, var(--lume-color-accent) 12%, transparent);
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 35%, transparent);
+  }
+
+  /* With the chips under it, the field has no line of its own. */
+  .palette-field:has(+ .palette-chips) {
+    border-bottom: none;
   }
 
   .palette-problem {
     @apply text-danger;
     flex-shrink: 0;
-    padding: 8px 14px 0;
+    padding: 8px 16px 0;
     font-size: 12px;
   }
 
   .palette-list {
     flex: 1;
     min-height: 0;
-    padding: 6px;
+    padding: 4px 6px 6px;
     overflow-y: auto;
     scrollbar-width: thin;
   }
@@ -3379,30 +3918,99 @@
     display: none;
   }
 
+  .palette-heading {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 6px 10px 0;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
   .palette-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    min-height: 32px;
+    gap: 10px;
+    height: 34px;
     padding: 0 10px;
-    border-radius: calc(var(--lume-radius-control) - 1px);
-    cursor: pointer;
+    border-radius: min(8px, var(--lume-radius-control));
+    cursor: default;
   }
 
   .palette-row[aria-selected="true"] {
     @apply bg-control-hover;
   }
 
+  .palette-row-icon {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
   .palette-row-text {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
 
-  .palette-row-prefix {
+  .palette-row-sub {
     @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    opacity: 0.8;
+  }
+
+  .palette-row[aria-selected="true"] .palette-row-sub {
+    opacity: 1;
+  }
+
+  /* A host's picture is coloured by its kind, as the connect palette colours it. */
+  .palette-host-icon {
+    display: flex;
+    color: var(--lume-color-accent);
+  }
+
+  .palette-host-icon[data-kind="wsl"] {
+    color: var(--lume-color-status-warning);
+  }
+
+  .palette-host-icon[data-kind="ssh"] {
+    color: var(--lume-color-status-info);
+  }
+
+  /* How the work in a tab stands: a dot before its line, a word at its end. */
+  .palette-row-state {
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--lume-color-accent);
+  }
+
+  .palette-row-state[data-state="wait"] {
+    background: var(--lume-color-status-warning);
+  }
+
+  .palette-row-state[data-state="done"] {
+    background: var(--lume-color-status-info);
+  }
+
+  .palette-row-state[data-state="failed"] {
+    background: var(--lume-color-status-danger);
+  }
+
+  .palette-row-meta {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
   }
 
   .palette-mark {
@@ -3411,11 +4019,99 @@
     font-weight: 600;
   }
 
+  /*
+   * Keys beside a command: quiet letters, raised into caps on the marked row.
+   */
   .palette-row-keys {
     @apply text-ink-muted;
+    display: inline-flex;
+    align-items: center;
     flex-shrink: 0;
     font-family: var(--font-mono);
     font-size: 11px;
+    font-weight: 500;
+    opacity: 0.8;
+  }
+
+  .palette-row-keys .key-chord {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .palette-row-keys kbd {
+    padding: 0 2px;
+    font: inherit;
+  }
+
+  .palette-row-keys .key-then,
+  .connect-keys .key-then {
+    margin: 0 3px;
+    font-family: var(--font-ui);
+    font-size: 10.5px;
+    opacity: 0.7;
+  }
+
+  .palette-row[aria-selected="true"] .palette-row-keys {
+    opacity: 1;
+  }
+
+  .palette-row[aria-selected="true"] .palette-row-keys .key-chord {
+    gap: 3px;
+  }
+
+  .palette-row[aria-selected="true"] .palette-row-keys kbd,
+  .key-cap {
+    @apply text-ink;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 5px;
+    background: var(--lume-color-control-active);
+    box-shadow:
+      inset 0 0 0 var(--lume-size-border) var(--lume-color-border),
+      0 1px 0 color-mix(in srgb, var(--lume-color-overlay) 60%, transparent);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  /* A footer's legend: what the keys do. */
+  .palette-foot {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 14px;
+    height: 36px;
+    padding: 0 14px;
+    overflow: hidden;
+    border-top: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  .palette-foot > span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .palette-foot .key-cap,
+  .connect-footer .key-cap {
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 4px;
+    font-size: 10px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .palette-foot-end {
+    margin-left: auto;
   }
 
   /* A plugin's choice: each row's detail after its label, quieter. */
@@ -4689,7 +5385,10 @@
   }
 }
 
-/* The palette that opens a terminal from a profile. */
+/*
+ * The palette that opens a terminal from a profile: the command palette's look, with a
+ * column beside the list that says what the marked row is and what can be done with it.
+ */
 @layer components {
   .connect-backdrop {
     position: fixed;
@@ -4698,32 +5397,35 @@
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    padding: calc(var(--lume-size-topbar) + 40px) 16px 16px;
-    background: color-mix(in srgb, var(--lume-color-overlay) 60%, transparent);
+    padding: max(calc(var(--lume-size-topbar) + 10px), 10vh) 16px 16px;
+    background: color-mix(in srgb, var(--lume-color-overlay) 35%, transparent);
     cursor: default;
   }
 
   .connect {
-    @apply bg-popover;
     container-type: inline-size;
     display: flex;
     flex-direction: column;
-    width: min(880px, 100%);
-    max-height: min(640px, 100%);
+    width: min(900px, 100%);
+    max-height: min(590px, 100%);
     overflow: hidden;
-    border: var(--lume-size-border) solid var(--lume-color-border);
-    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 4px));
-    box-shadow: var(--lume-shadow-popover);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 6px));
+    background: color-mix(in srgb, var(--lume-color-popover) 92%, transparent);
+    backdrop-filter: blur(20px) saturate(1.3);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--lume-color-text) 7%, transparent),
+      0 0 0 var(--lume-size-border) var(--lume-color-border),
+      var(--lume-shadow-popover);
+    font-size: 13px;
   }
 
   .connect-field {
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    gap: 10px;
-    height: 52px;
-    padding: 0 16px;
-    border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+    gap: 11px;
+    height: 50px;
+    padding: 0 12px 0 16px;
   }
 
   .connect-field-icon {
@@ -4743,37 +5445,71 @@
   }
 
   .connect-input::placeholder {
-    color: var(--lume-color-text-muted);
+    color: color-mix(in srgb, var(--lume-color-text-muted) 80%, transparent);
   }
 
+  /* The kinds to show, as a row of chips under the field, each with its count. */
   .connect-chips {
     display: flex;
     flex-shrink: 0;
-    gap: 4px;
+    gap: 6px;
+    padding: 0 12px 10px;
+    overflow-x: auto;
+    border-bottom: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+    scrollbar-width: none;
   }
 
   .connect-chip {
     @apply text-ink-muted;
     display: flex;
     align-items: center;
-    height: 22px;
-    padding: 0 8px;
-    border-radius: min(6px, var(--lume-radius-control));
-    font-size: 11px;
+    flex-shrink: 0;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
     cursor: pointer;
     transition:
       background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
-      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      transform var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
   }
 
   .connect-chip:hover {
-    @apply bg-control-hover text-ink;
+    @apply text-ink;
+  }
+
+  .connect-chip:active {
+    transform: scale(0.96);
+  }
+
+  /*
+   * The label, its picture and its count sit on one centre line: each is its own box
+   * one line high, so the monospaced count does not ride on a baseline of its own.
+   */
+  .connect-chip > * {
+    display: block;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+
+  .connect-chip-count {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
   }
 
   .connect-chip[aria-pressed="true"] {
     @apply text-accent;
-    background: color-mix(in srgb, var(--lume-color-accent) 14%, transparent);
-    font-weight: 600;
+    background-color: color-mix(in srgb, var(--lume-color-accent) 12%, transparent);
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 35%, transparent);
   }
 
   .connect-body {
@@ -4785,54 +5521,43 @@
   .connect-results {
     flex: 1 1 420px;
     min-width: 0;
-    padding: 8px;
+    height: 410px;
+    padding: 4px 6px 6px;
     overflow-y: auto;
-    border-right: var(--lume-size-border) solid var(--lume-color-border);
+    border-right: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
     scrollbar-width: thin;
   }
 
-  .connect-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
+  .connect-list,
   .connect-group {
     display: flex;
     flex-direction: column;
-    gap: 2px;
   }
 
   .connect-heading {
     @apply text-ink-muted;
-    margin: 10px 10px 4px;
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 6px 10px 0;
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-
-  .connect-group:first-child > .connect-heading {
-    margin-top: 6px;
   }
 
   .connect-row,
   .connect-action {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
+    height: 34px;
     padding: 0 10px;
-    border-radius: calc(var(--lume-radius-control) - 1px);
-    cursor: pointer;
-  }
-
-  .connect-row {
-    min-height: 44px;
+    border-radius: min(8px, var(--lume-radius-control));
+    cursor: default;
   }
 
   .connect-action {
     @apply text-ink-muted;
-    min-height: 36px;
   }
 
   .connect-row[aria-selected="true"],
@@ -4844,95 +5569,78 @@
     @apply text-ink;
   }
 
-  .connect-tile {
+  .connect-row-icon {
     --connect-tone: var(--lume-color-accent);
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    width: 28px;
-    height: 28px;
-    border-radius: min(7px, var(--lume-radius-control));
+    width: 15px;
     color: var(--connect-tone);
-    background: color-mix(in srgb, var(--connect-tone) 14%, transparent);
   }
 
-  .connect-tile[data-kind="wsl"] {
+  .connect-row-icon[data-kind="wsl"] {
     --connect-tone: var(--lume-color-status-warning);
   }
 
-  .connect-tile[data-kind="ssh"] {
+  .connect-row-icon[data-kind="ssh"] {
     --connect-tone: var(--lume-color-status-info);
   }
 
-  .connect-row-text {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-width: 0;
-    line-height: 1.3;
-  }
-
   .connect-row-name {
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
-    font-weight: 600;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
 
   .connect-row-line {
     @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     font-size: 12px;
     white-space: nowrap;
     text-overflow: ellipsis;
+    opacity: 0.8;
+  }
+
+  .connect-row[aria-selected="true"] .connect-row-line {
+    opacity: 1;
   }
 
   .connect-row-line[data-kind="ssh"] {
     font-family: var(--font-mono);
+    font-size: 11.5px;
   }
 
   .connect-mark {
     @apply text-accent;
     background: transparent;
+    font-weight: 600;
   }
 
-  .connect-session-tile {
-    background: transparent;
-  }
-
-  .connect-dot {
-    box-sizing: border-box;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-
-  .connect-dot[data-state="running"] {
-    border: 2px solid var(--lume-color-accent);
-  }
-
-  .connect-dot[data-state="ended"] {
-    border: 1.5px solid var(--lume-color-text-muted);
-  }
-
-  .connect-hint {
+  .connect-meta {
     @apply text-ink-muted;
     flex-shrink: 0;
     font-family: var(--font-mono);
     font-size: 11px;
   }
 
-  .connect-badge {
-    @apply text-ink-muted;
-    display: flex;
-    align-items: center;
-    flex-shrink: 0;
-    height: 20px;
-    padding: 0 7px;
-    border: var(--lume-size-border) solid var(--lume-color-border);
-    border-radius: min(5px, var(--lume-radius-control));
-    font-size: 11px;
+  .connect-dot {
+    box-sizing: border-box;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+
+  .connect-dot[data-state="running"] {
+    background: var(--lume-color-accent);
+  }
+
+  .connect-dot[data-state="ended"] {
+    border: 1.5px solid var(--lume-color-text-muted);
   }
 
   .connect-action-icon {
@@ -4954,21 +5662,24 @@
     font-size: 12px;
   }
 
+  /* What the marked row is, and what can be done with it. */
   .connect-detail {
     display: flex;
-    flex: 1 1 320px;
+    flex: 0 0 340px;
     flex-direction: column;
+    box-sizing: border-box;
     min-width: 0;
-    gap: 14px;
-    padding: 16px;
+    height: 410px;
+    gap: 10px;
+    padding: 16px 16px 14px;
     overflow-y: auto;
-    background: color-mix(in srgb, var(--lume-color-surface) 55%, var(--lume-color-popover));
+    background: color-mix(in srgb, var(--lume-color-overlay) 12%, transparent);
   }
 
   .connect-detail-head {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
     min-width: 0;
   }
 
@@ -4990,16 +5701,103 @@
     font-family: var(--font-mono);
   }
 
-  .connect-facts {
+  .connect-detail-top {
     display: flex;
-    flex-direction: column;
+    align-items: flex-start;
     gap: 8px;
   }
 
+  .connect-detail-top > .connect-detail-head {
+    flex: 1;
+  }
+
+  /* The pin beside a profile's name: a ring, filled in while the profile is pinned. */
+  .connect-pin {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: min(8px, var(--lume-radius-control));
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    cursor: pointer;
+    transition:
+      transform var(--lume-motion-duration-fast) var(--lume-motion-easing-standard),
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .connect-pin:hover {
+    @apply text-ink;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .connect-pin:active {
+    transform: scale(0.94);
+  }
+
+  .connect-pin[aria-pressed="true"] {
+    @apply text-accent;
+    background-color: color-mix(in srgb, var(--lume-color-accent) 8%, transparent);
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 35%, transparent);
+  }
+
+  .connect-pin[aria-pressed="true"] svg {
+    fill: currentColor;
+  }
+
+  .connect-row-pin {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  /* A host's numbers: how near it is, how many panes run it, its port. */
+  .connect-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .connect-stats > div {
+    min-width: 0;
+    padding: 7px 10px;
+    border-radius: min(8px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-text) 3.5%, transparent);
+  }
+
+  .connect-stats dt {
+    @apply text-ink-muted;
+    font-size: 11px;
+  }
+
+  .connect-stats dd {
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connect-facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
   .connect-fact {
-    padding: 8px 10px;
-    border-radius: calc(var(--lume-radius-control) - 1px);
-    background: color-mix(in srgb, var(--lume-color-control-active) 70%, transparent);
+    min-width: 0;
+    padding: 7px 10px;
+    border-radius: min(8px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-text) 3.5%, transparent);
+  }
+
+  /* The first fact says what runs, which is long: it has the whole width. */
+  .connect-fact:first-child {
+    grid-column: 1 / -1;
   }
 
   .connect-fact dt {
@@ -5013,45 +5811,86 @@
     font-size: 12px;
   }
 
+  /* Where a profile comes from is said in words, not as something to type. */
+  .connect-fact dd[data-prose] {
+    font-family: var(--font-ui);
+  }
+
   .connect-detail-spacer {
     flex: 1;
   }
 
-  .connect-detail-buttons {
+  /* What can be done: the first thing, filled in; the others as plain rows. */
+  .connect-acts {
     display: flex;
-    gap: 8px;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .connect-primary,
   .connect-secondary {
     display: flex;
     align-items: center;
-    justify-content: center;
-    height: 34px;
-    padding: 0 12px;
-    border-radius: calc(var(--lume-radius-control) - 1px);
+    gap: 10px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: min(7px, var(--lume-radius-control));
+    font-size: 12.5px;
     cursor: pointer;
     transition:
       background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
-      filter var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+      transform var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
+  }
+
+  .connect-primary:active,
+  .connect-secondary:active {
+    transform: scale(0.98);
   }
 
   .connect-primary {
     @apply bg-accent text-accent-ink;
-    flex: 1;
     font-weight: 600;
   }
 
   .connect-primary:hover {
-    filter: brightness(1.08);
-  }
-
-  .connect-secondary {
-    border: var(--lume-size-border) solid var(--lume-color-border);
+    filter: brightness(1.06);
   }
 
   .connect-secondary:hover {
     @apply bg-control-hover;
+  }
+
+  .connect-keys {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: auto;
+  }
+
+  .connect-keys .key-chord {
+    display: inline-flex;
+    gap: 3px;
+  }
+
+  .connect-keys kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 5px;
+    background: var(--lume-color-control-active);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+  }
+
+  .connect-primary .connect-keys kbd {
+    background: color-mix(in srgb, var(--lume-color-accent-text) 16%, transparent);
+    box-shadow: none;
+    color: inherit;
   }
 
   .connect-footer {
@@ -5059,22 +5898,46 @@
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    gap: 16px;
-    min-height: 36px;
-    padding: 0 16px;
+    gap: 14px;
+    height: 36px;
+    padding: 0 14px;
     overflow: hidden;
-    border-top: var(--lume-size-border) solid var(--lume-color-border);
-    font-size: 12px;
+    border-top: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+    font-size: 11.5px;
     white-space: nowrap;
+  }
+
+  .connect-footer > span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .connect-footer-keys,
+  .connect-footer-keys .key-chord {
+    display: inline-flex;
+    gap: 3px;
+  }
+
+  .connect-footer-keys kbd {
+    @apply text-ink;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--lume-color-control-active);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
   }
 
   .connect-footer-spacer {
     flex: 1;
-  }
-
-  .connect-key {
-    @apply text-ink;
-    font-family: var(--font-mono);
   }
 
   /* A narrow palette lists above what it says of the marked profile. */
@@ -5084,28 +5947,22 @@
       overflow-y: auto;
     }
 
-    .connect-results {
-      flex: none;
-      overflow: visible;
-      border-right: none;
-      border-bottom: var(--lume-size-border) solid var(--lume-color-border);
-    }
-
+    .connect-results,
     .connect-detail {
       flex: none;
+      height: auto;
       overflow: visible;
     }
 
-    .connect-chip {
-      padding: 0 6px;
+    .connect-results {
+      border-right: none;
+      border-bottom: var(--lume-size-border) solid
+        color-mix(in srgb, var(--lume-color-border) 70%, transparent);
     }
   }
 
   @container (max-width: 420px) {
-    .connect-chips {
-      display: none;
-    }
-
+    .connect-footer > span:nth-child(2),
     .connect-footer > span:nth-child(4) {
       display: none;
     }
@@ -5113,6 +5970,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .connect-chip,
+    .connect-pin,
     .connect-primary,
     .connect-secondary {
       transition: none;

@@ -846,6 +846,13 @@ export class FakeCore implements Carrier {
         return answer(this.#profiles);
       case "sessions_detached":
         return answer({ sessions: [...this.#detached] });
+      // Every host is near, and the one called "far" does not answer.
+      case "host_probe":
+        return answer(
+          args["profile"] === "far"
+            ? { ms: null, note: "the host did not answer in time" }
+            : { ms: 24 },
+        );
       case "font_families":
         return answer(FONTS);
       // No picture is behind the panes: no bytes.

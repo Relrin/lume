@@ -4,7 +4,8 @@
  * It has three places for status items: at its left, in its middle and at its right.
  * Around them stand the bar's own parts: the application's menu and the workspace's
  * name at the left end, the window's tabs in the middle unless they are listed in a panel at the window's side,
- * and the window's buttons at the right end when the page draws the title bar.
+ * and at the right end the Activity list, the command palette and a new tab, then the
+ * window's buttons when the page draws the title bar.
  *
  * A window without a title bar of the system's is moved by this bar: a press on any
  * part of it that is not a control drags the window, and a double press makes the
@@ -24,6 +25,7 @@ import { TRAFFIC_LIGHTS_INSET_PX } from "../tuning.ts";
 import { AppMenu } from "./AppMenu.tsx";
 import { useShell } from "./context.ts";
 import { TabStrip } from "./TabStrip.tsx";
+import { TopTools } from "./TopTools.tsx";
 import { WindowControls } from "./WindowControls.tsx";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 
@@ -86,6 +88,7 @@ export function TopBar() {
       </div>
       <div className="top-right">
         {has("topbar.right") && <StatusSlotItems store={app.status} slot="topbar.right" />}
+        <TopTools />
         {custom && !mac && <WindowControls />}
       </div>
     </header>

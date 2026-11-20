@@ -76,6 +76,7 @@ import { focusBar } from "./focus-bar.ts";
 import { createHostLinkStore, type HostLinkStore } from "./host-link.ts";
 import { NoticeStore, sentence } from "./notices.ts";
 import { createTabUiStore, type TabUiStore } from "./tab-ui.ts";
+import { workOf } from "./work.ts";
 
 /** The page's prompts. Created with the module so a component can show them at once. */
 export const prompts = new PromptStore();
@@ -248,6 +249,8 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   // once it has them; a change the copies already hold is passed over there.
   // What is made further on, for what is called back before it is.
   const made: { shell?: ShellApp; views?: PaneViews; client?: CoreClient } = {};
+  // What a pane is doing, for the question asked before closing it, once the window is up.
+  const workNow = (pane: PaneId) => (made.shell ? workOf(made.shell, pane) : null);
   // What the user is doing with the tabs and the panes' menus. The terminals open one too.
   const tabUi = createTabUiStore();
   let early: Notice[] | null = [];
@@ -494,7 +497,8 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     palette,
     connect,
     search,
-    mayRun: (id, args) => mayRun({ layout, config, views, prompts, client, notices }, id, args),
+    mayRun: (id, args) =>
+      mayRun({ layout, config, views, prompts, client, notices, work: workNow }, id, args),
     focusBar: () => focusBar(),
     renameTab: (tab) => tabUi.getState().startRename(tab ?? selectActiveTab(layout.getState())),
     renamePane: (named) => {
@@ -574,7 +578,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         windowState.getState().set(notice);
         break;
       case "close_requested":
-        void closeRequested({ layout, config, views, prompts, client, notices });
+        void closeRequested({ layout, config, views, prompts, client, notices, work: workNow });
         break;
       case "window_shown":
         shownAgain();

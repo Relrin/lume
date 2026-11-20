@@ -22,6 +22,33 @@ export interface Closing {
   readonly what: "pane" | "tab" | "tabs" | "group" | "moved-group" | "window";
   /** How many of its panes have a program that has not ended. At least one. */
   readonly running: number;
+  /** The panes still at work, as the question names them, the one that presses most first. */
+  readonly busy?: readonly BusyPane[];
+  /**
+   * The control the close was asked for from, in the window's coordinates: the question
+   * hangs under it. Without one it is shown near the top of the window.
+   */
+  readonly anchor?: CloseAnchor;
+}
+
+/** A pane that closing would interrupt, as the question about the close names it. */
+export interface BusyPane {
+  readonly pane: string;
+  /** What is at work: a program, or a command line's program. */
+  readonly who: string;
+  /** What it is doing, said after its name: "is still running". */
+  readonly rest: string;
+  /** Whether it waits on the user, rather than working. */
+  readonly waiting: boolean;
+  /** Whether the program reports its own status, as coding agents do. */
+  readonly agent: boolean;
+}
+
+/** Where a control is, for a question to hang under it. */
+export interface CloseAnchor {
+  readonly left: number;
+  readonly width: number;
+  readonly bottom: number;
 }
 
 /** A question about something that cannot be taken back, put by the core. */

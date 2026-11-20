@@ -17,18 +17,24 @@ import {
 import type { Notice } from "../core/types.ts";
 import type { LayoutState } from "../layout/store.ts";
 import type { GroupId, PaneId, TabId } from "../layout/types.ts";
-import type { Closing } from "../terminal/prompts.ts";
+import type { BusyPane, CloseAnchor, Closing } from "../terminal/prompts.ts";
 import type { ShellApp } from "./boot.ts";
 import { sentence } from "./notices.ts";
+import { workRest, type PaneWork } from "./work.ts";
 
 /** The parts of the page answering the core's question about a command need. */
 export type ConfirmingApp = Pick<ShellApp, "prompts" | "views"> & {
   readonly commands: Pick<ShellApp["commands"], "run">;
 };
 
-/** The parts of the page asking about a close needs. */
+/**
+ * The parts of the page asking about a close needs. `work` says what a pane is doing,
+ * so that the question can name it; without it the question only counts.
+ */
 export type ClosingApp = Pick<ShellApp, "layout" | "config" | "views" | "prompts" | "client"> &
-  Partial<Pick<ShellApp, "notices">>;
+  Partial<Pick<ShellApp, "notices">> & {
+    readonly work?: (pane: PaneId) => PaneWork | null;
+  };
 
 /** The commands that close panes the user may still be using. */
 const PANE_CLOSE = "lume.pane.close";
@@ -132,17 +138,74 @@ export function closingText(closing: Closing): string {
 }
 
 /**
- * How many of some panes run something that closing them would end. The core knows
- * best: which program has each terminal, and whether a shell is running a command. If
- * it cannot be asked, a pane whose program has not ended counts.
+ * Which of some panes run something that closing them would end. The core knows best:
+ * which program has each terminal, and whether a shell is running a command. If it
+ * cannot be asked, a pane whose program has not ended counts.
  */
-async function running(app: ClosingApp, panes: readonly PaneId[]): Promise<number> {
-  if (panes.length === 0) return 0;
+async function running(app: ClosingApp, panes: readonly PaneId[]): Promise<readonly PaneId[]> {
+  if (panes.length === 0) return [];
   try {
-    return (await app.client.panesBusy(panes)).length;
+    return await app.client.panesBusy(panes);
   } catch {
-    return panes.filter((pane) => app.views.get(pane)?.ended === false).length;
+    return panes.filter((pane) => app.views.get(pane)?.ended === false);
   }
+}
+
+/** The busy panes as the question names them: what waits on the user first. */
+function busyPanes(app: ClosingApp, panes: readonly PaneId[]): BusyPane[] | undefined {
+  const { work } = app;
+  if (!work) return undefined;
+  const named = panes.map((pane): BusyPane => {
+    const found = work(pane);
+    // The core counts a program the page has no word of, such as an editor: it runs.
+    if (!found || found.state === "done" || found.state === "failed") {
+      return {
+        pane,
+        who: found?.who ?? "A program",
+        rest: "is still running",
+        waiting: false,
+        agent: false,
+      };
+    }
+    return {
+      pane,
+      who: found.who,
+      rest: workRest(found),
+      waiting: found.state === "wait",
+      agent: found.agent,
+    };
+  });
+  return named.sort((a, b) => Number(b.waiting) - Number(a.waiting));
+}
+
+/** Where a control is, for the question to hang under it, if it is on show. */
+function anchorAt(selector: string): CloseAnchor | undefined {
+  if (typeof document === "undefined") return undefined;
+  const element = document.querySelector(selector);
+  if (!element) return undefined;
+  const box = element.getBoundingClientRect();
+  if (box.width === 0 && box.height === 0) return undefined;
+  return { left: box.left, width: box.width, bottom: box.bottom };
+}
+
+/**
+ * The control a close hangs its question under: the close button of the tab or pane
+ * being closed, where it is on show. Several tabs or a group have none.
+ */
+function closeAnchor(id: string, args: unknown, state: LayoutState): CloseAnchor | undefined {
+  if (!state.ready || typeof document === "undefined") return undefined;
+  if (id === TAB_CLOSE) {
+    const tab = (named(args, "tab") as TabId | undefined) ?? selectActiveTab(state);
+    if (tab === null) return undefined;
+    const holder = `[data-tab-id="${CSS.escape(tab)}"]`;
+    return anchorAt(`${holder} .tab-close`) ?? anchorAt(holder);
+  }
+  if (id === PANE_CLOSE) {
+    const pane = (named(args, "pane") as PaneId | undefined) ?? selectFocus(state);
+    if (pane === null) return undefined;
+    return anchorAt(`[data-pane="${CSS.escape(pane)}"] [aria-label="Close pane"]`);
+  }
+  return undefined;
 }
 
 /**
@@ -155,8 +218,15 @@ export async function mayRun(app: ClosingApp, id: string, args: unknown): Promis
   const closed = panesClosedBy(app.layout.getState(), id, args);
   if (!closed) return true;
   const live = await running(app, closed.panes);
-  if (live === 0) return true;
-  const agreed = await app.prompts.confirmClose({ what: closed.what, running: live });
+  if (live.length === 0) return true;
+  const busy = busyPanes(app, live);
+  const anchor = closeAnchor(id, args, app.layout.getState());
+  const agreed = await app.prompts.confirmClose({
+    what: closed.what,
+    running: live.length,
+    ...(busy ? { busy } : {}),
+    ...(anchor ? { anchor } : {}),
+  });
   // The keyboard goes back to where the user was working when nothing is closed.
   if (!agreed) app.views.focus();
   return agreed;
@@ -168,10 +238,21 @@ export async function mayRun(app: ClosingApp, id: string, args: unknown): Promis
  */
 export async function closeRequested(app: ClosingApp): Promise<void> {
   const state = app.layout.getState();
-  const live = state.ready ? await running(app, selectWindowPanes(state)) : 0;
-  if (live > 0 && !(await app.prompts.confirmClose({ what: "window", running: live }))) {
-    app.views.focus();
-    return;
+  const live = state.ready ? await running(app, selectWindowPanes(state)) : [];
+  if (live.length > 0) {
+    const busy = busyPanes(app, live);
+    // The window's own close button, where the page draws the title bar.
+    const anchor = anchorAt('.window-controls [aria-label="Close window"]');
+    const agreed = await app.prompts.confirmClose({
+      what: "window",
+      running: live.length,
+      ...(busy ? { busy } : {}),
+      ...(anchor ? { anchor } : {}),
+    });
+    if (!agreed) {
+      app.views.focus();
+      return;
+    }
   }
   try {
     await app.client.windowControl("close", true);

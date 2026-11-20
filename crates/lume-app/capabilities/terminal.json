@@ -28,6 +28,7 @@
     "allow-config-unset",
     "allow-config-open",
     "allow-profiles-list",
+    "allow-host-probe",
     "allow-background-image",
     "allow-ui-contributions",
     "allow-ui-visible",

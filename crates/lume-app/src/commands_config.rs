@@ -18,6 +18,7 @@ use tauri::ipc::Response;
 use crate::background;
 use crate::configsvc::ThemeEntry;
 use crate::error::CommandError;
+use crate::host_probe;
 use crate::opener;
 use crate::services::Services;
 use crate::tuning::BACKGROUND_IMAGE_MAX_BYTES;
@@ -103,6 +104,19 @@ pub async fn shells_list() -> Result<Vec<ShellEntry>, CommandError> {
 #[tauri::command(async)]
 pub fn profiles_list(services: Shared<'_>) -> Value {
     services.panes.profiles.view()
+}
+
+/// How long a connection to the machine a profile reaches over SSH takes to open, in
+/// milliseconds, or why it was not measured. Only a profile's own host is measured.
+#[tauri::command]
+pub async fn host_probe(services: Shared<'_>, profile: String) -> Result<Value, CommandError> {
+    let found = services
+        .panes
+        .profiles
+        .find(&profile)
+        .ok_or_else(|| CommandError::not_found(format!("there is no profile {profile}")))?;
+    serde_json::to_value(host_probe::probe(found.launcher).await)
+        .map_err(|error| CommandError::internal(error.to_string()))
 }
 
 /// The picture shown behind the panes, as the bytes of its file; no bytes when the

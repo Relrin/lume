@@ -43,10 +43,6 @@
             ]
           },
           {
-            "role": "button",
-            "name": "New tab"
-          },
-          {
             "role": "meter",
             "name": "CPU"
           },
@@ -57,6 +53,21 @@
           {
             "role": "img",
             "name": "Load: 0.8"
+          },
+          {
+            "role": "button",
+            "name": "Activity",
+            "state": {
+              "expanded": "false"
+            }
+          },
+          {
+            "role": "button",
+            "name": "Command palette"
+          },
+          {
+            "role": "button",
+            "name": "New tab"
           }
         ]
       },

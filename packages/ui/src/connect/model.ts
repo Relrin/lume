@@ -59,11 +59,13 @@ export interface ConnectEntry {
   readonly indices: readonly number[];
   /** The line under the name: where the terminal goes, or what it runs. */
   readonly line: string;
+  /** Whether the user pinned it, so it is listed first. */
+  readonly pinned: boolean;
 }
 
-/** The profiles of one kind. */
+/** The profiles of one kind, or those pinned. */
 export interface ConnectGroup {
-  readonly kind: ConnectKind;
+  readonly kind: ConnectKind | "pinned";
   readonly label: string;
   readonly entries: readonly ConnectEntry[];
 }
@@ -213,11 +215,15 @@ function otherText(profile: Profile): string {
  * first and then the ones that were found, each in the order the list gives them. With
  * one, it lists the profiles whose name matches, best first, and after them those that
  * match by their id or what they run. A group with nothing in it is left out.
+ *
+ * The profiles in `pinned` are taken out of their kinds' groups and listed first, in a
+ * group of their own, in the order their groups had them.
  */
 export function connectGroups(
   list: Pick<ProfileList, "profiles" | "default"> | null,
   query: string,
   filter: ConnectFilter,
+  pinned: ReadonlySet<string> = new Set(),
 ): ConnectGroup[] {
   if (!list) return [];
   const offered = list.profiles.filter((profile) => passes(profile, filter));
@@ -227,8 +233,9 @@ export function connectGroups(
     isDefault: list.default !== null && profile.id === list.default,
     indices,
     line: lineOf(profile),
+    pinned: pinned.has(profile.id),
   });
-  return GROUPS.flatMap(({ kind, label }) => {
+  const groups: ConnectGroup[] = GROUPS.flatMap(({ kind, label }) => {
     const own = offered.filter((profile) => kindOf(profile) === kind);
     let entries: ConnectEntry[];
     if (query.trim() === "") {
@@ -251,6 +258,12 @@ export function connectGroups(
     entries = entries.slice(0, CONNECT_GROUP_MAX);
     return entries.length === 0 ? [] : [{ kind, label, entries }];
   });
+  if (pinned.size === 0) return groups;
+  const first = groups.flatMap((group) => group.entries.filter((entry) => entry.pinned));
+  const rest = groups
+    .map((group) => ({ ...group, entries: group.entries.filter((entry) => !entry.pinned) }))
+    .filter((group) => group.entries.length > 0);
+  return first.length === 0 ? rest : [{ kind: "pinned", label: "Pinned", entries: first }, ...rest];
 }
 
 /** How long ago something started, as the palette says it: "started 5m ago". */

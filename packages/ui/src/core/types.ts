@@ -458,6 +458,14 @@ export interface DetachedSession {
   readonly pid: number | null;
 }
 
+/** What `host_probe` says of the machine a profile reaches over SSH. */
+export interface HostProbe {
+  /** How long a connection took to open, in milliseconds; null when it did not open. */
+  readonly ms: number | null;
+  /** Why there is no time, in words. */
+  readonly note?: string;
+}
+
 /** What `sessions_detached` returns. */
 export interface DetachedSessions {
   readonly sessions: readonly DetachedSession[];

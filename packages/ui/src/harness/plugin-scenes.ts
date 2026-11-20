@@ -335,6 +335,34 @@ const WITH_PLUGINS: FakeCoreOptions = {
   assets: { gear: GEAR },
 };
 
+/**
+ * The same, with a badge that has a picture at the right of the top bar: drawn as one
+ * of the bar's tools, its count over a corner of the picture.
+ */
+const WITH_TOOL_BADGE: FakeCoreOptions = {
+  ...WITH_PLUGINS,
+  contributions: {
+    ...PLUGIN_CONTRIBUTIONS,
+    status: [
+      ...PLUGIN_CONTRIBUTIONS.status,
+      {
+        id: "acme.tools.review",
+        plugin: "acme.tools",
+        slot: "topbar.right",
+        kind: "badge",
+        order: 9,
+        icon: { image: "acme.tools:gear" },
+        command: "acme.tools.jobs",
+        tooltip: "Changes to review",
+      },
+    ],
+    values: [
+      ...PLUGIN_CONTRIBUTIONS.values,
+      { plugin: "acme.tools", item: "acme.tools.review", pane: null, value: { text: "12" } },
+    ],
+  },
+};
+
 /** The same, with a row in the panel whose rows are given when it is opened. */
 const WITH_LAZY_ROWS: FakeCoreOptions = {
   ...WITH_PLUGINS,
@@ -551,6 +579,19 @@ export const PLUGIN_SCENES: readonly Scene[] = [
         problems.push("the plugin's badge that runs a command is not a button");
       }
       return problems;
+    },
+  },
+  {
+    name: "plugin-status-tool",
+    window: WITH_TOOL_BADGE,
+    prepare: async () => {
+      await statusItem("acme.tools.review");
+    },
+    check: (page) => {
+      const tool = page.querySelector('[data-status="acme.tools.review"][data-tool]');
+      if (!tool) return ["the badge with a picture in the top bar is not drawn as a tool"];
+      const count = tool.querySelector(".status-badge")?.textContent ?? "";
+      return count === "12" ? [] : [`the tool's count says ${JSON.stringify(count)}, not 12`];
     },
   },
   {

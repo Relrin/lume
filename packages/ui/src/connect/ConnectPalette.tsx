@@ -6,7 +6,13 @@
  * filters along the field show one kind of profile, the arrow keys move through the
  * list, and the column beside it says what the marked profile will run and where it
  * comes from. Enter opens the profile in a new tab and Ctrl+Enter beside the pane that
- * has the keyboard; Escape puts the palette away.
+ * has the keyboard; Escape puts the palette away. The filters stand in a row of chips
+ * under the field, each with how many of its kind match what is typed.
+ *
+ * Ctrl+D, or the pin beside a profile's name in the column, pins the marked profile:
+ * pinned profiles are listed first. For a host reached over SSH the column also says
+ * how long a connection to it takes to open, measured when the host is first marked,
+ * how many panes of the window run it, and its port.
  *
  * Sessions that still run in the session host with no pane to show them are listed
  * after the profiles, and are shown again in a tab of their own, or beside the pane
@@ -16,12 +22,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 
-import type { DetachedSession } from "../core/types.ts";
+import type { DetachedSession, HostProbe } from "../core/types.ts";
+import { Glyph } from "../icons/Glyph.tsx";
 import { homeShortened } from "../events/where.ts";
 import { useShell } from "../shell/context.ts";
 import { FileIcon, RefreshIcon, SearchIcon } from "../shell/icons.tsx";
 import { sentence } from "../shell/notices.ts";
+import { Cap, KeyCaps } from "../palette/KeyCaps.tsx";
 import { KindIcon } from "./icons.tsx";
+import { readPins, togglePin } from "./pins.ts";
 import {
   DETACHED_LABEL,
   connectFilters,
@@ -75,7 +84,7 @@ function MarkedName({ text, indices }: { text: string; indices: readonly number[
 /** Whether a detached session's program runs, as a dot like the mockup's. */
 function SessionDot({ session }: { session: DetachedSession }) {
   return (
-    <span className="connect-tile connect-session-tile">
+    <span className="connect-row-icon">
       <span className="connect-dot" data-state={session.exited ? "ended" : "running"} />
     </span>
   );
@@ -111,12 +120,12 @@ function SessionDetail({
         {facts.map(([label, value]) => (
           <div key={label} className="connect-fact">
             <dt>{label}</dt>
-            <dd>{value}</dd>
+            <dd data-prose={label === "From" || undefined}>{value}</dd>
           </div>
         ))}
       </dl>
       <div className="connect-detail-spacer" />
-      <div className="connect-detail-buttons">
+      <div className="connect-acts">
         <button
           type="button"
           className="connect-primary"
@@ -125,6 +134,7 @@ function SessionDetail({
           onClick={() => attach(entry, "tab")}
         >
           Attach in new tab
+          <KeyCaps label="↵" className="connect-keys" />
         </button>
         <button
           type="button"
@@ -141,18 +151,33 @@ function SessionDetail({
 }
 
 /** The column that says what the marked profile, session or action is. */
+/** What a host's measurement says, as the column and the row show it. */
+function latencyOf(probe: HostProbe | "pending" | undefined): string {
+  if (probe === undefined || probe === "pending") return "…";
+  return probe.ms === null ? "—" : `${probe.ms} ms`;
+}
+
 function Detail({
   row,
   splitKey,
   open,
   act,
   session,
+  pin,
+  probe,
+  running,
 }: {
   row: ConnectRow | undefined;
   splitKey: string;
   open: (entry: ConnectEntry, how: "tab" | "split") => void;
   act: (action: ConnectAction) => void;
   session: (entry: DetachedEntry) => ReactNode;
+  /** Pins the profile, or takes its pin away. */
+  pin: (entry: ConnectEntry) => void;
+  /** What measuring a host found, by profile id. */
+  probe: (profile: string) => HostProbe | "pending" | undefined;
+  /** How many panes of the window run a profile. */
+  running: (profile: string) => number;
 }) {
   if (!row) {
     return (
@@ -168,7 +193,7 @@ function Detail({
         <h2 className="connect-detail-name">{row.action.label}</h2>
         <p className="connect-detail-about">{row.action.about}</p>
         <div className="connect-detail-spacer" />
-        <div className="connect-detail-buttons">
+        <div className="connect-acts">
           <button
             type="button"
             className="connect-primary"
@@ -177,6 +202,7 @@ function Detail({
             onClick={() => act(row.action)}
           >
             {row.action.label}
+            <KeyCaps label="↵" className="connect-keys" />
           </button>
         </div>
       </section>
@@ -190,22 +216,60 @@ function Detail({
   ];
   if (profile.cwd !== undefined) facts.push(["Starts in", profile.cwd]);
   facts.push(["Id", profile.id]);
+  const launcher = profile.launcher;
+  const measured = launcher.type === "ssh" ? probe(profile.id) : undefined;
+  const stats: [string, string, string | undefined][] =
+    launcher.type === "ssh"
+      ? [
+          [
+            "Latency",
+            latencyOf(measured),
+            typeof measured === "object" ? measured.note : undefined,
+          ],
+          ["Panes", String(running(profile.id)), undefined],
+          ["Port", String(launcher.port ?? 22), undefined],
+        ]
+      : [];
   return (
     <section className="connect-detail" aria-label="Selection">
-      <div className="connect-detail-head">
-        <h2 className="connect-detail-name">{profile.name}</h2>
-        <span className="connect-detail-line">{entry.line}</span>
+      <div className="connect-detail-top">
+        <div className="connect-detail-head">
+          <h2 className="connect-detail-name">{profile.name}</h2>
+          <span className="connect-detail-line">{entry.line}</span>
+        </div>
+        <button
+          type="button"
+          className="connect-pin"
+          aria-pressed={entry.pinned}
+          aria-label={entry.pinned ? `Unpin ${profile.name}` : `Pin ${profile.name}`}
+          title={entry.pinned ? "Unpin (Ctrl+D)" : "Pin to the top (Ctrl+D)"}
+          tabIndex={-1}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => pin(entry)}
+        >
+          <Glyph name="pin" size={14} />
+        </button>
       </div>
+      {stats.length > 0 && (
+        <dl className="connect-stats">
+          {stats.map(([label, value, note]) => (
+            <div key={label} title={note}>
+              <dt>{label}</dt>
+              <dd data-prose={label === "From" || undefined}>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
       <dl className="connect-facts">
         {facts.map(([label, value]) => (
           <div key={label} className="connect-fact">
             <dt>{label}</dt>
-            <dd>{value}</dd>
+            <dd data-prose={label === "From" || undefined}>{value}</dd>
           </div>
         ))}
       </dl>
       <div className="connect-detail-spacer" />
-      <div className="connect-detail-buttons">
+      <div className="connect-acts">
         <button
           type="button"
           className="connect-primary"
@@ -214,16 +278,17 @@ function Detail({
           onClick={() => open(entry, "tab")}
         >
           Open in new tab
+          <KeyCaps label="↵" className="connect-keys" />
         </button>
         <button
           type="button"
           className="connect-secondary"
           tabIndex={-1}
-          title={`Split right (${splitKey})`}
           onPointerDown={(event) => event.preventDefault()}
           onClick={() => open(entry, "split")}
         >
           Split right
+          <KeyCaps label={splitKey} className="connect-keys" />
         </button>
       </div>
     </section>
@@ -244,6 +309,10 @@ function ConnectDialog() {
   const [detached, setDetached] = useState<readonly DetachedSession[] | null>(null);
   const [detachedProblem, setDetachedProblem] = useState<string | null>(null);
   const [asked, setAsked] = useState(0);
+  const [pins, setPins] = useState<readonly string[]>(() => readPins());
+  const pinned = useMemo(() => new Set(pins), [pins]);
+  // What measuring each host found, kept while the palette is open.
+  const [probes, setProbes] = useState<ReadonlyMap<string, HostProbe | "pending">>(() => new Map());
   // When the list was read, which is what the sessions' ages are counted from.
   const [now, setNow] = useState(() => Date.now());
 
@@ -277,18 +346,63 @@ function ConnectDialog() {
     [app.machine.home, windows],
   );
   const filters = connectFilters((detached?.length ?? 0) > 0, filter);
-  const groups = useMemo(() => connectGroups(list, query, filter), [list, query, filter]);
+  const groups = useMemo(
+    () => connectGroups(list, query, filter, pinned),
+    [list, query, filter, pinned],
+  );
   const sessions = useMemo(
     () => detachedEntries(detached, query, filter, now, place),
     [detached, query, filter, now, place],
   );
   const rows = useMemo(() => connectRows(groups, sessions), [groups, sessions]);
+  // How many of each kind match what is typed, for the chips.
+  const counts = useMemo(() => {
+    const every = connectGroups(list, query, "all");
+    const of = (kind: ConnectFilter) =>
+      every
+        .filter((group) => kind === "all" || group.kind === kind)
+        .reduce((sum, group) => sum + group.entries.length, 0);
+    const loose = detachedEntries(detached, query, "detached", now, place).length;
+    return (filter: ConnectFilter) =>
+      filter === "detached" ? loose : filter === "all" ? of("all") + loose : of(filter);
+  }, [list, query, detached, now, place]);
   const marked = Math.min(selected, Math.max(0, rows.length - 1));
-  const splitKey = platform === "macos" ? "⌘ ↵" : "Ctrl ↵";
+  const splitKey = platform === "macos" ? "⌘↵" : "Ctrl+↵";
 
   useEffect(() => {
     results.current?.querySelector(`#${optionId(marked)}`)?.scrollIntoView({ block: "nearest" });
   }, [marked, rows]);
+
+  // A host is measured when it is first marked, and once only.
+  const markedRow = rows[marked];
+  const markedHost =
+    markedRow?.type === "profile" && markedRow.entry.profile.launcher.type === "ssh"
+      ? markedRow.entry.profile.id
+      : null;
+  useEffect(() => {
+    if (markedHost === null || probes.has(markedHost)) return;
+    setProbes((held) => new Map(held).set(markedHost, "pending"));
+    app.client.hostProbe(markedHost).then(
+      (found) => setProbes((held) => new Map(held).set(markedHost, found)),
+      (error: unknown) =>
+        setProbes((held) =>
+          new Map(held).set(markedHost, {
+            ms: null,
+            note: error instanceof Error ? error.message : String(error),
+          }),
+        ),
+    );
+  }, [app.client, markedHost, probes]);
+
+  /** How many panes of the window run a profile. */
+  const running = (profile: string): number => {
+    const state = app.layout.getState();
+    if (!state.ready) return 0;
+    return Object.values(state.panes).filter(
+      (pane) => pane?.content.type === "terminal" && pane.content.profile === profile,
+    ).length;
+  };
+  const pin = (entry: ConnectEntry) => setPins(togglePin(entry.profile.id));
 
   // Putting the palette away gives the keyboard back to where the user was working.
   const close = () => app.connect.getState().close();
@@ -398,6 +512,13 @@ function ConnectDialog() {
               setSelected(0);
             }}
             onKeyDown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "d") {
+                const row = rows[marked];
+                if (row?.type === "profile") pin(row.entry);
+                event.preventDefault();
+                event.stopPropagation();
+                return;
+              }
               switch (event.key) {
                 case "ArrowDown":
                   move(marked + 1);
@@ -429,22 +550,29 @@ function ConnectDialog() {
               event.stopPropagation();
             }}
           />
-          <span className="connect-chips" role="group" aria-label="Show">
-            {filters.map((choice) => (
-              <button
-                key={choice.value}
-                type="button"
-                className="connect-chip"
-                data-filter={choice.value}
-                aria-pressed={filter === choice.value}
-                tabIndex={-1}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={() => filterBy(choice.value)}
-              >
-                {choice.label}
-              </button>
-            ))}
-          </span>
+        </div>
+        <div className="connect-chips" role="group" aria-label="Show">
+          {filters.map((choice) => (
+            <button
+              key={choice.value}
+              type="button"
+              className="connect-chip"
+              data-filter={choice.value}
+              aria-label={`${choice.label}, ${counts(choice.value)}`}
+              aria-pressed={filter === choice.value}
+              tabIndex={-1}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => filterBy(choice.value)}
+            >
+              {choice.value === "local" || choice.value === "wsl" || choice.value === "ssh" ? (
+                <KindIcon kind={choice.value} size={12} />
+              ) : null}
+              {choice.label}
+              <span className="connect-chip-count" aria-hidden="true">
+                {counts(choice.value)}
+              </span>
+            </button>
+          ))}
         </div>
         <div className="connect-body">
           <div ref={results} className="connect-results">
@@ -463,18 +591,26 @@ function ConnectDialog() {
                     option(
                       { type: "profile", entry },
                       <>
-                        <span className="connect-tile" data-kind={entry.kind}>
+                        <span className="connect-row-icon" data-kind={entry.kind}>
                           <KindIcon kind={entry.kind} />
                         </span>
-                        <span className="connect-row-text">
-                          <span className="connect-row-name">
-                            <MarkedName text={entry.profile.name} indices={entry.indices} />
-                          </span>
-                          <span className="connect-row-line" data-kind={entry.kind}>
-                            {entry.line}
-                          </span>
+                        <span className="connect-row-name">
+                          <MarkedName text={entry.profile.name} indices={entry.indices} />
                         </span>
-                        {entry.isDefault && <span className="connect-badge">Default</span>}
+                        {entry.pinned && group.kind !== "pinned" && (
+                          <span className="connect-row-pin" title="Pinned">
+                            <Glyph name="pin" size={11} />
+                          </span>
+                        )}
+                        <span className="connect-row-line" data-kind={entry.kind}>
+                          {entry.line}
+                        </span>
+                        {entry.isDefault && <span className="connect-meta">default</span>}
+                        {typeof probes.get(entry.profile.id) === "object" && (
+                          <span className="connect-meta">
+                            {latencyOf(probes.get(entry.profile.id))}
+                          </span>
+                        )}
                       </>,
                       "connect-row",
                     ),
@@ -493,13 +629,11 @@ function ConnectDialog() {
                       { type: "session", entry },
                       <>
                         <SessionDot session={entry.session} />
-                        <span className="connect-row-text">
-                          <span className="connect-row-name">
-                            <MarkedName text={entry.name} indices={entry.indices} />
-                          </span>
-                          <span className="connect-row-line">{entry.line}</span>
+                        <span className="connect-row-name">
+                          <MarkedName text={entry.name} indices={entry.indices} />
                         </span>
-                        {isMarked && <span className="connect-hint">↵ attach</span>}
+                        <span className="connect-row-line">{entry.line}</span>
+                        {isMarked && <span className="connect-meta">↵ attach</span>}
                       </>,
                       "connect-row",
                     );
@@ -556,6 +690,9 @@ function ConnectDialog() {
           <Detail
             row={rows[marked]}
             splitKey={splitKey}
+            pin={pin}
+            probe={(profile) => probes.get(profile)}
+            running={running}
             open={open}
             act={act}
             session={(entry) => (
@@ -565,20 +702,33 @@ function ConnectDialog() {
         </div>
         <div className="connect-footer">
           <span>
-            <span className="connect-key">↑↓</span> move
+            <Cap>↵</Cap>
+            Open in new tab
           </span>
           <span>
-            <span className="connect-key">↵</span> open in new tab
+            <KeyCaps label={splitKey} className="connect-footer-keys" />
+            Split right
           </span>
           <span>
-            <span className="connect-key">{splitKey}</span> split right
+            <Cap>↑</Cap>
+            <Cap>↓</Cap>
+            Move
           </span>
           <span>
-            <span className="connect-key">Tab</span> filter
+            <Cap>Tab</Cap>
+            Kind
+          </span>
+          <span>
+            <KeyCaps
+              label={platform === "macos" ? "⌘D" : "Ctrl+D"}
+              className="connect-footer-keys"
+            />
+            Pin
           </span>
           <span className="connect-footer-spacer" />
           <span>
-            <span className="connect-key">Esc</span> close
+            <Cap>Esc</Cap>
+            Close
           </span>
         </div>
       </div>

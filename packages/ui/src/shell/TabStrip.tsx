@@ -45,7 +45,6 @@ import { useShell } from "./context.ts";
 import { describeTabNow, followTab, mark } from "./describing.ts";
 import { useKeyHint } from "./hints.ts";
 import { BellOffIcon, CloseIcon, GroupGlyph, LockIcon, ProgramTile } from "./icons.tsx";
-import { NewTabButton } from "./NewTabButton.tsx";
 import { roveWithin } from "./roving.ts";
 import {
   dropPlace,
@@ -778,7 +777,6 @@ export function TabStrip() {
           <RowItems items={items} active={active} drag={drag} />
         </RowContext>
       </div>
-      <NewTabButton />
     </div>
   );
 }

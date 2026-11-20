@@ -16,6 +16,7 @@ import type {
   ConfigView,
   ControlMessage,
   DetachedSessions,
+  HostProbe,
   LayoutApplied,
   LayoutView,
   Notice,
@@ -97,6 +98,14 @@ export class CoreClient {
   /** Which of this window's `panes` run something that closing them would end. */
   panesBusy(panes: readonly PaneId[]): Promise<PaneId[]> {
     return this.transport.command("panes_busy", { panes });
+  }
+
+  /**
+   * How long a connection to the machine a profile reaches over SSH takes to open, or
+   * why it was not measured.
+   */
+  hostProbe(profile: string): Promise<HostProbe> {
+    return this.transport.command("host_probe", { profile });
   }
 
   /** The sessions the session host runs that no pane of any workspace shows. */

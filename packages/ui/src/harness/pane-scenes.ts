@@ -12,6 +12,7 @@ import type { ProfileList } from "../core/types.ts";
 import type { ShellApp } from "../shell/boot.ts";
 import type { Launcher, SessionEvent } from "../transport/types.ts";
 import type { FakeCore, FixturePane } from "./fake-core.ts";
+import { FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import type { Scene } from "./scene.ts";
 import { CHROME_START_TIMEOUT_MS } from "./tuning.ts";
 
@@ -250,6 +251,72 @@ export const PANE_SCENES: readonly Scene[] = [
       });
     },
     check: (page) => said(page, ".pane-pill-name", "claude"),
+  },
+  {
+    // The Activity list open: an agent waiting on the user, a command at work, and a
+    // command that failed while the user looked elsewhere.
+    name: "activity",
+    window: { tabs: [1, 1, 1, 1], titleBar: "custom" },
+    prepare: async (app, core) => {
+      report(core, {
+        p2: [
+          { type: "foreground", pid: 70, name: "claude" },
+          {
+            type: "program_status",
+            state: "blocked",
+            kind: "permission",
+            message: "Asks: apply migration 0042 to staging?",
+          },
+        ],
+        p3: [{ type: "command_started", command: "cargo test -p billing" }],
+        p4: [
+          { type: "command_started", command: "npm run build" },
+          { type: "command_finished", exit: 1 },
+        ],
+      });
+      await until("the work being reported", () => app.reports.get("p4").activity !== "idle");
+      document.querySelector<HTMLElement>('.top-tool[aria-haspopup="dialog"]')?.click();
+      await until("the Activity list opening", () => document.querySelector(".activity") !== null);
+    },
+    check: (page) => {
+      const rows = page.querySelectorAll(".activity-row").length;
+      return rows === 3 ? [] : [`the Activity list has ${rows} rows, not 3`];
+    },
+  },
+  {
+    // The question asked before a tab whose agent waits on the user is closed from its
+    // close button, hanging under it.
+    name: "close-question",
+    window: {
+      tabs: [1, 1],
+      titleBar: "custom",
+      settings: { terminal: { "confirm-close": "always" } },
+      commands: [
+        ...FIXTURE_COMMANDS,
+        { id: "lume.tab.close", title: "Close Tab", category: "Tab", runs: "core", palette: true },
+      ],
+    },
+    prepare: async (app, core) => {
+      report(core, {
+        p2: [
+          { type: "foreground", pid: 70, name: "claude" },
+          { type: "program_status", state: "blocked", kind: "permission" },
+        ],
+      });
+      await until("the agent being reported", () => app.reports.get("p2").statuses.length > 0);
+      const tab = core.tabs[1] ?? "";
+      app.commands.run("lume.tab.close", { tab });
+      await until("the question being asked", () => {
+        return document.querySelector(".close-question") !== null;
+      });
+    },
+    check: (page) => [
+      ...said(page, ".close-question h2", "Close this tab?"),
+      ...said(page, ".close-why-text b", "claude"),
+      ...(page.querySelector(".close-question[data-anchored]") === null
+        ? ["the question does not hang under the close button"]
+        : []),
+    ],
   },
   {
     name: "pane-look",

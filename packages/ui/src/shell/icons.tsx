@@ -208,6 +208,26 @@ export function DoneIcon({ size = 11 }: { size?: number }) {
   return <Glyph name="check" size={size} weight={3} />;
 }
 
+/** An eye: the list of what the window's panes are doing. */
+export function EyeIcon({ size = 16 }: { size?: number }) {
+  return <Glyph name="eye" size={size} weight={1.9} />;
+}
+
+/** The Command key's loop: the command palette. */
+export function CommandIcon({ size = 15 }: { size?: number }) {
+  return <Glyph name="command" size={size} weight={1.9} />;
+}
+
+/** A circle with a mark in it: something waits on the user, or went wrong. */
+export function AttentionIcon({ size = 12 }: { size?: number }) {
+  return <Glyph name="circle-exclamation-point" size={size} weight={2.4} />;
+}
+
+/** An arrow pointing on: go to what is named. */
+export function ArrowRightIcon({ size = 11 }: { size?: number }) {
+  return <Glyph name="arrow-right" size={size} weight={2.4} />;
+}
+
 /** An arrow going round: start something again. */
 export function AgainIcon({ size = 12 }: { size?: number }) {
   return <Glyph name="rotate-cw" size={size} />;

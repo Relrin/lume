@@ -40,6 +40,17 @@
           },
           {
             "role": "button",
+            "name": "Activity",
+            "state": {
+              "expanded": "false"
+            }
+          },
+          {
+            "role": "button",
+            "name": "Command palette"
+          },
+          {
+            "role": "button",
             "name": "New tab"
           }
         ]
@@ -195,47 +206,118 @@
             }
           },
           {
+            "role": "group",
+            "name": "Search",
+            "parts": [
+              {
+                "role": "button",
+                "name": "All, 10",
+                "state": {
+                  "pressed": "true"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Commands, 6",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Tabs, 1",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Hosts, 3",
+                "state": {
+                  "pressed": "false"
+                }
+              }
+            ]
+          },
+          {
             "role": "listbox",
             "name": "Command",
             "parts": [
               {
+                "role": "presentation"
+              },
+              {
                 "role": "option",
-                "name": "Tab: New TabCtrl+Shift+T",
+                "name": "Terminal",
                 "state": {
                   "selected": "true"
                 }
               },
               {
+                "role": "presentation"
+              },
+              {
                 "role": "option",
-                "name": "Pane: Split Right",
+                "name": "PowerShellpwsh.exe",
                 "state": {
                   "selected": "false"
                 }
               },
               {
                 "role": "option",
-                "name": "Pane: Close Pane",
+                "name": "UbuntuWSL 2 · running",
                 "state": {
                   "selected": "false"
                 }
               },
               {
                 "role": "option",
-                "name": "Search: Find in TerminalCtrl+Shift+F",
+                "name": "dev-stagingdev-staging",
+                "state": {
+                  "selected": "false"
+                }
+              },
+              {
+                "role": "presentation"
+              },
+              {
+                "role": "option",
+                "name": "New TabTab",
                 "state": {
                   "selected": "false"
                 }
               },
               {
                 "role": "option",
-                "name": "Search: Close Find",
+                "name": "Split RightPane",
                 "state": {
                   "selected": "false"
                 }
               },
               {
                 "role": "option",
-                "name": "View: Increase Font Size",
+                "name": "Close PanePane",
+                "state": {
+                  "selected": "false"
+                }
+              },
+              {
+                "role": "option",
+                "name": "Find in TerminalSearch",
+                "state": {
+                  "selected": "false"
+                }
+              },
+              {
+                "role": "option",
+                "name": "Close FindSearch",
+                "state": {
+                  "selected": "false"
+                }
+              },
+              {
+                "role": "option",
+                "name": "Increase Font SizeView",
                 "state": {
                   "selected": "false"
                 }

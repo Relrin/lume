@@ -18,7 +18,7 @@ export function TabListPanel() {
   return (
     <div className="tab-column" data-drop={NEW_TAB_DROP}>
       <TabColumn />
-      <NewTabButton column />
+      <NewTabButton />
     </div>
   );
 }

@@ -47,6 +47,7 @@ mod frame_token;
 mod frames;
 mod harness;
 mod host;
+mod host_probe;
 mod log;
 mod marks;
 mod opener;
@@ -468,6 +469,7 @@ fn main() -> ExitCode {
         commands_config::config_unset,
         commands_config::config_open,
         commands_config::config_schema,
+        commands_config::host_probe,
         commands_config::themes_list,
         commands_config::shells_list,
         commands_config::profiles_list,

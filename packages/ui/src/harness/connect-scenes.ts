@@ -161,6 +161,71 @@ export const CONNECT_SCENES: readonly Scene[] = [
     },
   },
   {
+    // A host reached over SSH, marked and pinned: its numbers in the column, and the
+    // pinned group first in the list.
+    name: "connect-host",
+    window: WINDOW,
+    prepare: async (app) => {
+      // Pins are kept in the page's storage: the scene starts from none.
+      window.localStorage.removeItem("lume.connect.pins");
+      const palette = await openConnect(app);
+      const field = palette.querySelector<HTMLInputElement>(".connect-input");
+      palette.querySelector<HTMLButtonElement>('.connect-chip[data-filter="ssh"]')?.click();
+      if (field) typeInto(field, "build");
+      await until("the host being marked", () =>
+        palette.querySelector('.connect-row[aria-selected="true"] .connect-row-name')
+          ?.textContent === "Build box"
+          ? true
+          : null,
+      );
+      field?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "d", ctrlKey: true, bubbles: true }),
+      );
+      if (field) typeInto(field, "");
+      await until("the host measured", () => {
+        const stats = palette.querySelector(".connect-stats dd")?.textContent ?? "";
+        return stats.endsWith("ms") ? true : null;
+      });
+      window.localStorage.removeItem("lume.connect.pins");
+    },
+    check: (page) => {
+      const problems: string[] = [];
+      const first = page.querySelector(".connect-heading")?.textContent ?? "";
+      if (first !== "Pinned") problems.push(`the list begins with ${JSON.stringify(first)}`);
+      const latency = page.querySelector(".connect-stats dd")?.textContent ?? "";
+      if (latency !== "24 ms") problems.push(`the host's latency says ${JSON.stringify(latency)}`);
+      if (page.querySelector('.connect-pin[aria-pressed="true"]') === null) {
+        problems.push("the marked host is not shown pinned");
+      }
+      return problems;
+    },
+  },
+  {
+    // The command palette with something typed under everything: the best match
+    // first, then the commands, the tabs and the hosts that match.
+    name: "palette-search",
+    window: { ...WINDOW, tabs: [1, 1] },
+    prepare: async (app) => {
+      await until("the profiles arriving", () => app.profiles.getState().list);
+      app.palette.getState().open();
+      const field = await until("the palette's field", () =>
+        document.querySelector<HTMLInputElement>(".palette-input"),
+      );
+      typeInto(field, "in");
+      await until("the hosts being listed", () =>
+        document.querySelector(".palette-row .palette-host-icon") ? true : null,
+      );
+    },
+    check: (page) => {
+      const headings = [...page.querySelectorAll(".palette-heading")].map(
+        (heading) => heading.textContent ?? "",
+      );
+      return headings[0] === "Top hit" && headings.includes("Tabs") && headings.includes("Hosts")
+        ? []
+        : [`the palette's headings are ${JSON.stringify(headings)}`];
+    },
+  },
+  {
     name: "app-menu-new-tab-with",
     window: WINDOW,
     prepare: async (app) => {

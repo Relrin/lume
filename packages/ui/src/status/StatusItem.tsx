@@ -402,11 +402,15 @@ export function StatusItemView({ item }: { item: StatusItem }) {
     item.color === undefined
       ? undefined
       : ({ "--status-tone": `var(--lume-${item.color.replaceAll(".", "-")})` } as CSSProperties);
+  // A badge with a picture in the top bar is drawn as one of the bar's tools: the
+  // picture alone, with its count over a corner of it.
+  const toolLike =
+    item.kind === "badge" && item.picture !== undefined && item.slot.startsWith("topbar.");
   const content = (
     <>
       {item.picture !== undefined && (
         <span className="status-picture">
-          <PluginIcon icon={item.picture} images={images} size={13} />
+          <PluginIcon icon={item.picture} images={images} size={toolLike ? 16 : 13} />
         </span>
       )}
       {body(item)}
@@ -420,6 +424,7 @@ export function StatusItemView({ item }: { item: StatusItem }) {
   const attributes = {
     "data-status": item.id,
     "data-kind": item.kind,
+    "data-tool": toolLike || undefined,
     "data-tone": item.tone ?? "neutral",
     "data-problem": item.problem === undefined ? undefined : true,
     "data-plugin": item.plugin,

@@ -181,3 +181,12 @@ pub const PLANNED_CHROME_HEIGHT_PX: f64 = 72.0;
 /// The width of a cell of a monospaced font as a share of its size: what the bundled
 /// terminal font and most others have.
 pub const PLANNED_CELL_WIDTH_EM: f64 = 0.6;
+
+/// How long measuring a host over SSH waits for its name to be looked up, and then for
+/// the connection to open. A host slower than this is said not to answer in time.
+pub const HOST_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// How long the OpenSSH client is given to say where a host leads (`ssh -G`), and how
+/// often it is looked at meanwhile. It only reads its configuration, so it is quick.
+pub const SSH_CONFIG_WAIT: Duration = Duration::from_secs(2);
+pub const SSH_CONFIG_POLL: Duration = Duration::from_millis(20);

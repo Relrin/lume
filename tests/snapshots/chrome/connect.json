@@ -40,6 +40,17 @@
           },
           {
             "role": "button",
+            "name": "Activity",
+            "state": {
+              "expanded": "false"
+            }
+          },
+          {
+            "role": "button",
+            "name": "Command palette"
+          },
+          {
+            "role": "button",
             "name": "New tab"
           }
         ]
@@ -200,28 +211,28 @@
             "parts": [
               {
                 "role": "button",
-                "name": "All",
+                "name": "All, 6",
                 "state": {
                   "pressed": "true"
                 }
               },
               {
                 "role": "button",
-                "name": "SSH",
+                "name": "SSH, 2",
                 "state": {
                   "pressed": "false"
                 }
               },
               {
                 "role": "button",
-                "name": "WSL",
+                "name": "WSL, 2",
                 "state": {
                   "pressed": "false"
                 }
               },
               {
                 "role": "button",
-                "name": "Local",
+                "name": "Local, 2",
                 "state": {
                   "pressed": "false"
                 }
@@ -238,7 +249,7 @@
                 "parts": [
                   {
                     "role": "option",
-                    "name": "PowerShellpwsh.exeDefault",
+                    "name": "PowerShellpwsh.exedefault",
                     "state": {
                       "selected": "true"
                     }
@@ -321,6 +332,13 @@
               {
                 "role": "heading",
                 "name": "PowerShell"
+              },
+              {
+                "role": "button",
+                "name": "Pin PowerShell",
+                "state": {
+                  "pressed": "false"
+                }
               },
               {
                 "role": "button",

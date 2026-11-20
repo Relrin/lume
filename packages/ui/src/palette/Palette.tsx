@@ -6,20 +6,39 @@
  * the arrow keys move through it, Enter runs what is marked and Escape puts the
  * palette away. A command that needs to be told something first, such as a name, has
  * the palette ask for it in the same field before it is run.
+ *
+ * Besides commands it finds the window's tabs and the profiles a terminal is opened
+ * from, which it calls hosts. Chips under the field choose what is searched, as do Tab
+ * and Shift+Tab, or a sign at the start of what is typed: `>` commands, `@` tabs, `#`
+ * hosts. Each chip counts what matches.
+ *
+ * Each row shows a picture for its kind, its title, a quieter line, and for a command
+ * the keys that run it. With nothing typed the commands run lately come first, under
+ * their own heading; with something typed the best match stands alone at the top.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 
 import { keyLabel } from "../commands/store.ts";
-import type { CommandSpec } from "../core/types.ts";
+import { KindIcon } from "../connect/icons.tsx";
+import { kindOf, lineOf, openCommand } from "../connect/model.ts";
+import type { CommandSpec, Profile } from "../core/types.ts";
+import { Glyph } from "../icons/Glyph.tsx";
+import type { LineGlyphName } from "../icons/glyphs.generated.ts";
 import { useSlotMotion } from "../motion/slots.ts";
+import { selectTabOrder, selectTitlePane } from "../layout/selectors.ts";
+import type { ShellApp } from "../shell/boot.ts";
 import { useShell } from "../shell/context.ts";
+import { describeNow, describeTabNow } from "../shell/describing.ts";
+import { windowWork, type WorkState } from "../shell/work.ts";
 import { SearchIcon } from "../shell/icons.tsx";
 import { PALETTE_RESULTS_MAX } from "../tuning.ts";
 import { promptsFor, readArg, type ArgPrompt, type Choice } from "./args.ts";
 import { profileChoices, workspaceChoices } from "./choices.ts";
 import { rank } from "./fuzzy.ts";
+import { Cap, KeyCaps } from "./KeyCaps.tsx";
+import { PER_KIND_MAX, readSign, SCOPES, stepScope, type Scope } from "./scopes.ts";
 import { pageStorage, readRecents, rememberRecent } from "./store.ts";
 
 /** What the palette is asking for. */
@@ -48,7 +67,88 @@ interface Row {
   readonly command: CommandSpec | undefined;
   /** What a row chosen from a list stands for, when that is not the text it shows. */
   readonly value?: string;
+  /** The heading of the part of the list the row is in, or none. */
+  readonly section: string;
+  /** How well the query matched, to find the best of every kind. */
+  readonly score: number;
+  /** The picture before a tab's or a host's name. */
+  readonly icon?: ReactNode;
+  /** The quieter line after a tab's or a host's name. */
+  readonly sub?: string;
+  /** How the work in a tab stands, as a coloured dot and a word. */
+  readonly state?: WorkState;
+  /** A word at the row's end. */
+  readonly meta?: string;
+  /** What choosing a tab or a host does. */
+  readonly run?: () => void;
 }
+
+/** A tab as the palette finds it. */
+interface TabEntry {
+  readonly tab: string;
+  readonly label: string;
+  readonly where: string;
+  readonly state: WorkState | null;
+}
+
+/** How each state of a tab's work is said at the end of its row. */
+const STATE_WORDS: Readonly<Record<WorkState, string>> = {
+  wait: "needs you",
+  work: "working",
+  done: "done",
+  failed: "failed",
+};
+
+/** How much each state presses, to show the one that presses most of a tab's panes. */
+const STATE_ORDER: Readonly<Record<WorkState, number>> = { wait: 0, failed: 1, done: 2, work: 3 };
+
+/** The window's tabs, in their order, as the palette lists them. */
+function tabEntries(app: ShellApp): TabEntry[] {
+  const state = app.layout.getState();
+  if (!state.ready) return [];
+  const work = windowWork(app);
+  return selectTabOrder(state).map((tab) => {
+    const pane = selectTitlePane(state, tab);
+    const pressing = work
+      .filter((item) => item.tab === tab)
+      .sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state])[0];
+    return {
+      tab,
+      label: describeTabNow(app, tab).label,
+      where: pane === undefined ? "" : describeNow(app, pane).where,
+      state: pressing?.state ?? null,
+    };
+  });
+}
+
+/** The picture of a command's kind, by its category. */
+const CATEGORY_GLYPHS: Readonly<Record<string, LineGlyphName>> = {
+  Tab: "panel-top",
+  Pane: "columns-2",
+  Application: "settings",
+  Terminal: "terminal",
+  Workspace: "layers",
+  View: "monitor",
+  Window: "square",
+  Panel: "panel-right",
+  Search: "search",
+  Session: "activity",
+  Host: "server",
+  Configuration: "settings",
+  Plugins: "puzzle",
+  Git: "git-branch",
+};
+
+function categoryGlyph(category: string): LineGlyphName {
+  return CATEGORY_GLYPHS[category] ?? "chevron-right";
+}
+
+/** The picture of each scope's chip. */
+const SCOPE_GLYPHS: Readonly<Record<Exclude<Scope, "all">, LineGlyphName>> = {
+  commands: "terminal",
+  tabs: "panel-top",
+  hosts: "server",
+};
 
 /** The command that shows the palette, which the palette has no reason to list. */
 const OWN_COMMAND = "lume.palette.open";
@@ -97,30 +197,128 @@ function Marked({
   );
 }
 
-/** The commands the palette offers, as rows: those run lately first while nothing is typed. */
-function commandRows(
-  commands: readonly CommandSpec[],
-  query: string,
-  recents: readonly string[],
-  keysOf: (id: string) => string | undefined,
-): Row[] {
-  const offered = commands.filter((command) => command.palette && command.id !== OWN_COMMAND);
-  const row = (command: CommandSpec, indices: readonly number[]): Row => ({
-    key: command.id,
-    prefix: `${command.category}: `,
-    text: command.title,
-    indices,
-    keys: keysOf(command.id),
-    command,
-  });
-  if (query.trim() === "") {
-    const lately = recents.flatMap((id) => offered.filter((command) => command.id === id));
-    const others = offered.filter((command) => !recents.includes(command.id));
-    return [...lately, ...others].slice(0, PALETTE_RESULTS_MAX).map((command) => row(command, []));
+/** What the palette searches, as the dialog holds it. */
+interface Sources {
+  readonly commands: readonly CommandSpec[];
+  readonly recents: readonly string[];
+  readonly keysOf: (id: string) => string | undefined;
+  readonly tabs: readonly TabEntry[];
+  readonly hosts: readonly Profile[];
+  readonly defaultHost: string | null;
+  readonly showTab: (tab: string) => void;
+  readonly openHost: (profile: string) => void;
+}
+
+/** The commands that match, as rows, best first. */
+function commandMatches(sources: Sources, query: string): Row[] {
+  const offered = sources.commands.filter(
+    (command) => command.palette && command.id !== OWN_COMMAND,
+  );
+  return rank(offered, query, (command) => `${command.category}: ${command.title}`).map(
+    (match) => ({
+      key: match.item.id,
+      prefix: `${match.item.category}: `,
+      text: match.item.title,
+      indices: match.indices,
+      keys: sources.keysOf(match.item.id),
+      command: match.item,
+      section: "Commands",
+      score: match.score,
+    }),
+  );
+}
+
+/** The tabs that match, as rows, best first. */
+function tabMatches(sources: Sources, query: string): Row[] {
+  return rank(sources.tabs, query, (entry) => entry.label).map((match) => ({
+    key: `tab:${match.item.tab}`,
+    prefix: "",
+    text: match.item.label,
+    indices: match.indices,
+    keys: undefined,
+    command: undefined,
+    section: "Tabs",
+    score: match.score,
+    icon: <Glyph name="panel-top" size={15} weight={1.9} />,
+    sub: match.item.where,
+    ...(match.item.state === null
+      ? {}
+      : { state: match.item.state, meta: STATE_WORDS[match.item.state] }),
+    run: () => sources.showTab(match.item.tab),
+  }));
+}
+
+/** The hosts that match, as rows, best first. */
+function hostMatches(sources: Sources, query: string): Row[] {
+  return rank(sources.hosts, query, (profile) => profile.name).map((match) => ({
+    key: `host:${match.item.id}`,
+    prefix: "",
+    text: match.item.name,
+    indices: match.indices,
+    keys: undefined,
+    command: undefined,
+    section: "Hosts",
+    score: match.score,
+    icon: (
+      <span className="palette-host-icon" data-kind={kindOf(match.item)}>
+        <KindIcon kind={kindOf(match.item)} size={15} />
+      </span>
+    ),
+    sub: lineOf(match.item),
+    ...(match.item.id === sources.defaultHost ? { meta: "default" } : {}),
+    run: () => sources.openHost(match.item.id),
+  }));
+}
+
+/** Rows under another heading. */
+function under(rows: readonly Row[], section: string): Row[] {
+  return rows.map((row) => ({ ...row, section }));
+}
+
+/**
+ * The rows of a scope. Commands run lately come first while nothing is typed; under
+ * everything with something typed, the best match of any kind stands alone at the top
+ * and each kind lists a few of its best after it.
+ */
+function scopedRows(sources: Sources, scope: Scope, query: string): Row[] {
+  const typed = query.trim() !== "";
+  const commands = commandMatches(sources, query);
+  const recent = (): Row[] => {
+    const lately = sources.recents.flatMap((id) => commands.filter((row) => row.key === id));
+    return [
+      ...under(lately, "Recent"),
+      ...commands.filter((row) => !sources.recents.includes(row.key)),
+    ];
+  };
+  if (scope === "commands") return (typed ? commands : recent()).slice(0, PALETTE_RESULTS_MAX);
+  if (scope === "tabs") return tabMatches(sources, query).slice(0, PALETTE_RESULTS_MAX);
+  if (scope === "hosts") return hostMatches(sources, query).slice(0, PALETTE_RESULTS_MAX);
+  const tabs = tabMatches(sources, query);
+  const hosts = hostMatches(sources, query);
+  if (!typed) {
+    const lately = recent();
+    const firstCommands = lately.filter((row) => row.section === "Recent");
+    const otherCommands = lately.filter((row) => row.section !== "Recent");
+    return [
+      ...firstCommands,
+      ...tabs.slice(0, PER_KIND_MAX),
+      ...hosts.slice(0, PER_KIND_MAX),
+      ...otherCommands,
+    ].slice(0, PALETTE_RESULTS_MAX);
   }
-  return rank(offered, query, (command) => `${command.category}: ${command.title}`)
-    .slice(0, PALETTE_RESULTS_MAX)
-    .map((match) => row(match.item, match.indices));
+  // The sort is stable: of equal matches, commands stay first.
+  const best = [...commands, ...tabs, ...hosts].sort((a, b) => b.score - a.score)[0];
+  if (!best) return [];
+  const rest = (rows: readonly Row[]) => rows.filter((row) => row !== best).slice(0, PER_KIND_MAX);
+  return [{ ...best, section: "Top hit" }, ...rest(commands), ...rest(tabs), ...rest(hosts)];
+}
+
+/** How many of each scope match what is typed, for the chips. */
+function scopeCounts(sources: Sources, query: string): Readonly<Record<Scope, number>> {
+  const commands = commandMatches(sources, query).length;
+  const tabs = rank(sources.tabs, query, (entry) => entry.label).length;
+  const hosts = rank(sources.hosts, query, (profile) => profile.name).length;
+  return { all: commands + tabs + hosts, commands, tabs, hosts };
 }
 
 function choiceRows(choices: readonly Choice[], query: string): Row[] {
@@ -134,6 +332,8 @@ function choiceRows(choices: readonly Choice[], query: string): Row[] {
       keys: undefined,
       command: undefined,
       value: match.item.value,
+      section: "",
+      score: match.score,
     }));
 }
 
@@ -155,6 +355,7 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
       : { kind: "commands" },
   );
   const [query, setQuery] = useState("");
+  const [scope, setScope] = useState<Scope>("all");
   const [selected, setSelected] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
   /** The workspaces a prompt's value is chosen from, once they have been fetched. */
@@ -211,14 +412,38 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
     };
   }, [app, source]);
 
+  // The tabs are read once, as the palette opens: choosing one puts the palette away.
+  const tabs = useMemo(() => tabEntries(app), [app]);
+  const sources = useMemo((): Sources => {
+    const keysOf = (id: string) =>
+      view ? keyLabel(view.keymap.bindings, id, view.platform) : undefined;
+    return {
+      commands,
+      recents,
+      keysOf,
+      tabs,
+      hosts: profiles?.profiles ?? [],
+      defaultHost: profiles?.default ?? null,
+      showTab: (tab) => {
+        app.client
+          .layoutApply({ type: "tab_activate", target: { type: "id", tab } })
+          .catch(() => undefined);
+      },
+      openHost: (profile) => {
+        const command = openCommand(profile, "tab", app.views.focused() !== undefined);
+        app.commands.run(command.id, command.args);
+      },
+    };
+  }, [app, commands, recents, view, tabs, profiles]);
   const rows = useMemo(() => {
-    if (stage.kind === "commands") {
-      const keysOf = (id: string) =>
-        view ? keyLabel(view.keymap.bindings, id, view.platform) : undefined;
-      return commandRows(commands, query, recents, keysOf);
-    }
+    if (stage.kind === "commands") return scopedRows(sources, scope, query);
     return choices ? choiceRows(choices, query) : [];
-  }, [stage.kind, commands, query, recents, view, choices]);
+  }, [stage.kind, sources, scope, query, choices]);
+  const counts = useMemo(() => scopeCounts(sources, query), [sources, query]);
+  const pickScope = (next: Scope) => {
+    setScope(next);
+    setSelected(0);
+  };
   const marked = Math.min(selected, Math.max(0, rows.length - 1));
 
   useEffect(() => {
@@ -258,6 +483,11 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   const accept = (index: number) => {
     const row = rows[index];
     if (stage.kind === "commands") {
+      if (row?.run) {
+        close();
+        row.run();
+        return;
+      }
       if (row?.command) choose(row.command);
       return;
     }
@@ -270,7 +500,8 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
     setSelected(((to % rows.length) + rows.length) % rows.length);
   };
 
-  const placeholder = stage.kind === "commands" ? "Type a command" : (prompt?.placeholder ?? "");
+  const placeholder =
+    stage.kind === "commands" ? "Search commands, tabs and hosts" : (prompt?.placeholder ?? "");
   const label = stage.kind === "commands" ? "Command" : (prompt?.placeholder ?? "Value");
   const expanded = rows.length > 0;
 
@@ -307,7 +538,11 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
             autoCorrect="off"
             value={query}
             onChange={(event) => {
-              setQuery(event.target.value);
+              const typed = event.target.value;
+              // A sign typed first chooses what is searched, while everything is.
+              const sign = stage.kind === "commands" && scope === "all" ? readSign(typed) : null;
+              if (sign) setScope(sign.scope);
+              setQuery(sign ? sign.rest : typed);
               setSelected(0);
               setProblem(null);
             }}
@@ -328,6 +563,18 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
                 case "Enter":
                   accept(marked);
                   break;
+                case "Tab":
+                  if (stage.kind !== "commands") return;
+                  pickScope(stepScope(scope, event.shiftKey ? -1 : 1));
+                  break;
+                case "Backspace":
+                  // An empty field goes back to searching everything.
+                  if (stage.kind !== "commands" || query !== "" || scope === "all") {
+                    event.stopPropagation();
+                    return;
+                  }
+                  pickScope("all");
+                  break;
                 case "Escape":
                   close();
                   break;
@@ -341,45 +588,127 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
             }}
           />
         </div>
+        {stage.kind === "commands" && (
+          <div className="palette-chips" role="group" aria-label="Search">
+            {SCOPES.map((choice) => (
+              <button
+                key={choice.value}
+                type="button"
+                className="palette-chip"
+                aria-label={`${choice.label}, ${counts[choice.value]}`}
+                aria-pressed={scope === choice.value}
+                tabIndex={-1}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => pickScope(choice.value)}
+              >
+                {choice.value !== "all" && (
+                  <Glyph name={SCOPE_GLYPHS[choice.value]} size={12} weight={2} />
+                )}
+                {choice.label}
+                <span className="palette-chip-count" aria-hidden="true">
+                  {counts[choice.value]}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         {problem !== null && (
           <p className="palette-problem" role="alert">
             {problem}
           </p>
         )}
         <div ref={list} id={LIST_ID} className="palette-list" role="listbox" aria-label={label}>
-          {rows.map((row, index) => (
-            <div
-              key={row.key}
-              id={optionId(index)}
-              className="palette-row"
-              role="option"
-              aria-selected={index === marked}
-              onPointerMove={() => {
-                if (index !== marked) setSelected(index);
-              }}
-              onClick={() => accept(index)}
-            >
-              <span className="palette-row-text">
-                {row.prefix !== "" && (
-                  <span className="palette-row-prefix">
-                    <Marked text={row.prefix} indices={row.indices} offset={0} />
-                  </span>
+          {rows.map((row, index) => {
+            const heading = row.section !== "" && row.section !== rows[index - 1]?.section;
+            return (
+              <Fragment key={row.key}>
+                {heading && (
+                  <div className="palette-heading" role="presentation">
+                    {row.section}
+                  </div>
                 )}
-                <Marked text={row.text} indices={row.indices} offset={[...row.prefix].length} />
-              </span>
-              {row.keys !== undefined && <span className="palette-row-keys">{row.keys}</span>}
-            </div>
-          ))}
+                <div
+                  id={optionId(index)}
+                  className="palette-row"
+                  role="option"
+                  aria-selected={index === marked}
+                  onPointerMove={() => {
+                    if (index !== marked) setSelected(index);
+                  }}
+                  onClick={() => accept(index)}
+                >
+                  {row.command ? (
+                    <span className="palette-row-icon">
+                      <Glyph name={categoryGlyph(row.command.category)} size={15} weight={1.9} />
+                    </span>
+                  ) : row.icon ? (
+                    <span className="palette-row-icon">{row.icon}</span>
+                  ) : null}
+                  <span className="palette-row-text">
+                    <Marked text={row.text} indices={row.indices} offset={[...row.prefix].length} />
+                  </span>
+                  {row.state !== undefined && (
+                    <i className="palette-row-state" data-state={row.state} />
+                  )}
+                  <span className="palette-row-sub">
+                    {row.command ? (
+                      <Marked text={row.command.category} indices={row.indices} offset={0} />
+                    ) : (
+                      row.sub
+                    )}
+                  </span>
+                  {row.keys !== undefined && (
+                    <KeyCaps label={row.keys} className="palette-row-keys" />
+                  )}
+                  {row.meta !== undefined && <span className="palette-row-meta">{row.meta}</span>}
+                </div>
+              </Fragment>
+            );
+          })}
         </div>
         {rows.length === 0 && (
           <p className="palette-empty">
             {stage.kind === "commands"
-              ? "No command matches."
+              ? "Nothing matches."
               : choices === null && source !== null
                 ? "Loading…"
                 : "Press Enter to confirm, Escape to cancel."}
           </p>
         )}
+        <div className="palette-foot">
+          <span>
+            <Cap>↵</Cap>
+            {stage.kind === "commands" ? "Run" : "Confirm"}
+          </span>
+          <span>
+            <Cap>↑</Cap>
+            <Cap>↓</Cap>
+            Move
+          </span>
+          {stage.kind === "commands" && (
+            <span>
+              <Cap>Tab</Cap>
+              Filter
+            </span>
+          )}
+          {stage.kind === "commands" && (
+            <span>
+              <Cap>&gt;</Cap>
+              <Cap>@</Cap>
+              <Cap>#</Cap>
+              Commands, tabs, hosts
+            </span>
+          )}
+          <span>
+            <Cap>Esc</Cap>
+            Close
+          </span>
+          {stage.kind === "args" && stage.prompts.length > 1 && (
+            <span className="palette-foot-end">
+              {stage.at + 1} of {stage.prompts.length}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

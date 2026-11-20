@@ -21,6 +21,7 @@ export interface BrandGlyph {
 export type LineGlyphName =
   | "activity"
   | "arrow-down"
+  | "arrow-right"
   | "arrow-up"
   | "battery"
   | "bell"
@@ -39,10 +40,12 @@ export type LineGlyphName =
   | "chevron-right"
   | "circle"
   | "circle-check"
+  | "circle-exclamation-point"
   | "clipboard"
   | "clock"
   | "cloud"
   | "columns-2"
+  | "command"
   | "contrast"
   | "copy"
   | "cpu"
@@ -79,6 +82,7 @@ export type LineGlyphName =
   | "panel-top"
   | "pause"
   | "pencil"
+  | "pin"
   | "play"
   | "plus"
   | "puzzle"
@@ -266,6 +270,10 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["path", {"d":"M12 5v14"}],
     ["path", {"d":"m19 12-7 7-7-7"}],
   ],
+  "arrow-right": [
+    ["path", {"d":"M5 12h14"}],
+    ["path", {"d":"m12 5 7 7-7 7"}],
+  ],
   "arrow-up": [
     ["path", {"d":"m5 12 7-7 7 7"}],
     ["path", {"d":"M12 19V5"}],
@@ -346,6 +354,11 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["circle", {"cx":"12","cy":"12","r":"10"}],
     ["path", {"d":"m16 9-5.5 5.5L8 12"}],
   ],
+  "circle-exclamation-point": [
+    ["circle", {"cx":"12","cy":"12","r":"10"}],
+    ["line", {"x1":"12","x2":"12","y1":"8","y2":"12"}],
+    ["line", {"x1":"12","x2":"12.01","y1":"16","y2":"16"}],
+  ],
   "clipboard": [
     ["rect", {"width":"8","height":"4","x":"8","y":"2","rx":"1","ry":"1"}],
     ["path", {"d":"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"}],
@@ -360,6 +373,9 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
   "columns-2": [
     ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
     ["path", {"d":"M12 3v18"}],
+  ],
+  "command": [
+    ["path", {"d":"M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"}],
   ],
   "contrast": [
     ["circle", {"cx":"12","cy":"12","r":"10"}],
@@ -562,6 +578,10 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
   "pencil": [
     ["path", {"d":"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"}],
     ["path", {"d":"m15 5 4 4"}],
+  ],
+  "pin": [
+    ["path", {"d":"M12 17v5"}],
+    ["path", {"d":"M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"}],
   ],
   "play": [
     ["path", {"d":"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"}],
