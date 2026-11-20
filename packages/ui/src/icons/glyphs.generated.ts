@@ -24,6 +24,7 @@ export type LineGlyphName =
   | "arrow-up"
   | "battery"
   | "bell"
+  | "bell-off"
   | "book-open"
   | "bookmark"
   | "box"
@@ -38,6 +39,7 @@ export type LineGlyphName =
   | "chevron-right"
   | "circle"
   | "circle-check"
+  | "clipboard"
   | "clock"
   | "cloud"
   | "columns-2"
@@ -71,7 +73,10 @@ export type LineGlyphName =
   | "monitor"
   | "network"
   | "palette"
+  | "panel-bottom"
   | "panel-left"
+  | "panel-right"
+  | "panel-top"
   | "pause"
   | "pencil"
   | "play"
@@ -86,6 +91,7 @@ export type LineGlyphName =
   | "settings"
   | "sparkles"
   | "square"
+  | "square-dashed-text"
   | "square-plus"
   | "square-x"
   | "star"
@@ -272,6 +278,12 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["path", {"d":"M10.268 21a2 2 0 0 0 3.464 0"}],
     ["path", {"d":"M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"}],
   ],
+  "bell-off": [
+    ["path", {"d":"M10.268 21a2 2 0 0 0 3.464 0"}],
+    ["path", {"d":"M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742"}],
+    ["path", {"d":"m2 2 20 20"}],
+    ["path", {"d":"M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05"}],
+  ],
   "book-open": [
     ["path", {"d":"M12 5v16"}],
     ["path", {"d":"M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"}],
@@ -333,6 +345,10 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
   "circle-check": [
     ["circle", {"cx":"12","cy":"12","r":"10"}],
     ["path", {"d":"m16 9-5.5 5.5L8 12"}],
+  ],
+  "clipboard": [
+    ["rect", {"width":"8","height":"4","x":"8","y":"2","rx":"1","ry":"1"}],
+    ["path", {"d":"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"}],
   ],
   "clock": [
     ["circle", {"cx":"12","cy":"12","r":"10"}],
@@ -523,9 +539,21 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["circle", {"cx":"6.5","cy":"12.5","r":".5","fill":"currentColor"}],
     ["circle", {"cx":"8.5","cy":"7.5","r":".5","fill":"currentColor"}],
   ],
+  "panel-bottom": [
+    ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
+    ["path", {"d":"M3 15h18"}],
+  ],
   "panel-left": [
     ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
     ["path", {"d":"M9 3v18"}],
+  ],
+  "panel-right": [
+    ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
+    ["path", {"d":"M15 3v18"}],
+  ],
+  "panel-top": [
+    ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
+    ["path", {"d":"M3 9h18"}],
   ],
   "pause": [
     ["rect", {"x":"14","y":"3","width":"5","height":"18","rx":"1"}],
@@ -587,6 +615,23 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
   ],
   "square": [
     ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
+  ],
+  "square-dashed-text": [
+    ["path", {"d":"M14 21h1"}],
+    ["path", {"d":"M14 3h1"}],
+    ["path", {"d":"M19 3a2 2 0 0 1 2 2"}],
+    ["path", {"d":"M21 14v1"}],
+    ["path", {"d":"M21 19a2 2 0 0 1-2 2"}],
+    ["path", {"d":"M21 9v1"}],
+    ["path", {"d":"M3 14v1"}],
+    ["path", {"d":"M3 9v1"}],
+    ["path", {"d":"M5 21a2 2 0 0 1-2-2"}],
+    ["path", {"d":"M5 3a2 2 0 0 0-2 2"}],
+    ["path", {"d":"M7 12h10"}],
+    ["path", {"d":"M7 16h6"}],
+    ["path", {"d":"M7 8h8"}],
+    ["path", {"d":"M9 21h1"}],
+    ["path", {"d":"M9 3h1"}],
   ],
   "square-plus": [
     ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],

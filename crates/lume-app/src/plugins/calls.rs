@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use lume_layout::{Dir, Intent, NewContent, PaneId, SpawnRequest, UNITS};
+use lume_layout::{Dir, Intent, NewContent, PaneContent, PaneId, SpawnRequest, UNITS};
 use lume_plugin::broker::grant_of;
 use lume_plugin::permissions::{Kind, Prompt};
 use lume_plugin_api::types::{
@@ -368,6 +368,22 @@ impl Plugins {
         })
     }
 
+    /// Whether the plugin shows views in panes and every one of them is in a muted tab.
+    fn muted_everywhere(&self, local: &str) -> bool {
+        let Ok(services) = self.services_or_fail() else {
+            return false;
+        };
+        let workspace = services.panes.workspace();
+        let mut views = workspace
+            .panes()
+            .into_iter()
+            .filter(|pane| {
+                matches!(&pane.content, PaneContent::PluginView { plugin, .. } if plugin == local)
+            })
+            .peekable();
+        views.peek().is_some() && views.all(|pane| workspace.pane_muted(pane.id))
+    }
+
     fn toast(&self, local: &str, toast: UiToast) -> Result<(), ApiError> {
         if toast.message.chars().count() > TOAST_MAX {
             return Err(api_error(
@@ -386,6 +402,12 @@ impl Plugins {
             NoticeLevel::Warning => "warning",
             NoticeLevel::Error => "error",
         };
+        // A plugin whose views are all in tabs the user muted says nothing: its notice
+        // is taken and not shown, as a bell in such a tab is not rung. One with a view
+        // elsewhere, or with none, is heard.
+        if self.muted_everywhere(local) {
+            return Ok(());
+        }
         let message = plain(&toast.message, TOAST_MAX).replace('\n', " ");
         self.notice(level, format!("{name}: \u{201c}{message}\u{201d}"));
         Ok(())

@@ -306,6 +306,10 @@
           },
           {
             "role": "menuitem",
+            "name": "Mute tab"
+          },
+          {
+            "role": "menuitem",
             "name": "Lock session"
           },
           {

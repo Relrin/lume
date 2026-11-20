@@ -346,6 +346,7 @@ fn tab_groups() {
         icon: name.map(|_| Some(GroupIcon::Bug)),
         collapsed,
         kept: name.map(|_| true),
+        muted: None,
     };
     let new_tab = || Intent::TabNew {
         window: w,

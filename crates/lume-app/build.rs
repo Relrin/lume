@@ -12,6 +12,7 @@
 const COMMANDS: &[&str] = &[
     "frame_token",
     "webview_info",
+    "about_info",
     "probe_done",
     "carrier_open",
     "carrier_send",

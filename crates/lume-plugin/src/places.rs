@@ -174,8 +174,11 @@ const APP_VIEW: &[Builtin] = &[
 ];
 
 const APP_HELP: &[Builtin] = &[
-    section("about", &[item("whats-new")]),
-    section("support", &[item("report-issue"), item("show-logs")]),
+    section("about", &[item("about-lume"), item("whats-new")]),
+    section(
+        "support",
+        &[item("commands"), item("report-issue"), item("show-logs")],
+    ),
     section("host", &[item("restart-host")]),
 ];
 
@@ -207,6 +210,7 @@ const TAB: &[Builtin] = &[
     section(
         "closing",
         &[
+            item("mute"),
             item("lock"),
             item("close-left"),
             item("close-right"),
@@ -215,10 +219,13 @@ const TAB: &[Builtin] = &[
     ),
 ];
 
-const PANE: &[Builtin] = &[section(
-    "show",
-    &[item("show-in-new-tab"), item("show-in-new-window")],
-)];
+const PANE: &[Builtin] = &[
+    section("name", &[item("rename")]),
+    section(
+        "show",
+        &[item("show-in-new-tab"), item("show-in-new-window")],
+    ),
+];
 
 /// The application's own nodes at the top of a menu, in the order they are shown.
 pub fn skeleton(menu: &str) -> &'static [Builtin] {

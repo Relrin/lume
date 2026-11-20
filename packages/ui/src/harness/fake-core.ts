@@ -162,11 +162,12 @@ export interface FixtureGroup extends Omit<Group, "id"> {
   readonly tabs: readonly number[];
 }
 
-/** How one of a fixture's tabs looks: its name, its colour, whether it is locked. */
+/** How one of a fixture's tabs looks: its name, its colour, whether it is locked or muted. */
 export interface FixtureTabLook {
   readonly title?: string;
   readonly color?: TabColor;
   readonly locked?: boolean;
+  readonly muted?: boolean;
 }
 
 /** What a test may ask of the window it is given. Everything may be left out. */
@@ -423,6 +424,7 @@ interface TabFacts {
   title: string | null;
   color: TabColor | null;
   locked: boolean;
+  muted: boolean;
   group: GroupId | null;
 }
 
@@ -488,6 +490,7 @@ export class FakeCore implements Carrier {
         title: look?.title ?? null,
         color: look?.color ?? null,
         locked: look?.locked ?? false,
+        muted: look?.muted ?? false,
         group: null,
       });
     }
@@ -585,6 +588,7 @@ export class FakeCore implements Carrier {
           last_focus: tab.panes[0] ?? null,
           ...(facts?.color ? { color: facts.color } : {}),
           ...(facts?.locked ? { locked: true } : {}),
+          ...(facts?.muted ? { muted: true } : {}),
           ...(facts?.group ? { group: facts.group } : {}),
         },
       ];
@@ -687,6 +691,7 @@ export class FakeCore implements Carrier {
           revision: this.#revision,
           workspace: this.#workspace(),
           machine: FIXTURE_MACHINE,
+          host: { connected: true },
         });
       case "panes_busy": {
         const asked = Array.isArray(args["panes"]) ? (args["panes"] as PaneId[]) : [];
@@ -698,6 +703,17 @@ export class FakeCore implements Carrier {
         return answer(this.#config());
       case "commands_list":
         return answer(this.#options.commands ?? []);
+      case "about_info":
+        return answer({
+          appVersion: "0.0.0",
+          os: "windows",
+          arch: "x86_64",
+          engine: "WebView2",
+          engineVersion: "140.0.0.0",
+          proto: 2,
+          host: { version: "0.0.0", proto: 2, daemon: true, connected: true },
+          rexVersion: null,
+        });
       case "window_state":
         return answer({ maximised: false, fullscreen: false, focused: true });
       case "workspaces_list":
@@ -908,11 +924,35 @@ export class FakeCore implements Carrier {
           if (facts) facts.locked = typeof given["on"] === "boolean" ? given["on"] : !facts.locked;
         });
         return;
+      case "lume.tab.mute":
+        this.#tabs(() => {
+          if (facts) facts.muted = typeof given["on"] === "boolean" ? given["on"] : !facts.muted;
+        });
+        return;
+      case "lume.group.mute":
+        this.#tabs(() =>
+          editGroup((found) => {
+            const { muted, ...rest } = found;
+            const on = typeof given["on"] === "boolean" ? given["on"] : !muted;
+            return on ? { ...rest, muted: true } : rest;
+          }),
+        );
+        return;
       case "lume.tab.rename":
         this.#tabs(() => {
           if (facts) facts.title = typeof given["title"] === "string" ? given["title"] : null;
         });
         return;
+      case "lume.pane.rename": {
+        // Told as a change and not kept: a layout read whole again has the pane unnamed.
+        const pane = typeof given["pane"] === "string" ? given["pane"] : this.#focus;
+        const session = this.#fixture.sessions.get(pane);
+        if (session === undefined) return;
+        const title = typeof given["title"] === "string" ? given["title"] : null;
+        const node = terminal(pane, session, this.#options.panes?.[pane]);
+        this.#changed([{ type: "pane", pane: { id: node.id, title, content: node.content } }]);
+        return;
+      }
       case "lume.group.new":
         this.#tabs(() => {
           if (!facts) return;
@@ -946,7 +986,7 @@ export class FakeCore implements Carrier {
         this.#tabs(() =>
           editGroup((found) => {
             const next: Record<string, unknown> = { ...found };
-            for (const key of ["name", "color", "icon", "collapsed", "kept"]) {
+            for (const key of ["name", "color", "icon", "collapsed", "kept", "muted"]) {
               if (!(key in given)) continue;
               if (given[key] === null) delete next[key];
               else next[key] = given[key];
@@ -1028,12 +1068,18 @@ export class FakeCore implements Carrier {
       const is = after.facts.get(tab);
       if (!was || !is) continue;
       if (was.title !== is.title) changes.push({ type: "tab_title", tab, title: is.title });
-      if (was.color !== is.color || was.locked !== is.locked || was.group !== is.group) {
+      if (
+        was.color !== is.color ||
+        was.locked !== is.locked ||
+        was.muted !== is.muted ||
+        was.group !== is.group
+      ) {
         changes.push({
           type: "tab_state",
           tab,
           color: is.color,
           locked: is.locked,
+          ...(is.muted ? { muted: true } : {}),
           group: is.group,
         });
       }

@@ -368,6 +368,13 @@
                 }
               },
               {
+                "role": "menuitem",
+                "name": "Mute groupOff",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
                 "role": "separator"
               },
               {

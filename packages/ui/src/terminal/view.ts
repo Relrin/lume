@@ -156,6 +156,8 @@ export interface ViewSettings {
   readonly history?: HistorySettings;
   /** How much larger than the look's own the text is, in CSS pixels; negative for smaller. */
   readonly zoomPx: number;
+  /** Whether what the pointer selects is copied as soon as it is let go. Left out, it is not. */
+  readonly copyOnSelect?: boolean;
 }
 
 /** What a view needs from its surroundings. */
@@ -178,6 +180,11 @@ export interface ViewServices {
    * took it: it ran a command, or the key begins a sequence that may.
    */
   shortcut(event: KeyboardEvent, context: { readonly alternateScreen: boolean }): boolean;
+  /**
+   * Opens the terminal's menu where the other button was pressed. `selection` says
+   * whether there is anything selected to copy.
+   */
+  menu(at: { readonly clientX: number; readonly clientY: number }, selection: boolean): void;
   /**
    * Told that the view now shows another session, with what the core said it runs, or
    * none: what was reported of the session before is no longer the view's.
@@ -324,6 +331,7 @@ export class TerminalView implements FrameView {
   /** Lets fetched lines go once the view has stayed at the newest output long enough. */
   #releaseTimer: number | undefined;
   #zoomPx: number;
+  #copyOnSelect: boolean;
   #dirty = false;
   /** The wait for a program that is drawing a screen it asked not to be shown half of. */
   readonly #sync = new SyncHold();
@@ -370,6 +378,7 @@ export class TerminalView implements FrameView {
     this.#scrollbackLines = settings.scrollbackLines;
     this.#history = settings.history;
     this.#zoomPx = settings.zoomPx;
+    this.#copyOnSelect = settings.copyOnSelect ?? false;
     this.#fontSizePx = this.#fontSize();
     this.#mouse = new MouseEncoder(services.vt);
     this.#mapping = {
@@ -426,13 +435,13 @@ export class TerminalView implements FrameView {
     this.#listen(root, "pointercancel", (event) => this.#onPointerUp(event));
     this.#listen(root, "pointerleave", () => this.#onPointerLeave());
     this.#listen(root, "wheel", (event) => this.#onWheel(event), { passive: false });
-    this.#listen(root, "contextmenu", (event) => event.preventDefault());
+    this.#listen(root, "contextmenu", (event) => this.#onContextMenu(event));
     // A session is told when its view goes out of sight and comes back.
     const visibility = () => this.#scheduleReport();
     document.addEventListener("visibilitychange", visibility);
     this.#stopListening.push(() => document.removeEventListener("visibilitychange", visibility));
 
-    const observer = new ResizeObserver(() => this.#measure());
+    const observer = new ResizeObserver(() => this.#measure(true));
     observer.observe(root);
     this.#stopListening.push(() => observer.disconnect());
     this.#watchPixelRatio();
@@ -575,6 +584,7 @@ export class TerminalView implements FrameView {
     this.#scrollbackLines = settings.scrollbackLines;
     this.#history = settings.history;
     this.#zoomPx = settings.zoomPx;
+    this.#copyOnSelect = settings.copyOnSelect ?? false;
     this.#fontSizePx = this.#fontSize();
 
     const session = this.#session;
@@ -681,16 +691,28 @@ export class TerminalView implements FrameView {
     this.#measure();
   }
 
-  #measure(): void {
+  /**
+   * Takes the size of the view's element. With `now`, a view that changed size is drawn
+   * before this returns: asked for by whoever is called between the page's layout and
+   * its painting, so that the picture is painted at its new size together with the
+   * element. Drawn a frame later, it would trail the pane's edge while a window is
+   * dragged to another size.
+   */
+  #measure(now = false): void {
     const elements = this.#elements;
     const renderer = this.#renderer;
     if (!elements || !renderer) return;
     const size = { width: elements.root.clientWidth, height: elements.root.clientHeight };
     if (size.width === 0 || size.height === 0) return;
+    const dpr = window.devicePixelRatio;
+    const resized =
+      size.width !== this.#cssSize.width ||
+      size.height !== this.#cssSize.height ||
+      dpr !== this.#dpr;
     this.#cssSize = size;
-    this.#dpr = window.devicePixelRatio;
+    this.#dpr = dpr;
     // The picture follows the element at once. The grid follows when the session has
-    // answered, so until then the old grid is drawn in the new space.
+    // answered, so until then the old grid is drawn in the new space, at its own size.
     renderer.resize(size, this.#dpr);
     this.#remeasured = true;
     // Another grid fits now: the window or the font changed, and that is the newer wish.
@@ -699,6 +721,7 @@ export class TerminalView implements FrameView {
     this.#scheduleReport();
     this.#markDirty();
     for (const resolve of this.#measured.splice(0)) resolve();
+    if (now && resized && this.needsFrame()) this.frame();
   }
 
   /**
@@ -713,7 +736,7 @@ export class TerminalView implements FrameView {
       const changed = () => {
         stop();
         if (stopped) return;
-        this.#measure();
+        this.#measure(true);
         arm();
       };
       query.addEventListener("change", changed);
@@ -1816,6 +1839,8 @@ export class TerminalView implements FrameView {
     if (drag.route === "select") {
       this.#gesture?.release(point);
       this.#markDirty();
+      // Nothing selected, as after a plain press, leaves the clipboard as it was.
+      if (this.#copyOnSelect && event.type === "pointerup") void this.#copy();
       return;
     }
     if (!drag.button) return;
@@ -1829,6 +1854,18 @@ export class TerminalView implements FrameView {
         anyButtonPressed: false,
       }),
     );
+  }
+
+  /**
+   * The other button opens the terminal's menu, unless the program follows the mouse:
+   * then the press is the program's, and Shift held with it asks for the menu.
+   */
+  #onContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    const terminal = this.#session?.terminal;
+    if (!terminal) return;
+    if (pointerRoute(terminal.mouseTracking(), event.shiftKey) === "report") return;
+    this.#services.menu({ clientX: event.clientX, clientY: event.clientY }, hasSelection(terminal));
   }
 
   #onPointerLeave(): void {

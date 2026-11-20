@@ -693,11 +693,16 @@ impl Panes {
     /// a report from another machine does not carry, and the user's home folder.
     pub fn view(&self, window: WindowId) -> Value {
         let snapshot = self.snapshot();
+        let connected = self
+            .state
+            .upgrade()
+            .is_none_or(|state| crate::host::link_up(&state));
         json!({
             "window": window,
             "epoch": snapshot.epoch,
             "revision": snapshot.revision,
             "workspace": snapshot.workspace,
+            "host": { "connected": connected },
             "machine": {
                 "name": lume_session::cwd::machine_name(),
                 "home": std::env::home_dir().map(|home| home.to_string_lossy().into_owned()),
@@ -2641,6 +2646,7 @@ mod tests {
                 icon: None,
                 collapsed: None,
                 kept: None,
+                muted: None,
             })
             .await
             .unwrap();

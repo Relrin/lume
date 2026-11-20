@@ -268,6 +268,18 @@ export function selectGroup(
   return selectGroups(state, window).find((found) => found.id === group);
 }
 
+/**
+ * Whether a tab is muted: the tab itself, or the group it is in. What runs in a muted
+ * tab does not ask for attention.
+ */
+export function isTabMuted(state: LayoutState, tab: TabId): boolean {
+  const entry = state.tabs[tab];
+  if (!entry) return false;
+  if (entry.muted) return true;
+  if (entry.group === null) return false;
+  return selectGroup(state, entry.group, entry.window)?.muted === true;
+}
+
 /** The tabs of a group, in order. Builds a list. */
 export function selectGroupTabs(state: LayoutState, group: GroupId, window?: WindowId): TabId[] {
   return selectTabOrder(state, window).filter((tab) => state.tabs[tab]?.group === group);

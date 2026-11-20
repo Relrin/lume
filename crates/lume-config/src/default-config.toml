@@ -144,6 +144,8 @@
 # close-on-exit = "clean"
 # Whether closing a pane asks first: "never" or "always".
 # confirm-close = "never"
+# Copy text to the clipboard as soon as it is selected with the pointer.
+# copy-on-select = false
 # A desktop notification when a command ends in a window that is not in use, if it ran
 # for at least this many seconds (5 or more). It needs the shell to report its commands.
 # notify-long-command = false

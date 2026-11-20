@@ -53,6 +53,7 @@ import type { PaneTitles } from "./titles.ts";
 export type SharedServices = Omit<
   ViewServices,
   | "shortcut"
+  | "menu"
   | "attached"
   | "reported"
   | "exited"
@@ -79,6 +80,12 @@ export interface ViewsServices {
   appearanceOf(pane: PaneId): Appearance;
   /** Offers a key pressed in a pane's terminal to the shell's own bindings. */
   shortcut(pane: PaneId, event: KeyboardEvent, alternateScreen: boolean): boolean;
+  /** Opens the menu of a pane's terminal where the other button was pressed in it. */
+  menu(
+    pane: PaneId,
+    at: { readonly clientX: number; readonly clientY: number },
+    selection: boolean,
+  ): void;
   /** Told that a pane's terminal has taken the keyboard. */
   keyboard(pane: PaneId): void;
   /** Told that the search of a pane's terminal has caught up with the terminal. */
@@ -247,6 +254,7 @@ export class PaneViews {
           }
         : {}),
       zoomPx: this.#zoomPx,
+      copyOnSelect: terminal?.["copy-on-select"] === true,
     };
   }
 
@@ -368,6 +376,7 @@ export class PaneViews {
       {
         ...shared,
         shortcut: (event, context) => this.#services.shortcut(pane, event, context.alternateScreen),
+        menu: (at, selection) => this.#services.menu(pane, at, selection),
         attached: (about) => {
           reports.attached(pane, about);
           retitle();

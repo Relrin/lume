@@ -34,6 +34,9 @@ export function WorkspaceSwitcher() {
   const app = useShell();
   const name = useStore(app.layout, (state) => state.name);
   const known = useStore(app.commandStore, (state) => state.byId);
+  // The dot says whether the session host can be reached, whatever the theme's accent.
+  const connected = useStore(app.hostLink, (state) => state.connected);
+  const linkLabel = connected ? "Session host connected" : "Session host disconnected";
   const [open, setOpen] = useState(false);
   const [listed, setListed] = useState<WorkspaceList | null>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -102,10 +105,12 @@ export function WorkspaceSwitcher() {
         className="switcher-button"
         aria-haspopup="menu"
         aria-expanded={open}
-        title={`Workspace: ${name}`}
+        aria-description={linkLabel}
+        title={`Workspace: ${name}\n${linkLabel}`}
         onClick={() => setOpen(!open)}
       >
-        <span className="switcher-dot" />
+        {/* The dot is said in the button's description, not in its name. */}
+        <span className="switcher-dot" data-link={connected ? "up" : "down"} aria-hidden="true" />
         <span className="switcher-name">{name}</span>
         <span className="switcher-chevron">
           <ChevronDownIcon />

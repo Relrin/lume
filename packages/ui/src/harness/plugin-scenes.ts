@@ -157,7 +157,13 @@ export const PLUGIN_CONTRIBUTIONS: UiContributions = {
           },
         ],
       },
-      section("closing", [item("lock"), item("close-left"), item("close-right"), item("close")]),
+      section("closing", [
+        item("mute"),
+        item("lock"),
+        item("close-left"),
+        item("close-right"),
+        item("close"),
+      ]),
     ],
     "menu.status": [
       {

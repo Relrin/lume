@@ -188,6 +188,12 @@ const SETTINGS_SCENES: readonly SettingsScene[] = [
   { name: "settings", page: "appearance" },
   { name: "settings-terminal", page: "terminal" },
   { name: "settings-search", page: "general", query: "cursor" },
+  {
+    name: "settings-commands",
+    page: "commands",
+    window: { titleBar: "custom", commands: FIXTURE_COMMANDS, bindings: FIXTURE_BINDINGS },
+  },
+  { name: "settings-about", page: "about" },
   ...PLUGIN_SETTINGS_SCENES,
 ];
 

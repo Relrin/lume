@@ -17,7 +17,7 @@ import {
   type PaneFacts,
 } from "../events/describe.ts";
 import { iconChoices, type PaneIcon, type ProgramIcon } from "../events/programs.ts";
-import { panesOf, selectTitlePane, UNTITLED_TAB } from "../layout/selectors.ts";
+import { isTabMuted, panesOf, selectTitlePane, UNTITLED_TAB } from "../layout/selectors.ts";
 import type { LayoutState } from "../layout/store.ts";
 import type { PaneId, TabId } from "../layout/types.ts";
 import { TAB_ICONS_MAX } from "../tuning.ts";
@@ -110,7 +110,10 @@ export function describeTabNow(app: ShellApp, tab: TabId): TabDescription {
   return {
     label,
     icons: described.slice(0, TAB_ICONS_MAX).map((description) => description.icon),
-    activity: greatest(described.map((description) => description.activity)),
+    // A muted tab is not marked as waiting, whatever its panes say.
+    activity: isTabMuted(state, tab)
+      ? "idle"
+      : greatest(described.map((description) => description.activity)),
   };
 }
 

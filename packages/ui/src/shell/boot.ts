@@ -73,6 +73,7 @@ import { createWindowStateStore, type WindowStateStore } from "../window/state.t
 import { closeRequested, confirmRequested, mayRun } from "./closing.ts";
 import { describeTabNow, paneFacts } from "./describing.ts";
 import { focusBar } from "./focus-bar.ts";
+import { createHostLinkStore, type HostLinkStore } from "./host-link.ts";
 import { NoticeStore, sentence } from "./notices.ts";
 import { createTabUiStore, type TabUiStore } from "./tab-ui.ts";
 
@@ -117,6 +118,8 @@ export interface ShellApp {
   readonly expandRow: (panel: string, path: readonly string[]) => Promise<void>;
   /** What the window is doing on the desktop. */
   readonly windowState: WindowStateStore;
+  /** Whether the session host is connected. */
+  readonly hostLink: HostLinkStore;
   /** Moves cards about the window by their headers. */
   readonly cardDrag: CardDrag;
   /** The panel that is being dragged to another side of the window, if one is. */
@@ -210,6 +213,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   const status = createStatusStore();
   const plugins = createPluginsStore();
   const windowState = createWindowStateStore();
+  const hostLink = createHostLinkStore();
   // The user looks at the pane that has the keyboard, while the window is the one in use.
   const attended = (pane: PaneId): boolean => {
     const state = layout.getState();
@@ -244,6 +248,8 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   // once it has them; a change the copies already hold is passed over there.
   // What is made further on, for what is called back before it is.
   const made: { shell?: ShellApp; views?: PaneViews; client?: CoreClient } = {};
+  // What the user is doing with the tabs and the panes' menus. The terminals open one too.
+  const tabUi = createTabUiStore();
   let early: Notice[] | null = [];
   let onNotice = (notice: Notice): void => void early?.push(notice);
   let ready: () => void = () => undefined;
@@ -282,6 +288,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   commandStore.getState().set(commandList);
   applyConfig(configView);
   const machine = layoutView.machine ?? UNKNOWN_MACHINE;
+  hostLink.getState().set(layoutView.host?.connected ?? true);
   made.client = client;
   // Looking at the machine takes the core a moment; nothing waits for it.
   client.profilesList().then(
@@ -453,6 +460,13 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       if (layout.getState().floats[pane]) contexts.add("floating");
       return shortcuts.handle(event, withPlugins(contexts));
     },
+    menu: (pane, at, selection) =>
+      tabUi.getState().open({
+        kind: "terminal",
+        pane,
+        anchor: { left: at.clientX, top: at.clientY, bottom: at.clientY },
+        selection,
+      }),
     keyboard: (pane) => search.setKeyboard(pane, "terminal"),
     searched: (pane) => search.touched(pane),
   });
@@ -473,7 +487,6 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     clearTimer: (timer) => window.clearTimeout(timer),
     now: () => performance.now(),
   });
-  const tabUi = createTabUiStore();
   const commands = new Commands({
     store: commandStore,
     client,
@@ -484,6 +497,15 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     mayRun: (id, args) => mayRun({ layout, config, views, prompts, client, notices }, id, args),
     focusBar: () => focusBar(),
     renameTab: (tab) => tabUi.getState().startRename(tab ?? selectActiveTab(layout.getState())),
+    renamePane: (named) => {
+      const pane = named ?? selectFocus(layout.getState());
+      if (pane === null || pane === undefined) return;
+      // The field is in the pane's header. A pane alone in its tab may have none, and
+      // is what its tab is called after: there the field is the tab's.
+      const header = document.querySelector(`[data-pane="${CSS.escape(pane)}"] > .pane-header`);
+      if (header) tabUi.getState().startPaneRename(pane);
+      else tabUi.getState().startRename(layout.getState().paneTabs[pane] ?? null);
+    },
     answerPrompt: (proceed, item) => prompts.answerCurrent(proceed, item),
     failed: (message) => notices.push("error", sentence(message)),
   });
@@ -566,6 +588,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         break;
       case "notice":
         notices.push(notice.level, notice.message, notice.action);
+        break;
+      case "host_link":
+        hostLink.getState().set(notice.connected);
         break;
       case "contributions_changed":
         contributionsAnnounced = Math.max(contributionsAnnounced, notice.revision);
@@ -816,6 +841,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     visible,
     expandRow: (panel, path) => client.uiPanelExpand(panel, path),
     windowState,
+    hostLink,
     cardDrag,
     panelDrag,
     search,

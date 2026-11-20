@@ -98,6 +98,8 @@ export interface ConfigSettings {
     readonly "hidden-release-seconds"?: number;
     readonly "cursor-style": "block" | "bar" | "underline";
     readonly "cursor-blink": boolean;
+    /** Copy what the pointer selects at once. A core that does not say means off. */
+    readonly "copy-on-select"?: boolean;
     /** What the cursor leaves behind when it jumps. A core that does not say means none. */
     readonly "cursor-trail"?: CursorTrail | Contributed;
     /** What the cursor gives off when it changes shape. A core that does not say means none. */
@@ -480,6 +482,8 @@ export interface LayoutView {
   readonly workspace: Workspace;
   /** What the page needs of this machine. Sent with the view the page asks for. */
   readonly machine?: Machine;
+  /** Whether the session host is connected. Sent with the view the page asks for. */
+  readonly host?: { readonly connected: boolean };
 }
 
 /** What `layout_apply` returns. */
@@ -523,6 +527,31 @@ export interface CommandSpec {
   readonly palette: boolean;
   /** A JSON Schema of the command's arguments, if it takes any. */
   readonly args?: unknown;
+}
+
+/**
+ * What the application is, as `about_info` says it: versions, and words for kinds of
+ * things. Nothing in it names the machine, the user, a host or a folder.
+ */
+export interface AboutInfo {
+  readonly appVersion: string;
+  readonly os: string;
+  readonly arch: string;
+  /** `WebView2`, `WKWebView` or `WebKitGTK`. */
+  readonly engine: string;
+  readonly engineVersion: string | null;
+  /** The version of the protocol the application speaks to a session host. */
+  readonly proto: number;
+  /** The session host in use, if the application has one. */
+  readonly host: {
+    readonly version: string;
+    readonly proto: number;
+    /** Whether it runs on its own, as opposed to inside the application. */
+    readonly daemon: boolean;
+    readonly connected: boolean;
+  } | null;
+  /** The version of the Rex server installed on this machine, if one is. */
+  readonly rexVersion: string | null;
 }
 
 /** What the core tells a page without being asked. */
@@ -602,6 +631,8 @@ export type Notice =
   | { readonly type: "plugin_state"; readonly plugin: string; readonly problem: string | null }
   /** The settings window was asked for again: the page to show, if one was named. */
   | { readonly type: "settings_show"; readonly section: string | null }
+  /** The connection to the session host was lost, or made again. */
+  | { readonly type: "host_link"; readonly connected: boolean }
   | {
       readonly type: "notice";
       readonly level: "info" | "warning" | "error";

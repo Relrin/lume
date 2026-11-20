@@ -11,6 +11,7 @@ import type { Intent, PaneId } from "../layout/types.ts";
 import type { Carrier } from "../transport/carrier.ts";
 import { TransportClient } from "../transport/client.ts";
 import type {
+  AboutInfo,
   CommandSpec,
   ConfigView,
   ControlMessage,
@@ -154,6 +155,11 @@ export class CoreClient {
    */
   async backgroundImage(): Promise<Uint8Array> {
     return bytesOf(await this.transport.command<unknown>("background_image"));
+  }
+
+  /** What the application is: its version and its parts', and the Rex server's. */
+  aboutInfo(): Promise<AboutInfo> {
+    return this.transport.command("about_info");
   }
 
   /** Every command there is. */

@@ -1134,6 +1134,10 @@ pub struct TerminalConfig {
         .help("Ask before closing a pane whose program is still running")
         .options(&CONFIRM_CHOICES)))]
     pub confirm_close: Confirm,
+    /// Copy text to the clipboard as soon as it is selected with the pointer.
+    #[schemars(extend("x-lume-settings" = Shown::switch("terminal", "Clipboard", 10, "Copy on select")
+        .help("Text selected with the pointer is copied at once, with no key pressed")))]
+    pub copy_on_select: bool,
     /// Show a desktop notification when a command that ran for a while ends in a window
     /// that is not in use. It needs the shell to report its commands.
     #[schemars(extend("x-lume-settings" = Shown::switch("general", "Attention", 20, "Notify when a long command ends")
@@ -1166,6 +1170,7 @@ impl Default for TerminalConfig {
             padding: None,
             close_on_exit: CloseOnExit::Clean,
             confirm_close: Confirm::Never,
+            copy_on_select: false,
             notify_long_command: false,
             long_command_seconds: LONG_COMMAND_SECONDS_DEFAULT,
         }

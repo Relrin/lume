@@ -54,6 +54,14 @@
                 "name": "Terminal"
               },
               {
+                "role": "button",
+                "name": "Commands"
+              },
+              {
+                "role": "button",
+                "name": "About"
+              },
+              {
                 "role": "heading",
                 "name": "Add-ons"
               },
@@ -101,13 +109,22 @@
             "name": "Theme"
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
             "role": "radiogroup",
@@ -182,7 +199,10 @@
             "role": "spinbutton"
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
             "role": "spinbutton"
@@ -285,7 +305,10 @@
             ]
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
             "role": "switch",
@@ -298,7 +321,10 @@
             "name": "Tabs"
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
             "role": "heading",

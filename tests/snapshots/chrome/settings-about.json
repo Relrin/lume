@@ -1,0 +1,143 @@
+{
+  "structure": {
+    "box": "settings-window",
+    "at": [0, 0, 1280, 800],
+    "parts": [
+      {
+        "box": "settings-titlebar",
+        "at": [0, 0, 1280, 40],
+        "parts": [
+          {
+            "role": "button",
+            "name": "Minimise"
+          },
+          {
+            "role": "button",
+            "name": "Maximise"
+          },
+          {
+            "role": "button",
+            "name": "Close window"
+          }
+        ]
+      },
+      {
+        "role": "complementary",
+        "box": "settings-side",
+        "at": [0, 40, 236, 760],
+        "parts": [
+          {
+            "role": "textbox",
+            "name": "Search settings"
+          },
+          {
+            "role": "navigation",
+            "name": "Settings sections",
+            "parts": [
+              {
+                "role": "heading",
+                "name": "Application"
+              },
+              {
+                "role": "button",
+                "name": "General"
+              },
+              {
+                "role": "button",
+                "name": "Appearance"
+              },
+              {
+                "role": "button",
+                "name": "Terminal"
+              },
+              {
+                "role": "button",
+                "name": "Commands"
+              },
+              {
+                "role": "button",
+                "name": "About",
+                "state": {
+                  "current": "page"
+                }
+              },
+              {
+                "role": "heading",
+                "name": "Add-ons"
+              },
+              {
+                "role": "button",
+                "name": "Manage add-ons"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "role": "main",
+        "box": "settings-main",
+        "at": [236, 40, 1044, 760],
+        "parts": [
+          {
+            "box": "settings-head",
+            "at": [236, 40, 1044, 46],
+            "parts": [
+              {
+                "role": "heading",
+                "name": "About"
+              },
+              {
+                "role": "button",
+                "name": "Open config.toml"
+              }
+            ]
+          },
+          {
+            "role": "heading",
+            "name": "Lume"
+          },
+          {
+            "role": "button",
+            "name": "Copy debug info"
+          }
+        ]
+      }
+    ]
+  },
+  "colors": {
+    "dark": {
+      "color.surface": "#121416",
+      "color.card": "#171a1e",
+      "color.card-header": "#171a1e",
+      "color.border": "#262b31",
+      "color.border-focus": "#7fe3b899",
+      "color.text": "#e6e8ea",
+      "color.text-muted": "#9aa3ab",
+      "color.accent": "#7fe3b8",
+      "terminal.bg": "#171a1e",
+      "terminal.fg": "#d7dadd",
+      "space.gap": "8px",
+      "radius.card": "10px",
+      "size.header": "34px",
+      "size.topbar": "44px",
+      "the window's text": "#e6e8ea"
+    },
+    "light": {
+      "color.surface": "#e6e9ef",
+      "color.card": "#ffffff",
+      "color.card-header": "#f6f7fa",
+      "color.border": "#cfd4df",
+      "color.border-focus": "#2f6fd0",
+      "color.text": "#1c1f2a",
+      "color.text-muted": "#5b6275",
+      "color.accent": "#2f6fd0",
+      "terminal.bg": "#ffffff",
+      "terminal.fg": "#1c1f2a",
+      "space.gap": "8px",
+      "radius.card": "10px",
+      "size.header": "34px",
+      "size.topbar": "44px",
+      "the window's text": "#1c1f2a"
+    }
+  }
+}

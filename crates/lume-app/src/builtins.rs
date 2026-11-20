@@ -49,7 +49,7 @@ const COMMANDS: &[Row] = &[
     (
         "lume.host.restart",
         "Restart Session Host",
-        "Application",
+        "Host",
         Runs::Core,
         true,
     ),
@@ -96,6 +96,20 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.app.about",
+        "About Lume",
+        "Application",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.app.commands",
+        "Show Commands and Keys",
+        "Application",
+        Runs::Core,
+        true,
+    ),
+    (
         "lume.config.open",
         "Open Configuration File",
         "Configuration",
@@ -120,7 +134,7 @@ const COMMANDS: &[Row] = &[
     (
         "lume.profile.refresh",
         "Look for Profiles Again",
-        "Application",
+        "Host",
         Runs::Core,
         true,
     ),
@@ -174,6 +188,13 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.tab.mute",
+        "Mute or Unmute Tab",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
+    (
         "lume.tab.merge",
         "Move Tab into Another Tab",
         "Tab",
@@ -202,6 +223,13 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     ("lume.group.set", "Change Group", "Tab", Runs::Core, false),
+    (
+        "lume.group.mute",
+        "Mute or Unmute Group",
+        "Tab",
+        Runs::Core,
+        true,
+    ),
     (
         "lume.group.toggle",
         "Collapse or Expand Group",
@@ -388,6 +416,13 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     ("lume.pane.rename", "Rename Pane", "Pane", Runs::Core, false),
+    (
+        "lume.pane.rename-start",
+        "Rename Pane…",
+        "Pane",
+        Runs::Page,
+        true,
+    ),
     (
         "lume.pane.float",
         "Float or Dock Pane",
@@ -694,6 +729,14 @@ fn arguments(id: &str) -> Option<Value> {
             json!({ "tab": tab, "on": { "type": "boolean", "description": "Locked or not; the other way round if left out." } }),
             &[],
         )),
+        "lume.tab.mute" => Some(object(
+            json!({ "tab": tab, "on": { "type": "boolean", "description": "Muted or not; the other way round if left out." } }),
+            &[],
+        )),
+        "lume.group.mute" => Some(object(
+            json!({ "group": group, "on": { "type": "boolean", "description": "Muted or not; the other way round if left out." } }),
+            &[],
+        )),
         "lume.tab.merge" => Some(object(
             json!({ "tab": tab, "into": { "type": "string", "description": "The tab whose panes it joins." } }),
             &["into"],
@@ -710,6 +753,7 @@ fn arguments(id: &str) -> Option<Value> {
                 "icon": { "type": ["string", "null"], "enum": ["bug", "flame", "rocket", "flask", "wrench", "layers", "server", "book", null] },
                 "collapsed": { "type": "boolean" },
                 "kept": { "type": "boolean" },
+                "muted": { "type": "boolean" },
             }),
             &[],
         )),
@@ -772,6 +816,7 @@ fn arguments(id: &str) -> Option<Value> {
             &[],
         )),
         "lume.pane.close"
+        | "lume.pane.rename-start"
         | "lume.pane.duplicate"
         | "lume.pane.reconnect"
         | "lume.pane.copy-cwd"
@@ -1295,6 +1340,17 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
         }
         "lume.app.report-issue" => return open_link(format!("{REPOSITORY}/issues/new")).await,
         "lume.app.whats-new" => return open_link(format!("{REPOSITORY}/releases")).await,
+        // The pages of the settings window that say what the application is and what
+        // it can be asked to do.
+        "lume.app.about" | "lume.app.commands" => {
+            let section = if id == "lume.app.about" {
+                "about"
+            } else {
+                "commands"
+            };
+            context.shell.open_settings(Some(section), Some(window));
+            return Ok(());
+        }
         "lume.tab.new" => Intent::TabNew {
             window,
             // A terminal opened from the window's pane starts where that pane is.
@@ -1385,6 +1441,31 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
                 on: argument(args, "on")?.unwrap_or(!locked),
             }
         }
+        "lume.tab.mute" => {
+            let tab = context.tab(args)?;
+            let muted = panes.workspace().tab(tab).is_some_and(|found| found.muted);
+            Intent::TabMute {
+                tab,
+                on: argument(args, "on")?.unwrap_or(!muted),
+            }
+        }
+        "lume.group.mute" => {
+            let group = context.group(args)?;
+            let muted = context
+                .window_now()?
+                .centre
+                .group(group)
+                .is_some_and(|found| found.muted);
+            Intent::GroupSet {
+                group,
+                name: None,
+                color: None,
+                icon: None,
+                collapsed: None,
+                kept: None,
+                muted: Some(argument(args, "on")?.unwrap_or(!muted)),
+            }
+        }
         "lume.tab.merge" => Intent::TabMerge {
             tab: context.tab(args)?,
             into: argument(args, "into")?
@@ -1415,6 +1496,7 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
             icon: given::<GroupIcon>(args, "icon")?,
             collapsed: argument(args, "collapsed")?,
             kept: argument(args, "kept")?,
+            muted: argument(args, "muted")?,
         },
         "lume.group.toggle" => {
             let group = context.group(args)?;
@@ -1430,6 +1512,7 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
                 icon: None,
                 collapsed: Some(!collapsed),
                 kept: None,
+                muted: None,
             }
         }
         "lume.group.move-left" | "lume.group.move-right" => {

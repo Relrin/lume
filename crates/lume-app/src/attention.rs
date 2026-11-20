@@ -63,6 +63,9 @@ pub trait Surroundings {
     fn window_focused(&self, window: WindowId) -> bool;
     /// What a person calls the pane that shows a session.
     fn name_of(&self, key: &SessionKey) -> String;
+    /// Whether the pane that shows a session is in a tab the user muted, or in a group
+    /// they did. Nothing asks for attention on behalf of such a pane.
+    fn muted(&self, key: &SessionKey) -> bool;
 }
 
 /// What is kept between reports to decide what to do about the next.
@@ -113,7 +116,7 @@ impl Attention {
         };
         match event {
             SessionEvent::Bell => {
-                if !settings.bell {
+                if !settings.bell || around.muted(key) {
                     return None;
                 }
                 let window = around.window_of(key)?;
@@ -135,7 +138,7 @@ impl Attention {
             SessionEvent::CommandFinished { exit } => {
                 let began = self.started.remove(key)?;
                 let ran = now.saturating_duration_since(began);
-                if !settings.notify || ran < settings.long_command {
+                if !settings.notify || ran < settings.long_command || around.muted(key) {
                     return None;
                 }
                 let window = around.window_of(key)?;
@@ -184,6 +187,13 @@ impl Surroundings for Live {
 
     fn window_focused(&self, window: WindowId) -> bool {
         self.services.shell.window_focused(window)
+    }
+
+    fn muted(&self, key: &SessionKey) -> bool {
+        let panes = &self.services.panes;
+        panes
+            .pane_of(key)
+            .is_some_and(|pane| panes.workspace().pane_muted(pane))
     }
 
     fn name_of(&self, key: &SessionKey) -> String {
@@ -266,11 +276,22 @@ mod tests {
     #[derive(Default)]
     struct Around {
         focused: RefCell<HashSet<WindowId>>,
+        /// The sessions whose panes are in a muted tab.
+        muted: RefCell<HashSet<u64>>,
     }
 
     impl Around {
         fn focus(&self, raw: u64) {
             self.focused.borrow_mut().insert(window(raw));
+        }
+
+        fn mute(&self, raw: u64, on: bool) {
+            let mut muted = self.muted.borrow_mut();
+            if on {
+                muted.insert(raw);
+            } else {
+                muted.remove(&raw);
+            }
         }
     }
 
@@ -288,6 +309,10 @@ mod tests {
 
         fn name_of(&self, _key: &SessionKey) -> String {
             "Ubuntu".to_owned()
+        }
+
+        fn muted(&self, key: &SessionKey) -> bool {
+            self.muted.borrow().contains(&key.session.get())
         }
     }
 
@@ -421,6 +446,46 @@ mod tests {
         // Two in a row: the second waits for the first to rest.
         assert!(run(&mut attention, 2, &ON).is_some());
         assert_eq!(run(&mut attention, 2, &ON), None);
+    }
+
+    #[test]
+    fn a_muted_tab_asks_for_nothing_until_it_is_let_ask_again() {
+        let around = Around::default();
+        let mut attention = Attention::default();
+        let now = Instant::now();
+        let long = Duration::from_secs(60);
+        around.mute(1, true);
+
+        // Neither a bell nor a long command's end, and the session beside it still asks.
+        let bell = |raw| event(raw, SessionEvent::Bell);
+        assert_eq!(attention.take(&bell(1), now, &ON, &around), None);
+        assert_eq!(
+            attention.take(&bell(2), now, &ON, &around),
+            Some(Act::Attention(window(2)))
+        );
+        attention.take(&started(1), now, &ON, &around);
+        assert_eq!(
+            attention.take(&finished(1, Some(1)), now + long, &ON, &around),
+            None
+        );
+
+        // The muted bell did not use up the window's turn, and the muted command's end
+        // is not kept to be told later.
+        around.mute(1, false);
+        assert_eq!(
+            attention.take(&bell(1), now, &ON, &around),
+            Some(Act::Attention(window(1)))
+        );
+        assert_eq!(
+            attention.take(&finished(1, Some(1)), now + long, &ON, &around),
+            None
+        );
+        attention.take(&started(1), now + long, &ON, &around);
+        assert!(
+            attention
+                .take(&finished(1, Some(0)), now + long * 2, &ON, &around)
+                .is_some()
+        );
     }
 
     #[test]
