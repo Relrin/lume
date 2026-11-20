@@ -73,7 +73,10 @@ export type LineGlyphName =
   | "monitor"
   | "network"
   | "palette"
+  | "panel-bottom"
   | "panel-left"
+  | "panel-right"
+  | "panel-top"
   | "pause"
   | "pencil"
   | "play"
@@ -536,9 +539,21 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
     ["circle", {"cx":"6.5","cy":"12.5","r":".5","fill":"currentColor"}],
     ["circle", {"cx":"8.5","cy":"7.5","r":".5","fill":"currentColor"}],
   ],
+  "panel-bottom": [
+    ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
+    ["path", {"d":"M3 15h18"}],
+  ],
   "panel-left": [
     ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
     ["path", {"d":"M9 3v18"}],
+  ],
+  "panel-right": [
+    ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
+    ["path", {"d":"M15 3v18"}],
+  ],
+  "panel-top": [
+    ["rect", {"width":"18","height":"18","x":"3","y":"3","rx":"2"}],
+    ["path", {"d":"M3 9h18"}],
   ],
   "pause": [
     ["rect", {"x":"14","y":"3","width":"5","height":"18","rx":"1"}],
