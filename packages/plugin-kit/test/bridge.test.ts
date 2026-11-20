@@ -95,6 +95,26 @@ describe("calls", () => {
     expect(error).toMatchObject({ code: "denied", message: "not allowed" });
   });
 
+  it("fail with the plugin's own kind of failure and what its code said of it", async () => {
+    const window = new Window();
+    const view = createView(HELLO, window);
+    const call = view.host.call("merge");
+    window.say({
+      t: "error",
+      id: 1,
+      code: "conflict",
+      message: "two files conflict",
+      data: { files: ["a.rs", "b.rs"] },
+    });
+    const error = await call.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HostError);
+    expect(error).toMatchObject({ code: "conflict", data: { files: ["a.rs", "b.rs"] } });
+    // One that says nothing more has no data.
+    const plain = view.host.call("save");
+    window.say({ t: "error", id: 2, code: "denied", message: "no" });
+    expect(await plain.catch((caught: unknown) => caught)).toMatchObject({ data: null });
+  });
+
   it("are refused here when they could not be sent", async () => {
     const window = new Window();
     const view = createView(HELLO, window);

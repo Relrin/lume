@@ -34,6 +34,11 @@ lume.views.handle("grant-for", async (args) => {
 
 lume.views.handle("instances", () => lume.views.instances());
 
+// A failure of a kind that is the plugin's own, with something said of it.
+lume.views.handle("fail", () => {
+  throw new lume.LumeError("echo.own-kind", "a failure of its own kind", { count: 7 });
+});
+
 // A grant the view never opens, written to the log for another plugin's view to try.
 lume.views.handle("spare", async (_args, from) => {
   const child = await lume.process.spawn("sort");

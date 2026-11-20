@@ -11,12 +11,17 @@
   const parse = JSON.parse;
   const freeze = Object.freeze;
 
-  /** A call that failed, with the kind of failure in `code`. */
+  /**
+   * A call that failed, with the kind of failure in `code`. A plugin's code throws one
+   * with a code of its own, and what it likes in `data`, to tell whoever called it
+   * what kind of failure it was.
+   */
   class LumeError extends Error {
-    constructor(code, message) {
+    constructor(code, message, data) {
       super(message);
       this.name = "LumeError";
       this.code = code;
+      this.data = data === undefined ? null : data;
     }
   }
 
@@ -81,7 +86,11 @@
   }
 
   function failure(error) {
-    if (error instanceof LumeError) return { code: error.code, message: error.message };
+    if (error instanceof LumeError) {
+      const failed = { code: String(error.code), message: error.message };
+      if (error.data !== null && error.data !== undefined) failed.data = error.data;
+      return failed;
+    }
     return { code: "failed", message: text(error) };
   }
 
@@ -303,7 +312,8 @@
         const waiting = pending.get(id);
         if (waiting) {
           pending.delete(id);
-          waiting.reject(new LumeError(data.code, data.message));
+          // A failure of another plugin's code comes with that plugin's own name for it.
+          waiting.reject(new LumeError(data.kind ?? data.code, data.message, data.data));
         }
         return;
       }

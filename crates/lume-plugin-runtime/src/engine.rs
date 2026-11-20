@@ -610,8 +610,7 @@ impl Engine {
                 "commands.done" => {
                     let invocation = args["invocation"].as_u64().unwrap_or(0);
                     let result = match args.get("error") {
-                        Some(error) => Err(serde_json::from_value(error.clone())
-                            .unwrap_or_else(|_| ApiError::failed(error.to_string()))),
+                        Some(error) => Err(ApiError::reported(error)),
                         None => Ok(args.get("value").cloned().unwrap_or(Value::Null)),
                     };
                     self.shared

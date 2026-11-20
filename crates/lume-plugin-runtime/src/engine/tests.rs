@@ -134,6 +134,55 @@ fn a_command_is_carried_out_by_its_handler() {
 }
 
 #[test]
+fn a_failure_of_the_plugin_s_own_kind_is_carried_as_it_named_it() {
+    let (plugin, recorder) = start(spec(
+        r#"
+        lume.commands.register("own", () => {
+          throw new lume.LumeError("conflict", "two files conflict", { files: ["a.rs", "b.rs"] });
+        });
+        lume.commands.register("known", () => {
+          throw new lume.LumeError("not_found", "no such branch", { branch: "x" });
+        });
+        lume.commands.register("unnameable", () => {
+          throw new lume.LumeError("Not A Kind", "odd");
+        });
+        lume.commands.register("wordy", () => {
+          throw new lume.LumeError("big", "too much", "x".repeat(20000));
+        });
+        "#,
+    ));
+    started(&recorder);
+    // A kind the application has never heard of comes through under its own name,
+    // with what the code said of it.
+    plugin.command(1, "own", Value::Null);
+    let own = command_result(&recorder, 1).unwrap_err();
+    assert_eq!(own.code, crate::ErrorCode::Failed);
+    assert_eq!(own.kind.as_deref(), Some("conflict"));
+    assert_eq!(own.message, "two files conflict");
+    assert_eq!(own.data, Some(json!({ "files": ["a.rs", "b.rs"] })));
+    assert_eq!(own.shown_code(), "conflict");
+    // One of the application's codes stays that code, and may say more too.
+    plugin.command(2, "known", Value::Null);
+    let known = command_result(&recorder, 2).unwrap_err();
+    assert_eq!(known.code, crate::ErrorCode::NotFound);
+    assert_eq!(known.kind, None);
+    assert_eq!(known.data, Some(json!({ "branch": "x" })));
+    assert_eq!(known.shown_code(), "not_found");
+    // What cannot name a kind, and more than may be said, are left out; the failure
+    // and its message are not.
+    plugin.command(3, "unnameable", Value::Null);
+    let unnameable = command_result(&recorder, 3).unwrap_err();
+    assert_eq!(
+        (unnameable.kind, unnameable.message.as_str()),
+        (None, "odd")
+    );
+    plugin.command(4, "wordy", Value::Null);
+    let wordy = command_result(&recorder, 4).unwrap_err();
+    assert_eq!(wordy.kind.as_deref(), Some("big"));
+    assert_eq!(wordy.data, None);
+}
+
+#[test]
 fn a_view_s_call_reaches_its_handler_with_which_view_made_it() {
     let (plugin, recorder) = start(spec(
         r#"

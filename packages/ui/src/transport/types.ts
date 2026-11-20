@@ -186,11 +186,14 @@ export interface SpawnRequest {
 /** A failed call into the core. `code` is stable; `message` is for people. */
 export class CommandError extends Error {
   readonly code: string;
+  /** What a plugin's code said of a failure of its own, where it said anything. */
+  readonly data?: unknown;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, data?: unknown) {
     super(message);
     this.name = "CommandError";
     this.code = code;
+    if (data !== undefined && data !== null) this.data = data;
   }
 }
 
@@ -198,9 +201,13 @@ export class CommandError extends Error {
 export function toCommandError(thrown: unknown): CommandError {
   if (thrown instanceof CommandError) return thrown;
   if (typeof thrown === "object" && thrown !== null) {
-    const { code, message } = thrown as { code?: unknown; message?: unknown };
+    const { code, message, data } = thrown as {
+      code?: unknown;
+      message?: unknown;
+      data?: unknown;
+    };
     if (typeof code === "string" && typeof message === "string") {
-      return new CommandError(code, message);
+      return new CommandError(code, message, data);
     }
   }
   return new CommandError("internal", typeof thrown === "string" ? thrown : String(thrown));

@@ -137,7 +137,7 @@ What it is sent:
 | Message                                         | When                                                  |
 | ----------------------------------------------- | ----------------------------------------------------- |
 | `{ t: "result", id, value }`                    | A call was answered.                                  |
-| `{ t: "error", id, code, message }`             | A call or a stream failed.                            |
+| `{ t: "error", id, code, message, data? }`      | A call or a stream failed.                            |
 | `{ t: "opened", id, port, readable, writable }` | A stream was opened; `port` is the stream's own port. |
 | `{ t: "event", event, payload }`                | Its plugin's code posted it an event.                 |
 | `{ t: "tokens", tokens, scheme }`               | The window's look changed.                            |
@@ -171,8 +171,13 @@ lume.views.onClose((view) => lume.log.info(`${view.view} closed`));
 await lume.views.post("changes", "refreshed", { count: 3 });
 ```
 
-A call waits for its answer for 30 seconds. A failure of the code comes back as `error` with the
-code's own kind of failure. Events reach a view in the order they were posted.
+A call waits for its answer for 30 seconds. Events reach a view in the order they were posted.
+
+A failure of the code comes back as `error`. Its `code` is one of the application's codes, or the
+name the plugin's code gave the failure when it threw a `LumeError` of its own; `data` is what the
+code said of it, and is left out when it said nothing. A plugin defines its own kinds of failure
+this way, and Lume carries them without knowing any. See
+[errors of the plugin's own](environment.md#errors-of-the-plugins-own).
 
 The view has no permissions of its own. Whatever it needs done (a file read, a program run) it
 asks its plugin's code for, and the code does it within what the plugin was granted. Treat what a

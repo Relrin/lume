@@ -123,7 +123,7 @@ pub fn view_closed(services: Shared<'_>, window: WebviewWindow, view: String) {
 }
 
 /// A call one of the page's open views made of its plugin's code. A failure of the
-/// code's comes back with the code's own kind of failure.
+/// code's comes back with the code's own kind of failure and what it said of it.
 #[tauri::command]
 pub async fn view_call(
     services: Shared<'_>,
@@ -137,11 +137,9 @@ pub async fn view_call(
         .view_call(window.label(), &view, &name, args)
         .await
         .map_err(|error| {
-            let code = serde_json::to_value(error.code)
-                .ok()
-                .and_then(|code| code.as_str().map(str::to_owned))
-                .unwrap_or_else(|| "failed".to_owned());
-            CommandError::new(code, error.message)
+            let mut failed = CommandError::new(error.shown_code(), error.message);
+            failed.data = error.data;
+            failed
         })
 }
 

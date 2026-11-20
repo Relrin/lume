@@ -72,6 +72,13 @@ async function openStream(grant, piece) {
 const refusal = (error) => String(error.code ?? error.message);
 
 async function streams() {
+  // A failure of the plugin's own kind arrives as its code named it.
+  const own = await call("fail").then(
+    () => "answered",
+    (error) => `${error.code} ${JSON.stringify(error.data)} ${error.message}`,
+  );
+  say(`own ${own}`);
+
   // A program's input written and its output read, without the plugin's code between.
   const sort = await call("sort");
   let sorted = "";
@@ -240,7 +247,7 @@ window.addEventListener("message", (event) => {
     waiting.delete(data.id);
     if (data.t === "result") found.resolve(data.value);
     else if (data.t === "opened") found.resolve(data);
-    else found.reject(Object.assign(new Error(data.message), { code: data.code }));
+    else found.reject(Object.assign(new Error(data.message), { code: data.code, data: data.data }));
   };
   post({ t: "ready" });
   start().catch((error) => {

@@ -976,11 +976,39 @@ pub struct ServicesCall {
 }
 
 /// Why a call failed.
+///
+/// The codes are the application's own, and few. A plugin's code names its own kinds
+/// of failure itself (`kind`) and says what it likes of each (`data`); the application
+/// carries both to whoever called, a view or another plugin, without knowing any of
+/// them. So a plugin gains a kind of failure without anything here changing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ApiError {
     pub code: ErrorCode,
     pub message: String,
+    /// The kind of failure, as the plugin whose code failed names it. The caller reads
+    /// it where it would read the code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// What the plugin's code says of the failure, as JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+}
+
+/// The longest a plugin's own kind of failure may be named.
+pub const ERROR_KIND_MAX: usize = 64;
+
+/// The most a plugin's code may say of a failure, as JSON.
+pub const ERROR_DATA_MAX: usize = 16 * 1024;
+
+/// Whether `kind` can name a plugin's own kind of failure: lower-case letters, digits,
+/// `_`, `-` and `.`, beginning with a letter.
+pub fn error_kind_ok(kind: &str) -> bool {
+    kind.len() <= ERROR_KIND_MAX
+        && kind.starts_with(|c: char| c.is_ascii_lowercase())
+        && kind
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-' | '.'))
 }
 
 /// The kinds of failure a call can have.
@@ -1014,6 +1042,51 @@ impl ApiError {
         Self {
             code,
             message: message.into(),
+            kind: None,
+            data: None,
+        }
+    }
+
+    /// The failure as a plugin's code reported it: as JSON with a code that may be the
+    /// plugin's own. A code that is none of the application's becomes the failure's
+    /// kind, under the code `failed`; what cannot be a kind, and data that is too
+    /// large, are left out, and the failure is still a failure.
+    pub fn reported(error: &Value) -> Self {
+        let message = match error.get("message") {
+            Some(Value::String(message)) => message.clone(),
+            _ => error.to_string(),
+        };
+        let named = error.get("code").and_then(Value::as_str);
+        let code: Option<ErrorCode> =
+            named.and_then(|named| serde_json::from_value(Value::from(named)).ok());
+        let kind = match code {
+            Some(_) => None,
+            None => named
+                .filter(|named| error_kind_ok(named))
+                .map(str::to_owned),
+        };
+        let data = error
+            .get("data")
+            .filter(|data| !data.is_null())
+            .filter(|data| data.to_string().len() <= ERROR_DATA_MAX)
+            .cloned();
+        Self {
+            code: code.unwrap_or(ErrorCode::Failed),
+            message,
+            kind,
+            data,
+        }
+    }
+
+    /// What the caller reads as the failure's code: the plugin's own kind where it
+    /// named one, the application's code otherwise.
+    pub fn shown_code(&self) -> String {
+        match &self.kind {
+            Some(kind) => kind.clone(),
+            None => serde_json::to_value(self.code)
+                .ok()
+                .and_then(|code| code.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "failed".to_owned()),
         }
     }
 

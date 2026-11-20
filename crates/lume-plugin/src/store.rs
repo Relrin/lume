@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
 
-use crate::git::{self, GitError, GitSource};
+use crate::git::{self, GitSource};
 use crate::hash::{self, HashError};
 use crate::id::{check_plugin_id, overlap};
 use crate::lock::{Entry, LOCK_FILE, Lock, LockError, SOURCE_GIT, SOURCE_LINK, Source};
@@ -52,8 +52,11 @@ pub enum StoreError {
     Package(#[from] PackageError),
     #[error(transparent)]
     Hash(#[from] HashError),
-    #[error(transparent)]
-    Git(#[from] GitError),
+    /// The package could not be got from where it is kept. Each kind of source says
+    /// why in its own words and with its own error, which is kept as it is: a new
+    /// kind of source brings its error with it and adds nothing here.
+    #[error("{0}")]
+    Source(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("{path}: {error}")]
     Io {
         path: PathBuf,
@@ -81,6 +84,13 @@ pub enum StoreError {
     Refused(String),
     #[error("another change to the plugins is under way; try again in a moment")]
     Busy,
+}
+
+impl StoreError {
+    /// A failure to get a package from its source, whatever kind of source it is.
+    pub fn source(error: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::Source(Box::new(error))
+    }
 }
 
 fn list(problems: &[Problem]) -> String {
@@ -394,7 +404,7 @@ impl Store {
                 PackageSource::Git(source) => {
                     std::fs::create_dir_all(&staging).map_err(io(&staging))?;
                     let fetching = staging.join("fetched");
-                    let fetched = git::fetch(source, &fetching)?;
+                    let fetched = git::fetch(source, &fetching).map_err(StoreError::source)?;
                     let mut staged = package::stage(&fetched.package, &staging.join("package"))?;
                     remove_fetched(&fetching);
                     staged.folder.clone_from(&staging);

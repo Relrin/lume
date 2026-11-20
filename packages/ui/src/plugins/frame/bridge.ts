@@ -17,7 +17,8 @@
  * - `{ t: "stream", id, grant }`: it opens a stream its plugin's code let it use;
  * - `{ t: "error", message }`: it failed.
  *
- * What it is sent: `{ t: "result" | "error", id, … }` for its calls, `{ t: "opened",
+ * What it is sent: `{ t: "result" | "error", id, … }` for its calls (a failure with
+ * its `code`, its `message` and, where its plugin's code said more, `data`), `{ t: "opened",
  * id, port, readable, writable }` for a stream it opened, with the stream's own port,
  * `{ t: "event", event, payload }` from its plugin's code, `{ t: "tokens", tokens,
  * scheme }` when the look changes, `{ t: "focus" }` when the keyboard comes to it, and
@@ -200,11 +201,13 @@ export interface PortLike {
 }
 
 /** An error as a frame is told it: its kind and what happened. */
-function failure(error: unknown): { code: string; message: string } {
+function failure(error: unknown): { code: string; message: string; data?: unknown } {
   if (isRecord(error)) {
     const code = typeof error.code === "string" ? error.code : "failed";
     const message = typeof error.message === "string" ? error.message : String(error);
-    return { code, message };
+    // What the plugin's code said of a failure of its own goes to its view as it is.
+    const data = error.data;
+    return data === undefined || data === null ? { code, message } : { code, message, data };
   }
   return { code: "failed", message: error instanceof Error ? error.message : String(error) };
 }

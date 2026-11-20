@@ -13,6 +13,7 @@ import {
   readMessage,
 } from "../src/plugins/frame/bridge.ts";
 import { keepFrameReload, reloadPluginFrames } from "../src/plugins/frame/registry.ts";
+import { toCommandError } from "../src/transport/types.ts";
 
 class FakePort implements PortLike {
   sent: unknown[] = [];
@@ -126,6 +127,22 @@ describe("a frame's bridge", () => {
     port.receive({ t: "call", id: 9, name: "x" });
     await settle();
     expect(port.sent).toEqual([{ t: "error", id: 9, code: "denied", message: "no" }]);
+  });
+
+  it("passes on what a plugin's code said of a failure of its own kind", async () => {
+    const port = new FakePort();
+    const { made } = host({
+      call: () =>
+        Promise.reject(
+          toCommandError({ code: "conflict", message: "two files", data: { files: ["a.rs"] } }),
+        ),
+    });
+    new FrameBridge(port, made, () => 0);
+    port.receive({ t: "call", id: 3, name: "merge" });
+    await settle();
+    expect(port.sent).toEqual([
+      { t: "error", id: 3, code: "conflict", message: "two files", data: { files: ["a.rs"] } },
+    ]);
   });
 
   it("refuses calls past the number that may wait", async () => {

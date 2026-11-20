@@ -44,14 +44,20 @@ export const CALLS_IN_FLIGHT_MAX = 64;
 /** The longest a call's name may be. */
 export const NAME_MAX = 128;
 
-/** A call or a stream that failed, with the kind of failure the application names. */
-export class HostError extends Error {
+/**
+ * A call or a stream that failed. `code` is the kind of failure: one of the
+ * application's, or the name the plugin's own code gave it when it threw a
+ * `LumeError` of its own. `data` is what that code said of the failure, or `null`.
+ */
+export class HostError<Data = unknown> extends Error {
   readonly code: string;
+  readonly data: Data | null;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, data: Data | null = null) {
     super(message);
     this.name = "HostError";
     this.code = code;
+    this.data = data;
   }
 }
 
@@ -248,7 +254,7 @@ export function createView(hello: Hello, port: PortLike, effects: ViewEffects = 
       case "error": {
         const code = typeof data["code"] === "string" ? data["code"] : "failed";
         const message = typeof data["message"] === "string" ? data["message"] : "failed";
-        settle(data["id"])?.reject(new HostError(code, message));
+        settle(data["id"])?.reject(new HostError(code, message, data["data"] ?? null));
         return;
       }
       case "event": {

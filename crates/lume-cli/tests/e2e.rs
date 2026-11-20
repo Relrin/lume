@@ -2880,6 +2880,8 @@ fn a_plugins_view_keeps_its_state_and_uses_its_plugins_streams() {
     for said in [
         "view opened echo in a pane",
         "echo started pane count 4",
+        // A kind of failure the application knows nothing of, as the code named it.
+        "echo own echo.own-kind {\"count\":7} a failure of its own kind",
         // A program's input and output, used by the view itself.
         "echo sorted a,b,c ended true",
         "echo ways output true/false input false/true",

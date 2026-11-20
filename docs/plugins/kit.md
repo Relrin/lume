@@ -118,8 +118,34 @@ const stop = view.host.on<number>("count", (count) => show(count));
 ```
 
 Arguments, answers and payloads are JSON, of 1 MiB at most. A call that fails rejects with a
-`HostError`, whose `code` is the kind of failure: `denied`, `not_found`, `invalid`,
-`busy`, `failed`. A view waits for 64 answers at most at a time, and may send some 200 messages a second; a
+`HostError`, whose `code` is the kind of failure: one of the application's (`denied`, `not_found`,
+`invalid`, `busy`, `failed` and the rest), or the plugin's own.
+
+A plugin names its own kinds of failure. Its code throws a `LumeError` with a code of its own and,
+if it likes, something to say of it; the view finds both on the error it catches:
+
+```ts
+// The plugin's code.
+lume.views.handle("merge", async (args) => {
+  const conflicts = await merge(args.branch);
+  if (conflicts.length > 0) {
+    throw new lume.LumeError("conflict", "The branches conflict.", { files: conflicts });
+  }
+});
+
+// The view.
+try {
+  await view.host.call("merge", { branch });
+} catch (error) {
+  if (error instanceof HostError && error.code === "conflict") {
+    showConflicts((error as HostError<{ files: string[] }>).data?.files ?? []);
+  } else {
+    throw error;
+  }
+}
+```
+
+See [errors of the plugin's own](environment.md#errors-of-the-plugins-own). A view waits for 64 answers at most at a time, and may send some 200 messages a second; a
 view that sends far more than that is stopped.
 
 ### What is kept

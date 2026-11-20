@@ -1027,9 +1027,20 @@ export interface Disposable {
   dispose(): void;
 }
 
-/** A call that failed, with the kind of failure in `code`. */
-export declare class LumeError extends Error {
-  readonly code: ErrorCode;
+/**
+ * A call that failed, with the kind of failure in `code`.
+ *
+ * The application's own calls fail with one of its codes. A plugin's code throws a
+ * `LumeError` with a code of its own (lower-case letters, digits, `_`, `-` and `.`,
+ * 64 characters at most) and, if it likes, `data` (JSON of 16 KiB at most): whoever
+ * called it, a view or another plugin, finds both on the error it catches.
+ */
+export declare class LumeError<Code extends string = string> extends Error {
+  constructor(code: Code, message: string, data?: unknown);
+  /** One of the application's codes, or the name a plugin's code gave the failure. */
+  readonly code: ErrorCode | Code;
+  /** What the code that failed said of the failure; `null` when it said nothing. */
+  readonly data: unknown;
 }
 
 /** What the plugin is: the id it is installed under, which may not be its manifest's. */

@@ -15,6 +15,9 @@ use serde::Serialize;
 pub struct CommandError {
     pub code: Cow<'static, str>,
     pub message: String,
+    /// What a plugin's code said of a failure of its own, for the view that called it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
 impl CommandError {
@@ -22,6 +25,7 @@ impl CommandError {
         Self {
             code: code.into(),
             message: message.into(),
+            data: None,
         }
     }
 

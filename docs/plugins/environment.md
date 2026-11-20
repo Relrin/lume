@@ -192,12 +192,45 @@ try {
 | `unavailable` | What the call needs is not there on this machine, such as a keychain.  |
 | `timed_out`   | It took longer than it may.                                            |
 
+### Errors of the plugin's own
+
+The codes above are the application's, for what the application's calls can fail of. A plugin has
+kinds of failure of its own, and names them itself: it throws a `LumeError` with its own code and,
+if it likes, something to say of the failure.
+
+```js
+lume.views.handle("checkout", async (args) => {
+  const dirty = await changedFiles();
+  if (dirty.length > 0) {
+    throw new lume.LumeError("uncommitted", "There are changes that are not committed.", {
+      files: dirty,
+    });
+  }
+  // ...
+});
+```
+
+Whoever called finds both on the error it catches: `error.code === "uncommitted"`, and
+`error.data.files`. That is so for a view calling the plugin's code and for another plugin calling
+one of its services. Lume carries the code and the data as they are and gives them no meaning, so
+a plugin adds a kind of failure without anything in Lume changing.
+
+- A code of the plugin's own is lower-case letters, digits, `_`, `-` and `.`, beginning with a
+  letter, of 64 characters at most. Anything else fails as `failed`, with its message.
+- `data` is JSON of 16 KiB at most. More than that is left out; the failure and its message still
+  arrive.
+- One of the application's codes may be thrown too, as in `new lume.LumeError("not_found", …)`,
+  and may carry `data`.
+- The message is for people and for the log. Have callers decide by the code, never by the
+  message.
+
 What happens to an error the code throws:
 
 - **In the top level of the file.** The plugin does not start. The error is logged with its stack,
   and the user sees a notice that the plugin could not start.
 - **In a command's or a service's handler.** The error is logged, and the command or the call fails
-  with the error's message. A `LumeError` keeps its code; anything else fails as `failed`.
+  with the error's message. A `LumeError` keeps its code and its data; anything else fails as
+  `failed`.
 - **In a listener or a timer's function.** The error is logged, and the plugin goes on.
 
 A command the manifest declares but the code registered no handler for fails as `unhandled`.
