@@ -10,6 +10,13 @@
 //! go straight to the session, which sends no more than it was granted. What waits in
 //! a link is therefore bounded by the credit the webview handed out.
 //!
+//! A stream may also be a pipe: one of a plugin's streams of bytes, which a view of
+//! that plugin was let use. Its bytes travel as a session's output and input do, under
+//! the same credit, but nothing else of a session's does: there is no size, no event
+//! and no state to start from. A pipe is read and written on threads of its own, since
+//! both may wait, and a page that writes faster than the pipe takes loses the pipe
+//! rather than fill the application's memory.
+//!
 //! The carrier's stream 0 carries what the core has to say to the page itself. Some of
 //! it is requests: what is on a session's screen is known only to the terminal in the
 //! page, so the core asks, and the page answers through a command that names the
@@ -17,8 +24,8 @@
 //! a copy of has changed. Both leave through the one writer, so a page receives them in
 //! the order they were sent.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use lume_proto::app::{AppError, AppReplyBody, PageRequest, PageRequestBody, codes, encode_notice};
@@ -33,7 +40,7 @@ use tokio::task::AbortHandle;
 use crate::error::CommandError;
 use crate::marks::Marks;
 use crate::sessions::SessionStates;
-use crate::tuning::CARRIER_BATCH_MAX;
+use crate::tuning::{CARRIER_BATCH_MAX, PIPE_READ_MAX, PIPE_WRITE_QUEUE_MAX};
 
 /// The other end of the carrier is gone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,10 +109,218 @@ struct LinkState {
     next_ask: u64,
 }
 
-struct Stream {
-    session: SessionKey,
-    input: InputSink,
-    pump: AbortHandle,
+enum Stream {
+    /// An attachment to a session.
+    Session {
+        session: SessionKey,
+        input: InputSink,
+        pump: AbortHandle,
+    },
+    /// One of a plugin's streams, used by one of its views.
+    Pipe(Arc<PipeFlow>),
+}
+
+impl Stream {
+    /// Stops what forwards the stream's output. A session's input is detached apart.
+    fn stop(&self) {
+        match self {
+            Stream::Session { pump, .. } => pump.abort(),
+            Stream::Pipe(flow) => flow.close(),
+        }
+    }
+
+    fn into_input(self) -> Option<InputSink> {
+        match self {
+            Stream::Session { input, .. } => Some(input),
+            Stream::Pipe(_) => None,
+        }
+    }
+}
+
+/// Where the frames a page sends on a stream go.
+enum Target {
+    Session(InputSink),
+    Pipe(Arc<PipeFlow>),
+}
+
+/// A stream of bytes a link reads for a page and writes for it. Every call may wait,
+/// and is made on a thread kept for it.
+pub trait Pipe: Send + Sync + 'static {
+    /// Whether there is anything to read from it, and whether it can be written.
+    fn ways(&self) -> (bool, bool);
+    /// The next bytes, `max` at most, waiting for at least one; nothing at its end.
+    fn read(&self, max: usize) -> Result<Option<Vec<u8>>, String>;
+    /// Writes all of `bytes`, waiting while it is full.
+    fn write(&self, bytes: &[u8]) -> Result<(), String>;
+    /// Nothing more will be written: a program reading it sees its input end.
+    fn finish(&self);
+}
+
+/// Called once when a pipe is over, however that came about.
+pub type PipeEnded = Box<dyn FnOnce() + Send>;
+
+/// What a pipe's two threads and its link share.
+struct PipeFlow {
+    state: Mutex<PipeState>,
+    /// Rung when credit arrives, when there is something to write, and at the end.
+    changed: Condvar,
+}
+
+struct PipeState {
+    /// How many bytes the page said it will take.
+    credit: u64,
+    /// What the page wrote and the pipe has not taken yet; an empty piece means that
+    /// nothing more will be written.
+    writes: VecDeque<Vec<u8>>,
+    queued: usize,
+    closed: bool,
+    ended: Option<PipeEnded>,
+}
+
+impl PipeFlow {
+    fn state(&self) -> MutexGuard<'_, PipeState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Ends the flow: both threads stop as soon as the call each is in returns.
+    fn close(&self) {
+        let ended = {
+            let mut state = self.state();
+            state.closed = true;
+            state.writes.clear();
+            state.queued = 0;
+            state.ended.take()
+        };
+        self.changed.notify_all();
+        if let Some(ended) = ended {
+            ended();
+        }
+    }
+
+    fn grant(&self, bytes: u32) {
+        let mut state = self.state();
+        state.credit = state.credit.saturating_add(u64::from(bytes));
+        drop(state);
+        self.changed.notify_all();
+    }
+
+    /// Takes in what the page wrote. Refused when more waits than a pipe may hold.
+    fn push(&self, bytes: Vec<u8>) -> Result<(), ()> {
+        let mut state = self.state();
+        if state.closed {
+            return Ok(());
+        }
+        if state.queued + bytes.len() > PIPE_WRITE_QUEUE_MAX {
+            return Err(());
+        }
+        state.queued += bytes.len();
+        state.writes.push_back(bytes);
+        drop(state);
+        self.changed.notify_all();
+        Ok(())
+    }
+}
+
+/// Reads a pipe for as long as the page grants credit, and sends what it read.
+fn pipe_reader(
+    stream: u32,
+    pipe: &dyn Pipe,
+    flow: &PipeFlow,
+    outgoing: &mpsc::UnboundedSender<Queued>,
+) {
+    let status = loop {
+        let allowed = {
+            let mut state = flow.state();
+            while state.credit == 0 && !state.closed {
+                state = flow
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+            if state.closed {
+                return;
+            }
+            usize::try_from(state.credit)
+                .unwrap_or(usize::MAX)
+                .min(PIPE_READ_MAX)
+        };
+        match pipe.read(allowed) {
+            Ok(Some(bytes)) => {
+                {
+                    let mut state = flow.state();
+                    // Closed while the read waited: what it read has nowhere to go.
+                    if state.closed {
+                        return;
+                    }
+                    state.credit = state.credit.saturating_sub(bytes.len() as u64);
+                }
+                if outgoing
+                    .send(Queued::Frame(Message::new(stream, Body::Data(bytes))))
+                    .is_err()
+                {
+                    break None;
+                }
+            }
+            Ok(None) => break Some(ExitStatus::Code(0)),
+            Err(problem) => {
+                tracing::debug!(stream, problem, "a pipe could not be read");
+                break Some(ExitStatus::Unknown);
+            }
+        }
+    };
+    if let Some(status) = status {
+        let _ = outgoing.send(Queued::Frame(Message::new(stream, Body::Exit(status))));
+    }
+    flow.close();
+}
+
+/// Writes what the page sent to a pipe, in order.
+fn pipe_writer(
+    stream: u32,
+    pipe: &dyn Pipe,
+    flow: &PipeFlow,
+    readable: bool,
+    outgoing: &mpsc::UnboundedSender<Queued>,
+) {
+    loop {
+        let next = {
+            let mut state = flow.state();
+            loop {
+                if state.closed {
+                    return;
+                }
+                if let Some(next) = state.writes.pop_front() {
+                    state.queued -= next.len();
+                    break next;
+                }
+                state = flow
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+        };
+        if next.is_empty() {
+            pipe.finish();
+            // A pipe that is only written is over once its input has ended.
+            if !readable {
+                let _ = outgoing.send(Queued::Frame(Message::new(
+                    stream,
+                    Body::Exit(ExitStatus::Code(0)),
+                )));
+                flow.close();
+            }
+            return;
+        }
+        if let Err(problem) = pipe.write(&next) {
+            tracing::debug!(stream, problem, "a pipe could not be written");
+            let _ = outgoing.send(Queued::Frame(Message::new(
+                stream,
+                Body::Exit(ExitStatus::Unknown),
+            )));
+            flow.close();
+            return;
+        }
+    }
 }
 
 fn page_gone() -> AppError {
@@ -202,7 +417,7 @@ impl Link {
                 let pump = self.runtime.spawn(forwarding).abort_handle();
                 state.streams.insert(
                     stream,
-                    Stream {
+                    Stream::Session {
                         session,
                         input,
                         pump,
@@ -215,6 +430,110 @@ impl Link {
         Err(CommandError::stale_carrier())
     }
 
+    /// Puts one of a plugin's streams on a reserved stream and starts carrying its
+    /// bytes: what is read from it goes to the page as output, within the credit the
+    /// page grants, and the page's input is written to it. `ended` is called once when
+    /// the pipe is over: it ran out, failed, the page let go of it, or the link went.
+    pub fn bind_pipe(
+        &self,
+        stream: u32,
+        pipe: Arc<dyn Pipe>,
+        ended: PipeEnded,
+    ) -> Result<(), CommandError> {
+        let (readable, writable) = pipe.ways();
+        let flow = Arc::new(PipeFlow {
+            state: Mutex::new(PipeState {
+                credit: 0,
+                writes: VecDeque::new(),
+                queued: 0,
+                closed: false,
+                ended: Some(ended),
+            }),
+            changed: Condvar::new(),
+        });
+        {
+            let mut state = self.state();
+            if state.retired {
+                drop(state);
+                flow.close();
+                return Err(CommandError::stale_carrier());
+            }
+            state
+                .streams
+                .insert(stream, Stream::Pipe(Arc::clone(&flow)));
+        }
+        let started = |name: &str, work: Box<dyn FnOnce() + Send>| {
+            std::thread::Builder::new()
+                .name(name.to_owned())
+                .spawn(work)
+                .map(drop)
+        };
+        let mut threads = Ok(());
+        if readable {
+            let (pipe, flow, outgoing) =
+                (Arc::clone(&pipe), Arc::clone(&flow), self.outgoing.clone());
+            threads = started(
+                "lume-pipe-read",
+                Box::new(move || pipe_reader(stream, pipe.as_ref(), &flow, &outgoing)),
+            );
+        }
+        if writable && threads.is_ok() {
+            let (pipe, flow, outgoing) =
+                (Arc::clone(&pipe), Arc::clone(&flow), self.outgoing.clone());
+            threads = started(
+                "lume-pipe-write",
+                Box::new(move || pipe_writer(stream, pipe.as_ref(), &flow, readable, &outgoing)),
+            );
+        }
+        if let Err(error) = threads {
+            self.end_pipe(stream);
+            return Err(CommandError::internal(format!(
+                "the stream could not be started: {error}"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Ends a pipe from the application's side, as when its grant is taken back: the
+    /// page is told the stream is over.
+    pub fn end_pipe(&self, stream: u32) {
+        let ended = {
+            let mut state = self.state();
+            match state.streams.get(&stream) {
+                Some(Stream::Pipe(_)) => state.streams.remove(&stream),
+                _ => None,
+            }
+        };
+        if let Some(Stream::Pipe(flow)) = ended {
+            flow.close();
+            let _ = self.outgoing.send(Queued::Frame(Message::new(
+                stream,
+                Body::Exit(ExitStatus::Unknown),
+            )));
+        }
+    }
+
+    /// Acts on what a page sent on a pipe.
+    fn apply_to_pipe(&self, stream: u32, flow: &PipeFlow, body: Body) {
+        match body {
+            Body::Input(bytes) => {
+                if flow.push(bytes).is_err() {
+                    tracing::debug!(stream, "a page wrote more than a pipe holds");
+                    self.end_pipe(stream);
+                }
+            }
+            Body::Credit(bytes) => flow.grant(bytes),
+            Body::Detach => {
+                let gone = self.state().streams.remove(&stream);
+                if let Some(gone) = gone {
+                    gone.stop();
+                }
+            }
+            // A pipe has no size, no state and no facts.
+            _ => {}
+        }
+    }
+
     /// Acts on the frames the webview sent, in order.
     ///
     /// `frames` must be whole frames of the kinds a view sends on a stream. Frames for
@@ -223,8 +542,17 @@ impl Link {
     pub async fn apply(&self, frames: &[u8]) -> Result<(), CommandError> {
         for message in decode_client_frames(frames)? {
             let Message { stream, body } = message;
-            let Some(input) = self.state().streams.get(&stream).map(|s| s.input.clone()) else {
-                continue;
+            let target = self.state().streams.get(&stream).map(|found| match found {
+                Stream::Session { input, .. } => Target::Session(input.clone()),
+                Stream::Pipe(flow) => Target::Pipe(Arc::clone(flow)),
+            });
+            let input = match target {
+                Some(Target::Session(input)) => input,
+                Some(Target::Pipe(flow)) => {
+                    self.apply_to_pipe(stream, &flow, body);
+                    continue;
+                }
+                None => continue,
             };
             let result = match body {
                 Body::Input(bytes) if bytes.is_empty() => Ok(()),
@@ -276,12 +604,19 @@ impl Link {
     /// The way to type into a session, if the page is attached to it.
     pub fn input_of(&self, session: &SessionKey) -> Option<InputSink> {
         let state = self.state();
-        let (_, stream) = state
+        state
             .streams
             .iter()
-            .filter(|(_, stream)| stream.session == *session)
-            .max_by_key(|(id, _)| **id)?;
-        Some(stream.input.clone())
+            .filter_map(|(id, stream)| match stream {
+                Stream::Session {
+                    session: shown,
+                    input,
+                    ..
+                } if shown == session => Some((id, input)),
+                _ => None,
+            })
+            .max_by_key(|(id, _)| **id)
+            .map(|(_, input)| input.clone())
     }
 
     /// Asks the page something and waits for its answer, for `limit` at most.
@@ -340,8 +675,10 @@ impl Link {
     async fn close(&self, stream: u32) {
         let closed = self.state().streams.remove(&stream);
         if let Some(closed) = closed {
-            closed.pump.abort();
-            let _ = closed.input.detach().await;
+            closed.stop();
+            if let Some(input) = closed.into_input() {
+                let _ = input.detach().await;
+            }
         }
     }
 
@@ -359,10 +696,12 @@ impl Link {
         };
         self.writer.abort();
         for stream in streams.values() {
-            stream.pump.abort();
+            stream.stop();
         }
         for stream in streams.into_values() {
-            let _ = stream.input.detach().await;
+            if let Some(input) = stream.into_input() {
+                let _ = input.detach().await;
+            }
         }
     }
 }
@@ -372,7 +711,7 @@ impl Drop for Link {
         self.writer.abort();
         let state = self.state.get_mut().unwrap_or_else(PoisonError::into_inner);
         for stream in state.streams.values() {
-            stream.pump.abort();
+            stream.stop();
         }
     }
 }

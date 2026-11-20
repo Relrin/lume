@@ -1,0 +1,44 @@
+# A plugin for the end-to-end tests and the benchmarks: a view that keeps something
+# between its runs, and that reads and writes its plugin's streams directly. It opens
+# its view itself, offers it for a kind of file and a kind of address, and can say how
+# long the window's page takes to answer.
+schema = 1
+id = "test.echo-view"
+name = "Echo View"
+version = "1.0.0"
+description = "A view that keeps its state and uses its plugin's streams."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-echo-view"
+activation = ["onView:echo", "onView:side", "onCommand:open", "onCommand:page-answers"]
+
+[permissions]
+"fs.read" = ["${plugin-data}/**"]
+"fs.write" = ["${plugin-data}/**"]
+"process.run" = ["sort"]
+
+[[contributes.commands]]
+id = "open"
+title = "Open the echo view"
+
+[[contributes.commands]]
+id = "page-answers"
+title = "Time the window's answers"
+
+[[contributes.pane-views]]
+id = "echo"
+title = "Echo"
+entry = "ui/index.html"
+
+[[contributes.panels]]
+id = "side"
+title = "Echo side"
+kind = "frame"
+area = "right"
+entry = "ui/index.html"
+
+[[contributes.openers]]
+view = "echo"
+title = "Echo"
+patterns = ["*.echo"]
+schemes = ["test-echo"]

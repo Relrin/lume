@@ -28,6 +28,7 @@ import { FLOAT_EDGES } from "../layout/floats.ts";
 import { selectFocus } from "../layout/selectors.ts";
 import type { PaneContent, PaneId } from "../layout/types.ts";
 import { PluginFrame } from "../plugins/frame/PluginFrame.tsx";
+import { focusPaneFrame } from "../plugins/frame/registry.ts";
 import { SearchBar } from "../search/SearchBar.tsx";
 import { playSlot } from "../motion/slots.ts";
 import { StatusSlotItems } from "../status/StatusItem.tsx";
@@ -356,16 +357,20 @@ function PaneHeader({
 /**
  * A pane's card. `header` says whether the card has one; `floating`, whether the card
  * floats over the window's tabs, which gives it a header whatever else is said, and
- * edges to resize it by.
+ * edges to resize it by. `parked` says the pane is not on show: only the card of a
+ * pane that shows a plugin's view is ever rendered so, to keep the view's frame for a
+ * while after its tab was left.
  */
 export function PaneCard({
   pane,
   header,
   floating = false,
+  parked = false,
 }: {
   pane: PaneId;
   header: boolean;
   floating?: boolean;
+  parked?: boolean;
 }) {
   const app = useShell();
   const plugin = useStore(app.layout, (state) => {
@@ -373,8 +378,17 @@ export function PaneCard({
     return content?.type === "plugin_view" ? content : undefined;
   });
   if (plugin !== undefined) {
-    return <PluginPaneCard pane={pane} header={header} floating={floating} content={plugin} />;
+    return (
+      <PluginPaneCard
+        pane={pane}
+        header={header}
+        floating={floating}
+        parked={parked}
+        content={plugin}
+      />
+    );
   }
+  if (parked) return null;
   return <TerminalPaneCard pane={pane} header={header} floating={floating} />;
 }
 
@@ -384,16 +398,22 @@ type PluginContent = Extract<PaneContent, { type: "plugin_view" }>;
 /**
  * The card of a pane that shows one of a plugin's views: the header every pane has, and
  * the plugin's page in a frame where a terminal would be.
+ *
+ * A frame cannot be moved in the page without starting again, so the card of a pane
+ * whose tab is not on show stays where it is, out of sight and out of reach, and its
+ * frame with it.
  */
 function PluginPaneCard({
   pane,
   header,
   floating,
+  parked,
   content,
 }: {
   pane: PaneId;
   header: boolean;
   floating: boolean;
+  parked: boolean;
   content: PluginContent;
 }) {
   const app = useShell();
@@ -409,12 +429,22 @@ function PluginPaneCard({
       ? false
       : (state.shown?.plugins.find((entry) => entry.id === def.plugin)?.ready ?? false),
   );
-  const headed = header || floating;
+  const headed = (header || floating) && !parked;
   useLayoutEffect(() => {
     const element = card.current;
-    if (!element) return undefined;
+    // A card that is not on show has no place among the tab's cards.
+    if (!element || parked) return undefined;
     return app.area.registerPane(pane, element);
-  }, [app, pane]);
+  }, [app, pane, parked]);
+  /** Gives the pane the keyboard, in the layout and in its frame. */
+  const take = () => {
+    if (parked) return;
+    if (!focused) {
+      app.client
+        .layoutApply({ type: "focus", target: { type: "pane", pane } })
+        .catch(() => undefined);
+    }
+  };
   return (
     <section
       ref={card}
@@ -423,7 +453,14 @@ function PluginPaneCard({
       data-focused={focused}
       data-floating={floating}
       data-content="plugin"
+      data-parked={parked}
+      inert={parked}
+      aria-hidden={parked || undefined}
       aria-label={`Pane ${pane}`}
+      onPointerDown={() => {
+        take();
+        focusPaneFrame(pane);
+      }}
     >
       {headed && <PaneHeader pane={pane} focused={focused} floating={floating} />}
       <div className="pane-plugin">
@@ -435,6 +472,9 @@ function PluginPaneCard({
             entry={def.entry}
             title={def.title}
             state={content.state}
+            host={pane}
+            shown={!parked}
+            onFocusIn={take}
           />
         ) : (
           <PluginViewPlaceholder plugin={content.plugin} view={content.view} />

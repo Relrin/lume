@@ -33,6 +33,7 @@ use types::{
     SessionsSpawn, SettingsGet, Spawned, StatusClear, StatusSet, StreamId, StreamRead, StreamWrite,
     Subscribe, UiConfirm, UiPick, UiToast, ViewInstance, ViewsInstances, ViewsPost, WorkspaceInfo,
 };
+use types::{OpenedView, StreamGrant, StreamRevoke, UiOpenView};
 
 /// The major version of the API, which a manifest's `api` names.
 pub const API_MAJOR: u32 = 1;
@@ -216,6 +217,15 @@ api! {
     StreamsWrite = "streams.write"(stream, data, encoding): StreamWrite => ();
     /// Closes one of the plugin's streams. A program's input that is closed ends.
     StreamsClose = "streams.close"(stream): StreamId => ();
+    /// Lets one of the plugin's open views use one of its streams directly: the bytes
+    /// then go between the view and the stream without passing through the plugin's
+    /// code. Gives a grant, which the code hands the view (with `views.post`, or as a
+    /// call's answer) and the view opens with `streams.open(grant)`. A grant is for
+    /// that one view and is opened once; it ends when the view closes, the stream
+    /// closes, or it is revoked.
+    StreamsGrantToView = "streams.grantToView"(instance, stream): StreamGrant => String;
+    /// Takes back a grant: a view that had opened it is told its stream has ended.
+    StreamsRevoke = "streams.revoke"(grant): StreamRevoke => ();
     /// Runs a program the plugin may run, found once on the system's path, and gives
     /// back how it ended and what it wrote. Where the permission says so, the user is
     /// asked first, shown the command.
@@ -272,6 +282,9 @@ api! {
     /// Has the user choose one of a list, under the plugin's name: its id, or null if
     /// they chose none.
     UiPick = "ui.pick"(items, options): UiPick => Option<String>;
+    /// Opens one of the plugin's own pane views: in a new tab, beside or below the
+    /// pane that has the keyboard, or floating. Gives the pane it is in.
+    UiOpenView = "ui.openView"(view, options): UiOpenView => OpenedView;
     /// Asks the user for a permission the manifest lists under
     /// `[permissions.optional]`, and says whether it was granted.
     PermissionsRequest = "permissions.request"(permission, scope, reason): PermissionsRequest => bool;

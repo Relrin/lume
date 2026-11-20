@@ -53,6 +53,8 @@ const COMMANDS: &[&str] = &[
     "view_opened",
     "view_closed",
     "view_call",
+    "view_state",
+    "view_stream_open",
     "addons_list",
     "addon_set_enabled",
     "addon_remove",

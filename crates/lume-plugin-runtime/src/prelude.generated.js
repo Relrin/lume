@@ -341,11 +341,14 @@
     read: (stream, options) => request("streams.read", { stream, options }),
     write: (stream, data, encoding) => request("streams.write", { stream, data, encoding }),
     close: (stream) => request("streams.close", { stream }),
+    grantToView: (instance, stream) => request("streams.grantToView", { instance, stream }),
+    revoke: (grant) => request("streams.revoke", { grant }),
   });
   Object.assign(namespace(["ui"]), {
     toast: (message, level) => request("ui.toast", { message, level }),
     confirm: (title, message, options) => request("ui.confirm", { title, message, options }),
     pick: (items, options) => request("ui.pick", { items, options }),
+    openView: (view, options) => request("ui.openView", { view, options }),
   });
   Object.assign(namespace(["views"]), {
     post: (to, event, payload) => told("views.post", { to, event, payload }),

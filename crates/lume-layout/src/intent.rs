@@ -226,6 +226,17 @@ pub enum Intent {
         area: Option<Area>,
         index: u32,
     },
+    /// Keeps what a plugin's view in a pane asked to find again.
+    ViewState {
+        pane: PaneId,
+        state: serde_json::Value,
+    },
+    /// Keeps what a plugin's view in a panel asked to find again.
+    PanelState {
+        window: WindowId,
+        panel: PanelId,
+        state: serde_json::Value,
+    },
     /// Records where a window is on the desktop.
     WindowBounds { window: WindowId, bounds: Bounds },
     /// Records which window the user is working in.
@@ -264,6 +275,8 @@ impl Intent {
             self,
             Intent::SessionSet { .. }
                 | Intent::PanelSet { .. }
+                | Intent::ViewState { .. }
+                | Intent::PanelState { .. }
                 | Intent::WindowBounds { .. }
                 | Intent::WindowFocus { .. }
                 | Intent::WorkspaceRename { .. }

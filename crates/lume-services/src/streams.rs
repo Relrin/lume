@@ -158,6 +158,14 @@ impl Streams {
         self.open().retain(|_, stream| stream.owner != owner);
     }
 
+    /// Whether `owner` holds the stream `id`, and if so whether it can be read and
+    /// whether it can be written.
+    pub fn ways(&self, owner: &str, id: u64) -> Option<(bool, bool)> {
+        self.get(owner, id)
+            .ok()
+            .map(|stream| (stream.reader.is_some(), stream.writer.is_some()))
+    }
+
     /// How many streams `owner` holds open.
     pub fn count(&self, owner: &str) -> usize {
         self.open()
@@ -278,6 +286,9 @@ mod tests {
             streams.add("a.x", None, None).unwrap_err().kind,
             ErrorKind::Invalid
         );
+        assert_eq!(streams.ways("a.x", id), Some((false, true)));
+        assert_eq!(streams.ways("a.x", read_only), Some((true, false)));
+        assert_eq!(streams.ways("b.y", id), None);
     }
 
     #[test]

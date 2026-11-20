@@ -1,0 +1,13 @@
+body {
+  margin: 8px;
+  font:
+    13px system-ui,
+    sans-serif;
+  color: var(--lume-color-text, #ddd);
+  background: var(--lume-color-surface, #111);
+}
+
+#field {
+  width: 100%;
+  height: 4em;
+}

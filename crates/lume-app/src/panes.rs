@@ -1516,6 +1516,7 @@ impl Panes {
                         content: PanelContent::PluginView {
                             plugin: plugin.to_owned(),
                             view: view.to_owned(),
+                            state: serde_json::Value::Null,
                         },
                         area: Some(area),
                         index,

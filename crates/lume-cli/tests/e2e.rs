@@ -2778,3 +2778,372 @@ fn a_hostile_view_reaches_nothing_but_its_own_host_half() {
         .count();
     eprintln!("requests turned away for want of the page's token: {refused}");
 }
+
+/// What a test plugin has written to its log once `mark` is in it after `from` bytes.
+fn plugin_log_until(home: &Path, id: &str, from: usize, mark: &str) -> String {
+    let log = home.join(format!("state/plugins/logs/{id}.log"));
+    let deadline = Instant::now() + START;
+    loop {
+        let text = std::fs::read_to_string(&log).unwrap_or_default();
+        let fresh = text.get(from..).unwrap_or_default();
+        if fresh.contains(mark) {
+            return text;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{id} never logged {mark:?} (from byte {from}):\n{text}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// How much a test plugin has written to its log so far.
+fn plugin_log_len(home: &Path, id: &str) -> usize {
+    std::fs::read_to_string(home.join(format!("state/plugins/logs/{id}.log")))
+        .unwrap_or_default()
+        .len()
+}
+
+/// The panes of the layout that show a plugin's view, as (pane, view, what it kept).
+fn view_panes(layout: &Value) -> Vec<(String, String, Value)> {
+    fn walk(node: &Value, found: &mut Vec<(String, String, Value)>) {
+        if node["type"] == "pane" {
+            if node["content"]["type"] == "plugin_view" {
+                found.push((
+                    node["id"].as_str().unwrap_or_default().to_owned(),
+                    node["content"]["view"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned(),
+                    node["content"]["state"].clone(),
+                ));
+            }
+            return;
+        }
+        for child in node["children"].as_array().into_iter().flatten() {
+            walk(child, found);
+        }
+    }
+    let mut found = Vec::new();
+    for window in layout["workspace"]["windows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        for tab in window["centre"]["tabs"].as_array().into_iter().flatten() {
+            walk(&tab["root"], &mut found);
+        }
+        for floating in window["floating"].as_array().into_iter().flatten() {
+            let mut pane = floating["pane"].clone();
+            pane["type"] = Value::from("pane");
+            walk(&pane, &mut found);
+        }
+    }
+    found
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugins_view_keeps_its_state_and_uses_its_plugins_streams() {
+    let (port, _connections) = counting_listener();
+    let home = home_with_plugins(&["echo-view", "hostile"]);
+    let config = home.join("config").join("config.toml");
+    let mut written = std::fs::read_to_string(&config).unwrap();
+    written.push_str(&format!("\n[plugins.\"test.hostile\"]\nport = {port}\n"));
+    std::fs::write(&config, &written).unwrap();
+    let endpoint = format!("e2e-{}-views", std::process::id());
+    let app = App::start_on(home.clone(), true, endpoint.clone());
+    app.status_with_session();
+    for id in ["test.echo-view", "test.hostile"] {
+        app.until_plugin(id, "the plugin to be read", |plugin| {
+            plugin["state"] == "ready"
+        });
+    }
+
+    // A second view of the same plugin, in a panel, for the first to be told apart from.
+    app.ctl(&[
+        "command",
+        "lume.panel.show",
+        r#"{"panel":"test.echo-view.side"}"#,
+    ])
+    .ok("show the side panel");
+    plugin_log_until(&home, "test.echo-view", 0, "echo started panel count 0");
+
+    // The view in a pane, opened by the application's command, with what it starts with.
+    app.ctl(&[
+        "command",
+        "lume.view.open",
+        r#"{"plugin":"test.echo-view","view":"echo","state":{"task":"streams","count":4}}"#,
+    ])
+    .ok("open the view");
+    let log = plugin_log_until(&home, "test.echo-view", 0, "echo done");
+    for said in [
+        "view opened echo in a pane",
+        "echo started pane count 4",
+        // A program's input and output, used by the view itself.
+        "echo sorted a,b,c ended true",
+        "echo ways output true/false input false/true",
+        // A grant is opened once, and only by the view it was made for.
+        "echo reopen refused not_found",
+        "echo foreign refused not_found",
+        "echo guessed refused not_found",
+        // One that is taken back ends its stream.
+        "echo revoked ended false",
+    ] {
+        assert!(log.contains(said), "{said:?} is not in:\n{log}");
+    }
+    assert!(!log.contains("echo failed"), "{log}");
+
+    // Another plugin's view is handed a real grant of this one's, and gets nowhere.
+    let spare = log
+        .lines()
+        .find_map(|line| line.split("spare grant ").nth(1))
+        .expect("the view left a grant unopened")
+        .trim()
+        .to_owned();
+    written.push_str(&format!("grant = \"{spare}\"\n"));
+    std::fs::write(&config, &written).unwrap();
+    std::thread::sleep(Duration::from_millis(1500));
+    let sessions_before = app.ctl(&["list"]).ok("list")["sessions"]
+        .as_array()
+        .map_or(0, Vec::len);
+    app.ctl(&[
+        "command",
+        "lume.panel.show",
+        r#"{"panel":"test.hostile.probe"}"#,
+    ])
+    .ok("show the probe");
+    let probe = plugin_log_until(&home, "test.hostile", 0, "probe done");
+    assert!(
+        probe.contains("probe A14.foreign-grant blocked"),
+        "another plugin's stream stays out of reach:\n{probe}"
+    );
+    assert!(!probe.contains(" reached:"), "{probe}");
+    // Nor did the keys it made up open, close or start anything.
+    assert!(probe.contains("probe A13.forged-keys noted"), "{probe}");
+    let sessions_after = app.ctl(&["list"]).ok("list")["sessions"]
+        .as_array()
+        .map_or(0, Vec::len);
+    assert_eq!(sessions_before, sessions_after, "forged keys ran nothing");
+
+    // What the view asked to have kept is in the layout, with its pane.
+    let deadline = Instant::now() + START;
+    let pane = loop {
+        let views = view_panes(&app.layout());
+        if let Some((pane, _, state)) = views.iter().find(|(_, view, _)| view == "echo")
+            && state["count"] == 5
+        {
+            break pane.clone();
+        }
+        assert!(Instant::now() < deadline, "the view's state: {views:?}");
+        std::thread::sleep(Duration::from_millis(200));
+    };
+
+    // Moved to float over the window, the pane's frame starts again from what it kept.
+    let at = plugin_log_len(&home, "test.echo-view");
+    let float = serde_json::json!({ "type": "float", "pane": pane }).to_string();
+    app.ctl(&["layout", "apply", &float]).ok("float the view");
+    plugin_log_until(&home, "test.echo-view", at, "echo started pane count 5");
+
+    // An address of the scheme the view offers to open goes to it; nothing else would
+    // open it, so nobody is asked.
+    let at = plugin_log_len(&home, "test.echo-view");
+    app.ctl(&[
+        "command",
+        "lume.app.open",
+        r#"{"uri":"test-echo://thing/1"}"#,
+    ])
+    .ok("open an address");
+    plugin_log_until(
+        &home,
+        "test.echo-view",
+        at,
+        "echo started pane count 0 open test-echo://thing/1",
+    );
+    // A file it offers to open could also be shown in the file manager: the user is
+    // asked, and chooses the view.
+    let file = home.join("notes.echo");
+    std::fs::write(&file, "x").unwrap();
+    let asked = {
+        let args = serde_json::json!({ "path": file }).to_string();
+        let (lume, endpoint) = (lume(), app.endpoint.clone());
+        std::thread::spawn(move || {
+            Command::new(lume)
+                .args([
+                    "ctl",
+                    "--endpoint",
+                    &endpoint,
+                    "command",
+                    "lume.app.open",
+                    &args,
+                ])
+                .output()
+                .expect("lume runs")
+        })
+    };
+    let choice = serde_json::json!({ "proceed": true, "item": "test.echo-view.echo" }).to_string();
+    let deadline = Instant::now() + START;
+    while app.ctl(&["command", "lume.window.answer", &choice]).status != 0 {
+        assert!(
+            Instant::now() < deadline,
+            "nobody was asked what opens the file"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(asked.join().unwrap().status.success(), "the file is opened");
+    let log = plugin_log_until(&home, "test.echo-view", at, "notes.echo");
+    assert!(log.contains("count 0 open "), "{log}");
+    // A plugin opens its own view with a call of its own, and is shown the one that is
+    // open already when it asks for that.
+    app.ctl(&[
+        "command",
+        "test.echo-view.open",
+        r#"{"reuse":true,"state":{"count":50}}"#,
+    ])
+    .ok("the plugin opens its view");
+    let log = plugin_log_until(&home, "test.echo-view", at, "opened pane");
+    assert!(log[at..].contains("reused true"), "{}", &log[at..]);
+
+    // After the application was closed and started again, each view finds what it kept.
+    let kept: Vec<(String, String, Value)> = view_panes(&app.layout());
+    assert_eq!(kept.len(), 3, "{kept:?}");
+    app.ctl(&["command", "lume.workspace.save"]).ok("save");
+    app.quit();
+    let at = plugin_log_len(&home, "test.echo-view");
+    let app = App::start_on(home.clone(), false, endpoint);
+    // The pane with the keyboard shows a view now, so there is no session to wait for.
+    app.until_plugin("test.echo-view", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    let counts = |views: &[(String, String, Value)]| -> Vec<(String, Value)> {
+        views
+            .iter()
+            .map(|(_, view, state)| (view.clone(), state["count"].clone()))
+            .collect()
+    };
+    assert_eq!(
+        counts(&view_panes(&app.layout())),
+        counts(&kept),
+        "the layout came back with what the views kept"
+    );
+    // The tab on show holds the view opened last: it starts from the count it kept.
+    plugin_log_until(
+        &home,
+        "test.echo-view",
+        at,
+        "echo started pane count 1 open ",
+    );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_view_that_gets_in_the_way_is_stopped_or_left_to_itself() {
+    let home = home_with_plugins(&["hostile"]);
+    let config = home.join("config").join("config.toml");
+    let base = std::fs::read_to_string(&config).unwrap();
+    let app = App::start_in(home.clone(), false);
+    app.status_with_session();
+    app.until_plugin("test.hostile", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    for (turn, mode) in ["flood", "large", "spin"].into_iter().enumerate() {
+        std::fs::write(
+            &config,
+            format!("{base}\n[plugins.\"test.hostile\"]\nabuse = \"{mode}\"\n"),
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(1500));
+        let at = plugin_log_len(&home, "test.hostile");
+        app.ctl(&[
+            "command",
+            "lume.panel.show",
+            r#"{"panel":"test.hostile.abuse"}"#,
+        ])
+        .ok("show the view");
+        plugin_log_until(&home, "test.hostile", at, &format!("abuse {mode} started"));
+        if mode == "spin" {
+            // A view that only keeps its own processor busy is left to it.
+            std::thread::sleep(Duration::from_secs(1));
+        } else {
+            // One that sends more than it may is taken down, and its plugin told.
+            plugin_log_until(&home, "test.hostile", at, "view closed abuse");
+        }
+        // Either way the terminal beside it goes on taking keys and showing output.
+        let began = Instant::now();
+        let mark = format!("still-here-{turn}");
+        app.type_line(&format!("echo {mark}"));
+        app.wait_text(&mark);
+        assert!(
+            began.elapsed() < Duration::from_secs(5),
+            "the terminal answered {:?} after a view began to {mode}",
+            began.elapsed()
+        );
+        app.ctl(&[
+            "command",
+            "lume.panel.close",
+            r#"{"panel":"test.hostile.abuse"}"#,
+        ])
+        .ok("close the view");
+        if mode == "spin" {
+            plugin_log_until(&home, "test.hostile", at, "view closed abuse");
+        }
+    }
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_view_out_of_sight_is_kept_for_a_while_and_then_started_again_from_what_it_kept() {
+    let home = home_with_plugins(&["echo-view"]);
+    let app = App::start_in(home.clone(), false);
+    app.status_with_session();
+    app.until_plugin("test.echo-view", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    app.ctl(&[
+        "command",
+        "lume.view.open",
+        r#"{"plugin":"test.echo-view","view":"echo","state":{"count":7}}"#,
+    ])
+    .ok("open the view");
+    plugin_log_until(&home, "test.echo-view", 0, "echo started pane count 7");
+    let window = app.layout()["workspace"]["windows"][0]["id"]
+        .as_str()
+        .expect("the window has an id")
+        .to_owned();
+    let show = |index: u32| {
+        let intent = serde_json::json!({
+            "type": "tab_activate",
+            "target": { "type": "index", "window": window, "index": index },
+        })
+        .to_string();
+        app.ctl(&["layout", "apply", &intent]).ok("show a tab");
+    };
+
+    // Away to the terminal's tab and back at once: the view was not started again,
+    // and its plugin never heard it close.
+    let at = plugin_log_len(&home, "test.echo-view");
+    show(0);
+    std::thread::sleep(Duration::from_secs(3));
+    show(1);
+    std::thread::sleep(Duration::from_secs(3));
+    let log = std::fs::read_to_string(home.join("state/plugins/logs/test.echo-view.log"))
+        .unwrap_or_default();
+    assert!(
+        !log[at..].contains("started") && !log[at..].contains("view closed"),
+        "a view out of sight for a moment is kept as it is:\n{}",
+        &log[at..]
+    );
+
+    // Away for longer than a view out of sight is kept: it is let go of, which its
+    // plugin hears, and started again from what it kept when it is next shown.
+    show(0);
+    plugin_log_until(&home, "test.echo-view", at, "view closed echo");
+    let log = std::fs::read_to_string(home.join("state/plugins/logs/test.echo-view.log"))
+        .unwrap_or_default();
+    assert!(!log[at..].contains("started"), "{}", &log[at..]);
+    show(1);
+    plugin_log_until(&home, "test.echo-view", at, "echo started pane count 8");
+    app.quit();
+}

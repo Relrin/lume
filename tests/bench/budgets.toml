@@ -113,6 +113,21 @@
 # report and is not held to a limit.
 "hydrate.memory.pagedRatio" = { max = 1.5, unit = "x" }
 
+# A plugin's view reading one of its plugin's streams itself, as fast as it comes.
+"views.stream.streamMibPerSecond" = { min = 30.0, unit = "MiB/s" }
+# How long the window's page takes to answer a request while a view reads such a
+# stream, and while a view gets in the way: floods its channel, sends messages as large
+# and as often as it may, or never gives up its processor. The first two are stopped;
+# the worst answer before they are is held to three frames at 60 Hz.
+"views.stream.pageAnswerMs.p95" = { max = 5.0, unit = "ms" }
+"views.stream.pageAnswerMs.max" = { max = 50.0, unit = "ms" }
+"views.flood.pageAnswerMs.p95" = { max = 5.0, unit = "ms" }
+"views.flood.pageAnswerMs.max" = { max = 50.0, unit = "ms" }
+"views.large.pageAnswerMs.p95" = { max = 5.0, unit = "ms" }
+"views.large.pageAnswerMs.max" = { max = 50.0, unit = "ms" }
+"views.spin.pageAnswerMs.p95" = { max = 5.0, unit = "ms" }
+"views.spin.pageAnswerMs.max" = { max = 50.0, unit = "ms" }
+
 # Shared CI runners: no GPU, a virtual display, and neighbours. These limits catch a
 # change that makes something several times slower, and nothing finer than that.
 [ci]
@@ -160,3 +175,8 @@
 "hydrate.attach.p50" = { max = 1000.0, unit = "ms" }
 "hydrate.lines" = { min = 9000.0, unit = "lines" }
 "hydrate.memory.pagedRatio" = { max = 1.5, unit = "x" }
+"views.stream.streamMibPerSecond" = { min = 4.0, unit = "MiB/s" }
+"views.stream.pageAnswerMs.p95" = { max = 100.0, unit = "ms" }
+"views.flood.pageAnswerMs.p95" = { max = 100.0, unit = "ms" }
+"views.large.pageAnswerMs.p95" = { max = 100.0, unit = "ms" }
+"views.spin.pageAnswerMs.p95" = { max = 100.0, unit = "ms" }

@@ -358,6 +358,34 @@ export type Nothing = Record<string, never>;
  */
 export type NoticeLevel = "info" | "warning" | "error";
 
+export interface OpenViewOptions {
+  place?: ViewPlace;
+  /**
+   * Shows a pane that has this view open already, if there is one, instead of
+   * opening another. Such a pane keeps the state it has.
+   */
+  reuse?: boolean;
+  /**
+   * What the view starts with, as its `state`: JSON of 64 KiB at most.
+   */
+  state?: Json;
+  /**
+   * What its pane is called; the view's title if left out.
+   */
+  title?: string;
+}
+
+/**
+ * The pane a view was opened in.
+ */
+export interface OpenedView {
+  pane: string;
+  /**
+   * Whether the pane was there already and was only shown.
+   */
+  reused: boolean;
+}
+
 /**
  * A terminal pane.
  */
@@ -815,6 +843,14 @@ export interface StatusValue {
   value?: number;
 }
 
+export interface StreamGrant {
+  /**
+   * The open view that may use the stream, by its instance.
+   */
+  instance: string;
+  stream: number;
+}
+
 export interface StreamId {
   stream: number;
 }
@@ -830,6 +866,13 @@ export interface StreamReadOptions {
    * The most bytes one read gives; 64 KiB if left out, 1 MiB at most.
    */
   max?: number;
+}
+
+export interface StreamRevoke {
+  /**
+   * What `streams.grantToView` gave.
+   */
+  grant: string;
 }
 
 export interface StreamWrite {
@@ -872,6 +915,14 @@ export interface UiConfirm {
   title: string;
 }
 
+export interface UiOpenView {
+  options?: OpenViewOptions;
+  /**
+   * One of the plugin's pane views, by the name its manifest gives it.
+   */
+  view: string;
+}
+
 export interface UiPick {
   /**
    * At most 500.
@@ -898,6 +949,10 @@ export interface ViewInstance {
    */
   instance: string;
   /**
+   * The pane it is shown in, for a view in a pane.
+   */
+  pane?: string;
+  /**
    * Where it is shown: `pane` or `panel`.
    */
   place: string;
@@ -906,6 +961,27 @@ export interface ViewInstance {
    */
   view: string;
 }
+
+/**
+ * Where a view opens.
+ */
+export type ViewPlace =
+  /**
+   * A new tab of the window in front.
+   */
+  | "tab"
+  /**
+   * Beside the pane that has the keyboard.
+   */
+  | "right"
+  /**
+   * Below it.
+   */
+  | "down"
+  /**
+   * Floating over the window's tabs.
+   */
+  | "float";
 
 export interface ViewsInstances {
   /**
@@ -1322,6 +1398,19 @@ export interface LumeCalls {
      * Closes one of the plugin's streams. A program's input that is closed ends.
      */
     close(stream: number): Promise<void>;
+    /**
+     * Lets one of the plugin's open views use one of its streams directly: the bytes
+     *  then go between the view and the stream without passing through the plugin's
+     *  code. Gives a grant, which the code hands the view (with `views.post`, or as a
+     *  call's answer) and the view opens with `streams.open(grant)`. A grant is for
+     *  that one view and is opened once; it ends when the view closes, the stream
+     *  closes, or it is revoked.
+     */
+    grantToView(instance: string, stream: number): Promise<string>;
+    /**
+     * Takes back a grant: a view that had opened it is told its stream has ended.
+     */
+    revoke(grant: string): Promise<void>;
   };
   readonly ui: {
     /**
@@ -1338,6 +1427,11 @@ export interface LumeCalls {
      *  they chose none.
      */
     pick(items: PickItem[], options?: PickOptions): Promise<string | null>;
+    /**
+     * Opens one of the plugin's own pane views: in a new tab, beside or below the
+     *  pane that has the keyboard, or floating. Gives the pane it is in.
+     */
+    openView(view: string, options?: OpenViewOptions): Promise<OpenedView>;
   };
   readonly views: {
     /**
@@ -1377,6 +1471,8 @@ export interface ViewFrom {
   readonly view: string;
   /** Where it is shown: `pane` or `panel`. */
   readonly place: string;
+  /** The pane it is shown in, for a view in a pane. */
+  readonly pane?: string;
 }
 
 export interface LumeViews {

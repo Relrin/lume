@@ -184,8 +184,13 @@ pub enum PanelContent {
     Slot { slot: Slot },
     /// The list of the window's tabs.
     TabList {},
-    /// A view a plugin provides.
-    PluginView { plugin: String, view: String },
+    /// A view a plugin provides, with whatever the view asked to have kept for it.
+    PluginView {
+        plugin: String,
+        view: String,
+        #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+        state: serde_json::Value,
+    },
 }
 
 /// A place in the top bar that status items are shown in.

@@ -590,6 +590,20 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.view.open",
+        "Open a Plugin's View",
+        "View",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.app.open",
+        "Open a File or an Address",
+        "Application",
+        Runs::Core,
+        false,
+    ),
+    (
         "lume.view.zoom-in",
         "Increase Font Size",
         "View",
@@ -772,6 +786,52 @@ fn arguments(id: &str) -> Option<Value> {
                 "description": "A plugin's panel, by its id: the plugin's and the panel's name, as in acme.tools.processes.",
             } }),
             &["panel"],
+        )),
+        "lume.view.open" => Some(object(
+            json!({
+                "plugin": {
+                    "type": "string",
+                    "description": "The plugin whose view it is, by its id.",
+                },
+                "view": {
+                    "type": "string",
+                    "description": "One of the plugin's pane views, by the name its manifest gives it.",
+                },
+                "state": {
+                    "description": "What the view starts with: JSON of 64 KiB at most.",
+                },
+                "place": {
+                    "type": "string",
+                    "enum": ["tab", "right", "down", "float"],
+                    "description": "Where it opens; a new tab if left out.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "What its pane is called; the view's title if left out.",
+                },
+                "reuse": {
+                    "type": "boolean",
+                    "description": "Show a pane that has the view open already, if there is one.",
+                },
+            }),
+            &["plugin", "view"],
+        )),
+        "lume.app.open" => Some(object(
+            json!({
+                "path": {
+                    "type": "string",
+                    "description": "A file on this machine, by its whole path.",
+                },
+                "uri": {
+                    "type": "string",
+                    "description": "An address, in place of a path.",
+                },
+                "view": {
+                    "type": "string",
+                    "description": "The view to open it with, as <plugin>.<view>; without one, the only view that opens it does, or the user chooses.",
+                },
+            }),
+            &[],
         )),
         "lume.panel.expand" => Some(object(
             json!({

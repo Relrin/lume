@@ -62,12 +62,16 @@ function nestedRuns(setUp, ms = 1500) {
   });
 }
 
-function call(name, args) {
+function ask(message) {
   const id = nextCall++;
   return new Promise((resolve, reject) => {
     waiting.set(id, { resolve, reject });
-    port.postMessage({ t: "call", id, name, args });
+    port.postMessage({ ...message, id });
   });
+}
+
+function call(name, args) {
+  return ask({ t: "call", name, args });
 }
 
 function settle(ms) {
@@ -367,6 +371,40 @@ async function probe(config) {
   });
   record("A12.data-frame", data, data ? "a script in a nested document ran" : "nothing ran in it");
 
+  // A13: keys this page says were pressed and that it had no use for. Each is bound
+  // to something a view must not be able to set off: pasting, a new tab, closing the
+  // pane, a new window, quitting. None was pressed; what they came to is for whoever
+  // reads the application afterwards to say, so they are only noted here.
+  const forged = [
+    ["V", "KeyV"],
+    ["T", "KeyT"],
+    ["W", "KeyW"],
+    ["N", "KeyN"],
+    ["E", "KeyE"],
+    ["O", "KeyO"],
+  ];
+  for (const [key, code] of forged) {
+    for (const mods of [["ctrl", "shift"], ["ctrl"], ["alt"], ["meta"], ["meta", "shift"]]) {
+      port.postMessage({ t: "key", key, code, mods });
+    }
+  }
+  // Whatever they set off has happened by the time the report is read.
+  await settle(500);
+  note("A13.forged-keys", `${forged.length * 5} keys that were never pressed were passed on`);
+
+  // A14: a stream another plugin's view was let use. The grant is a real one, which
+  // the test took from that plugin's log; it was made for that view and no other.
+  if (config.grant) {
+    const stream = await attempt(() => ask({ t: "stream", grant: config.grant }));
+    record(
+      "A14.foreign-grant",
+      !stream.threw,
+      stream.threw ? stream.value : "another plugin's stream was opened",
+    );
+  } else {
+    note("A14.foreign-grant", "no grant was given to try");
+  }
+
   await call("report", { lines: results, done: true });
   document.getElementById("state").textContent = "done";
   await settle(200);
@@ -385,6 +423,7 @@ window.addEventListener("message", (event) => {
     if (!found) return;
     waiting.delete(data.id);
     if (data.t === "result") found.resolve(data.value);
+    else if (data.t === "opened") found.resolve("opened");
     else found.reject(new Error(`${data.code}: ${data.message}`));
   };
   port.postMessage({ t: "ready" });

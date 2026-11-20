@@ -1,7 +1,8 @@
 # A plugin for the end-to-end tests whose page tries to get out of its frame: it reaches
 # for the application's commands, the window around it, other plugins' files, the
 # network, storage and the system, and reports what each try came to. Every one should
-# fail. It holds no permissions at all.
+# fail. A second page does not try to get out but to get in the way: it floods its
+# channel, or never gives up the processor. The plugin holds no permissions at all.
 schema = 1
 id = "test.hostile"
 name = "Hostile"
@@ -10,7 +11,7 @@ description = "A view that tries everything a view must not be able to do."
 api = "1"
 main = "host.js"
 repository = "https://example.invalid/lume/test-hostile"
-activation = ["onView:probe"]
+activation = ["onView:probe", "onView:abuse"]
 
 [[contributes.panels]]
 id = "probe"
@@ -18,6 +19,25 @@ title = "Probe"
 kind = "frame"
 area = "right"
 entry = "ui/index.html"
+
+[[contributes.panels]]
+id = "abuse"
+title = "Abuse"
+kind = "frame"
+area = "right"
+entry = "ui/abuse.html"
+
+[[contributes.settings]]
+key = "grant"
+type = "string"
+default = ""
+label = "A grant to a stream that another plugin's view holds"
+
+[[contributes.settings]]
+key = "abuse"
+type = "string"
+default = "flood"
+label = "How the second page gets in the way: flood, large or spin"
 
 [[contributes.settings]]
 key = "port"

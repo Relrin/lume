@@ -129,6 +129,8 @@ export interface ViewFrom {
   readonly view: string;
   /** Where it is shown: `pane` or `panel`. */
   readonly place: string;
+  /** The pane it is shown in, for a view in a pane. */
+  readonly pane?: string;
 }
 
 export interface LumeViews {

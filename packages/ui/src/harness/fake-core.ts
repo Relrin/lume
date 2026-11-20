@@ -744,6 +744,11 @@ export class FakeCore implements Carrier {
         return answer(`w-1/${String(args["view"])}`);
       case "view_closed":
         return answer(null);
+      case "view_state":
+        this.ran.push({ id: name, args });
+        return answer(null);
+      case "view_stream_open":
+        return Promise.reject(new Error("there is no such grant"));
       case "view_call":
         this.ran.push({ id: name, args });
         return answer(null);

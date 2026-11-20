@@ -91,6 +91,11 @@ impl Default for Held {
 }
 
 impl Held {
+    /// The streams plugins hold open.
+    pub(super) fn streams(&self) -> &Arc<Streams> {
+        &self.streams
+    }
+
     fn next(&self) -> u64 {
         self.next.fetch_add(1, Ordering::Relaxed)
     }
@@ -771,6 +776,8 @@ impl Plugins {
         // Its stored values are read again from the file when it next runs: the file may
         // change while it does not, as when it is removed with its data.
         lock(&self.kv).remove(local);
+        // A view that was using one of its streams is told the stream is over.
+        self.drop_grants(|granted| granted.local == local);
         self.system.streams.close_all(local);
         lock(&self.system.watches).retain(|_, (owner, _)| owner != local);
         let ended: Vec<Started> = {

@@ -167,6 +167,34 @@ impl Services {
                 .plugin_panel(window, id == "lume.panel.show", args)
                 .await;
         }
+        if id == "lume.app.open" {
+            return self.plugins.open_target(window, args).await;
+        }
+        if id == "lume.view.open" {
+            let text = |key: &str| {
+                args.get(key).and_then(Value::as_str).ok_or_else(|| {
+                    CommandError::bad_request(format!("the view's `{key}` is not said"))
+                })
+            };
+            let options = lume_plugin_api::types::OpenViewOptions {
+                state: args.get("state").cloned(),
+                place: args
+                    .get("place")
+                    .cloned()
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map_err(|_| {
+                        CommandError::bad_request("a view opens in a tab, right, down or float")
+                    })?,
+                title: args.get("title").and_then(Value::as_str).map(str::to_owned),
+                reuse: args.get("reuse").and_then(Value::as_bool).unwrap_or(false),
+            };
+            return self
+                .plugins
+                .open_view(Some(window), text("plugin")?, text("view")?, options)
+                .await
+                .map(drop);
+        }
         match (spec.runs, asker) {
             (Runs::Core, _) => {
                 let context = builtins::Context {

@@ -185,8 +185,19 @@ export class CoreClient {
    * Opens one of a plugin's views in this page, under the page's own name for it; gives
    * the instance the plugin's code knows it by.
    */
-  viewOpened(view: string, plugin: string, name: string, place: "pane" | "panel"): Promise<string> {
-    return this.transport.command("view_opened", { view, plugin, name, place });
+  viewOpened(
+    view: string,
+    plugin: string,
+    name: string,
+    place: "pane" | "panel",
+    host: string | null,
+  ): Promise<string> {
+    return this.transport.command("view_opened", { view, plugin, name, place, host });
+  }
+
+  /** Keeps what one of the page's views wants to find again when it next starts. */
+  viewState(view: string, state: unknown): Promise<void> {
+    return this.transport.command("view_state", { view, state: state ?? null });
   }
 
   /** Closes one of the page's views. */

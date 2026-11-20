@@ -42,6 +42,10 @@ Commands:
   bench --startup
                Build for release and time only the application's starts, printing
                each start's marks and their middle values; nothing is judged
+  bench --views
+               Build for release and time only what plugins' views cost: a stream
+               read by a view, and the window's answers beside a view that is in
+               the way; nothing is judged
   latency [--label <name>] [--samples <n>] [--wait <seconds>]
                Time keys from the desktop to the screen in whichever terminal has the
                focus after the wait (Windows, and Linux under X11): run `cat` or
@@ -95,6 +99,10 @@ fn main() -> Result<()> {
         ["dist", "--installers"] => dist::run(true),
         ["bench"] => bench("reference"),
         ["bench", "--profile", profile] => bench(profile),
+        ["bench", "--views"] => {
+            build_release_for_testing()?;
+            bench::views_only()
+        }
         ["bench", "--startup"] => {
             build_release_for_testing()?;
             bench::startup_only()

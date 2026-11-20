@@ -98,6 +98,29 @@ export interface Attachment {
   detach(): void;
 }
 
+/**
+ * One of a plugin's streams of bytes, which one of its views was let use: bytes from
+ * it, and a way to write to it, on the page's carrier.
+ */
+export interface Pipe {
+  /** Whether anything can be read from it, and whether it can be written. */
+  readonly readable: boolean;
+  readonly writable: boolean;
+  /**
+   * Starts the flow. `receive` gets the bytes in order; `ended` is called once when
+   * the stream is over, with whether it simply ran out.
+   */
+  start(receive: (bytes: Uint8Array) => void, ended: (ok: boolean) => void): void;
+  /** Reports that `bytes` of what was received have been taken, which lets more come. */
+  consumed(bytes: number): void;
+  /** Writes to the stream. */
+  write(bytes: Uint8Array): void;
+  /** Says nothing more will be written: a program reading the stream sees its input end. */
+  finish(): void;
+  /** Lets go of the stream. */
+  close(): void;
+}
+
 interface Stream {
   readonly granter: Granter;
   /** Frames kept until the view is ready for them; `null` once it is. */
@@ -273,6 +296,70 @@ export class TransportClient {
         stream.onHydrate = null;
         this.#enqueue(encodeDetach(id));
       },
+    };
+  }
+
+  /**
+   * Opens a grant one of the page's views holds to a stream of its plugin's. `view` is
+   * the page's name for the view, which the core checks the grant against; `window` is
+   * how many bytes may be on their way or waiting to be taken at once.
+   */
+  async pipe(view: string, grant: string, window: number): Promise<Pipe> {
+    const id = this.#nextStream++;
+    const stream: Stream = {
+      granter: new Granter(window),
+      waiting: [],
+      receive: null,
+      onHydrate: null,
+    };
+    this.#streams.set(id, stream);
+    let ways: { readable: boolean; writable: boolean };
+    try {
+      ways = await this.command("view_stream_open", { view, grant, stream: id });
+    } catch (error) {
+      this.#streams.delete(id);
+      throw error;
+    }
+    const open = () => this.#streams.get(id) === stream;
+    const close = () => {
+      if (!open()) return;
+      this.#streams.delete(id);
+      this.#enqueue(encodeDetach(id));
+    };
+    return {
+      readable: ways.readable,
+      writable: ways.writable,
+      start: (receive, ended) => {
+        if (!open() || stream.receive) return;
+        stream.receive = (frame) => {
+          if (frame.kind === "data") {
+            receive(frame.bytes);
+          } else if (frame.kind === "exit") {
+            // The core has let go of it already.
+            this.#streams.delete(id);
+            ended(typeof frame.status === "object" && "code" in frame.status);
+          }
+        };
+        this.#enqueue(encodeCredit(id, stream.granter.firstGrant));
+        const waiting = stream.waiting ?? [];
+        stream.waiting = null;
+        for (const frame of waiting) this.#deliver(stream, frame);
+      },
+      consumed: (bytes) => {
+        if (!open()) return;
+        const grant = stream.granter.consumed(bytes);
+        if (grant > 0) this.#enqueue(encodeCredit(id, grant));
+      },
+      write: (bytes) => {
+        if (open() && bytes.length > 0) {
+          this.#enqueue(encodeInput(id, bytes, this.#opened.limits.maxPayload));
+        }
+      },
+      // Input of no bytes is how a pipe is told that its input has ended.
+      finish: () => {
+        if (open()) this.#enqueue(encodeInput(id, new Uint8Array(0), 1));
+      },
+      close,
     };
   }
 

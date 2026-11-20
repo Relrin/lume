@@ -40,6 +40,7 @@ function host(overrides: Partial<FrameHost> = {}) {
     ready: () => void (seen.ready += 1),
     state: (state) => void seen.states.push(state),
     key: (key) => void seen.keys.push(key),
+    stream: () => Promise.reject(new Error("no stream")),
     stop: (reason) => void seen.stopped.push(reason),
     ...overrides,
   };
@@ -156,6 +157,18 @@ describe("a frame's bridge", () => {
     for (let i = 0; i < 5000; i += 1) port.receive({ t: "state", state: i });
     expect(seen.stopped).toEqual(["it sent far more messages than a view may"]);
     expect(seen.states.length).toBe(RATE_BURST);
+  });
+
+  it("stops a frame that sends more than it may, however seldom", () => {
+    const port = new FakePort();
+    const { made, seen } = host();
+    new FrameBridge(port, made, () => 0);
+    // Each is a message a view may send; together they are more than it may at once.
+    const filler = "x".repeat(900 * 1024);
+    for (let id = 0; id < 4 && seen.stopped.length === 0; id += 1) {
+      port.receive({ t: "call", id, name: "sink", args: filler });
+    }
+    expect(seen.stopped).toEqual(["it sent far more than a view may"]);
   });
 
   it("stops a frame that says it failed", () => {

@@ -1325,6 +1325,33 @@ fn change(
                 panels.insert(at, Panel { id: panel, content });
             }
         }
+        Intent::ViewState { pane, state } => {
+            let found = workspace
+                .pane_mut(pane)
+                .ok_or(IntentError::NoSuchPane(pane))?;
+            // A pane that shows a terminal keeps nothing for a view.
+            if let PaneContent::PluginView { state: kept, .. } = &mut found.content {
+                *kept = state;
+            }
+        }
+        Intent::PanelState {
+            window,
+            panel,
+            state,
+        } => {
+            let window = window_index(workspace, window)?;
+            let dock = &mut workspace.windows[window].dock;
+            for area in Area::ALL {
+                for found in &mut dock.area_mut(area).panels {
+                    if found.id != panel {
+                        continue;
+                    }
+                    if let PanelContent::PluginView { state: kept, .. } = &mut found.content {
+                        *kept = state.clone();
+                    }
+                }
+            }
+        }
         Intent::WindowBounds { window, bounds } => {
             let window = window_index(workspace, window)?;
             workspace.windows[window].bounds = Some(bounds);

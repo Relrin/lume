@@ -36,6 +36,8 @@
     "allow-view-opened",
     "allow-view-closed",
     "allow-view-call",
+    "allow-view-state",
+    "allow-view-stream-open",
     "allow-window-drag",
     "allow-window-control",
     "allow-window-state",

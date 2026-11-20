@@ -2214,6 +2214,12 @@
   /* A plugin's own page, in a sandboxed frame, and what stands in for it while it
      loads or after it stopped. */
 
+  /* The card of a view whose tab is not on show: kept, with its frame, out of sight. */
+  .pane-card[data-parked="true"] {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
   .pane-plugin {
     position: relative;
     display: flex;

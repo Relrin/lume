@@ -534,6 +534,32 @@ Closes one of the plugin's streams. A program's input that is closed ends.
 
 Gives `void`.
 
+### `lume.streams.grantToView(instance, stream)`
+
+Lets one of the plugin's open views use one of its streams directly: the bytes
+ then go between the view and the stream without passing through the plugin's
+ code. Gives a grant, which the code hands the view (with `views.post`, or as a
+ call's answer) and the view opens with `streams.open(grant)`. A grant is for
+ that one view and is opened once; it ends when the view closes, the stream
+ closes, or it is revoked.
+
+| Argument | Type | |
+|---|---|---|
+| `instance` | `string` | The open view that may use the stream, by its instance. |
+| `stream` | `number` |  |
+
+Gives `string`.
+
+### `lume.streams.revoke(grant)`
+
+Takes back a grant: a view that had opened it is told its stream has ended.
+
+| Argument | Type | |
+|---|---|---|
+| `grant` | `string` | What `streams.grantToView` gave. |
+
+Gives `void`.
+
 ## lume.ui
 
 ### `lume.ui.toast(message, level?)`
@@ -571,6 +597,18 @@ Has the user choose one of a list, under the plugin's name: its id, or null if
 | `options` | `PickOptions` | optional.  |
 
 Gives `string \| null`.
+
+### `lume.ui.openView(view, options?)`
+
+Opens one of the plugin's own pane views: in a new tab, beside or below the
+ pane that has the keyboard, or floating. Gives the pane it is in.
+
+| Argument | Type | |
+|---|---|---|
+| `view` | `string` | One of the plugin's pane views, by the name its manifest gives it. |
+| `options` | `OpenViewOptions` | optional.  |
+
+Gives `OpenedView`.
 
 ## lume.views
 
@@ -908,6 +946,24 @@ How a notice looks.
 
 `"info" \| "warning" \| "error"`
 
+### `OpenViewOptions`
+
+| Field | Type | |
+|---|---|---|
+| `place` | `ViewPlace` | optional.  |
+| `reuse` | `boolean` | optional. Shows a pane that has this view open already, if there is one, instead of opening another. Such a pane keeps the state it has. |
+| `state` | `Json` | optional. What the view starts with, as its `state`: JSON of 64 KiB at most. |
+| `title` | `string` | optional. What its pane is called; the view's title if left out. |
+
+### `OpenedView`
+
+The pane a view was opened in.
+
+| Field | Type | |
+|---|---|---|
+| `pane` | `string` |  |
+| `reused` | `boolean` | Whether the pane was there already and was only shown. |
+
 ### `PaneInfo`
 
 A terminal pane.
@@ -1212,6 +1268,13 @@ the manifest says what kind of item it is.
 | `tooltip` | `string` | optional. What the pointer is told when it rests on the item. |
 | `value` | `number` | optional. How full a meter is, from 0 to 1. |
 
+### `StreamGrant`
+
+| Field | Type | |
+|---|---|---|
+| `instance` | `string` | The open view that may use the stream, by its instance. |
+| `stream` | `number` |  |
+
 ### `StreamId`
 
 | Field | Type | |
@@ -1231,6 +1294,12 @@ the manifest says what kind of item it is.
 |---|---|---|
 | `encoding` | `Encoding` | optional.  |
 | `max` | `number` | optional. The most bytes one read gives; 64 KiB if left out, 1 MiB at most. |
+
+### `StreamRevoke`
+
+| Field | Type | |
+|---|---|---|
+| `grant` | `string` | What `streams.grantToView` gave. |
 
 ### `StreamWrite`
 
@@ -1266,6 +1335,13 @@ What the plugin can hear about.
 | `options` | `ConfirmOptions` | optional.  |
 | `title` | `string` | At most 80 characters. |
 
+### `UiOpenView`
+
+| Field | Type | |
+|---|---|---|
+| `options` | `OpenViewOptions` | optional.  |
+| `view` | `string` | One of the plugin's pane views, by the name its manifest gives it. |
+
 ### `UiPick`
 
 | Field | Type | |
@@ -1287,8 +1363,15 @@ One open view of the plugin's.
 | Field | Type | |
 |---|---|---|
 | `instance` | `string` | What tells this open view from every other: calls from it carry it, and `views.post` reaches it by it. |
+| `pane` | `string` | optional. The pane it is shown in, for a view in a pane. |
 | `place` | `string` | Where it is shown: `pane` or `panel`. |
 | `view` | `string` | The view's name, as the manifest gives it. |
+
+### `ViewPlace`
+
+Where a view opens.
+
+`"tab" \| "right" \| "down" \| "float"`
 
 ### `ViewsInstances`
 

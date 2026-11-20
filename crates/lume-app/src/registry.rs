@@ -111,6 +111,11 @@ pub fn plugin_access(id: &str) -> PluginAccess {
     {
         return PluginAccess::Needs("sessions.spawn");
     }
+    // Opening a view by its name, or a file with whichever view opens it, puts another
+    // plugin's page in the window: that is the layout's to allow.
+    if matches!(id, "lume.view.open" | "lume.app.open") {
+        return PluginAccess::Needs("layout.write");
+    }
     let area = id.split('.').nth(1).unwrap_or_default();
     match area {
         "tab" | "pane" | "window" | "group" | "workspace" | "panel" => {
@@ -363,6 +368,9 @@ mod tests {
     fn a_plugin_runs_only_what_its_permissions_cover_of_the_applications_commands() {
         assert_eq!(plugin_access("lume.palette.open"), PluginAccess::Open);
         assert_eq!(plugin_access("lume.view.zoom-in"), PluginAccess::Open);
+        for id in ["lume.view.open", "lume.app.open"] {
+            assert_eq!(plugin_access(id), PluginAccess::Needs("layout.write"));
+        }
         assert_eq!(
             plugin_access("lume.pane.zoom"),
             PluginAccess::Needs("layout.write")

@@ -199,6 +199,8 @@ export function PanelHost({ panel, area }: { panel: Panel; area: SideArea }) {
               place="panel"
               entry={def.entry}
               title={def.title}
+              state={panel.content.state}
+              host={panel.id}
             />
           ) : (
             <PluginViewPlaceholder plugin={panel.content.plugin} view={panel.content.view} />

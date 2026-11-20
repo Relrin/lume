@@ -407,3 +407,77 @@ fn tab_groups() {
         ],
     );
 }
+
+#[test]
+fn plugin_views() {
+    // The window is w1 with pane p2 in tab t3; the view's pane is p4 in tab t5.
+    let w = window(1);
+    let panel = PanelId::new("acme.tools.changes").unwrap();
+    golden(
+        "plugin-views",
+        vec![
+            open(),
+            Intent::TabNew {
+                window: w,
+                content: plugin_view(),
+                index: None,
+                activate: true,
+                group: None,
+            },
+            Intent::ViewState {
+                pane: pane(4),
+                state: json!({ "file": "src/main.rs", "line": 12 }),
+            },
+            // What a view keeps goes with its pane wherever the pane goes.
+            Intent::Float {
+                pane: pane(4),
+                rect: None,
+            },
+            Intent::Minimise {
+                pane: pane(4),
+                on: true,
+            },
+            Intent::Minimise {
+                pane: pane(4),
+                on: false,
+            },
+            Intent::Dock {
+                pane: pane(4),
+                to: None,
+            },
+            // A terminal keeps nothing for a view: nothing changes.
+            Intent::ViewState {
+                pane: pane(2),
+                state: json!({ "x": 1 }),
+            },
+            // Refused: there is no such pane.
+            Intent::ViewState {
+                pane: pane(99),
+                state: json!(null),
+            },
+            Intent::PanelSet {
+                window: w,
+                panel: panel.clone(),
+                content: PanelContent::PluginView {
+                    plugin: "acme.tools".to_owned(),
+                    view: "changes".to_owned(),
+                    state: Value::Null,
+                },
+                area: Some(Area::Right),
+                index: 0,
+            },
+            Intent::PanelState {
+                window: w,
+                panel: panel.clone(),
+                state: json!({ "tab": "history" }),
+            },
+            // A panel that is moved keeps what its view kept.
+            Intent::PanelMove {
+                window: w,
+                panel,
+                area: Area::Left,
+                index: 0,
+            },
+        ],
+    );
+}

@@ -117,6 +117,20 @@ export function TabArea() {
 
   const all = useMemo(() => (root ? panesOf(root) : []), [root]);
   const shown = zoomed !== null && all.includes(zoomed) ? [zoomed] : all;
+  // The panes of the window's tabs that show a plugin's view, on show or not, always
+  // in the same order: a frame that is moved among its siblings starts again, so
+  // their cards are never rendered in another order, nor taken out while their tabs
+  // are merely out of sight.
+  const views = useStore(app.layout, (state) =>
+    state.ready
+      ? Object.values(state.tabs)
+          .flatMap((one) => panesOf(one.root))
+          .filter((pane) => state.panes[pane]?.content.type === "plugin_view")
+          .sort()
+          .join(" ")
+      : "",
+  );
+  const viewPanes = useMemo(() => (views === "" ? [] : views.split(" ")), [views]);
   const gaps = useMemo(() => (root && zoomed === null ? gapsOf(root) : []), [root, zoomed]);
   // A header that is shown only when needed is left off a pane alone in its tab.
   const header = mode === "always" || (mode === "auto" && all.length > 1);
@@ -132,8 +146,18 @@ export function TabArea() {
       {gaps.map((gap) => (
         <DividerHandle key={`${gap.split}:${gap.index}`} {...gap} />
       ))}
-      {shown.map((pane) => (
-        <PaneCard key={`${epoch}:${pane}`} pane={pane} header={header} />
+      {shown
+        .filter((pane) => !viewPanes.includes(pane))
+        .map((pane) => (
+          <PaneCard key={`${epoch}:${pane}`} pane={pane} header={header} />
+        ))}
+      {viewPanes.map((pane) => (
+        <PaneCard
+          key={`${epoch}:${pane}`}
+          pane={pane}
+          header={header}
+          parked={!shown.includes(pane)}
+        />
       ))}
       <FloatingLayer />
       <MinimisedTray />

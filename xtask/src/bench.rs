@@ -441,6 +441,203 @@ fn time_plugin_starts(profile: Profile) -> Result<Value> {
     }))
 }
 
+/// Installs one of the test plugins into the folders of a run.
+fn install_fixture(lume: &Path, dirs: &paths::PrivateDirs, name: &str) -> Result<()> {
+    let package = paths::root().join("tests").join("plugins").join(name);
+    let mut command = Command::new(lume);
+    dirs.apply(&mut command);
+    let output = command
+        .args(["plugin", "install"])
+        .arg(&package)
+        .arg("--yes")
+        .stdin(Stdio::null())
+        .output()
+        .context("installing a plugin for the measurement")?;
+    if !output.status.success() {
+        bail!(
+            "the plugin {name} could not be installed for the measurement: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}
+
+/// Waits until a test plugin's log has a line with `mark` after its first `from` bytes,
+/// and gives what follows the mark on that line.
+fn logged(log: &Path, from: usize, mark: &str, limit: Duration) -> Result<String> {
+    let began = Instant::now();
+    loop {
+        let text = std::fs::read_to_string(log).unwrap_or_default();
+        let fresh = text.get(from..).unwrap_or_default();
+        if let Some(rest) = fresh
+            .lines()
+            .find_map(|line| line.split_once(mark).map(|(_, rest)| rest))
+        {
+            return Ok(rest.trim().to_owned());
+        }
+        if began.elapsed() > limit {
+            bail!("{} never said {mark:?}: {fresh}", log.display());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn log_len(log: &Path) -> usize {
+    std::fs::read_to_string(log).unwrap_or_default().len()
+}
+
+/// How many bytes the view reads to time a stream, and how often the window's page is
+/// asked for an answer while a view is in its way.
+const VIEW_STREAM_BYTES: u64 = 16 * 1024 * 1024;
+const PAGE_ANSWERS: u64 = 1500;
+
+/// What the plugins' views cost: how fast a view reads one of its plugin's streams
+/// directly, beside the same bytes passed on by the plugin's code; how long a small
+/// job takes through a program's input and output; and how long the window's page
+/// takes to answer while a view floods its channel, sends as much as it may, or never
+/// gives up its processor.
+fn time_views(profile: Profile) -> Result<Value> {
+    let app = suites::app(profile)?;
+    let lume = suites::lume(profile)?;
+    let endpoint = format!("bench-{}-views", std::process::id());
+    let dirs = paths::PrivateDirs::fresh(&endpoint)?;
+    for name in ["echo-view", "hostile"] {
+        install_fixture(&lume, &dirs, name)?;
+    }
+    let mut command = Command::new(&app);
+    dirs.apply(&mut command);
+    let mut child = command
+        .args(["--endpoint", &endpoint])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("starting the application")?;
+    let logs = dirs.state_dir().join("plugins").join("logs");
+    let echo = logs.join("test.echo-view.log");
+    let hostile = logs.join("test.hostile.log");
+    let run = |args: &[&str]| -> Result<()> {
+        ask(&lume, &endpoint, args)
+            .map(drop)
+            .with_context(|| format!("the application refused {args:?}"))
+    };
+
+    let measured = (|| -> Result<Value> {
+        // The plugins are read once the first output is out.
+        let began = Instant::now();
+        loop {
+            let ready = ask(&lume, &endpoint, &["plugins"]).is_some_and(|answer| {
+                let plugins = answer["plugins"].as_array().cloned().unwrap_or_default();
+                plugins.len() == 2 && plugins.iter().all(|plugin| plugin["state"] == "ready")
+            });
+            if ready {
+                break;
+            }
+            if began.elapsed() > START_TIMEOUT {
+                bail!("the plugins for the measurement were not read in time");
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        let open = json!({
+            "plugin": "test.echo-view",
+            "view": "echo",
+            "state": { "task": "bench", "bytes": VIEW_STREAM_BYTES },
+        })
+        .to_string();
+        run(&["command", "lume.view.open", &open])?;
+        let figures = logged(&echo, 0, "echo bench ", Duration::from_secs(180))?;
+        let stream: Value = serde_json::from_str(&figures).context("reading the view's figures")?;
+
+        // The window's answers with nothing in their way, and then with each kind of
+        // view that gets in it, begun while the answers are being timed.
+        let mut answers = serde_json::Map::new();
+        for mode in ["quiet", "stream", "flood", "large", "spin"] {
+            let at = log_len(&echo);
+            let asking = {
+                let args = json!({ "label": mode, "count": PAGE_ANSWERS }).to_string();
+                let (lume, endpoint) = (lume.clone(), endpoint.clone());
+                std::thread::spawn(move || {
+                    ask(
+                        &lume,
+                        &endpoint,
+                        &["command", "test.echo-view.page-answers", &args],
+                    )
+                })
+            };
+            if mode == "stream" {
+                // A view reading a long stream as fast as it comes.
+                let flow = json!({
+                    "plugin": "test.echo-view",
+                    "view": "echo",
+                    "state": { "task": "flow", "bytes": 4 * VIEW_STREAM_BYTES },
+                })
+                .to_string();
+                run(&["command", "lume.view.open", &flow])?;
+            } else if mode != "quiet" {
+                std::fs::write(
+                    dirs.config_file(),
+                    format!("[plugins.\"test.hostile\"]\nabuse = \"{mode}\"\n"),
+                )?;
+                std::thread::sleep(Duration::from_millis(600));
+                let from = log_len(&hostile);
+                run(&[
+                    "command",
+                    "lume.panel.show",
+                    r#"{"panel":"test.hostile.abuse"}"#,
+                ])?;
+                logged(
+                    &hostile,
+                    from,
+                    &format!("abuse {mode} started"),
+                    Duration::from_secs(30),
+                )?;
+            }
+            let _ = asking.join();
+            let samples = logged(
+                &echo,
+                at,
+                &format!("page-answers {mode} "),
+                Duration::from_secs(120),
+            )?;
+            let figures: Value =
+                serde_json::from_str(&samples).context("reading the window's answers")?;
+            if mode == "stream" {
+                logged(&echo, at, "echo flow ", Duration::from_secs(120))?;
+            } else if mode != "quiet" {
+                run(&[
+                    "command",
+                    "lume.panel.close",
+                    r#"{"panel":"test.hostile.abuse"}"#,
+                ])?;
+            }
+            println!(
+                "bench:   the window answers in {} ms (p95 {}, at most {}) beside a view: {mode}",
+                figures["p50"], figures["p95"], figures["max"],
+            );
+            answers.insert(mode.to_owned(), json!({ "pageAnswerMs": figures }));
+        }
+        println!(
+            "bench:   a view reads a stream at {:.0} MiB/s itself, {:.0} MiB/s through its plugin's code",
+            stream["streamMibPerSecond"].as_f64().unwrap_or(0.0),
+            stream["relayMibPerSecond"].as_f64().unwrap_or(0.0),
+        );
+        let mut report = Value::Object(answers);
+        for (key, value) in stream.as_object().into_iter().flatten() {
+            report["stream"][key] = value.clone();
+        }
+        Ok(report)
+    })();
+
+    // Closed, not killed, and with its sessions ended, whichever host runs them.
+    if ask(&lume, &endpoint, &["command", "lume.app.quit-end-sessions"]).is_none() {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+    measured
+}
+
 fn time_starts(profile: Profile) -> Result<Value> {
     let app = suites::app(profile)?;
     let lume = suites::lume(profile)?;
@@ -624,6 +821,14 @@ pub fn startup_only() -> Result<()> {
     Ok(())
 }
 
+/// Times only what the plugins' views cost, and prints it.
+pub fn views_only() -> Result<()> {
+    println!("bench: timing what plugins' views read and what one in the way costs the window");
+    let report = time_views(Profile::Release)?;
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
 /// Measures the release build and compares the numbers with the limits of `profile`.
 pub fn run(profile: &str) -> Result<()> {
     let limits = load_limits(profile)?;
@@ -643,6 +848,8 @@ pub fn run(profile: &str) -> Result<()> {
          {PLUGINS_INSTALLED} installed"
     );
     report["startup"]["plugins"] = time_plugin_starts(Profile::Release)?;
+    println!("bench: timing what plugins' views read and what one in the way costs the window");
+    report["views"] = time_views(Profile::Release)?;
     println!("bench: timing launches of an application kept running in the background");
     report["startup"]["ready"] = time_ready_starts(Profile::Release)?;
 

@@ -27,6 +27,7 @@
 mod asking;
 mod calls;
 mod manage;
+mod openers;
 mod system;
 mod views;
 
@@ -1288,6 +1289,26 @@ impl Plugins {
             | Call::PanelsClear(_)
             | Call::PanelsSetChildren(_)
             | Call::ViewsPost(_)) => self.show(local, shows).unwrap_or(Ok(Value::Null)),
+            Call::StreamsGrantToView(asked) => self.stream_grant(local, &asked),
+            Call::StreamsRevoke(asked) => {
+                self.stream_revoke(local, &asked.grant);
+                Ok(Value::Null)
+            }
+            Call::UiOpenView(asked) => {
+                let opened = self
+                    .open_view(None, local, &asked.view, asked.options)
+                    .await
+                    .map_err(|error| {
+                        let code = match error.code.as_ref() {
+                            "not_found" => ErrorCode::NotFound,
+                            "bad_request" => ErrorCode::Invalid,
+                            _ => ErrorCode::Failed,
+                        };
+                        api_error(code, error.message)
+                    })?;
+                serde_json::to_value(opened)
+                    .map_err(|error| api_error(ErrorCode::Failed, error.to_string()))
+            }
             Call::ViewsInstances(asked) => {
                 serde_json::to_value(self.view_instances(local, asked.view.as_deref()))
                     .map_err(|error| api_error(ErrorCode::Failed, error.to_string()))

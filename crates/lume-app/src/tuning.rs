@@ -16,6 +16,13 @@ pub const REATTACH_GRACE: Duration = Duration::from_secs(5);
 /// long, and bounds what is in flight beyond a stream's credit.
 pub const CARRIER_BATCH_MAX: usize = 256 * 1024;
 
+/// The most one read of a plugin's stream gives a view: what one frame carries.
+pub const PIPE_READ_MAX: usize = 64 * 1024;
+
+/// How much a view may have written to a plugin's stream that the stream has not
+/// taken yet. A view that writes past it loses the stream.
+pub const PIPE_WRITE_QUEUE_MAX: usize = 4 * 1024 * 1024;
+
 /// The longest link the core will open. Longer ones are not addresses anyone typed.
 pub const LINK_MAX_BYTES: usize = 2048;
 

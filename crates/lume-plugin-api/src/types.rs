@@ -895,6 +895,73 @@ pub struct ViewInstance {
     pub view: String,
     /// Where it is shown: `pane` or `panel`.
     pub place: String,
+    /// The pane it is shown in, for a view in a pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+}
+
+/// Where a view opens.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewPlace {
+    /// A new tab of the window in front.
+    #[default]
+    Tab,
+    /// Beside the pane that has the keyboard.
+    Right,
+    /// Below it.
+    Down,
+    /// Floating over the window's tabs.
+    Float,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OpenViewOptions {
+    /// What the view starts with, as its `state`: JSON of 64 KiB at most.
+    #[serde(default)]
+    pub state: Option<Value>,
+    #[serde(default)]
+    pub place: Option<ViewPlace>,
+    /// What its pane is called; the view's title if left out.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Shows a pane that has this view open already, if there is one, instead of
+    /// opening another. Such a pane keeps the state it has.
+    #[serde(default)]
+    pub reuse: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UiOpenView {
+    /// One of the plugin's pane views, by the name its manifest gives it.
+    pub view: String,
+    #[serde(default)]
+    pub options: OpenViewOptions,
+}
+
+/// The pane a view was opened in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct OpenedView {
+    pub pane: String,
+    /// Whether the pane was there already and was only shown.
+    pub reused: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StreamGrant {
+    /// The open view that may use the stream, by its instance.
+    pub instance: String,
+    pub stream: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StreamRevoke {
+    /// What `streams.grantToView` gave.
+    pub grant: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]

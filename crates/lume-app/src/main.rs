@@ -480,6 +480,8 @@ fn main() -> ExitCode {
         commands_plugins::view_opened,
         commands_plugins::view_closed,
         commands_plugins::view_call,
+        commands_plugins::view_state,
+        commands_plugins::view_stream_open,
         commands_plugins::addons_list,
         commands_plugins::addon_set_enabled,
         commands_plugins::addon_remove,

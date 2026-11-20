@@ -1,0 +1,700 @@
+{
+  "end": {
+    "focused_window": "w1",
+    "id": "00000000000000a1",
+    "name": "test",
+    "next_id": 7,
+    "scratch": null,
+    "windows": [
+      {
+        "bounds": null,
+        "centre": {
+          "active": "t3",
+          "tabs": [
+            {
+              "id": "t3",
+              "last_focus": "p4",
+              "root": {
+                "axis": "row",
+                "children": [
+                  {
+                    "content": {
+                      "backend": null,
+                      "cwd": null,
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": null,
+                      "type": "terminal"
+                    },
+                    "id": "p2",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  {
+                    "content": {
+                      "plugin": "lume.notes",
+                      "state": {
+                        "file": "src/main.rs",
+                        "line": 12
+                      },
+                      "type": "plugin_view",
+                      "view": "page"
+                    },
+                    "id": "p4",
+                    "title": null,
+                    "type": "pane"
+                  }
+                ],
+                "id": "s6",
+                "ratios": [
+                  500000,
+                  500000
+                ],
+                "type": "split"
+              },
+              "title": null,
+              "zoomed": null
+            }
+          ]
+        },
+        "dock": {
+          "bottom": {
+            "collapsed": false,
+            "panels": [],
+            "size": 240
+          },
+          "left": {
+            "collapsed": false,
+            "panels": [
+              {
+                "content": {
+                  "plugin": "acme.tools",
+                  "state": {
+                    "tab": "history"
+                  },
+                  "type": "plugin_view",
+                  "view": "changes"
+                },
+                "id": "acme.tools.changes"
+              }
+            ],
+            "size": 240
+          },
+          "right": {
+            "collapsed": false,
+            "panels": [],
+            "size": 240
+          },
+          "top": {
+            "collapsed": false,
+            "panels": [
+              {
+                "content": {
+                  "slot": "topbar.left",
+                  "type": "slot"
+                },
+                "id": "lume.topbar.left"
+              },
+              {
+                "content": {
+                  "slot": "topbar.center",
+                  "type": "slot"
+                },
+                "id": "lume.topbar.center"
+              },
+              {
+                "content": {
+                  "slot": "topbar.right",
+                  "type": "slot"
+                },
+                "id": "lume.topbar.right"
+              }
+            ],
+            "size": 240
+          }
+        },
+        "floating": [],
+        "focus": "p4",
+        "history": [
+          "p4",
+          "p2"
+        ],
+        "id": "w1"
+      }
+    ]
+  },
+  "name": "plugin-views",
+  "start": {
+    "focused_window": null,
+    "id": "00000000000000a1",
+    "name": "test",
+    "next_id": 1,
+    "scratch": null,
+    "windows": []
+  },
+  "steps": [
+    {
+      "changes": [
+        {
+          "type": "window_opened",
+          "window": {
+            "bounds": null,
+            "centre": {
+              "active": "t3",
+              "tabs": [
+                {
+                  "id": "t3",
+                  "last_focus": "p2",
+                  "root": {
+                    "content": {
+                      "backend": null,
+                      "cwd": null,
+                      "env": [],
+                      "launcher": null,
+                      "profile": null,
+                      "session": null,
+                      "type": "terminal"
+                    },
+                    "id": "p2",
+                    "title": null,
+                    "type": "pane"
+                  },
+                  "title": null,
+                  "zoomed": null
+                }
+              ]
+            },
+            "dock": {
+              "bottom": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "left": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "right": {
+                "collapsed": false,
+                "panels": [],
+                "size": 240
+              },
+              "top": {
+                "collapsed": false,
+                "panels": [
+                  {
+                    "content": {
+                      "slot": "topbar.left",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.left"
+                  },
+                  {
+                    "content": {
+                      "slot": "topbar.center",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.center"
+                  },
+                  {
+                    "content": {
+                      "slot": "topbar.right",
+                      "type": "slot"
+                    },
+                    "id": "lume.topbar.right"
+                  }
+                ],
+                "size": 240
+              }
+            },
+            "floating": [],
+            "focus": "p2",
+            "history": [
+              "p2"
+            ],
+            "id": "w1"
+          }
+        },
+        {
+          "type": "window_focused",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p2",
+        "tab": "t3",
+        "window": "w1"
+      },
+      "intent": {
+        "bounds": null,
+        "content": {
+          "backend": null,
+          "cwd": null,
+          "env": [],
+          "launcher": null,
+          "profile": null,
+          "size": null,
+          "type": "terminal"
+        },
+        "type": "window_new"
+      }
+    },
+    {
+      "changes": [
+        {
+          "index": 1,
+          "tab": {
+            "id": "t5",
+            "last_focus": "p4",
+            "root": {
+              "content": {
+                "plugin": "lume.notes",
+                "state": {
+                  "page": 3
+                },
+                "type": "plugin_view",
+                "view": "page"
+              },
+              "id": "p4",
+              "title": null,
+              "type": "pane"
+            },
+            "title": null,
+            "zoomed": null
+          },
+          "type": "tab_added",
+          "window": "w1"
+        },
+        {
+          "active": "t5",
+          "order": [
+            "t3",
+            "t5"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "pane": "p4",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": "p4",
+        "tab": "t5",
+        "window": null
+      },
+      "intent": {
+        "activate": true,
+        "content": {
+          "plugin": "lume.notes",
+          "state": {
+            "page": 3
+          },
+          "type": "plugin_view",
+          "view": "page"
+        },
+        "index": null,
+        "type": "tab_new",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "pane": {
+            "content": {
+              "plugin": "lume.notes",
+              "state": {
+                "file": "src/main.rs",
+                "line": 12
+              },
+              "type": "plugin_view",
+              "view": "page"
+            },
+            "id": "p4",
+            "title": null
+          },
+          "type": "pane"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "pane": "p4",
+        "state": {
+          "file": "src/main.rs",
+          "line": 12
+        },
+        "type": "view_state"
+      }
+    },
+    {
+      "changes": [
+        {
+          "tab": "t5",
+          "type": "tab_removed"
+        },
+        {
+          "active": "t3",
+          "order": [
+            "t3"
+          ],
+          "type": "tabs",
+          "window": "w1"
+        },
+        {
+          "floating": [
+            {
+              "minimised": null,
+              "pane": {
+                "content": {
+                  "plugin": "lume.notes",
+                  "state": {
+                    "file": "src/main.rs",
+                    "line": 12
+                  },
+                  "type": "plugin_view",
+                  "view": "page"
+                },
+                "id": "p4",
+                "title": null
+              },
+              "rect": {
+                "h": 600000,
+                "w": 600000,
+                "x": 200000,
+                "y": 200000
+              }
+            }
+          ],
+          "type": "floating",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "pane": "p4",
+        "rect": null,
+        "type": "float"
+      }
+    },
+    {
+      "changes": [
+        {
+          "floating": [
+            {
+              "minimised": "floating",
+              "pane": {
+                "content": {
+                  "plugin": "lume.notes",
+                  "state": {
+                    "file": "src/main.rs",
+                    "line": 12
+                  },
+                  "type": "plugin_view",
+                  "view": "page"
+                },
+                "id": "p4",
+                "title": null
+              },
+              "rect": {
+                "h": 600000,
+                "w": 600000,
+                "x": 200000,
+                "y": 200000
+              }
+            }
+          ],
+          "type": "floating",
+          "window": "w1"
+        },
+        {
+          "pane": "p2",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "on": true,
+        "pane": "p4",
+        "type": "minimise"
+      }
+    },
+    {
+      "changes": [
+        {
+          "floating": [
+            {
+              "minimised": null,
+              "pane": {
+                "content": {
+                  "plugin": "lume.notes",
+                  "state": {
+                    "file": "src/main.rs",
+                    "line": 12
+                  },
+                  "type": "plugin_view",
+                  "view": "page"
+                },
+                "id": "p4",
+                "title": null
+              },
+              "rect": {
+                "h": 600000,
+                "w": 600000,
+                "x": 200000,
+                "y": 200000
+              }
+            }
+          ],
+          "type": "floating",
+          "window": "w1"
+        },
+        {
+          "pane": "p4",
+          "type": "focus",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "on": false,
+        "pane": "p4",
+        "type": "minimise"
+      }
+    },
+    {
+      "changes": [
+        {
+          "root": {
+            "axis": "row",
+            "children": [
+              {
+                "content": {
+                  "backend": null,
+                  "cwd": null,
+                  "env": [],
+                  "launcher": null,
+                  "profile": null,
+                  "session": null,
+                  "type": "terminal"
+                },
+                "id": "p2",
+                "title": null,
+                "type": "pane"
+              },
+              {
+                "content": {
+                  "plugin": "lume.notes",
+                  "state": {
+                    "file": "src/main.rs",
+                    "line": 12
+                  },
+                  "type": "plugin_view",
+                  "view": "page"
+                },
+                "id": "p4",
+                "title": null,
+                "type": "pane"
+              }
+            ],
+            "id": "s6",
+            "ratios": [
+              500000,
+              500000
+            ],
+            "type": "split"
+          },
+          "tab": "t3",
+          "type": "tab_tree",
+          "zoomed": null
+        },
+        {
+          "floating": [],
+          "type": "floating",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "pane": "p4",
+        "to": null,
+        "type": "dock"
+      }
+    },
+    {
+      "changes": [],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "pane": "p2",
+        "state": {
+          "x": 1
+        },
+        "type": "view_state"
+      }
+    },
+    {
+      "intent": {
+        "pane": "p99",
+        "state": null,
+        "type": "view_state"
+      },
+      "refused": "not_found"
+    },
+    {
+      "changes": [
+        {
+          "area": "right",
+          "dock": {
+            "collapsed": false,
+            "panels": [
+              {
+                "content": {
+                  "plugin": "acme.tools",
+                  "type": "plugin_view",
+                  "view": "changes"
+                },
+                "id": "acme.tools.changes"
+              }
+            ],
+            "size": 240
+          },
+          "type": "dock",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "area": "right",
+        "content": {
+          "plugin": "acme.tools",
+          "type": "plugin_view",
+          "view": "changes"
+        },
+        "index": 0,
+        "panel": "acme.tools.changes",
+        "type": "panel_set",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "area": "right",
+          "dock": {
+            "collapsed": false,
+            "panels": [
+              {
+                "content": {
+                  "plugin": "acme.tools",
+                  "state": {
+                    "tab": "history"
+                  },
+                  "type": "plugin_view",
+                  "view": "changes"
+                },
+                "id": "acme.tools.changes"
+              }
+            ],
+            "size": 240
+          },
+          "type": "dock",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "panel": "acme.tools.changes",
+        "state": {
+          "tab": "history"
+        },
+        "type": "panel_state",
+        "window": "w1"
+      }
+    },
+    {
+      "changes": [
+        {
+          "area": "left",
+          "dock": {
+            "collapsed": false,
+            "panels": [
+              {
+                "content": {
+                  "plugin": "acme.tools",
+                  "state": {
+                    "tab": "history"
+                  },
+                  "type": "plugin_view",
+                  "view": "changes"
+                },
+                "id": "acme.tools.changes"
+              }
+            ],
+            "size": 240
+          },
+          "type": "dock",
+          "window": "w1"
+        },
+        {
+          "area": "right",
+          "dock": {
+            "collapsed": false,
+            "panels": [],
+            "size": 240
+          },
+          "type": "dock",
+          "window": "w1"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "area": "left",
+        "index": 0,
+        "panel": "acme.tools.changes",
+        "type": "panel_move",
+        "window": "w1"
+      }
+    }
+  ]
+}

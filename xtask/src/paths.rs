@@ -69,6 +69,11 @@ impl PrivateDirs {
         Ok(dirs)
     }
 
+    /// Where an application that uses these folders keeps what it writes.
+    pub fn state_dir(&self) -> &Path {
+        &self.state
+    }
+
     /// The settings file of an application that uses these folders.
     pub fn config_file(&self) -> PathBuf {
         self.config.join("config.toml")

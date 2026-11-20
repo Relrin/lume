@@ -61,7 +61,8 @@ pub async fn ui_panel_expand(
 }
 
 /// The page opened one of a plugin's views in a frame: a pane view (`place = "pane"`)
-/// or a panel that shows a page (`"panel"`). `view` is the page's own name for it.
+/// or a panel that shows a page (`"panel"`). `view` is the page's own name for it, and
+/// `host` the pane or the panel it is shown in.
 /// Gives the instance the plugin's code knows it by.
 #[tauri::command]
 pub fn view_opened(
@@ -71,12 +72,47 @@ pub fn view_opened(
     plugin: String,
     name: String,
     place: String,
+    host: Option<String>,
 ) -> Result<String, CommandError> {
     let place = crate::plugins::ViewPlace::parse(&place)
         .ok_or_else(|| CommandError::bad_request("a view is in a pane or a panel"))?;
     services
         .plugins
-        .view_opened(window.label(), &view, &plugin, &name, place)
+        .view_opened(window.label(), &view, &plugin, &name, place, host)
+}
+
+/// Keeps what one of the page's open views wants to find again when it next starts.
+#[tauri::command]
+pub async fn view_state(
+    services: Shared<'_>,
+    window: WebviewWindow,
+    view: String,
+    state: Value,
+) -> Result<(), CommandError> {
+    services
+        .plugins
+        .view_state(window.label(), &view, state)
+        .await
+}
+
+/// One of the page's open views opens a grant to one of its plugin's streams, as a
+/// stream of the page's carrier. Says whether the stream is read, written or both.
+// Run beside the main thread: it starts threads and takes locks.
+#[tauri::command(async)]
+pub fn view_stream_open(
+    services: Shared<'_>,
+    window: WebviewWindow,
+    carrier: u32,
+    view: String,
+    grant: String,
+    stream: u32,
+) -> Result<Value, CommandError> {
+    if grant.len() > 64 {
+        return Err(CommandError::not_found("there is no such grant"));
+    }
+    services
+        .plugins
+        .view_stream_open(window.label(), carrier, &view, &grant, stream)
 }
 
 /// The page closed one of its views.

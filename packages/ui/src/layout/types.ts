@@ -111,7 +111,13 @@ export type Slot = "topbar.left" | "topbar.center" | "topbar.right";
 export type PanelContent =
   | { readonly type: "slot"; readonly slot: Slot }
   | { readonly type: "tab_list" }
-  | { readonly type: "plugin_view"; readonly plugin: string; readonly view: string };
+  | {
+      readonly type: "plugin_view";
+      readonly plugin: string;
+      readonly view: string;
+      /** What the view asked to have kept for it; left out when it keeps nothing. */
+      readonly state?: unknown;
+    };
 
 /** The tabs of a window. */
 export interface TabGroup {
@@ -416,6 +422,13 @@ export type Intent =
       readonly content: PanelContent;
       readonly area: Area | null;
       readonly index: number;
+    }
+  | { readonly type: "view_state"; readonly pane: PaneId; readonly state: unknown }
+  | {
+      readonly type: "panel_state";
+      readonly window: WindowId;
+      readonly panel: PanelId;
+      readonly state: unknown;
     }
   | { readonly type: "window_bounds"; readonly window: WindowId; readonly bounds: Bounds }
   | { readonly type: "window_focus"; readonly window: WindowId };

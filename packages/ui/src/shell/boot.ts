@@ -28,6 +28,12 @@ import { checkFrameContract } from "../frame-contract.ts";
 import { shownAgain, startStep } from "../start-marks.ts";
 import { CardDrag } from "../drag/controller.ts";
 import { createPanelDragStore, type PanelDragStore } from "../drag/panels.ts";
+import {
+  forwardedEvent,
+  mayForward,
+  worthForwarding,
+  type ForwardedKey,
+} from "../keys/forwarded.ts";
 import { Shortcuts } from "../keys/shortcuts.ts";
 import { TabAreaController } from "../layout/controller.ts";
 import { estimatePane, gridFor } from "../layout/estimate.ts";
@@ -40,7 +46,8 @@ import { PaneLooks } from "../panes/looks.ts";
 import { PaneTitles } from "../panes/titles.ts";
 import { PaneViews } from "../panes/views.ts";
 import { setMotionSource } from "../motion/slots.ts";
-import { deliverViewEvent } from "../plugins/frame/registry.ts";
+import { deliverViewEvent, focusPaneFrame, onPaneFrameReady } from "../plugins/frame/registry.ts";
+import { openersFor } from "../plugins/openers.ts";
 import { followPluginStatus } from "../plugins/status.ts";
 import { createPluginsStore, type PluginsStore } from "../plugins/store.ts";
 import { VisibleItems } from "../plugins/visible.ts";
@@ -115,6 +122,11 @@ export interface ShellApp {
   readonly tabUi: TabUiStore;
   /** The cursor's effects, drawn over the whole window. */
   readonly cursorFx: CursorFx;
+  /**
+   * Takes a key one of the plugins' views passed on, from the view of `pane` if it is
+   * in one: it runs what the key is bound to only if that moves about the window.
+   */
+  forwardKey(key: ForwardedKey, pane?: PaneId): void;
   /**
    * How many renderers of each kind are alive and what their glyphs take, and how much
    * memory the terminals of the window hold between them.
@@ -310,6 +322,21 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     commands.run(command, args),
   );
   shortcuts.setBindings(configView.keymap.bindings);
+  // Keys the plugins' views pass on are read by the same bindings, apart from the
+  // window's own keys: a sequence begun in a view is not finished in a terminal. Of
+  // what they are bound to, only the commands that move about the window are run.
+  const forwarded = new Shortcuts({ platform, layout: keyLayout }, (command, args) => {
+    if (mayForward(command)) commands.run(command, args);
+  });
+  forwarded.setBindings(configView.keymap.bindings);
+  const forwardKey = (key: ForwardedKey, pane?: PaneId): void => {
+    if (!worthForwarding(key)) return;
+    // While a palette is on show every key is the palette's own.
+    if (overlayContext()) return;
+    const contexts =
+      pane !== undefined && layout.getState().floats[pane] ? new Set(["floating"]) : NO_CONTEXT;
+    forwarded.handle(forwardedEvent(key), contexts);
+  };
 
   // The cursor's effects are drawn over the whole window, so that a trail can go from
   // one pane to another; the page gives them their element when it is rendered.
@@ -392,7 +419,12 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         read: () => client.clipboardRead(),
         write: (text) => client.clipboardWrite(text),
       },
-      openLink: (url) => client.openLink(url),
+      // A link one of the plugins' views offers to open is the application's to
+      // decide about, with the user where there is a choice.
+      openLink: (url) =>
+        openersFor(url, plugins.getState().shown?.openers ?? []).length > 0
+          ? client.commandRun("lume.app.open", { uri: url })
+          : client.openLink(url),
       developerTools: import.meta.env.DEV,
     },
     layout,
@@ -491,6 +523,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         applyConfig(notice.view);
         configureCursorFx();
         shortcuts.setBindings(notice.view.keymap.bindings);
+        forwarded.setBindings(notice.view.keymap.bindings);
         {
           // The terminals are set up again once the font the configuration now names
           // is ready, unless the configuration has changed again by then.
@@ -643,8 +676,14 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     if (overlayContext()) return;
     const pane = selectFocus(layout.getState());
     if (pane !== null && search.focusBar(pane)) return;
+    // A pane that shows a plugin's view has no terminal: its frame takes the keyboard.
+    if (pane !== null && views.get(pane) === undefined && focusPaneFrame(pane)) return;
     views.focus();
   };
+  // A view's frame that has just become ready takes the keyboard if its pane has it.
+  onPaneFrameReady((pane) => {
+    if (selectFocus(layout.getState()) === pane) queueMicrotask(refocus);
+  });
   let overlayShown = false;
   const followOverlay = (): void => {
     const shown = overlayContext() !== undefined;
@@ -774,12 +813,14 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     search,
     tabUi,
     cursorFx,
+    forwardKey,
     stats: () => ({ ...host.stats(), wasmBytes: vt.memoryBytes }),
     dispose: () => {
       window.removeEventListener("focus", onWindowFocus);
       window.removeEventListener("keydown", onWindowKey, true);
       document.removeEventListener("visibilitychange", onVisibility);
       unfollowStatus();
+      onPaneFrameReady(null);
       visible.dispose();
       setMotionSource(null);
       onNotice = () => undefined;
