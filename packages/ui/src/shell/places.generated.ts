@@ -162,6 +162,9 @@ export const BUILTIN_PLACES: Readonly<Record<(typeof MENUS)[number], readonly Bu
     ] },
   ],
   "menu.pane": [
+    { key: "name", kind: "section", children: [
+      { key: "rename", kind: "item", children: [] },
+    ] },
     { key: "show", kind: "section", children: [
       { key: "show-in-new-tab", kind: "item", children: [] },
       { key: "show-in-new-window", kind: "item", children: [] },

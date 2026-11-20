@@ -489,6 +489,15 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     mayRun: (id, args) => mayRun({ layout, config, views, prompts, client, notices }, id, args),
     focusBar: () => focusBar(),
     renameTab: (tab) => tabUi.getState().startRename(tab ?? selectActiveTab(layout.getState())),
+    renamePane: (named) => {
+      const pane = named ?? selectFocus(layout.getState());
+      if (pane === null || pane === undefined) return;
+      // The field is in the pane's header. A pane alone in its tab may have none, and
+      // is what its tab is called after: there the field is the tab's.
+      const header = document.querySelector(`[data-pane="${CSS.escape(pane)}"] > .pane-header`);
+      if (header) tabUi.getState().startPaneRename(pane);
+      else tabUi.getState().startRename(layout.getState().paneTabs[pane] ?? null);
+    },
     answerPrompt: (proceed, item) => prompts.answerCurrent(proceed, item),
     failed: (message) => notices.push("error", sentence(message)),
   });

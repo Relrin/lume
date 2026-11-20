@@ -943,6 +943,16 @@ export class FakeCore implements Carrier {
           if (facts) facts.title = typeof given["title"] === "string" ? given["title"] : null;
         });
         return;
+      case "lume.pane.rename": {
+        // Told as a change and not kept: a layout read whole again has the pane unnamed.
+        const pane = typeof given["pane"] === "string" ? given["pane"] : this.#focus;
+        const session = this.#fixture.sessions.get(pane);
+        if (session === undefined) return;
+        const title = typeof given["title"] === "string" ? given["title"] : null;
+        const node = terminal(pane, session, this.#options.panes?.[pane]);
+        this.#changed([{ type: "pane", pane: { id: node.id, title, content: node.content } }]);
+        return;
+      }
       case "lume.group.new":
         this.#tabs(() => {
           if (!facts) return;

@@ -1761,7 +1761,7 @@ order = 5
             ["plugin:acme.tools.busy", "!terminal"]
         );
 
-        assert_eq!(keys(&out.menus["menu.pane"]), ["lume:show"]);
+        assert_eq!(keys(&out.menus["menu.pane"]), ["lume:name", "lume:show"]);
         // The application's keys that come again in other menus are in each.
         let tab = &out.menus["menu.tab"];
         let position = tab.iter().find(|node| node.key == "lume:position").unwrap();

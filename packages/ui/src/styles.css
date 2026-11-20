@@ -2489,6 +2489,20 @@
     text-overflow: ellipsis;
   }
 
+  /* The field a pane is renamed in, in the place of its name. */
+  .pane-rename {
+    @apply bg-control text-ink;
+    flex: 0 1 200px;
+    min-width: 60px;
+    height: 20px;
+    padding: 0 6px;
+    border: var(--lume-size-border) solid var(--lume-color-border-focus);
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    outline: none;
+    font-weight: 600;
+    user-select: text;
+  }
+
   /* The directory gives way to the title when there is not room for both. */
   .pane-cwd {
     @apply text-ink-muted;

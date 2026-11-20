@@ -74,6 +74,8 @@ export interface RowMotion {
 
 export interface TabUiState {
   readonly renaming: TabId | null;
+  /** The pane whose header shows a field for its name. */
+  readonly renamingPane: PaneId | null;
   readonly popup: TabPopup | null;
   readonly drag: TabDrag | null;
   /** A tab just put in a group of its own: that group's editor opens once it is shown. */
@@ -83,6 +85,8 @@ export interface TabUiState {
 
   startRename(tab: TabId | null): void;
   endRename(): void;
+  startPaneRename(pane: PaneId | null): void;
+  endPaneRename(): void;
   open(popup: TabPopup): void;
   close(): void;
   setDrag(drag: TabDrag | null): void;
@@ -108,6 +112,7 @@ export function groupOfLabel(id: string): GroupId | null {
 export function createTabUiStore(): TabUiStore {
   return createStore<TabUiState>()((set, get) => ({
     renaming: null,
+    renamingPane: null,
     popup: null,
     drag: null,
     editorFor: null,
@@ -115,6 +120,10 @@ export function createTabUiStore(): TabUiStore {
     startRename: (tab) => set({ renaming: tab, popup: null }),
     endRename: () => {
       if (get().renaming !== null) set({ renaming: null });
+    },
+    startPaneRename: (pane) => set({ renamingPane: pane, popup: null }),
+    endPaneRename: () => {
+      if (get().renamingPane !== null) set({ renamingPane: null });
     },
     open: (popup) => set({ popup }),
     close: () => {

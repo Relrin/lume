@@ -417,6 +417,13 @@ const COMMANDS: &[Row] = &[
     ),
     ("lume.pane.rename", "Rename Pane", "Pane", Runs::Core, false),
     (
+        "lume.pane.rename-start",
+        "Rename Pane…",
+        "Pane",
+        Runs::Page,
+        true,
+    ),
+    (
         "lume.pane.float",
         "Float or Dock Pane",
         "Pane",
@@ -809,6 +816,7 @@ fn arguments(id: &str) -> Option<Value> {
             &[],
         )),
         "lume.pane.close"
+        | "lume.pane.rename-start"
         | "lume.pane.duplicate"
         | "lume.pane.reconnect"
         | "lume.pane.copy-cwd"

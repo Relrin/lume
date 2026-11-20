@@ -132,6 +132,7 @@ neighbour (`before`, `after`).
 | `menu.tab`      | `group`       | `new-group`, `to-group`, `remove-from-group`                              |
 | `menu.tab`      | `position`    | `new-tab`, `move-left`, `move-right`, `move-into`                         |
 | `menu.tab`      | `closing`     | `mute`, `lock`, `close-left`, `close-right`, `close`                      |
+| `menu.pane`     | `name`        | `rename`                                                                  |
 | `menu.pane`     | `show`        | `show-in-new-tab`, `show-in-new-window`                                   |
 
 The `groups` submenu takes no items of plugins.

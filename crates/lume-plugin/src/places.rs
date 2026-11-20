@@ -219,10 +219,13 @@ const TAB: &[Builtin] = &[
     ),
 ];
 
-const PANE: &[Builtin] = &[section(
-    "show",
-    &[item("show-in-new-tab"), item("show-in-new-window")],
-)];
+const PANE: &[Builtin] = &[
+    section("name", &[item("rename")]),
+    section(
+        "show",
+        &[item("show-in-new-tab"), item("show-in-new-window")],
+    ),
+];
 
 /// The application's own nodes at the top of a menu, in the order they are shown.
 pub fn skeleton(menu: &str) -> &'static [Builtin] {

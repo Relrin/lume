@@ -47,6 +47,8 @@ export interface CommandServices {
   focusBar(): void;
   /** Opens the field that renames a tab in place: the one named, or the tab on show. */
   renameTab(tab: string | null): void;
+  /** Opens the field that renames a pane in place: the one named, or the one in use. */
+  renamePane(pane: PaneId | null): void;
   /**
    * Answers the question on show as its buttons would: going ahead (with the item of a
    * choice), or not. Says whether there was one.
@@ -191,6 +193,9 @@ export class Commands {
         return;
       case "lume.tab.rename-start":
         this.#services.renameTab(tabOf(args) ?? null);
+        return;
+      case "lume.pane.rename-start":
+        this.#services.renamePane(paneOf(args) ?? null);
         return;
       case "lume.window.answer": {
         const fields =

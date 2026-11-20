@@ -1,6 +1,6 @@
 /**
- * The menu of one pane, opened with the other button on its header: the pane's session
- * shown in another place too, in a new tab or a new window.
+ * The menu of one pane, opened with the other button on its header: its name, and the
+ * pane's session shown in another place too, in a new tab or a new window.
  *
  * Plugins may add items and sections among the menu's own, where their manifests ask;
  * a plugin's command is given the pane.
@@ -46,6 +46,13 @@ export function PaneMenu({
   // Only a running session can be shown in a second place.
   const shown = content.type === "terminal" && content.session !== null;
   const own: MenuItem[] = [
+    {
+      key: "rename",
+      label: "Rename pane…",
+      icon: <MenuGlyph name="pencil" />,
+      hint: menuHint(view, "lume.pane.rename-start"),
+      choose: () => app.tabUi.getState().startPaneRename(pane),
+    },
     {
       key: "show-in-new-tab",
       label: "Show in new tab",
