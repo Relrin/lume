@@ -81,7 +81,7 @@ describe("a setting drawn as a row", () => {
     expect(markup(row({ control: "switch", effective: false }))).toContain('aria-checked="false"');
   });
 
-  it("draws the choices of a select with the one in use chosen", () => {
+  it("draws a select as a closed control that says the choice in use", () => {
     const html = markup(
       row({
         control: "select",
@@ -94,9 +94,11 @@ describe("a setting drawn as a row", () => {
         ],
       }),
     );
-    expect(html).toContain('<option value="0">Theme\u2019s (10 px)</option>');
-    expect(html).toContain('<option value="1" selected="">6 px</option>');
-    expect(html).toContain('<option value="2">10 px</option>');
+    expect(html).toContain('role="combobox" aria-haspopup="listbox" aria-expanded="false"');
+    expect(html).toMatch(/class="settings-select-value">6 px<\/span>/);
+    // The choices are drawn when the control is opened, and by the window, not the system.
+    expect(html).not.toContain("<select");
+    expect(html).not.toContain('role="option"');
   });
 
   it("draws a typed number with its bounds and unit, and a way back to the theme's", () => {

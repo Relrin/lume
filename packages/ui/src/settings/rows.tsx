@@ -6,13 +6,15 @@
  * asks for the user's file to be changed; the row changes when the configuration
  * comes back changed, so a setting that could not be written is never shown as if it
  * had been. Each control is the element a browser already has for the job, named
- * after its row.
+ * after its row; a choice among many is the window's own, as the list a browser drops
+ * for one is the system's and not the theme's.
  */
 
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 
-import { AgainIcon, ChevronDownIcon } from "../shell/icons.tsx";
+import { AgainIcon } from "../shell/icons.tsx";
 import { roveWithin } from "../shell/roving.ts";
+import { Select } from "./Select.tsx";
 import {
   chosenIndex,
   shownNumber,
@@ -80,29 +82,18 @@ function Switch({ row, labelled, write }: ControlProps) {
   );
 }
 
-function Select({ row, labelled, write }: ControlProps) {
-  const chosen = chosenIndex(row);
+function Choice({ row, labelled, write }: ControlProps) {
   return (
-    <span className="settings-select">
-      <select
-        aria-labelledby={labelled}
-        // The choices are told apart by their places: their values are of any kind.
-        value={chosen < 0 ? "" : String(chosen)}
-        onClick={(event) => event.stopPropagation()}
-        onChange={(event) => {
-          const choice = row.choices[Number(event.target.value)];
-          if (choice) write(writeChoice(row, choice));
-        }}
-      >
-        {chosen < 0 && <option value="" />}
-        {row.choices.map((choice, index) => (
-          <option key={index} value={String(index)}>
-            {choice.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDownIcon />
-    </span>
+    <Select
+      // The choices are told apart by their places: their values are of any kind.
+      choices={row.choices.map((choice) => choice.label)}
+      chosen={chosenIndex(row)}
+      labelled={labelled}
+      onChoose={(index) => {
+        const choice = row.choices[index];
+        if (choice) write(writeChoice(row, choice));
+      }}
+    />
   );
 }
 
@@ -488,7 +479,7 @@ export function Row({
         )}
       </div>
       {row.control === "switch" && <Switch {...control} />}
-      {row.control === "select" && <Select {...control} />}
+      {row.control === "select" && <Choice {...control} />}
       {row.control === "segmented" && <Segmented {...control} />}
       {row.control === "text" && <TextField {...control} />}
       {row.control === "number" && <NumberField {...control} />}

@@ -97,7 +97,10 @@
             "name": "New terminals"
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
             "role": "heading",
@@ -136,10 +139,16 @@
             }
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
             "role": "spinbutton"
@@ -175,10 +184,16 @@
             "name": "Closing"
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
-            "role": "combobox"
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
           }
         ]
       }

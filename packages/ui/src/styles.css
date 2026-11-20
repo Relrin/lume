@@ -4131,29 +4131,108 @@
     max-width: 220px;
   }
 
-  .settings-select > select {
+  .settings-select > button {
     @apply text-ink;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
     max-width: 100%;
     height: 28px;
-    padding: 0 28px 0 10px;
+    padding: 0 8px 0 10px;
     border: var(--lume-size-border) solid var(--lume-color-border);
     border-radius: min(7px, var(--lume-radius-control));
     background: var(--settings-raised);
     font-size: 12.5px;
-    text-overflow: ellipsis;
     cursor: pointer;
-    appearance: none;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
   }
 
-  /* The mark that says there are more choices, over the control's right end. */
-  .settings-select > svg {
+  .settings-select > button:hover,
+  .settings-select > button[aria-expanded="true"] {
+    background: var(--settings-pressed);
+  }
+
+  .settings-select-value {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* The mark that says there are more choices. It turns over while they are on show. */
+  .settings-select > button > svg {
     @apply text-ink-muted;
-    position: absolute;
-    top: 50%;
-    right: 9px;
-    transform: translateY(-50%);
-    pointer-events: none;
+    flex-shrink: 0;
+    transition: rotate var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
+  }
+
+  .settings-select > button[aria-expanded="true"] > svg {
+    rotate: 180deg;
+  }
+
+  /*
+   * The choices, in the window itself, where the script puts them against their
+   * control. They unfold from it as the group editor's rows do: a grid of one row
+   * that grows from nothing to what is in it.
+   */
+  .settings-select-drop {
+    @apply bg-popover text-ink;
+    position: fixed;
+    z-index: 41;
+    display: grid;
+    grid-template-rows: 0fr;
+    max-width: min(320px, calc(100vw - 16px));
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 2px));
+    box-shadow: var(--lume-shadow-popover);
+    font-size: 12.5px;
+    opacity: 0;
+    transition:
+      grid-template-rows var(--lume-motion-duration-base) var(--lume-motion-easing-standard),
+      opacity var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .settings-select-drop[data-open="true"] {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  /* The room around the choices is theirs, so that the list folds away to nothing. */
+  .settings-select-list {
+    position: relative;
+    min-height: 0;
+    max-height: var(--select-room);
+    padding: 0 5px;
+    overflow: hidden;
+    scrollbar-width: thin;
+  }
+
+  /* It scrolls once it has unfolded: a bar that came and went as it grew would flicker. */
+  .settings-select-drop[data-settled] > .settings-select-list {
+    overflow-y: auto;
+  }
+
+  .settings-select-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 12px 0 8px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+    cursor: pointer;
+  }
+
+  .settings-select-option:first-child {
+    margin-top: 5px;
+  }
+
+  .settings-select-option:last-child {
+    margin-bottom: 5px;
+  }
+
+  .settings-select-option[data-active] {
+    @apply bg-control-hover;
   }
 
   .settings-segmented {
@@ -4502,7 +4581,7 @@
   }
 
   .settings-switch:focus-visible,
-  .settings-select > select:focus-visible,
+  .settings-select > button:focus-visible,
   .settings-segmented > button:focus-visible,
   .settings-swatch-theme:focus-visible,
   .settings-swatch:focus-visible,
@@ -4516,6 +4595,9 @@
   @media (prefers-reduced-motion: reduce) {
     .settings-switch,
     .settings-switch::after,
+    .settings-select > button,
+    .settings-select > button > svg,
+    .settings-select-drop,
     .settings-button,
     .settings-head {
       transition: none;
