@@ -13,6 +13,7 @@ import {
   PLAIN_TILE_COUNT,
   type BrandTile,
   type CategoryTile,
+  type PictureTile,
   type PlainTile,
 } from "../icons/tiles.ts";
 
@@ -22,8 +23,11 @@ export const PROGRAM_ICONS = NAMED_TILES;
 /** A tile the configuration may name for a program. */
 export type ProgramIcon = CategoryTile | BrandTile;
 
-/** The tile a pane shows: one the configuration may name, or a plain one. */
-export type PaneIcon = ProgramIcon | PlainTile;
+/**
+ * The tile a pane shows: one the configuration may name, a plain one, or a picture the
+ * pane was given to be known by.
+ */
+export type PaneIcon = ProgramIcon | PlainTile | PictureTile;
 
 /** The shells known here: what a terminal runs at its prompt. */
 const SHELLS: readonly string[] = [
@@ -281,6 +285,24 @@ const WORKED_IN: ReadonlySet<string> = new Set([
 /** Whether a program is one a person works in, by its name. */
 export function isWorkedIn(program: string): boolean {
   return WORKED_IN.has(programKey(program));
+}
+
+/**
+ * The programs that run other programs written as scripts. One of them seen under a
+ * shell says little of what the pane is for: the script it runs does.
+ */
+const SCRIPT_RUNTIMES: ReadonlySet<string> = new Set([
+  "node",
+  "bun",
+  "deno",
+  "python",
+  "python3",
+  "ruby",
+]);
+
+/** Whether a program is one that runs scripts, by its name. */
+export function isScriptRuntime(program: string): boolean {
+  return SCRIPT_RUNTIMES.has(programKey(program));
 }
 
 /** Whether a value is the name of a tile the configuration may name. */

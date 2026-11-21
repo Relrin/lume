@@ -355,6 +355,17 @@ const WITH_TOOL_BADGE: FakeCoreOptions = {
         command: "acme.tools.jobs",
         tooltip: "Changes to review",
       },
+      {
+        id: "acme.tools.new",
+        plugin: "acme.tools",
+        slot: "topbar.right",
+        kind: "icon",
+        order: 10,
+        label: "New job",
+        icon: { glyph: "bot" },
+        command: "acme.tools.jobs",
+        tooltip: "New job",
+      },
     ],
     values: [
       ...PLUGIN_CONTRIBUTIONS.values,
@@ -480,10 +491,17 @@ const WITH_FRAME_PANE: FakeCoreOptions = {
         title: "Report",
         entry: "ui/report.html",
         persist: true,
+        icon: { glyph: "bot" },
       },
     ],
   },
   pluginPane: { pane: "p2", plugin: "acme.tools", view: "report" },
+};
+
+/** The same, with each pane given a picture to be known by: a tile, and a plugin's own. */
+const WITH_PANE_PICTURES: FakeCoreOptions = {
+  ...WITH_FRAME_PANE,
+  paneIcons: { p1: "claude", p2: "image:acme.tools:gear" },
 };
 
 export const PLUGIN_SCENES: readonly Scene[] = [
@@ -515,6 +533,34 @@ export const PLUGIN_SCENES: readonly Scene[] = [
       }
       if (page.querySelectorAll(".pane-card").length !== 2) {
         problems.push(`there are ${page.querySelectorAll(".pane-card").length} panes`);
+      }
+      // The view's own picture is the pane's, where a terminal would show a prompt.
+      if (!card.querySelector('.pane-icon .tile[data-tile="picture"] svg')) {
+        problems.push("the pane does not show its view's picture");
+      }
+      return problems;
+    },
+  },
+  {
+    // Panes that were given a picture to be known by show it in their header and in
+    // their tab, whatever runs in them: a tile by its name, and a plugin's own picture.
+    name: "plugin-pane-pictures",
+    window: WITH_PANE_PICTURES,
+    prepare: async () => {
+      await until("the plugin's picture", () =>
+        document.querySelector('.pane-icon .tile[data-tile="picture"] .plugin-icon-mask'),
+      );
+    },
+    check: (page) => {
+      const tiles = [...page.querySelectorAll(".pane-card .pane-icon .tile")].map(
+        (tile) => tile.getAttribute("data-tile") ?? "",
+      );
+      const problems = compare(tiles, ["claude", "picture"], "the panes' pictures");
+      const tab = [...page.querySelectorAll('.tab[data-active="true"] .tab-icon .tile')].map(
+        (tile) => tile.getAttribute("data-tile") ?? "",
+      );
+      if (!tab.includes("claude") || !tab.includes("picture")) {
+        problems.push(`the tab shows ${tab.join(", ")}`);
       }
       return problems;
     },
@@ -591,7 +637,35 @@ export const PLUGIN_SCENES: readonly Scene[] = [
       const tool = page.querySelector('[data-status="acme.tools.review"][data-tool]');
       if (!tool) return ["the badge with a picture in the top bar is not drawn as a tool"];
       const count = tool.querySelector(".status-badge")?.textContent ?? "";
-      return count === "12" ? [] : [`the tool's count says ${JSON.stringify(count)}, not 12`];
+      const problems =
+        count === "12" ? [] : [`the tool's count says ${JSON.stringify(count)}, not 12`];
+      // A picture that is pressed stands among the bar's tools as one of them: as big,
+      // and as close to the next as they are to each other.
+      const own = page.querySelector<HTMLElement>(
+        'button[data-status="acme.tools.new"][data-tool]',
+      );
+      const tools = [...page.querySelectorAll<HTMLElement>(".top-tools .top-tool")];
+      const [first, second] = tools;
+      if (!own) return [...problems, "the picture with a command is not drawn as a tool"];
+      if (!first || !second) return [...problems, "the bar has no tools of its own"];
+      if (!own.querySelector("svg")) problems.push("the tool has no drawing");
+      const at = own.getBoundingClientRect();
+      const next = first.getBoundingClientRect();
+      if (at.width !== next.width || at.height !== next.height) {
+        problems.push(
+          `the tool is ${at.width} by ${at.height}, not ${next.width} by ${next.height}`,
+        );
+      }
+      const between = second.getBoundingClientRect().left - next.right;
+      if (Math.abs(next.left - at.right - between) > 0.5) {
+        problems.push(`the tool is ${next.left - at.right}px from the bar's, not ${between}px`);
+      }
+      const before = tool.getBoundingClientRect();
+      if (Math.abs(at.left - before.right - between) > 0.5) {
+        problems.push(`the two tools are ${at.left - before.right}px apart, not ${between}px`);
+      }
+      if (Math.abs(at.top - next.top) > 0.5) problems.push("the tool is not level with the bar's");
+      return problems;
     },
   },
   {

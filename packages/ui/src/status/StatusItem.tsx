@@ -72,6 +72,9 @@ const CARD_EDGE_PX = 8;
 /** How far from its item a card is. */
 const CARD_GAP_PX = 6;
 
+/** How heavy the line of a picture drawn as one of the top bar's tools is, as theirs. */
+const TOOL_WEIGHT = 1.9;
+
 /** How wide the menu an item opens is. */
 const STATUS_MENU_WIDTH = 240;
 
@@ -407,15 +410,24 @@ export function StatusItemView({ item }: { item: StatusItem }) {
     item.color === undefined
       ? undefined
       : ({ "--status-tone": `var(--lume-${item.color.replaceAll(".", "-")})` } as CSSProperties);
-  // A badge with a picture in the top bar is drawn as one of the bar's tools: the
-  // picture alone, with its count over a corner of it.
+  // A picture in the top bar that is pressed is drawn as one of the bar's tools: the
+  // picture alone on a square button, a badge's count over a corner of it.
   const toolLike =
-    item.kind === "badge" && item.picture !== undefined && item.slot.startsWith("topbar.");
+    item.picture !== undefined &&
+    item.slot.startsWith("topbar.") &&
+    (item.kind === "badge" ||
+      (item.kind === "icon" &&
+        !item.show_label &&
+        (item.command !== undefined || item.menu !== undefined)));
   const content = (
     <>
       {item.picture !== undefined && (
         <span className="status-picture">
-          <PluginIcon icon={item.picture} images={images} size={toolLike ? 16 : 13} />
+          {toolLike ? (
+            <PluginIcon icon={item.picture} images={images} size={16} weight={TOOL_WEIGHT} />
+          ) : (
+            <PluginIcon icon={item.picture} images={images} size={13} />
+          )}
         </span>
       )}
       {body(item)}

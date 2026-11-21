@@ -27,6 +27,7 @@ export const LINE_NAMES: readonly string[] = [
   "bell-off",
   "book-open",
   "bookmark",
+  "bot",
   "box",
   "bug",
   "chart-bar",

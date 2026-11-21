@@ -312,7 +312,7 @@ A page of the plugin's own that is shown in a pane, where a terminal would be. S
 | `id`      | string  | needed  | The view's name. A pane view and a panel of one plugin may not share a name. |
 | `title`   | string  | needed  | What its pane is called until the plugin titles it. 64 characters at most.   |
 | `entry`   | string  | needed  | The page: an `.html` file in the package.                                    |
-| `icon`    | string  | none    | A [picture](motion.md#pictures).                                             |
+| `icon`    | string  | none    | A [picture](motion.md#pictures), which its pane is known by.                 |
 | `persist` | boolean | `true`  | Whether what the view asks to have kept is saved with the workspace.         |
 
 ## `[[contributes.openers]]`

@@ -21,7 +21,8 @@ tint = true
 A picture declared this way has a name. The plugin's other things and its code use the name
 wherever a picture is wanted:
 
-- `icon` of a menu item, a status item or a panel in the manifest;
+- `icon` of a menu item, a status item, a panel or a pane view in the manifest;
+- `icon` of a [pane](views.md#a-panes-picture), given with `lume.layout.apply`;
 - `icon` of a status value given to `lume.status.set`;
 - `icon` of a panel row.
 

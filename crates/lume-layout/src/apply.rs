@@ -28,8 +28,8 @@ use crate::normalise::{contain, fit, mend, release, tidy_trees};
 use crate::persist::valid_name;
 use crate::tuning::{
     DOCK_PANELS_MAX, DOCK_SIZE_MAX, DOCK_SIZE_MIN, FLOAT_CASCADE, FLOAT_DEFAULT, FLOATING_MAX,
-    RATIO_TOLERANCE, SHARE_MIN, SHELF_MAX, SPLIT_CHILDREN_MAX, TAB_PANES_MAX, TABS_MAX,
-    TITLE_MAX_CHARS, TREE_DEPTH_MAX, UNITS, WINDOWS_MAX,
+    ICON_MAX_CHARS, RATIO_TOLERANCE, SHARE_MIN, SHELF_MAX, SPLIT_CHILDREN_MAX, TAB_PANES_MAX,
+    TABS_MAX, TITLE_MAX_CHARS, TREE_DEPTH_MAX, UNITS, WINDOWS_MAX,
 };
 
 /// A session that was started for a pane an intent is about to make.
@@ -180,6 +180,20 @@ fn name(title: Option<String>) -> Option<String> {
     (!title.is_empty()).then(|| title.to_owned())
 }
 
+/// The name of a picture as it is kept: lower-case letters, digits and `.`, `_`, `:`
+/// and `-`, no longer than such a name may be, and absent when it is anything else.
+fn picture(icon: Option<String>) -> Option<String> {
+    let icon = icon?;
+    let plain = !icon.is_empty()
+        && icon.len() <= ICON_MAX_CHARS
+        && icon.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '.' | '_' | ':' | '-')
+        });
+    plain.then_some(icon)
+}
+
 /// Makes the pane an intent asked for.
 fn new_pane(workspace: &mut Workspace, content: NewContent, started: &mut Option<Started>) -> Pane {
     let content = match content {
@@ -211,6 +225,7 @@ fn new_pane(workspace: &mut Workspace, content: NewContent, started: &mut Option
     Pane {
         id: PaneId::new(workspace.fresh()),
         title: None,
+        icon: None,
         content,
     }
 }
@@ -858,6 +873,12 @@ fn change(
                 .pane_mut(pane)
                 .ok_or(IntentError::NoSuchPane(pane))?
                 .title = name(title);
+        }
+        Intent::PaneIcon { pane, icon } => {
+            workspace
+                .pane_mut(pane)
+                .ok_or(IntentError::NoSuchPane(pane))?
+                .icon = picture(icon).map(String::into_boxed_str);
         }
         Intent::TabNew {
             window,

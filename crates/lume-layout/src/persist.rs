@@ -37,9 +37,9 @@ pub struct WorkspaceFile {
 /// Brings a file's contents from one version of the format to the next.
 type Migration = fn(Value) -> Result<Value, String>;
 
-/// The migrations, each with the version it starts from. Version 2 only added fields
-/// that version 1 files are read without.
-const MIGRATIONS: &[(u32, Migration)] = &[(1, Ok)];
+/// The migrations, each with the version it starts from. Versions 2 and 3 only added
+/// fields that older files are read without.
+const MIGRATIONS: &[(u32, Migration)] = &[(1, Ok), (2, Ok)];
 
 /// What reading a workspace's file gave.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -7,7 +7,7 @@
  * reports never render the component tree.
  */
 
-import type { ConfigView } from "../core/types.ts";
+import type { ConfigView, UiContributions } from "../core/types.ts";
 import { greatest, type Activity } from "../events/activity.ts";
 import {
   describePane,
@@ -15,6 +15,7 @@ import {
   type DescribeContext,
   type PaneDescription,
   type PaneFacts,
+  type PanePictures,
 } from "../events/describe.ts";
 import { iconChoices, type PaneIcon, type ProgramIcon } from "../events/programs.ts";
 import { isTabMuted, panesOf, selectTitlePane, UNTITLED_TAB } from "../layout/selectors.ts";
@@ -38,6 +39,27 @@ function iconsOf(view: ConfigView | null): ReadonlyMap<string, ProgramIcon> {
   return icons;
 }
 
+/** The plugins' pictures, worked out once for each thing the core says plugins add. */
+const PICTURES = new WeakMap<UiContributions, PanePictures>();
+
+const NO_PICTURES: PanePictures = { has: () => false, ofView: () => undefined };
+
+function picturesOf(shown: UiContributions | null): PanePictures {
+  if (!shown) return NO_PICTURES;
+  let pictures = PICTURES.get(shown);
+  if (!pictures) {
+    const views = new Map(
+      shown.pane_views.map((view) => [`${view.plugin}\n${view.view}`, view.icon] as const),
+    );
+    pictures = {
+      has: (key) => Object.hasOwn(shown.images, key),
+      ofView: (plugin, view) => views.get(`${plugin}\n${view}`),
+    };
+    PICTURES.set(shown, pictures);
+  }
+  return pictures;
+}
+
 /** What describing a pane reads besides the pane, as the window holds it now. */
 export function describeContext(app: ShellApp): DescribeContext {
   const view = app.config.getState().view;
@@ -46,6 +68,7 @@ export function describeContext(app: ShellApp): DescribeContext {
     windows: view?.platform === "windows",
     profiles: app.profiles.getState().list,
     icons: iconsOf(view),
+    pictures: picturesOf(app.plugins.getState().shown),
   };
 }
 
@@ -64,6 +87,8 @@ export function paneFacts(state: LayoutState, pane: PaneId): PaneFacts {
     startCwd: terminal?.cwd ?? null,
     launcher: terminal?.launcher ?? null,
     profile: terminal?.profile ?? null,
+    icon: entry?.id === pane ? (entry.icon ?? null) : null,
+    view: content?.type === "plugin_view" ? { plugin: content.plugin, view: content.view } : null,
   };
 }
 
@@ -135,8 +160,16 @@ export function followTab(
     app.layout.subscribe(again),
     app.profiles.subscribe(again),
     app.config.subscribe(again),
+    followPictures(app, again),
   ];
   return () => stops.forEach((stop) => stop());
+}
+
+/** Calls `again` when what plugins add, their pictures among it, has changed. */
+function followPictures(app: ShellApp, again: () => void): () => void {
+  return app.plugins.subscribe((state, before) => {
+    if (state.shown !== before.shown) again();
+  });
 }
 
 /**
@@ -158,6 +191,7 @@ export function followPane(
     }),
     app.profiles.subscribe(again),
     app.config.subscribe(again),
+    followPictures(app, again),
   ];
   return () => stops.forEach((stop) => stop());
 }

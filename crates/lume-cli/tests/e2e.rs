@@ -2572,6 +2572,44 @@ fn a_plugin_opens_a_terminal_only_with_leave_to_start_sessions_and_run_the_progr
 
 #[test]
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_gives_a_pane_its_own_picture_or_a_tile_and_no_other_plugins() {
+    let home = home_with_plugins(&["marker"]);
+    let app = App::start_in(home, false);
+    app.status_with_session();
+    app.until_plugin("test.marker", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    // The window's one tab holds its one pane.
+    let icon = |app: &App| {
+        app.layout()["workspace"]["windows"][0]["centre"]["tabs"][0]["root"]["icon"].clone()
+    };
+    assert_eq!(icon(&app), Value::Null);
+
+    // Its own picture is kept under the plugin's name, whatever else it asked for.
+    app.ctl(&["command", "test.marker.own"]).ok("its own");
+    app.until_plugin("test.marker", "its report", |plugin| {
+        logged(plugin, "gave its own and was refused another's")
+    });
+    let own = icon(&app);
+    let own = own.as_str().expect("the pane has a picture");
+    assert!(own.starts_with("image:") && own.ends_with(":mark"), "{own}");
+
+    app.ctl(&["command", "test.marker.tile"]).ok("a tile");
+    app.until_plugin("test.marker", "its report", |plugin| {
+        logged(plugin, "gave a tile")
+    });
+    assert_eq!(icon(&app), "agent");
+
+    app.ctl(&["command", "test.marker.clear"]).ok("none");
+    app.until_plugin("test.marker", "its report", |plugin| {
+        logged(plugin, "took it away")
+    });
+    assert_eq!(icon(&app), Value::Null);
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn a_plugin_that_waits_for_sessions_hears_of_those_that_were_there_before_it() {
     let home = home_with_plugins(&["listener"]);
     let app = App::start_in(home, false);

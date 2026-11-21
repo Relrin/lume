@@ -68,14 +68,23 @@ export function PluginIcon({
   icon,
   images,
   size = 14,
+  weight,
 }: {
   icon: IconRef | undefined;
   images: Readonly<Record<string, PluginImage>> | undefined;
   size?: number;
+  /** How heavy a line drawing's line is; left out, as heavy as the drawings usually are. */
+  weight?: number;
 }) {
   if (icon === undefined) return null;
   if ("glyph" in icon) {
-    if (isGlyph(icon.glyph)) return <Glyph name={icon.glyph} size={size} />;
+    if (isGlyph(icon.glyph)) {
+      return weight === undefined ? (
+        <Glyph name={icon.glyph} size={size} />
+      ) : (
+        <Glyph name={icon.glyph} size={size} weight={weight} />
+      );
+    }
     return <span className="plugin-icon-dot" aria-hidden="true" />;
   }
   const image = images?.[icon.image];

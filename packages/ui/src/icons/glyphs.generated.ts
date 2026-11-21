@@ -28,6 +28,7 @@ export type LineGlyphName =
   | "bell-off"
   | "book-open"
   | "bookmark"
+  | "bot"
   | "box"
   | "bug"
   | "chart-bar"
@@ -302,6 +303,14 @@ export const LINE_GLYPHS: Readonly<Record<LineGlyphName, readonly GlyphNode[]>> 
   ],
   "bookmark": [
     ["path", {"d":"M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"}],
+  ],
+  "bot": [
+    ["path", {"d":"M12 8V4H8"}],
+    ["rect", {"width":"16","height":"12","x":"4","y":"8","rx":"2"}],
+    ["path", {"d":"M2 14h2"}],
+    ["path", {"d":"M20 14h2"}],
+    ["path", {"d":"M15 13v2"}],
+    ["path", {"d":"M9 13v2"}],
   ],
   "box": [
     ["path", {"d":"M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"}],

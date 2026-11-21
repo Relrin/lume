@@ -7,12 +7,15 @@
  * what to show. It decides nothing else: a report is what a program printed.
  */
 
-import type { Machine, Profile, ProfileList } from "../core/types.ts";
+import type { IconRef, Machine, Profile, ProfileList } from "../core/types.ts";
+import { pictureOf, pictureTile } from "../icons/tiles.ts";
 import { findProfile } from "../profiles/store.ts";
 import type { DisconnectReason, ExitStatus, Launcher, ProgramStatus } from "../transport/types.ts";
 import type { Activity } from "./activity.ts";
 import {
   distributionIcon,
+  isProgramIcon,
+  isScriptRuntime,
   isShell,
   isWorkedIn,
   plainIcon,
@@ -40,6 +43,21 @@ export interface PaneFacts {
   readonly launcher: Launcher | null;
   /** The profile the pane says it runs, where it names one. */
   readonly profile: string | null;
+  /**
+   * The picture the pane was given to be known by: the name of a tile, or `image:` and
+   * the key of a plugin's picture.
+   */
+  readonly icon?: string | null;
+  /** The plugin's view the pane shows, where it shows one. */
+  readonly view?: { readonly plugin: string; readonly view: string } | null;
+}
+
+/** The pictures plugins add, as describing a pane reads them. */
+export interface PanePictures {
+  /** Whether there is a picture under this key. */
+  has(key: string): boolean;
+  /** The picture a plugin's manifest gives one of its views. */
+  ofView(plugin: string, view: string): IconRef | undefined;
 }
 
 /** What describing a pane reads besides the pane. */
@@ -50,6 +68,8 @@ export interface DescribeContext {
   readonly profiles: ProfileList | null;
   /** The user's own pictures for programs, by name. */
   readonly icons: ReadonlyMap<string, ProgramIcon>;
+  /** The pictures plugins add, where the window has plugins. */
+  readonly pictures?: PanePictures;
 }
 
 /** The status a program reported that a header shows. */
@@ -239,6 +259,22 @@ function paneIcon(
   return launcher?.type === "ssh" ? "remote" : "terminal";
 }
 
+/**
+ * The picture a pane is known by whatever runs in it: the one it was given, where that
+ * names a tile or a picture there is, or else the one the view it shows comes with.
+ */
+function givenIcon(facts: PaneFacts, context: DescribeContext): PaneIcon | undefined {
+  const given = facts.icon ?? "";
+  if (isProgramIcon(given)) return given;
+  const picture = pictureOf(given);
+  if (picture !== undefined && "image" in picture && context.pictures?.has(picture.image)) {
+    return pictureTile(picture);
+  }
+  const view = facts.view;
+  const own = view ? context.pictures?.ofView(view.plugin, view.view) : undefined;
+  return own === undefined ? undefined : pictureTile(own);
+}
+
 /** Describes a pane. */
 export function describePane(
   report: PaneReport,
@@ -271,13 +307,21 @@ export function describePane(
     const onlyShellSeen =
       foreground === undefined ||
       (shell === undefined ? isShell(foreground) : programKey(foreground) === programKey(shell));
-    const commanded = running && onlyShellSeen ? commandProgram(command.command) : undefined;
+    const typed = running ? commandProgram(command.command) : undefined;
+    // A program a person works in is often a script: what is seen below the shell is
+    // then what runs the script, and the command line says what the pane is for.
+    const scripted =
+      typed !== undefined &&
+      foreground !== undefined &&
+      isScriptRuntime(foreground) &&
+      isWorkedIn(typed);
+    const commanded = onlyShellSeen || scripted ? typed : undefined;
     program = commanded ?? foreground ?? shell;
     name = program ?? profile?.name ?? UNTITLED_PANE;
     where = localWhere(report, facts, context);
   }
 
-  const icon = paneIcon(program, launcher, report.statuses, context);
+  const icon = givenIcon(facts, context) ?? paneIcon(program, launcher, report.statuses, context);
   const failed =
     !running && command?.state === "finished" && command.exit !== undefined && command.exit !== 0
       ? command.exit

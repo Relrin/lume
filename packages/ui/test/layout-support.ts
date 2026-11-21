@@ -130,6 +130,8 @@ export class PlainFollower {
   #setPane(pane: Pane): void {
     const put = (target: Mutable<Pane>) => {
       target.title = pane.title;
+      if (pane.icon == null) delete target.icon;
+      else target.icon = pane.icon;
       target.content = clone(pane.content);
     };
     for (const window of this.#workspace.windows) {

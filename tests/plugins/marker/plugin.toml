@@ -1,0 +1,32 @@
+# A plugin for the end-to-end tests: it gives a pane a picture of its own, then one of
+# the application's tiles, and may name no other plugin's picture.
+schema = 1
+id = "test.marker"
+name = "Marker"
+version = "1.0.0"
+description = "Gives panes the pictures they are known by."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-marker"
+activation = ["onCommand:own", "onCommand:tile", "onCommand:clear"]
+
+[permissions]
+"layout.write" = true
+"panes.read" = true
+
+[[contributes.images]]
+id = "mark"
+file = "icons/mark.svg"
+tint = true
+
+[[contributes.commands]]
+id = "own"
+title = "Give the first pane the plugin's own picture"
+
+[[contributes.commands]]
+id = "tile"
+title = "Give the first pane one of the application's tiles"
+
+[[contributes.commands]]
+id = "clear"
+title = "Take the first pane's picture away"

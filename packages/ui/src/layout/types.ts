@@ -233,6 +233,11 @@ export interface Pane {
   readonly id: PaneId;
   /** The name the user gave the pane. */
   readonly title: string | null;
+  /**
+   * The picture the pane was given to be known by: the name of a tile, or `image:` and
+   * the key of a plugin's picture. Left out when it was given none.
+   */
+  readonly icon?: string | null;
   readonly content: PaneContent;
 }
 
@@ -349,6 +354,7 @@ export type Intent =
   | { readonly type: "minimise"; readonly pane: PaneId; readonly on: boolean }
   | { readonly type: "dock"; readonly pane: PaneId; readonly to?: Place | null }
   | { readonly type: "pane_rename"; readonly pane: PaneId; readonly title?: string | null }
+  | { readonly type: "pane_icon"; readonly pane: PaneId; readonly icon?: string | null }
   | {
       readonly type: "tab_new";
       readonly window: WindowId;

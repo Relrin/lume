@@ -73,6 +73,10 @@
           },
           {
             "role": "button",
+            "name": "New job"
+          },
+          {
+            "role": "button",
             "name": "Activity",
             "state": {
               "expanded": "false"

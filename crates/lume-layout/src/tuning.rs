@@ -55,6 +55,9 @@ pub const DOCK_PANELS_MAX: usize = 16;
 /// The longest name a tab or a pane may be given, in characters.
 pub const TITLE_MAX_CHARS: usize = 256;
 
+/// The longest name of a picture a pane may be given, in characters.
+pub const ICON_MAX_CHARS: usize = 96;
+
 /// How many changes a reader of an authority's changes may fall behind before it is
 /// given the whole layout instead.
 pub const CHANGE_BACKLOG: usize = 256;
@@ -63,7 +66,7 @@ pub const CHANGE_BACKLOG: usize = 256;
 pub const SHELF_MAX: usize = 32;
 
 /// The version of the file a workspace is saved in.
-pub const WORKSPACE_FILE_VERSION: u32 = 2;
+pub const WORKSPACE_FILE_VERSION: u32 = 3;
 
 /// How many files that could not be read are kept beside a workspace's file.
 pub const CORRUPT_KEPT: usize = 3;

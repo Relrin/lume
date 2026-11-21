@@ -80,6 +80,10 @@ enum Op {
         pane: usize,
         named: bool,
     },
+    PaneIcon {
+        pane: usize,
+        given: bool,
+    },
     TabNew {
         window: usize,
         index: Option<u32>,
@@ -243,6 +247,8 @@ fn ops() -> impl Strategy<Value = Vec<Op>> {
             .prop_map(|(pane, beside)| Op::Dock { pane, beside }),
         1 => (position.clone(), any::<bool>())
             .prop_map(|(pane, named)| Op::PaneRename { pane, named }),
+        1 => (position.clone(), any::<bool>())
+            .prop_map(|(pane, given)| Op::PaneIcon { pane, given }),
         5 => (
             position.clone(),
             proptest::option::of(0u32..4),
@@ -557,6 +563,13 @@ fn resolve(workspace: &Workspace, op: &Op) -> Intent {
         } => Intent::PaneRename {
             pane: pane(position),
             title: name(named),
+        },
+        Op::PaneIcon {
+            pane: position,
+            given,
+        } => Intent::PaneIcon {
+            pane: pane(position),
+            icon: given.then(|| "agent".to_owned()),
         },
         Op::TabNew {
             window: position,
@@ -964,6 +977,7 @@ fn the_sequences_exercise_every_kind_of_intent() {
         "float_move",
         "dock",
         "pane_rename",
+        "pane_icon",
         "tab_new",
         "tab_close",
         "tab_move",

@@ -36,6 +36,9 @@ const TYPED_MAX: usize = 64 * 1024;
 /// How long a plugin's notice may be.
 const TOAST_MAX: usize = 300;
 
+/// What goes before the key of a plugin's picture where a pane names it as its own.
+const PICTURE_IMAGE: &str = "image:";
+
 /// A failure of the application's own, as a plugin's code is told it.
 fn from_command(error: CommandError) -> ApiError {
     let code = match error.code.as_ref() {
@@ -107,6 +110,7 @@ impl Plugins {
                 let mut intent: Intent = serde_json::from_value(apply.intent)
                     .map_err(|error| api_error(ErrorCode::Invalid, error.to_string()))?;
                 self.check_new_terminal(local, &mut intent).await?;
+                self.own_picture(local, &mut intent)?;
                 let services = self.services_or_fail()?;
                 let applied = services.panes.apply(intent).await.map_err(from_command)?;
                 value_of(&applied)
@@ -124,6 +128,30 @@ impl Plugins {
             Call::ServicesCall(asked) => self.call_service(local, asked).await,
             other => self.serve_system(local, other).await,
         }
+    }
+
+    /// The picture a plugin gives a pane: one of the plugin's own, by the name its
+    /// manifest gives it, or else one of the application's tiles. A plugin names no
+    /// other plugin's picture.
+    fn own_picture(&self, local: &str, intent: &mut Intent) -> Result<(), ApiError> {
+        let Intent::PaneIcon {
+            icon: Some(icon), ..
+        } = intent
+        else {
+            return Ok(());
+        };
+        let own = format!("{local}:{icon}");
+        if self.inner().shown.contributions.images.contains_key(&own) {
+            *icon = format!("{PICTURE_IMAGE}{own}");
+            return Ok(());
+        }
+        if icon.contains(':') {
+            return Err(api_error(
+                ErrorCode::Invalid,
+                "a pane's picture is one of the plugin's own, or a tile, by its name",
+            ));
+        }
+        Ok(())
     }
 
     fn services_or_fail(&self) -> Result<Arc<crate::services::Services>, ApiError> {

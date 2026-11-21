@@ -6,13 +6,16 @@
  * announced on its own.
  */
 
-import type { CSSProperties } from "react";
+import { useContext, useSyncExternalStore, type CSSProperties } from "react";
 
+import type { IconRef, PluginImage } from "../core/types.ts";
 import { BrandMark, Glyph } from "../icons/Glyph.tsx";
 import type { LineGlyphName } from "../icons/glyphs.generated.ts";
-import { tileOf, type TileId } from "../icons/tiles.ts";
+import { pictureOf, tileOf, type PictureTile, type TileId } from "../icons/tiles.ts";
 import type { GroupIcon } from "../layout/types.ts";
+import { PluginIcon } from "../plugins/PluginIcon.tsx";
 import { TILE_SIZES, type TilePlace } from "../tuning.ts";
+import { ShellContext } from "./context.ts";
 
 /** The pictures a group of tabs can show, by what the layout calls them. */
 const GROUP_GLYPHS: Readonly<Record<GroupIcon, LineGlyphName>> = {
@@ -238,8 +241,43 @@ export function RefreshIcon({ size = 15 }: { size?: number }) {
   return <Glyph name="refresh-cw" size={size} weight={1.8} />;
 }
 
-/** The tile of a program: its drawing on its colour, sized for the place it is shown. */
-export function ProgramTile({ tile, place }: { tile: TileId; place: TilePlace }) {
+const NO_IMAGES: Readonly<Record<string, PluginImage>> = {};
+const never = () => () => undefined;
+
+/**
+ * A picture a pane was given, or its view comes with, where a tile goes: a plugin's own
+ * picture or one of the page's line drawings, on a tile of no colour of its own.
+ */
+function PictureTileView({ picture, place }: { picture: IconRef; place: TilePlace }) {
+  const app = useContext(ShellContext);
+  const read = () => app?.plugins.getState().shown?.images ?? NO_IMAGES;
+  const images = useSyncExternalStore(app ? app.plugins.subscribe : never, read, read);
+  const size = TILE_SIZES[place];
+  const style = {
+    "--tile-own-bg": "var(--lume-color-control)",
+    "--tile-own-ink": "var(--lume-color-text)",
+    "--tile-width": `${size.width}px`,
+    width: size.width,
+    height: size.height,
+  } as CSSProperties;
+  return (
+    <span className="tile" data-tile="picture" style={style}>
+      <PluginIcon icon={picture} images={images} size={size.glyph} weight={2.4} />
+    </span>
+  );
+}
+
+/**
+ * The tile of a program: its drawing on its colour, sized for the place it is shown. A
+ * pane that is known by a picture instead shows the picture in the tile's place.
+ */
+export function ProgramTile({ tile, place }: { tile: TileId | PictureTile; place: TilePlace }) {
+  const picture = pictureOf(tile);
+  if (picture !== undefined) return <PictureTileView picture={picture} place={place} />;
+  return <NamedTile tile={tile as TileId} place={place} />;
+}
+
+function NamedTile({ tile, place }: { tile: TileId; place: TilePlace }) {
   const drawn = tileOf(tile);
   const size = TILE_SIZES[place];
   const style = {

@@ -452,6 +452,10 @@ pub struct Pane {
     pub id: PaneId,
     /// The name the user gave the pane.
     pub title: Option<String>,
+    /// The picture the pane was given to be known by, instead of the one worked out
+    /// from what runs in it: the name of a tile, or of a plugin's picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Box<str>>,
     pub content: PaneContent,
 }
 

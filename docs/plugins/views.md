@@ -60,6 +60,28 @@ A panel is shown and hidden by the user, like any panel. A pane view is opened:
 - by the command `lume.view.open`, with `{ "plugin": …, "view": … }`;
 - by an opener, when the user opens a file or an address it matches.
 
+## A pane's picture
+
+A pane that shows a view has the view's `icon` in its header, in its tab and in its marker when it
+is put away, where a terminal has the tile of the program it runs. A view with no `icon` shows a
+terminal's prompt.
+
+A plugin with the `layout.write` permission can give any pane a picture to be known by, a
+terminal it opened as well as a view, and change it as what the pane is for changes:
+
+```js
+await lume.layout.apply({ type: "pane_icon", pane, icon: "report" });
+```
+
+- `icon` is one of the plugin's own [pictures](motion.md#pictures), by its name, or one of the
+  application's tiles, by the name `appearance.program-icons` takes for it (`agent`, `editor`,
+  `git`, a program's own such as `docker`).
+- `icon: null` takes the picture away: the pane shows its view's, or what runs in it, again.
+- The picture is kept with the workspace. One that names nothing there is, as after its plugin is
+  removed, is passed over.
+- A picture of the plugin's own that is `tint`ed is drawn in the tile's ink; any other keeps its
+  colours.
+
 ## What a page may load
 
 The frame is sandboxed with scripts allowed and nothing else. Its origin matches no other page's,

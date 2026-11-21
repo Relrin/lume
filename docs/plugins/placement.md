@@ -245,6 +245,27 @@ apart. `before` and `after` name another status item.
 Until the plugin's code says more, an item shows what its manifest gives it: its `label`, its
 `icon`, its `tooltip`.
 
+### A tool in the top bar
+
+An `icon` item in the top bar that has a picture and a `command` or a `menu` is drawn as one of
+the bar's own tools: the picture alone on a square button of their size, as close to them as they
+are to each other. A `badge` with a picture is drawn the same way, with its count over a corner
+of the picture. Give the item a `label` or a `tooltip`: it is what the button is called.
+
+```toml
+[[contributes.status]]
+id = "new"
+slot = "topbar.right"
+kind = "icon"
+icon = "bot"
+label = "New job"
+command = "new-job"
+order = 90
+```
+
+Items of `topbar.right` stand before the bar's tools, the one with the highest `order` nearest
+them.
+
 ### A segmented item
 
 A `segmented` item is a small switch: from two to four parts side by side, one of them the

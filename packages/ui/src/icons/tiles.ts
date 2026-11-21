@@ -9,6 +9,7 @@
  * each time.
  */
 
+import type { IconRef } from "../core/types.ts";
 import { BRAND_GLYPHS, type BrandGlyphName, type LineGlyphName } from "./glyphs.generated.ts";
 
 /** A colour of the terminal's palette, as the page's tokens hold it. */
@@ -256,6 +257,27 @@ export type PlainTile = `plain-${number}`;
 
 /** Every tile there is. */
 export type TileId = CategoryTile | BrandTile | PlainTile;
+
+/**
+ * A picture a pane is known by that is not one of the tiles: one of a plugin's own, by
+ * its key, or one of the page's line drawings, by its name.
+ */
+export type PictureTile = `image:${string}` | `glyph:${string}`;
+
+const IMAGE = "image:";
+const GLYPH = "glyph:";
+
+/** A picture as a pane names it. */
+export function pictureTile(picture: IconRef): PictureTile {
+  return "glyph" in picture ? `${GLYPH}${picture.glyph}` : `${IMAGE}${picture.image}`;
+}
+
+/** The picture a pane names, where what it names is a picture and not a tile. */
+export function pictureOf(named: string): IconRef | undefined {
+  if (named.startsWith(IMAGE)) return { image: named.slice(IMAGE.length) };
+  if (named.startsWith(GLYPH)) return { glyph: named.slice(GLYPH.length) };
+  return undefined;
+}
 
 /** The tiles the configuration may name for a program. */
 export const NAMED_TILES: readonly (CategoryTile | BrandTile)[] = [

@@ -766,6 +766,37 @@
     {
       "changes": [
         {
+          "pane": {
+            "content": {
+              "backend": "local",
+              "cwd": "/work",
+              "env": [],
+              "launcher": null,
+              "profile": null,
+              "session": "0000000000000002",
+              "type": "terminal"
+            },
+            "icon": "agent",
+            "id": "p4",
+            "title": "logs"
+          },
+          "type": "pane"
+        }
+      ],
+      "created": {
+        "pane": null,
+        "tab": null,
+        "window": null
+      },
+      "intent": {
+        "icon": "agent",
+        "pane": "p4",
+        "type": "pane_icon"
+      }
+    },
+    {
+      "changes": [
+        {
           "index": 0,
           "tab": {
             "id": "t10",
@@ -907,6 +938,7 @@
                   "session": "0000000000000002",
                   "type": "terminal"
                 },
+                "icon": "agent",
                 "id": "p4",
                 "title": "logs",
                 "type": "pane"

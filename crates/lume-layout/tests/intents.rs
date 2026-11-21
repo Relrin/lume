@@ -154,6 +154,10 @@ fn an_intent_about_a_pane_that_is_not_there_is_refused() {
             pane: NOWHERE,
             title: None,
         },
+        Intent::PaneIcon {
+            pane: NOWHERE,
+            icon: None,
+        },
         Intent::Float {
             pane: NOWHERE,
             rect: None,
@@ -633,6 +637,38 @@ fn names_are_kept_tidy() {
     assert_eq!(kept.chars().count(), 256);
     let (changes, _) = must(&mut workspace, Intent::TabRename { tab, title: None });
     assert_eq!(changes, vec![LayoutChange::TabTitle { tab, title: None }]);
+}
+
+#[test]
+fn a_pane_is_given_a_picture_and_loses_it() {
+    let (mut workspace, _, _, a) = one_pane();
+    let give = |icon: Option<&str>| Intent::PaneIcon {
+        pane: a,
+        icon: icon.map(str::to_owned),
+    };
+    let (changes, _) = must(&mut workspace, give(Some("agent")));
+    assert!(matches!(changes[..], [LayoutChange::Pane { .. }]));
+    assert_eq!(workspace.pane(a).unwrap().icon.as_deref(), Some("agent"));
+
+    must(&mut workspace, give(Some("image:some.plugin:mark-2")));
+    assert_eq!(
+        workspace.pane(a).unwrap().icon.as_deref(),
+        Some("image:some.plugin:mark-2")
+    );
+
+    // A name that is not plain, or is too long, is no picture.
+    for odd in ["Agent", "two words", "a/b", "", &"a".repeat(97)] {
+        must(&mut workspace, give(Some("agent")));
+        must(&mut workspace, give(Some(odd)));
+        assert_eq!(workspace.pane(a).unwrap().icon, None, "{odd:?}");
+    }
+
+    must(&mut workspace, give(Some("agent")));
+    must(&mut workspace, give(None));
+    assert_eq!(workspace.pane(a).unwrap().icon, None);
+    // A pane with no picture is written as it always was.
+    let written = serde_json::to_value(workspace.pane(a).unwrap()).unwrap();
+    assert!(written.get("icon").is_none());
 }
 
 // Tabs.

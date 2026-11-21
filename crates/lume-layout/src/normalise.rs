@@ -316,6 +316,7 @@ mod tests {
         Node::Pane(Pane {
             id: PaneId::new(number),
             title: None,
+            icon: None,
             content: PaneContent::Terminal(TerminalPane::default()),
         })
     }

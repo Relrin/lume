@@ -176,6 +176,28 @@ describe("what a pane is called and where it is", () => {
     expect(describe("pwsh.exe", "cargo test")).toMatchObject({ name: "cargo", running: true });
   });
 
+  it("names a program a person works in by its command line when a script runtime is seen", () => {
+    const at = report({ launcher: { type: "shell", program: "pwsh.exe", args: [], login: false } });
+    const describe = (name: string, command: string) =>
+      describePane(
+        { ...at, foreground: { pid: 9, name }, command: { state: "running", command } },
+        NO_FACTS,
+        WINDOWS,
+      );
+    // An agent installed as a script runs under what runs the script.
+    expect(describe("node.exe", "claude --resume abc")).toMatchObject({
+      name: "claude",
+      icon: "claude",
+      running: false,
+    });
+    expect(describe("python3", "aider")).toMatchObject({ name: "aider", icon: "agent" });
+    // Anything else a runtime runs is the runtime's, as it is seen.
+    expect(describe("node.exe", "npm run dev")).toMatchObject({ name: "node", icon: "node" });
+    expect(describe("node.exe", "node server.js")).toMatchObject({ name: "node" });
+    // And what is seen is believed where it is no runtime.
+    expect(describe("cargo.exe", "claude")).toMatchObject({ name: "cargo" });
+  });
+
   it("takes the command line's program when only the shell is seen to run", () => {
     const gitBash = {
       type: "shell",
@@ -463,6 +485,36 @@ describe("the pictures of programs", () => {
     const pane = describePane(report({ foreground: { pid: 1, name: "sleep" } }), NO_FACTS, WINDOWS);
     expect(pane.icon).toBe(sleep);
     expect(tileOf(sleep).glyph).toEqual({ kind: "line", name: "terminal" });
+  });
+
+  it("are the picture a pane was given, before what runs in it says", () => {
+    const pictures = {
+      has: (key: string) => key === "some.plugin:mark",
+      ofView: (plugin: string, view: string) =>
+        plugin === "some.plugin" && view === "chat" ? { glyph: "bot" } : undefined,
+    };
+    const context = { ...WINDOWS, pictures };
+    const running = report({ foreground: { pid: 1, name: "node" } });
+    const given = (icon: string | null, view: PaneFacts["view"] = null) =>
+      describePane(running, { ...NO_FACTS, icon, view }, context).icon;
+    expect(given(null)).toBe("node");
+    // A tile by its name, or a plugin's own picture that is there.
+    expect(given("claude")).toBe("claude");
+    expect(given("image:some.plugin:mark")).toBe("image:some.plugin:mark");
+    // What names nothing there is leaves the pane as it would be.
+    expect(given("image:some.plugin:gone")).toBe("node");
+    expect(given("unheard-of")).toBe("node");
+    expect(given("plain-3")).toBe("node");
+    expect(given("glyph:bot")).toBe("node");
+    // A view comes with its own picture, which one the pane was given goes before.
+    const chat = { plugin: "some.plugin", view: "chat" };
+    expect(given(null, chat)).toBe("glyph:bot");
+    expect(given("claude", chat)).toBe("claude");
+    expect(given(null, { plugin: "some.plugin", view: "other" })).toBe("node");
+    // Without plugins there are no pictures.
+    expect(
+      describePane(running, { ...NO_FACTS, icon: "image:some.plugin:mark" }, WINDOWS).icon,
+    ).toBe("node");
   });
 
   it("are drawn with a glyph that exists and a colour", () => {

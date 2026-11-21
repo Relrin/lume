@@ -165,6 +165,10 @@ fn splits_and_tabs() {
                 pane: pane(4),
                 title: Some("logs".to_owned()),
             },
+            Intent::PaneIcon {
+                pane: pane(4),
+                icon: Some("agent".to_owned()),
+            },
             Intent::TabNew {
                 window: w,
                 content: plugin_view(),

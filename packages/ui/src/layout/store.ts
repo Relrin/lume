@@ -275,7 +275,12 @@ function sameShape(a: TreeNode, b: TreeNode): boolean {
  */
 function takeTree(draft: Draft, tab: TabId, node: Node): TreeNode {
   if (node.type === "pane") {
-    const pane: Pane = { id: node.id, title: node.title, content: node.content };
+    const pane: Pane = {
+      id: node.id,
+      title: node.title,
+      ...(node.icon == null ? {} : { icon: node.icon }),
+      content: node.content,
+    };
     const before = draft.data.panes[pane.id];
     draft.set("panes", pane.id, before && alike(before, pane) ? before : pane);
     draft.set("paneTabs", pane.id, tab);

@@ -235,6 +235,8 @@ export interface FakeCoreOptions {
     readonly plugin: string;
     readonly view: string;
   };
+  /** The pictures some of the fixture's panes were given to be known by, by pane. */
+  readonly paneIcons?: Readonly<Record<PaneId, string>>;
   /** Whether the stand-in refuses to open plugins' views, as for a plugin gone. */
   readonly refuseViews?: boolean;
   /** The settings' schema, as plugins make it. Left out, the application's own. */
@@ -582,13 +584,16 @@ export class FakeCore implements Carrier {
   /** A tab's tree, with the pane that shows a plugin's view showing it. */
   #withView(node: Node): Node {
     const shown = this.#options.pluginPane;
-    if (!shown) return node;
+    const icons = this.#options.paneIcons;
+    if (!shown && !icons) return node;
     if (node.type === "split") {
       return { ...node, children: node.children.map((child) => this.#withView(child)) };
     }
-    if (node.id !== shown.pane) return node;
+    const icon = icons?.[node.id];
+    const known = icon === undefined ? node : { ...node, icon };
+    if (node.id !== shown?.pane) return known;
     return {
-      ...node,
+      ...known,
       content: {
         type: "plugin_view" as const,
         plugin: shown.plugin,

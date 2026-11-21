@@ -79,6 +79,13 @@ pub enum Intent {
         #[serde(default)]
         title: Option<String>,
     },
+    /// Gives a pane the picture it is known by, or takes it away: the pane then shows
+    /// the picture of what runs in it again.
+    PaneIcon {
+        pane: PaneId,
+        #[serde(default)]
+        icon: Option<String>,
+    },
     /// Opens a tab with one pane. Without an index it goes after the last tab; in a
     /// group, it goes after the group's last tab and the index is not looked at.
     TabNew {

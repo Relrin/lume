@@ -1175,18 +1175,28 @@
   }
 
   /*
-   * A badge with a picture in the top bar looks like the bar's own tools: the picture
-   * on a square button, its count in a small round mark over the top right corner.
-   * With nothing to count there is no mark.
+   * A picture in the top bar that is pressed looks like the bar's own tools: the
+   * picture on a square button, a badge's count in a small round mark over the top
+   * right corner. With nothing to count there is no mark. Such items stand as close to
+   * each other, and to the bar's tools after them, as the tools stand to each other.
    */
   .status-item[data-tool] {
     position: relative;
     justify-content: center;
+    flex-shrink: 0;
     width: 30px;
     height: 30px;
     margin: 0;
     padding: 0;
     border-radius: min(8px, var(--lume-radius-control));
+  }
+
+  .status-item[data-tool] + .status-item[data-tool] {
+    margin-left: -12px;
+  }
+
+  .top-right > .status-slot:has(> .status-item[data-tool]:last-child) {
+    margin-right: -8px;
   }
 
   .status-item[data-tool]:hover {
@@ -1413,7 +1423,9 @@
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lume-color-text) 26%, transparent);
   }
 
-  .tile svg {
+  .tile svg,
+  .tile .plugin-icon-image,
+  .tile .plugin-icon-mask {
     position: relative;
   }
 
