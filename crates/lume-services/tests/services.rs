@@ -338,6 +338,35 @@ fn a_program_past_its_timeout_is_stopped_with_what_it_started() {
 }
 
 #[test]
+fn a_program_that_ends_while_something_it_started_holds_its_output_is_not_waited_past_its_end() {
+    let layout = Layout::new("run-held");
+    let (program, args) = shell(&layout);
+    // What it starts writes to the same output for a few seconds more.
+    let script = if cfg!(windows) {
+        "start /b ping -n 5 127.0.0.1 & exit /b 4"
+    } else {
+        "(sleep 4; echo late) & exit 4"
+    };
+    let started = Instant::now();
+    let output = process::run(
+        &program,
+        &line(&args, script),
+        options(Duration::from_secs(20)),
+    )
+    .unwrap();
+    // Its end is seen though its output has not ended, and what is still to be written
+    // is waited for no longer than the grace.
+    assert_eq!(output.code, Some(4));
+    assert!(!output.timed_out);
+    assert!(output.truncated, "the output was still open");
+    assert!(
+        started.elapsed() < process::OUTPUT_GRACE + Duration::from_millis(1500),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
 fn a_spawned_program_is_measured_and_stopped_with_what_it_started() {
     let layout = Layout::new("spawn");
     let (program, args) = shell(&layout);

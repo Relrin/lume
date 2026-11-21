@@ -32,6 +32,13 @@ import { acquireGpu, gpuOffered, type GpuShared } from "./webgpu/device.ts";
 export interface RenderHostOptions {
   /** The tiers to try and their order. Defaults to `TIER_ORDER`. */
   tiers?: readonly Tier[];
+  /**
+   * For `start`: what to wait for before the GPU is asked for a device. Asking keeps the
+   * browser's GPU process busy for some hundreds of milliseconds, and the page's first
+   * frames are shown by that same process, so a page that starts asks once its first
+   * frame is out. Asked at once if left out.
+   */
+  gpuAfter?: Promise<unknown>;
 }
 
 /** A place in the page for a renderer's canvas. */
@@ -140,7 +147,9 @@ export class RenderHost {
     const host = new RenderHost(order, undefined);
     if (order.includes("webgpu") && order.includes("canvas2d") && gpuOffered()) {
       host.#gpuAnswered = false;
-      host.gpuSettled = acquireGpu().then((gpu) => host.#answered(gpu));
+      const ask = (): Promise<void> => acquireGpu().then((gpu) => host.#answered(gpu));
+      // A wait that fails is no reason not to ask.
+      host.gpuSettled = options.gpuAfter ? options.gpuAfter.then(ask, ask) : ask();
     }
     return host;
   }

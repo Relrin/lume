@@ -302,7 +302,17 @@ export class TerminalView implements FrameView {
    * fitted when it was told. The size holds until another grid fits: a caller's choice
    * is kept while the window stays as it is, and the window's user has the last word.
    */
-  #pin: { readonly size: TermSize; readonly fitted: TermSize } | undefined;
+  #pin:
+    | {
+        readonly size: TermSize;
+        /**
+         * The grid that fitted the view when the size was given, which the size holds
+         * against until another fits. Not known for a view that was not laid out yet:
+         * the first grid measured is then the one.
+         */
+        readonly fitted: TermSize | undefined;
+      }
+    | undefined;
   /** Run whenever the terminal's contents or size may have changed. */
   readonly #watchers = new Set<() => void>();
   /** Waiting for the view to have a size. */
@@ -623,6 +633,12 @@ export class TerminalView implements FrameView {
     return this.#pin?.size ?? this.#fitted();
   }
 
+  /** A size for the terminal to keep, held against the grid that fits the view now. */
+  #pinned(size: TermSize): { size: TermSize; fitted: TermSize | undefined } {
+    const measured = this.#renderer !== undefined && this.#cssSize.width !== 0;
+    return { size, fitted: measured ? this.#fitted() : undefined };
+  }
+
   /**
    * The grid that fits the view at its current size. A view without elements, or one
    * that has not been laid out yet, answers with the grid it is expected to have, or
@@ -715,8 +731,17 @@ export class TerminalView implements FrameView {
     // answered, so until then the old grid is drawn in the new space, at its own size.
     renderer.resize(size, this.#dpr);
     this.#remeasured = true;
-    // Another grid fits now: the window or the font changed, and that is the newer wish.
-    if (this.#pin && !sameSize(this.#fitted(), this.#pin.fitted)) this.#pin = undefined;
+    if (this.#pin) {
+      const fitted = this.#fitted();
+      if (this.#pin.fitted === undefined) {
+        // The view's first measure: a size given before it is held against this grid.
+        this.#pin = { size: this.#pin.size, fitted };
+      } else if (!sameSize(fitted, this.#pin.fitted)) {
+        // Another grid fits now: the window or the font changed, and that is the newer
+        // wish.
+        this.#pin = undefined;
+      }
+    }
     this.#updateGeometry();
     this.#scheduleReport();
     this.#markDirty();
@@ -820,7 +845,7 @@ export class TerminalView implements FrameView {
     size?: TermSize,
   ): Promise<void> {
     const { vt } = this.#services;
-    const pin = size ? { size, fitted: this.#fitted() } : undefined;
+    const pin = size ? this.#pinned(size) : undefined;
     const facts = { ...this.facts(), ...(size ? { size } : {}) };
     const attachment = await client.attach(backend, session, facts);
     // The screen as the session has it now, taken before any output.
@@ -976,7 +1001,7 @@ export class TerminalView implements FrameView {
    */
   resizeTo(size: TermSize): Promise<TermSize> {
     const { open } = this.#asked();
-    this.#pin = { size, fitted: this.#fitted() };
+    this.#pin = this.#pinned(size);
     this.#report();
     return this.#until(
       open,

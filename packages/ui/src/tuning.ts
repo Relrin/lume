@@ -120,6 +120,12 @@ export const DRAG_START_PX = 4;
 export const FONT_LOAD_TIMEOUT_MS = 3000;
 
 /**
+ * How long a starting window waits for a terminal's first frame before it asks the GPU
+ * for a device anyway: a window with no terminal on show draws none.
+ */
+export const GPU_ASK_LATEST_MS = 1500;
+
+/**
  * How near an edge of a card, as a share of the card's extent, a dragged card must be
  * dropped to go beside the card on that side. Dropped nearer the middle, the two cards
  * change places.

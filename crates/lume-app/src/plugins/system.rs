@@ -489,11 +489,15 @@ impl Plugins {
                 let output = blocking(move || process::run(&program, &args, run))
                     .await
                     .map_err(from_service)?;
+                // What it wrote may be megabytes: text that is sound is taken as it is,
+                // and handed over without another copy being made of it.
                 let text = |bytes: Vec<u8>| match encoding {
-                    Encoding::Utf8 => String::from_utf8_lossy(&bytes).into_owned(),
+                    Encoding::Utf8 => String::from_utf8(bytes).unwrap_or_else(|unsound| {
+                        String::from_utf8_lossy(unsound.as_bytes()).into_owned()
+                    }),
                     Encoding::Base64 => lume_plugin_api::encoding::to_base64(&bytes),
                 };
-                Ok(json!(ProcessResult {
+                Ok(process_result(ProcessResult {
                     code: output.code,
                     stdout: text(output.stdout),
                     stderr: text(output.stderr),
@@ -797,6 +801,18 @@ impl Plugins {
     }
 }
 
+/// How a program ended, as the plugin's code is given it: the same as the type writes
+/// itself, with the texts moved in and not copied.
+fn process_result(result: ProcessResult) -> Value {
+    let mut answer = serde_json::Map::with_capacity(5);
+    answer.insert("code".to_owned(), json!(result.code));
+    answer.insert("stdout".to_owned(), Value::String(result.stdout));
+    answer.insert("stderr".to_owned(), Value::String(result.stderr));
+    answer.insert("timedOut".to_owned(), Value::Bool(result.timed_out));
+    answer.insert("truncated".to_owned(), Value::Bool(result.truncated));
+    Value::Object(answer)
+}
+
 /// A request to a server as the services take it, from what the plugin sent.
 fn fetch_request(url: &str, init: FetchInit) -> Result<FetchRequest, ApiError> {
     let method = init
@@ -826,4 +842,31 @@ fn fetch_request(url: &str, init: FetchInit) -> Result<FetchRequest, ApiError> {
             .min(FETCH_MAX),
         max_bytes: init.max_bytes.unwrap_or(READ_DEFAULT).min(READ_MAX),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_program_s_result_is_handed_over_as_its_type_writes_itself() {
+        for result in [
+            ProcessResult {
+                code: Some(3),
+                stdout: "out \"quoted\"\n".to_owned(),
+                stderr: String::new(),
+                timed_out: false,
+                truncated: true,
+            },
+            ProcessResult {
+                code: None,
+                stdout: String::new(),
+                stderr: "stopped".to_owned(),
+                timed_out: true,
+                truncated: false,
+            },
+        ] {
+            assert_eq!(process_result(result.clone()), json!(result));
+        }
+    }
 }

@@ -152,7 +152,29 @@ fn too_large_state() -> CommandError {
 }
 
 fn state_fits(state: &Value) -> bool {
-    serde_json::to_string(state).is_ok_and(|text| text.len() <= STATE_MAX)
+    fits(state, STATE_MAX)
+}
+
+/// Whether a value is `most` bytes or fewer as JSON. The value is measured as it would
+/// be written, without writing it anywhere, and no further than the limit.
+fn fits(value: &Value, most: usize) -> bool {
+    struct Counted {
+        left: usize,
+    }
+    impl std::io::Write for Counted {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.left = self
+                .left
+                .checked_sub(bytes.len())
+                .ok_or_else(|| std::io::Error::other("past the limit"))?;
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    serde_json::to_writer(Counted { left: most }, value).is_ok()
 }
 
 /// The instance the plugin's code knows an open view by: the window's label and the
@@ -669,7 +691,7 @@ impl Plugins {
                 "a call's name is 1 to 128 characters",
             ));
         }
-        if serde_json::to_string(&args).map_or(true, |text| text.len() > PAYLOAD_MAX) {
+        if !fits(&args, PAYLOAD_MAX) {
             return Err(api_error(
                 ErrorCode::TooLarge,
                 "a view's call carries 1 MiB at most",
@@ -733,7 +755,7 @@ impl Plugins {
             ));
         }
         let payload = post.payload.unwrap_or(Value::Null);
-        if serde_json::to_string(&payload).map_or(true, |text| text.len() > PAYLOAD_MAX) {
+        if !fits(&payload, PAYLOAD_MAX) {
             return Err(api_error(
                 ErrorCode::TooLarge,
                 "an event carries 1 MiB at most",
@@ -753,14 +775,18 @@ impl Plugins {
             return Ok(Value::Null);
         }
         let links = self.state.links();
+        // One notice for every view it goes to, with only the view's name changed: what
+        // it carries is not copied for each.
+        let mut notice = json!({
+            "type": "view_event",
+            "view": "",
+            "event": post.event,
+            "payload": payload,
+        });
         for (window, page) in targets {
             if let Some((_, link)) = links.iter().find(|(label, _)| *label == window) {
-                link.notify(&json!({
-                    "type": "view_event",
-                    "view": page,
-                    "event": post.event,
-                    "payload": payload,
-                }));
+                notice["view"] = Value::String(page);
+                link.notify(&notice);
             }
         }
         Ok(Value::Null)
@@ -783,6 +809,16 @@ impl Plugins {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_value_is_measured_as_the_json_it_would_be() {
+        let value = json!({ "text": "a\"b", "list": [1, 2, 3] });
+        let length = serde_json::to_string(&value).unwrap().len();
+        assert!(fits(&value, length));
+        assert!(!fits(&value, length - 1));
+        assert!(fits(&Value::Null, 4));
+        assert!(!fits(&Value::String("x".repeat(100)), 50));
+    }
 
     #[test]
     fn a_page_names_its_views_plainly() {

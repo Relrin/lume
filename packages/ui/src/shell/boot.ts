@@ -25,7 +25,7 @@ import { createConnectStore, type ConnectStore } from "../connect/store.ts";
 import { CoreClient } from "../core/client.ts";
 import type { ConfigView, Machine, Notice } from "../core/types.ts";
 import { checkFrameContract } from "../frame-contract.ts";
-import { shownAgain, startStep } from "../start-marks.ts";
+import { firstFrame, shownAgain, startStep } from "../start-marks.ts";
 import { CardDrag } from "../drag/controller.ts";
 import { createPanelDragStore, type PanelDragStore } from "../drag/panels.ts";
 import {
@@ -68,7 +68,7 @@ import type { TerminalView } from "../terminal/view.ts";
 import { DEFAULT_APPEARANCE, rendererTheme, type Appearance } from "../theme.ts";
 import { TauriCarrier, type Carrier } from "../transport/carrier.ts";
 import { CommandError } from "../transport/types.ts";
-import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX } from "../tuning.ts";
+import { FONT_SIZE_MAX_PX, FONT_SIZE_MIN_PX, GPU_ASK_LATEST_MS } from "../tuning.ts";
 import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
 import { closeRequested, confirmRequested, mayRun } from "./closing.ts";
 import { describeTabNow, paneFacts } from "./describing.ts";
@@ -147,6 +147,17 @@ export interface ShellApp {
    * never does this; a test that starts a page more than once does, between two.
    */
   dispose(): void;
+}
+
+let emulator: Promise<Vt> | undefined;
+
+/**
+ * The terminal emulator, fetched and compiled once for the page. A starting window asks
+ * for it before anything else, so that it is there when the first terminal is made.
+ */
+export function startVt(): Promise<Vt> {
+  emulator ??= Vt.instantiate(fetch(wasmUrl));
+  return emulator;
 }
 
 /** The parts of the keyboard-layout interface some webviews offer. */
@@ -260,27 +271,35 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   const started = new Promise<void>((resolve) => (ready = resolve));
   let onRequest = (message: unknown): void => void started.then(() => onRequest(message));
 
-  // The graphics device is asked for before the configuration is known, since it is
-  // the slowest part of a start, and nothing waits for it: terminals are drawn with the
-  // next tier until it is granted. A configuration that names one tier is rare.
-  let host = RenderHost.start();
-  const [vt, keyLayout, client] = await Promise.all([
-    Vt.instantiate(fetch(wasmUrl)).then((vt) => {
+  // Nothing waits for the graphics device: terminals are drawn with the next tier until
+  // it is granted. It is asked for only once a terminal's first frame is on screen,
+  // since the browser's GPU process, which shows the page's frames, is held up for some
+  // hundreds of milliseconds by the asking. A configuration that names one tier is rare.
+  let host = RenderHost.start({
+    gpuAfter: Promise.race([
+      firstFrame.then(() => new Promise((shown) => requestAnimationFrame(shown))),
+      new Promise((late) => setTimeout(late, GPU_ASK_LATEST_MS)),
+    ]),
+  });
+  const opened = CoreClient.open(carrier, {
+    notice: (notice) => onNotice(notice),
+    request: (message) => onRequest(message),
+    failure: (error) =>
+      prompts.notice(`The application can no longer be reached: ${error.message}`),
+  });
+  // The first copies are asked for as soon as the core can be reached: they do not
+  // wait for the terminal emulator, which is fetched and compiled meanwhile.
+  const copies = opened.then((client) =>
+    Promise.all([client.layoutView(), client.configView(), client.commandsList()]),
+  );
+  const [vt, keyLayout, client, [layoutView, configView, commandList]] = await Promise.all([
+    startVt().then((vt) => {
       startStep("vt");
       return vt;
     }),
     keyboardLayout(),
-    CoreClient.open(carrier, {
-      notice: (notice) => onNotice(notice),
-      request: (message) => onRequest(message),
-      failure: (error) =>
-        prompts.notice(`The application can no longer be reached: ${error.message}`),
-    }),
-  ]);
-  const [layoutView, configView, commandList] = await Promise.all([
-    client.layoutView(),
-    client.configView(),
-    client.commandsList(),
+    opened,
+    copies,
   ]);
   if (configView.config.renderer.tier !== "auto") {
     host.dispose();

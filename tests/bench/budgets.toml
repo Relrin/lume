@@ -38,10 +38,12 @@
 
 # From the start of the application to the first output of its shell reaching the page,
 # and to its being drawn there. Most of it is the webview's own start, which the shell
-# is started beside. What follows, until the prompt, is the shell's own start and is
+# is started beside: about 380 ms until the webview is there, and some 150 ms more
+# until the browser's GPU process shows a first frame, which nothing of the page's can
+# be seen before. What follows, until the prompt, is the shell's own start and is
 # recorded only.
 "startup.outputMs.p50" = { max = 1000.0, unit = "ms" }
-"startup.drawnMs.p50" = { max = 700.0, unit = "ms" }
+"startup.drawnMs.p50" = { max = 600.0, unit = "ms" }
 # The shell is started before the window's page is there to ask for it.
 "startup.spawnedMs.p50" = { max = 150.0, unit = "ms" }
 # A launch while the application is kept running in the background: from the start of

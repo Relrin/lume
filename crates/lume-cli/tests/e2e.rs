@@ -3856,8 +3856,9 @@ fn the_git_review_plugin_shows_the_changes_of_a_real_repository() {
     // A commit made outside, as a terminal would make it, is followed.
     git_in(&repository, &["add", "-A"]);
     git_in(&repository, &["commit", "--quiet", "-m", "two"]);
+    // With nothing changed the button counts nothing: it draws no mark at all.
     app.until_plugin(ID, "the commit to be seen", |plugin| {
-        status_text(plugin, "git").as_deref() == Some("0")
+        status_text(plugin, "git").as_deref() == Some("")
     });
     if let Some(pages) = &pages {
         pages.until_text("ui/review.html", &["Everything is committed."]);

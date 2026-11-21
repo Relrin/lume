@@ -10,6 +10,12 @@ export type StartStep = "parsed" | "vt" | "gpu" | "fonts" | "layout" | "frame" |
 const reached: Partial<Record<StartStep, number>> = {};
 let output = false;
 let told = false;
+let framed: () => void = () => undefined;
+
+/** Settles when a terminal has drawn its first frame. */
+export const firstFrame: Promise<void> = new Promise((resolve) => {
+  framed = resolve;
+});
 
 /** Notes that a step of the start was reached; only the first time counts. */
 export function startStep(step: StartStep, at: number = performance.now()): void {
@@ -30,6 +36,7 @@ export function startOutput(): void {
 export function startDrawn(): void {
   if (told) return;
   startStep("frame");
+  framed();
   if (!output) return;
   told = true;
   startStep("drawn");

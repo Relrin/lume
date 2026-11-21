@@ -32,6 +32,10 @@ use crate::scope::{Places, ServiceError};
 /// its pipes. A program it started that keeps them open is not waited for past this.
 pub const OUTPUT_GRACE: Duration = Duration::from_secs(2);
 
+/// How long after its output ended a program is first asked after again, if it had not
+/// ended by then; the wait doubles from there.
+const AFTER_OUTPUT: Duration = Duration::from_micros(100);
+
 /// A program found on the PATH.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Program {
@@ -334,10 +338,15 @@ pub fn run(
             let _ = pipe.write_all(&bytes);
         });
     }
-    let stdout = Capture::start(child.stdout.take(), options.max_output);
+    let mut stdout = Capture::start(child.stdout.take(), options.max_output);
     let stderr = Capture::start(child.stderr.take(), options.max_output);
     let deadline = Instant::now() + options.timeout;
     let mut pause = Duration::from_millis(1);
+    // A program's output ends as the program does, so its end is what is waited for,
+    // and the program is asked after at once when it comes. A program that ends and
+    // leaves its output open to something it started is still found, by looking now
+    // and then; so is one that closes its output and runs on.
+    let mut writing = true;
     let (code, timed_out) = loop {
         match child.try_wait() {
             Ok(Some(status)) => break (status.code(), false),
@@ -352,7 +361,15 @@ pub fn run(
             stop(&mut child, &tree);
             break (None, true);
         }
-        thread::sleep(pause.min(deadline - now));
+        let wait = pause.min(deadline - now);
+        if writing && stdout.ended_within(wait) {
+            writing = false;
+            pause = AFTER_OUTPUT;
+            continue;
+        }
+        if !writing {
+            thread::sleep(wait);
+        }
         pause = (pause * 2).min(Duration::from_millis(20));
     };
     let until = Instant::now() + OUTPUT_GRACE;
@@ -378,6 +395,8 @@ fn stop(child: &mut std::process::Child, tree: &Tree) {
 struct Capture {
     kept: Arc<Mutex<(Vec<u8>, bool)>>,
     done: mpsc::Receiver<()>,
+    /// Whether the pipe's end was seen.
+    ended: bool,
 }
 
 impl Capture {
@@ -407,17 +426,29 @@ impl Capture {
                 let _ = tell.send(());
             });
         }
-        Self { kept, done }
+        Self {
+            kept,
+            done,
+            ended: false,
+        }
+    }
+
+    /// Waits up to `wait` for the pipe's end, and says whether it came. A capture with no
+    /// pipe has ended.
+    fn ended_within(&mut self, wait: Duration) -> bool {
+        if !self.ended {
+            self.ended = !matches!(
+                self.done.recv_timeout(wait),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            );
+        }
+        self.ended
     }
 
     /// What was kept, and whether it was cut. Waits for the pipe's end until `until`; a
     /// pipe still open then counts as cut.
-    fn finish(self, until: Instant) -> (Vec<u8>, bool) {
-        let wait = until.saturating_duration_since(Instant::now());
-        let ended = !matches!(
-            self.done.recv_timeout(wait),
-            Err(mpsc::RecvTimeoutError::Timeout)
-        );
+    fn finish(mut self, until: Instant) -> (Vec<u8>, bool) {
+        let ended = self.ended_within(until.saturating_duration_since(Instant::now()));
         let mut kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
         (std::mem::take(&mut kept.0), kept.1 || !ended)
     }
