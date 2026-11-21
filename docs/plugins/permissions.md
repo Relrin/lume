@@ -28,7 +28,7 @@ that is not covered fails with the code `denied`.
 | `net`             | servers       | Connecting to those servers over HTTP and HTTPS.                                                               |
 | `panes.read`      | none          | Reading what the terminals show, their scrollback, and what their programs use of the machine.                 |
 | `panes.write`     | none          | Typing into the terminals.                                                                                     |
-| `sessions.spawn`  | none          | Starting new terminals from the user's profiles.                                                               |
+| `sessions.spawn`  | none          | Starting new terminals: from the user's profiles, or running a program that `process.run` covers.              |
 | `workspace.read`  | none          | Seeing the workspace: its windows, tabs and panes, their folders, what runs in them, and what sessions report. |
 | `layout.write`    | none          | Opening, closing, moving and splitting tabs and panes.                                                         |
 | `clipboard.read`  | none          | Reading the clipboard.                                                                                         |
@@ -156,7 +156,7 @@ When installing, each permission is put in plain words:
 | `net`             | Connect to: (the servers, with their ports)                                           |
 | `panes.read`      | Read what your terminals show, and their scrollback                                   |
 | `panes.write`     | Type into your terminals                                                              |
-| `sessions.spawn`  | Start new terminals from your profiles                                                |
+| `sessions.spawn`  | Start new terminals, from your profiles or with a program it may run                  |
 | `workspace.read`  | See your workspace: its windows, tabs and panes, their folders, and what runs in them |
 | `layout.write`    | Open, close, move and split your tabs and panes                                       |
 | `clipboard.read`  | Read what you copy                                                                    |
@@ -278,6 +278,19 @@ application's, by its id. What a plugin may run of the application's depends on 
 | The rest under `lume.tab.`, `lume.pane.`, `lume.window.`, `lume.group.`, `lume.workspace.` and `lume.panel.`                                                                                                | `layout.write`        |
 | Those under `lume.terminal.` and `lume.search.`                                                                                                                                                             | `panes.write`         |
 | Everything else, such as `lume.palette.open` or `lume.view.zoom-in`                                                                                                                                         | nothing               |
+
+### Terminals that run a program
+
+`lume.sessions.spawn(profile, { program, args, env })` opens a terminal that runs a program in place
+of a profile's shell. It needs two permissions: `sessions.spawn`, and `process.run` over the
+program, which is named and found as a program the plugin runs itself is. On Windows a batch file
+needs `cmd` in the scope, and takes no argument that is empty or holds a space or one of
+`"&|<>^%!()`.
+
+The same holds for `lume.layout.apply` with an intent that opens a terminal (`split`, `tab_new`,
+`window_new`, `scratch_show`): `layout.write` alone opens views and moves panes, but a new terminal
+needs `sessions.spawn`, and a `launcher` in it must be `{ type: "shell", program, args, login }`
+with a program `process.run` covers. Other launchers, and sessions that already run, are refused.
 
 Some commands only the user may run, because they widen what plugins may do or end what the user
 has running: `lume.app.quit`, `lume.app.quit-end-sessions`, `lume.workspace.delete`,

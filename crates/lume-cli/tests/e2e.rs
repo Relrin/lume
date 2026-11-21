@@ -2517,6 +2517,61 @@ fn a_plugin_is_refused_everything_it_was_not_given() {
 
 #[test]
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_opens_a_terminal_only_with_leave_to_start_sessions_and_run_the_program() {
+    if !on_path("git") {
+        println!("skipped: there is no git on this machine");
+        return;
+    }
+    let home = home_with_plugins(&["splitter", "opener"]);
+    let app = App::start_in(home, false);
+    app.status_with_session();
+    for id in ["test.splitter", "test.opener"] {
+        app.until_plugin(id, "the plugin to be read", |plugin| {
+            plugin["state"] == "ready"
+        });
+    }
+    let panes = |app: &App| {
+        app.ctl(&["list"]).ok("list")["sessions"]
+            .as_array()
+            .map_or(0, Vec::len)
+    };
+    let at_first = panes(&app);
+    // Leave to change the layout is not leave to start what a terminal runs.
+    app.ctl(&["command", "test.splitter.probe"]).ok("the probe");
+    app.until_plugin("test.splitter", "its report", |plugin| {
+        logged(plugin, "refused all")
+    });
+    assert_eq!(panes(&app), at_first, "a refused terminal was opened");
+    // With both, the program the plugin may run is started, and no other.
+    app.ctl(&["command", "test.opener.probe"]).ok("the probe");
+    app.until_plugin("test.opener", "its report", |plugin| {
+        logged(plugin, "opened one and refused the rest")
+    });
+    let audit = std::fs::read_to_string(app.home.join("state/plugins/audit.log")).unwrap();
+    let entries: Vec<Value> = audit
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .collect();
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["plugin"] == "test.splitter"
+                && entry["capability"] == "sessions.spawn"
+                && entry["outcome"] == "denied"),
+        "{audit}"
+    );
+    assert!(
+        entries.iter().any(|entry| entry["plugin"] == "test.opener"
+            && entry["capability"] == "process.run"
+            && entry["scope"] == "ssh"
+            && entry["outcome"] == "denied"),
+        "{audit}"
+    );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn a_plugin_cannot_reach_past_what_it_was_given() {
     let home = home_with_plugins(&["escapes"]);
     // A link in the plugin's own data folder to the plugins folder, which holds the

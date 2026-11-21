@@ -1,0 +1,21 @@
+# A plugin for the end-to-end tests: it may start terminals and run one program, and
+# opens terminals that run a program by its name.
+schema = 1
+id = "test.opener"
+name = "Opener"
+version = "1.0.0"
+description = "Opens terminals that run a program."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-opener"
+activation = ["onCommand:probe"]
+
+[permissions]
+"layout.write" = true
+"panes.read" = true
+"sessions.spawn" = true
+"process.run" = ["git"]
+
+[[contributes.commands]]
+id = "probe"
+title = "Open terminals that run a program"

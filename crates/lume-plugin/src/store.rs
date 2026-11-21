@@ -1149,18 +1149,28 @@ fn follow_manifest(entry: &mut Entry, manifest: &Manifest, folder: &Path) {
     let granted = permissions::parse_table(&entry.grants)
         .unwrap_or_default()
         .required;
-    let kept: Vec<Request> = granted
-        .into_iter()
-        .filter(|old| {
-            !required.iter().any(|new| new.kind == old.kind)
-                && manifest
-                    .requested
-                    .optional
-                    .iter()
-                    .any(|optional| optional.kind == old.kind)
-        })
-        .collect();
-    required.extend(kept);
+    for old in granted {
+        let may_ask = manifest
+            .requested
+            .optional
+            .iter()
+            .any(|optional| optional.kind == old.kind);
+        if !may_ask {
+            continue;
+        }
+        // A kind the manifest asks for and may also ask more of: what was granted of it
+        // while it ran joins what the manifest asks for.
+        match required.iter_mut().find(|new| new.kind == old.kind) {
+            Some(held) => {
+                for scope in old.scope {
+                    if !held.scope.contains(&scope) {
+                        held.scope.push(scope);
+                    }
+                }
+            }
+            None => required.push(old),
+        }
+    }
     for request in required
         .iter()
         .filter(|request| request.kind == Kind::ServicesUse)
@@ -1922,6 +1932,34 @@ mod tests {
         let empty = GitSource::parse(&address(&origin), None, None).unwrap();
         assert!(store.prepare(empty, InstallOptions::default()).is_err());
         assert!(!store.root().join("staging").exists());
+    }
+
+    #[test]
+    fn a_linked_plugin_keeps_what_it_was_granted_of_a_kind_its_manifest_also_asks_for() {
+        let dir = TempDir::new("link-grant");
+        let store = store(&dir);
+        let folder = package(
+            &dir,
+            "work",
+            "acme.x",
+            "0.1.0",
+            "[permissions]\n\"process.run\" = [\"git\"]\n\n[permissions.optional]\n\"process.run\" = true\n",
+        );
+        store.link(&folder, InstallOptions::default()).unwrap();
+        let more = Request {
+            kind: Kind::ProcessRun,
+            scope: vec!["node".to_owned()],
+            prompt: crate::permissions::Prompt::Once,
+        };
+        store.grant("acme.x", &more).unwrap();
+        let (installed, _) = store.resolve(true).unwrap();
+        let grants = permissions::parse_table(&installed[0].entry.grants).unwrap();
+        let run = grants
+            .required
+            .iter()
+            .find(|request| request.kind == Kind::ProcessRun)
+            .unwrap();
+        assert_eq!(run.scope, ["git", "node"]);
     }
 
     #[test]

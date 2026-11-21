@@ -244,7 +244,7 @@ impl Plugins {
     /// A program a plugin asked to run, found and checked against its grant. The name is
     /// checked before it is looked for, so what is refused does not depend on what is
     /// installed; a batch file found for it is checked again, as `cmd`.
-    async fn program(&self, local: &str, name: &str) -> Result<Program, ApiError> {
+    pub(super) async fn program(&self, local: &str, name: &str) -> Result<Program, ApiError> {
         let named = Program {
             grant: name.to_owned(),
             path: PathBuf::new(),

@@ -289,6 +289,17 @@ impl Intent {
                 | Intent::GroupGraft { .. }
         )
     }
+
+    /// What the pane this intent makes is to show, for the intents that make one.
+    pub fn new_content_mut(&mut self) -> Option<&mut NewContent> {
+        match self {
+            Intent::Split { content, .. }
+            | Intent::TabNew { content, .. }
+            | Intent::WindowNew { content, .. } => Some(content),
+            Intent::ScratchShow { content, .. } => content.as_mut(),
+            _ => None,
+        }
+    }
 }
 
 /// What a new pane shows.

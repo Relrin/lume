@@ -1,0 +1,19 @@
+# A plugin for the end-to-end tests: it may change the layout and nothing else, and
+# tries to open terminals through it. Each try must be refused.
+schema = 1
+id = "test.splitter"
+name = "Splitter"
+version = "1.0.0"
+description = "Tries to start terminals with the layout permission alone."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-splitter"
+activation = ["onCommand:probe"]
+
+[permissions]
+"layout.write" = true
+"panes.read" = true
+
+[[contributes.commands]]
+id = "probe"
+title = "Try to open terminals"

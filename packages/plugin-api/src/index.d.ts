@@ -719,10 +719,28 @@ export interface SessionReport {
 
 export interface SessionSpawnOptions {
   /**
+   * The program's arguments. Only with `program`.
+   */
+  args?: string[];
+  /**
    * The folder it starts in.
    */
   cwd?: string;
+  /**
+   * Variables added to the program's environment. Only with `program`.
+   */
+  env?: Record<string, string>;
+  /**
+   * The pane it opens beside, for `right` and `down`: the pane that has the keyboard
+   * if left out.
+   */
+  pane?: string;
   place?: SpawnPlace;
+  /**
+   * A program to run in it in place of the profile's shell, by its name alone, as
+   * `claude`. The plugin needs the `process.run` permission over it as well.
+   */
+  program?: string;
 }
 
 export interface SessionsSpawn {

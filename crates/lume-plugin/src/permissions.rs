@@ -627,7 +627,9 @@ pub fn describe(request: &Request) -> Description {
             "Read what your terminals show, and their scrollback".to_owned()
         }
         Kind::PanesWrite => "Type into your terminals".to_owned(),
-        Kind::SessionsSpawn => "Start new terminals from your profiles".to_owned(),
+        Kind::SessionsSpawn => {
+            "Start new terminals, from your profiles or with a program it may run".to_owned()
+        }
         Kind::WorkspaceRead => {
             "See your workspace: its windows, tabs and panes, their folders, and what runs \
              in them"

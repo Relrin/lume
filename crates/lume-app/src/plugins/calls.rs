@@ -17,7 +17,7 @@ use lume_plugin_api::types::{
 };
 use lume_plugin_api::{ApiError, Call, ErrorCode};
 use lume_proto::app::{AppReplyBody, PageRequestBody};
-use lume_proto::{ErrorCode as SessionCode, Responder};
+use lume_proto::{ErrorCode as SessionCode, Launcher, Responder};
 use lume_session::SessionError;
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -49,6 +49,18 @@ fn from_command(error: CommandError) -> ApiError {
 
 fn from_session(error: SessionError) -> ApiError {
     from_command(CommandError::from(error))
+}
+
+/// A path without the long form's prefix (`\\?\C:\dir` as `C:\dir`), which the command
+/// interpreter and many programs do not take.
+fn plain_path(path: &str) -> String {
+    match path.strip_prefix(r"\\?\") {
+        Some(rest) => match rest.strip_prefix(r"UNC\") {
+            Some(share) => format!(r"\\{share}"),
+            None => rest.to_owned(),
+        },
+        None => path.to_owned(),
+    }
 }
 
 fn value_of<T: serde::Serialize>(value: &T) -> Result<Value, ApiError> {
@@ -87,13 +99,14 @@ impl Plugins {
                 self.pane_write(local, &write.pane, &write.text).await?;
                 Ok(Value::Null)
             }
-            Call::SessionsSpawn(asked) => self.spawn_session(asked).await,
+            Call::SessionsSpawn(asked) => self.spawn_session(local, asked).await,
             Call::SessionsList(_) => self.session_list().await,
             Call::WorkspaceCurrent(_) => value_of(&self.workspace_info()?),
             Call::WorkspaceRoot(_) => Ok(json!(self.config.current().workspace.root.clone())),
             Call::LayoutApply(apply) => {
-                let intent: Intent = serde_json::from_value(apply.intent)
+                let mut intent: Intent = serde_json::from_value(apply.intent)
                     .map_err(|error| api_error(ErrorCode::Invalid, error.to_string()))?;
+                self.check_new_terminal(local, &mut intent).await?;
                 let services = self.services_or_fail()?;
                 let applied = services.panes.apply(intent).await.map_err(from_command)?;
                 value_of(&applied)
@@ -259,9 +272,128 @@ impl Plugins {
         input.write(text.as_bytes()).await.map_err(from_session)
     }
 
-    async fn spawn_session(&self, asked: SessionsSpawn) -> Result<Value, ApiError> {
+    /// How a program a plugin names is started in a terminal: found along the path once
+    /// and checked against the plugin's `process.run` grant, as a program it runs itself
+    /// is. A batch file is run by the command interpreter, which the grant must hold.
+    async fn terminal_program(
+        &self,
+        local: &str,
+        name: &str,
+        args: Vec<String>,
+    ) -> Result<Launcher, ApiError> {
+        let found = self.program(local, name).await?;
+        let path = plain_path(&found.path.display().to_string());
+        let batch = found
+            .path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+            });
+        if !(cfg!(windows) && batch) {
+            return Ok(Launcher::Shell {
+                program: path,
+                args,
+                login: false,
+            });
+        }
+        // The interpreter reads its line by rules of its own, under which a quoted
+        // argument beside a quoted path, or one of its special characters, changes what
+        // is run. Such arguments are refused instead of guessed at.
+        let unsafe_for_batch = |text: &str| {
+            text.is_empty()
+                || text
+                    .chars()
+                    .any(|c| c.is_whitespace() || "\"&|<>^%!()".contains(c))
+        };
+        if args.iter().any(|arg| unsafe_for_batch(arg)) {
+            return Err(api_error(
+                ErrorCode::Invalid,
+                format!(
+                    "`{name}` is a batch file here, which cannot be given an argument that is \
+                     empty or holds a space or one of \"&|<>^%!()"
+                ),
+            ));
+        }
+        let mut line = vec!["/d".to_owned(), "/c".to_owned(), path];
+        line.extend(args);
+        Ok(Launcher::Shell {
+            program: "cmd.exe".to_owned(),
+            args: line,
+            login: false,
+        })
+    }
+
+    /// Checks an intent of a plugin's that opens a terminal: opening one is starting a
+    /// session, which needs `sessions.spawn`, and a program it names is checked as
+    /// `terminal_program` checks it, and started from where it was found. Anything but a
+    /// program by its name, or a session that already runs, is refused.
+    async fn check_new_terminal(&self, local: &str, intent: &mut Intent) -> Result<(), ApiError> {
+        let Some(NewContent::Terminal(request)) = intent.new_content_mut() else {
+            return Ok(());
+        };
+        let may_spawn = self
+            .inner()
+            .loaded
+            .get(local)
+            .is_some_and(|loaded| grant_of(&loaded.grants, Kind::SessionsSpawn).is_some());
+        self.broker
+            .record(local, Kind::SessionsSpawn, None, may_spawn);
+        if !may_spawn {
+            return Err(api_error(
+                ErrorCode::Denied,
+                format!("{local} has no permission to start terminals"),
+            ));
+        }
+        if request.session.is_some() || request.backend.is_some() {
+            return Err(api_error(
+                ErrorCode::Denied,
+                "a plugin opens a new terminal on this computer, not a session that runs \
+                 already or one elsewhere",
+            ));
+        }
+        match request.launcher.take() {
+            None => Ok(()),
+            Some(Launcher::Shell { program, args, .. }) => {
+                request.launcher = Some(self.terminal_program(local, &program, args).await?);
+                Ok(())
+            }
+            Some(_) => Err(api_error(
+                ErrorCode::Denied,
+                "a plugin starts a program by its name, or a profile of the user's",
+            )),
+        }
+    }
+
+    async fn spawn_session(&self, local: &str, asked: SessionsSpawn) -> Result<Value, ApiError> {
         let services = self.services_or_fail()?;
         let panes = &services.panes;
+        let options = asked.options;
+        let launcher = match options.program.filter(|name| !name.trim().is_empty()) {
+            Some(name) => Some(self.terminal_program(local, &name, options.args).await?),
+            None if !options.args.is_empty() || options.env.is_some() => {
+                return Err(api_error(
+                    ErrorCode::Invalid,
+                    "arguments and variables are for a program, which was not named",
+                ));
+            }
+            None => None,
+        };
+        let beside = match options.pane {
+            Some(pane) => {
+                let id: PaneId = pane
+                    .parse()
+                    .map_err(|reason: &str| api_error(ErrorCode::Invalid, reason))?;
+                if panes.workspace().pane(id).is_none() {
+                    return Err(api_error(
+                        ErrorCode::NotFound,
+                        format!("there is no pane {pane}"),
+                    ));
+                }
+                Some(id)
+            }
+            None => None,
+        };
         let profile = match asked.profile.filter(|id| !id.trim().is_empty()) {
             Some(id) => match panes.profiles.resolve(&id).await {
                 Some(_) => Some(id),
@@ -279,11 +411,13 @@ impl Plugins {
             .ok_or_else(|| api_error(ErrorCode::Failed, "there is no window to open it in"))?;
         let content = NewContent::Terminal(SpawnRequest {
             profile,
-            cwd: asked.options.cwd,
+            launcher,
+            cwd: options.cwd,
+            env: options.env.unwrap_or_default().into_iter().collect(),
             ..SpawnRequest::default()
         });
-        let place = asked.options.place.unwrap_or_default();
-        let intent = match (place, panes.focused_pane(window)) {
+        let place = options.place.unwrap_or_default();
+        let intent = match (place, beside.or_else(|| panes.focused_pane(window))) {
             (SpawnPlace::Right | SpawnPlace::Down, Some(pane)) => Intent::Split {
                 pane,
                 dir: if place == SpawnPlace::Right {

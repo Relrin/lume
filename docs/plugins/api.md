@@ -1192,8 +1192,12 @@ Something a session reported, as a plugin hears it.
 
 | Field | Type | |
 |---|---|---|
+| `args` | `string[]` | optional. The program's arguments. Only with `program`. |
 | `cwd` | `string` | optional. The folder it starts in. |
+| `env` | `Record<string, string>` | optional. Variables added to the program's environment. Only with `program`. |
+| `pane` | `string` | optional. The pane it opens beside, for `right` and `down`: the pane that has the keyboard if left out. |
 | `place` | `SpawnPlace` | optional.  |
+| `program` | `string` | optional. A program to run in it in place of the profile's shell, by its name alone, as `claude`. The plugin needs the `process.run` permission over it as well. |
 
 ### `SessionsSpawn`
 

@@ -715,6 +715,20 @@ pub struct SessionSpawnOptions {
     pub cwd: Option<String>,
     #[serde(default)]
     pub place: Option<SpawnPlace>,
+    /// A program to run in it in place of the profile's shell, by its name alone, as
+    /// `claude`. The plugin needs the `process.run` permission over it as well.
+    #[serde(default)]
+    pub program: Option<String>,
+    /// The program's arguments. Only with `program`.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Variables added to the program's environment. Only with `program`.
+    #[serde(default)]
+    pub env: Option<std::collections::BTreeMap<String, String>>,
+    /// The pane it opens beside, for `right` and `down`: the pane that has the keyboard
+    /// if left out.
+    #[serde(default)]
+    pub pane: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
