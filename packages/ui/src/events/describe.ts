@@ -14,6 +14,7 @@ import type { Activity } from "./activity.ts";
 import {
   distributionIcon,
   isShell,
+  isWorkedIn,
   plainIcon,
   programIcon,
   programKey,
@@ -79,7 +80,10 @@ export interface PaneDescription {
   readonly where: string;
   /** Where it is in full. */
   readonly whereInFull: string;
-  /** Whether the shell is running a command line. */
+  /**
+   * Whether the shell is running a command line that will come to an end by itself:
+   * not a program the user works in, such as an agent or an editor.
+   */
   readonly running: boolean;
   /** The exit code of the command line that ended last, when it failed. */
   readonly failed: number | null;
@@ -285,7 +289,10 @@ export function describePane(
     icon,
     where: where.short,
     whereInFull: where.full,
-    running,
+    // A program the user works in is not something that is running to its end: an
+    // agent or an editor left open says nothing is under way. What such a program is
+    // doing, it says itself, and that is shown as its status.
+    running: running && !(program !== undefined && isWorkedIn(program)),
     failed: ended ? null : failed,
     status: ended ? null : statusMark(report.statuses),
     ended,

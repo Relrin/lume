@@ -218,6 +218,9 @@ function body(item: StatusItem): ReactNode {
       return <Sparkline item={item} />;
     case "badge":
       return <span className="status-badge">{item.text}</span>;
+    case "segmented":
+      // Drawn by the item itself: its parts are buttons of their own.
+      return null;
   }
 }
 
@@ -287,6 +290,8 @@ function shownOf(item: StatusItem): string {
       return item.text ?? "";
     case "icon":
       return item.label;
+    case "segmented":
+      return item.selected ?? "";
   }
 }
 
@@ -435,6 +440,54 @@ export function StatusItemView({ item }: { item: StatusItem }) {
   };
 
   const interactive = app !== null && (item.command !== undefined || item.menu !== undefined);
+  if (item.kind === "segmented") {
+    const { command } = item;
+    return (
+      <span
+        ref={(node) => {
+          element.current = node;
+        }}
+        role="group"
+        aria-label={item.label === "" ? undefined : item.label}
+        className="status-item status-segmented"
+        {...attributes}
+        title={undefined}
+      >
+        {item.choices.map((choice) => {
+          const chosen = choice.value === item.selected;
+          return (
+            <button
+              key={choice.value}
+              type="button"
+              className="status-segment"
+              aria-pressed={chosen}
+              aria-label={choice.label}
+              title={choice.label}
+              tabIndex={-1}
+              disabled={app === null || command === undefined}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => {
+                // The chosen part is where things are already.
+                if (chosen || app === null || command === undefined) return;
+                const given =
+                  typeof item.args === "object" && item.args !== null
+                    ? (item.args as Record<string, unknown>)
+                    : {};
+                app.commands.run(command, { ...given, value: choice.value });
+              }}
+            >
+              {choice.picture !== undefined && (
+                <span className="status-picture">
+                  <PluginIcon icon={choice.picture} images={images} size={11} />
+                </span>
+              )}
+              <span className="status-segment-label">{choice.label}</span>
+            </button>
+          );
+        })}
+      </span>
+    );
+  }
   return (
     <>
       {interactive ? (

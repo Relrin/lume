@@ -2572,6 +2572,22 @@ fn a_plugin_opens_a_terminal_only_with_leave_to_start_sessions_and_run_the_progr
 
 #[test]
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_that_waits_for_sessions_hears_of_those_that_were_there_before_it() {
+    let home = home_with_plugins(&["listener"]);
+    let app = App::start_in(home, false);
+    // The first terminal runs, and has reported, before the plugins are read: nothing
+    // it says afterwards would start a plugin that waits for it.
+    app.status_with_session();
+    app.until_plugin(
+        "test.listener",
+        "the plugin to hear of the first terminal",
+        |plugin| logged(plugin, "heard the state of p"),
+    );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn a_plugin_cannot_reach_past_what_it_was_given() {
     let home = home_with_plugins(&["escapes"]);
     // A link in the plugin's own data folder to the plugins folder, which holds the

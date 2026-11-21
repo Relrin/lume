@@ -133,6 +133,9 @@ pub struct StatusDef {
     pub icon: Option<Icon>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<String>,
+    /// The parts of a segmented item, in the order they are shown.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<StatusChoiceDef>,
     /// The command it runs when clicked, by its full id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
@@ -147,6 +150,15 @@ pub struct StatusDef {
     /// The plugin's setting that chooses which of the bars' places it is in.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slot_setting: Option<SlotSetting>,
+}
+
+/// One part of a segmented status item.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct StatusChoiceDef {
+    pub value: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Icon>,
 }
 
 /// A setting of the plugin's that chooses where a status item goes.
@@ -1170,6 +1182,15 @@ fn status(installs: &[Install<'_>], commands: &dyn Commands, out: &mut Contribut
                 label: item.label.clone(),
                 icon: names.icon(item.icon.as_ref(), &out.images),
                 tooltip: item.tooltip.clone(),
+                choices: item
+                    .choices
+                    .iter()
+                    .map(|choice| StatusChoiceDef {
+                        value: choice.value.clone(),
+                        label: choice.label.clone(),
+                        icon: names.icon(choice.icon.as_ref(), &out.images),
+                    })
+                    .collect(),
                 command,
                 menu: item.menu.as_ref().map(|menu| format!("{local}:{menu}")),
                 when: names.when(item.when.as_ref()),

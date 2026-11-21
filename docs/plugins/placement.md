@@ -240,9 +240,36 @@ apart. `before` and `after` name another status item.
 | `meter`     | How full something is, from 0 to 1.     |
 | `sparkline` | A small line through the latest values. |
 | `badge`     | A count or a word.                      |
+| `segmented` | A few choices, one of them chosen.      |
 
 Until the plugin's code says more, an item shows what its manifest gives it: its `label`, its
 `icon`, its `tooltip`.
+
+### A segmented item
+
+A `segmented` item is a small switch: from two to four parts side by side, one of them the
+chosen one. It suits a pane's header, where it says which of a few ways the pane is shown.
+
+```toml
+[[contributes.status]]
+id = "view"
+slot = "pane.header"
+kind = "segmented"
+label = "Pane view"
+command = "show-as"
+choices = [
+  { value = "terminal", label = "Terminal", icon = "terminal" },
+  { value = "ui", label = "UI", icon = "window" },
+]
+```
+
+- Each choice has a `value` (lower-case letters, digits and hyphens), a `label`, and may have
+  an `icon`. In a narrow pane a choice with an icon is drawn as the icon alone.
+- The item needs a `command`, and takes no `menu`. Pressing a part that is not the chosen
+  one runs the command with `{ value }`, and in a pane's header with `{ pane, value }`.
+- The code says which part is chosen: `lume.status.set(id, { selected: "ui" }, pane)`. The
+  window does not change it by itself when a part is pressed: the command does what was
+  asked, and then says what is chosen now.
 
 ### Values
 

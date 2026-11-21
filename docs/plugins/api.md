@@ -1267,6 +1267,7 @@ the manifest says what kind of item it is.
 | `icon` | `string` | optional. The picture beside it: one of the plugin's own, by the name its manifest gives it, or one of the application's, by name. |
 | `label` | `string` | optional. What the item stands for, read out and shown beside a meter. |
 | `points` | `number[]` | optional. A sparkline's values, from the oldest to the newest. |
+| `selected` | `string` | optional. Which part of a segmented item is the chosen one, by its value. |
 | `text` | `string` | optional. The words of a text or badge item, or the amount written out beside a meter or a sparkline. |
 | `tone` | `Tone` | optional.  |
 | `tooltip` | `string` | optional. What the pointer is told when it rests on the item. |

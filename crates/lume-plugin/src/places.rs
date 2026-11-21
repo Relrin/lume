@@ -46,7 +46,7 @@ pub const BAR_SLOTS: [&str; 5] = [
 ];
 
 /// The kinds of status item.
-pub const STATUS_KINDS: [&str; 5] = ["text", "icon", "meter", "sparkline", "badge"];
+pub const STATUS_KINDS: [&str; 6] = ["text", "icon", "meter", "sparkline", "badge", "segmented"];
 
 /// The dock areas a panel can open in.
 pub const DOCK_AREAS: [&str; 3] = ["left", "right", "bottom"];

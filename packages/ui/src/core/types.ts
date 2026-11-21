@@ -249,6 +249,12 @@ export interface StatusDef {
   readonly label?: string;
   readonly icon?: IconRef;
   readonly tooltip?: string;
+  /** The parts of a segmented item, in the order they are shown. */
+  readonly choices?: readonly {
+    readonly value: string;
+    readonly label: string;
+    readonly icon?: IconRef;
+  }[];
   readonly command?: string;
   /** The key of the submenu in `menu.status` it opens. */
   readonly menu?: string;

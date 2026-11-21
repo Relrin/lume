@@ -242,6 +242,47 @@ export function isShell(program: string): boolean {
   return SHELLS.includes(programKey(program));
 }
 
+/**
+ * The programs a person works in, as opposed to those they wait for: coding agents,
+ * editors and pagers, monitors, file managers, multiplexers and shells on other
+ * machines. One of them at the prompt is the shell's command for as long as it is
+ * open, which says nothing of whether anything is under way.
+ */
+const WORKED_IN: ReadonlySet<string> = new Set([
+  ...KINDS.agent,
+  ...OWN.claude,
+  ...OWN.cline,
+  ...OWN.copilot,
+  ...OWN.cursor,
+  ...OWN.gemini,
+  ...OWN.opencode,
+  ...OWN.qwen,
+  "pi",
+  "agy",
+  ...KINDS.editor,
+  ...OWN.emacs,
+  ...OWN.helix,
+  ...OWN.neovim,
+  ...OWN.vim,
+  ...KINDS.monitor,
+  ...KINDS.files,
+  "tmux",
+  "screen",
+  "zellij",
+  "byobu",
+  "lazygit",
+  "tig",
+  "gitui",
+  "ssh",
+  "mosh",
+  "telnet",
+]);
+
+/** Whether a program is one a person works in, by its name. */
+export function isWorkedIn(program: string): boolean {
+  return WORKED_IN.has(programKey(program));
+}
+
 /** Whether a value is the name of a tile the configuration may name. */
 export function isProgramIcon(value: unknown): value is ProgramIcon {
   return typeof value === "string" && (PROGRAM_ICONS as readonly string[]).includes(value);

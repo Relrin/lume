@@ -137,6 +137,22 @@ function itemOf(
       return shownText === undefined || shownText === ""
         ? undefined
         : { ...base, kind: "badge", text: shownText };
+    case "segmented": {
+      const choices = (def.choices ?? []).map((choice) => ({
+        value: choice.value,
+        label: choice.label,
+        ...(choice.icon ? { picture: choice.icon } : {}),
+      }));
+      if (choices.length < 2 || def.command === undefined) return undefined;
+      const selected = text(value["selected"]);
+      return {
+        ...base,
+        kind: "segmented",
+        label,
+        choices,
+        ...(selected === undefined ? {} : { selected }),
+      };
+    }
     default:
       return undefined;
   }

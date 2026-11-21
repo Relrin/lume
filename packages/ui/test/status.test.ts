@@ -20,7 +20,9 @@ function fixture(kind: StatusItem["kind"]): StatusItem {
 describe("status items drawn from the fixtures", () => {
   it("has a fixture of every kind", () => {
     expect([...new Set(STATUS_FIXTURES.map((item) => item.kind))].sort()).toEqual(
-      [...STATUS_KINDS].sort(),
+      // A segmented item is a control of a pane's header, which the bars' fixtures
+      // have none of.
+      STATUS_KINDS.filter((kind) => kind !== "segmented").sort(),
     );
   });
 
@@ -80,6 +82,30 @@ describe("status items drawn from the fixtures", () => {
 
   it("draws a badge as a small box", () => {
     expect(markup(fixture("badge"))).toContain('<span class="status-badge">3</span>');
+  });
+
+  it("draws a segmented item as a group of buttons, the chosen one pressed", () => {
+    const html = markup({
+      id: "a.view",
+      slot: "pane.header",
+      kind: "segmented",
+      label: "Pane view",
+      choices: [
+        { value: "terminal", label: "Terminal" },
+        { value: "ui", label: "UI" },
+      ],
+      selected: "ui",
+      command: "a.show-as",
+    });
+    expect(html).toContain('role="group"');
+    expect(html).toContain('aria-label="Pane view"');
+    const parts = [
+      ...html.matchAll(/<button[^>]*aria-pressed="(true|false)"[^>]*aria-label="([^"]+)"/g),
+    ];
+    expect(parts.map((part) => [part[2], part[1]])).toEqual([
+      ["Terminal", "false"],
+      ["UI", "true"],
+    ]);
   });
 
   it("writes text a program might send as text, never as markup", () => {

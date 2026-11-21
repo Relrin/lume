@@ -149,7 +149,31 @@ describe("what a pane is called and where it is", () => {
       NO_FACTS,
       WINDOWS,
     );
-    expect(editing).toMatchObject({ name: "nvim", icon: "neovim", running: true });
+    // An editor is worked in, not waited for: it is named, and not marked as running.
+    expect(editing).toMatchObject({ name: "nvim", icon: "neovim", running: false });
+  });
+
+  it("marks as running what comes to an end, not what the user works in", () => {
+    const at = report({ launcher: { type: "shell", program: "pwsh.exe", args: [], login: false } });
+    const describe = (name: string, command: string) =>
+      describePane(
+        { ...at, foreground: { pid: 9, name }, command: { state: "running", command } },
+        NO_FACTS,
+        WINDOWS,
+      );
+    expect(describe("cargo.exe", "cargo build")).toMatchObject({ name: "cargo", running: true });
+    expect(describe("git.exe", "git push")).toMatchObject({ running: true });
+    // A coding agent left open is the shell's command for hours.
+    expect(describe("claude.exe", "claude")).toMatchObject({ name: "claude", running: false });
+    expect(describe("codex", "codex")).toMatchObject({ running: false });
+    expect(describe("btop", "btop")).toMatchObject({ running: false });
+    expect(describe("ssh.exe", "ssh devbox")).toMatchObject({ running: false });
+    // Told by the command line alone, where only the shell is seen.
+    expect(describe("pwsh.exe", "claude --resume abc")).toMatchObject({
+      name: "claude",
+      running: false,
+    });
+    expect(describe("pwsh.exe", "cargo test")).toMatchObject({ name: "cargo", running: true });
   });
 
   it("takes the command line's program when only the shell is seen to run", () => {
@@ -170,7 +194,7 @@ describe("what a pane is called and where it is", () => {
       NO_FACTS,
       WINDOWS,
     );
-    expect(lost).toMatchObject({ name: "vim", icon: "vim", running: true });
+    expect(lost).toMatchObject({ name: "vim", icon: "vim", running: false });
     // A program that is seen is what is named, whatever the command line says.
     const seen = describePane(
       report({

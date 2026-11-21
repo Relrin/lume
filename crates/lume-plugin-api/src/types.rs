@@ -28,6 +28,9 @@ pub struct StatusValue {
     /// How full a meter is, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<f64>,
+    /// Which part of a segmented item is the chosen one, by its value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<String>,
     /// A sparkline's values, from the oldest to the newest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub points: Option<Vec<f64>>,

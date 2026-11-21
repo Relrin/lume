@@ -2023,13 +2023,20 @@ impl Plugins {
 
     async fn follow_sessions(self: Arc<Self>) {
         let reports = Arc::clone(self.state.reports());
-        let (_, mut news) = reports.follow();
+        // The sessions that were there before anything followed them have said what
+        // they had to say already: a terminal that came back with the window reported
+        // its program before the plugins were read. What each adds up to is told as
+        // its whole state, so that a plugin that waits for sessions hears of them.
+        let (so_far, mut news) = reports.follow();
+        self.sessions_so_far(so_far).await;
         loop {
             match news.recv().await {
                 Ok(news) => self.session_news(news).await,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
                     tracing::debug!(missed, "session reports were missed by plugins");
-                    (_, news) = reports.follow();
+                    let so_far;
+                    (so_far, news) = reports.follow();
+                    self.sessions_so_far(so_far).await;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             }
@@ -2073,12 +2080,34 @@ impl Plugins {
                 serde_json::to_value(status).unwrap_or(Value::Null),
             ),
         };
+        self.session_report(&news.key, kind, details).await;
+    }
+
+    /// Tells the plugins what each of these sessions adds up to, as a `state` report.
+    async fn sessions_so_far(
+        self: &Arc<Self>,
+        sessions: Vec<(crate::carrier::SessionKey, lume_proto::SessionState)>,
+    ) {
+        for (key, state) in sessions {
+            let details = serde_json::to_value(&state).unwrap_or(Value::Null);
+            self.session_report(&key, "state".to_owned(), details).await;
+        }
+    }
+
+    /// Gives one report of a session to the plugins that listen, and starts those whose
+    /// activation events name its kind.
+    async fn session_report(
+        self: &Arc<Self>,
+        key: &crate::carrier::SessionKey,
+        kind: String,
+        details: Value,
+    ) {
         let pane = self
             .services()
-            .and_then(|services| services.panes.pane_of(&news.key))
+            .and_then(|services| services.panes.pane_of(key))
             .map(|pane| pane.to_string());
         let report = json!({
-            "session": news.key.session.to_string(),
+            "session": key.session.to_string(),
             "pane": pane,
             "kind": kind,
             "details": details,

@@ -437,8 +437,13 @@ pub struct StatusItem {
     /// setting changes, without the plugin's code.
     #[serde(default)]
     pub slot_setting: Option<String>,
-    /// `text`, `icon`, `meter`, `sparkline` or `badge`.
+    /// `text`, `icon`, `meter`, `sparkline`, `badge` or `segmented`.
     pub kind: String,
+    /// The parts of a `segmented` item, from two to four: the user presses one, and
+    /// the item's command is run with its value. The plugin's code says which is
+    /// chosen.
+    #[serde(default)]
+    pub choices: Vec<StatusChoice>,
     /// What the item stands for, read out and shown until the plugin says more.
     #[serde(default)]
     pub label: Option<String>,
@@ -469,6 +474,19 @@ pub struct StatusItem {
     /// the plugin that waits for it to be seen, without the plugin's code.
     #[serde(default)]
     pub shown_when: Option<String>,
+}
+
+/// One part of a `segmented` status item.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct StatusChoice {
+    /// What the item's command is given when this part is pressed, and what the
+    /// plugin's code names it by.
+    pub value: String,
+    /// What it is called: shown where there is room, and read out.
+    pub label: String,
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 /// One of the plugin's settings, under `[plugins."<id>"]` in the configuration.
@@ -1301,6 +1319,47 @@ impl Contributes {
             }
             if let Some(label) = &item.label {
                 p.text(&format!("{key}.label"), label, LABEL_MAX_CHARS, true);
+            }
+            if item.kind == "segmented" {
+                if !(2..=4).contains(&item.choices.len()) {
+                    p.say(format!(
+                        "{key}.choices: a segmented item has from two to four choices"
+                    ));
+                }
+                if item.command.is_none() || item.menu.is_some() {
+                    p.say(format!(
+                        "{key}: a segmented item needs a command, which is run with the \
+                         choice that was pressed, and takes no menu"
+                    ));
+                }
+                let mut values = std::collections::HashSet::new();
+                for (at, choice) in item.choices.iter().enumerate() {
+                    let key = format!("{key}.choices[{at}]");
+                    if check_name(&choice.value).is_err() {
+                        p.say(format!(
+                            "{key}.value: `{}` is not a name: lower-case letters, digits \
+                             and hyphens",
+                            choice.value
+                        ));
+                    }
+                    if !values.insert(choice.value.as_str()) {
+                        p.say(format!(
+                            "{key}.value: `{}` is the value of another choice too",
+                            choice.value
+                        ));
+                    }
+                    p.text(
+                        &format!("{key}.label"),
+                        &choice.label,
+                        LABEL_MAX_CHARS,
+                        true,
+                    );
+                    if let Some(icon) = &choice.icon {
+                        check_icon(p, &format!("{key}.icon"), icon, own);
+                    }
+                }
+            } else if !item.choices.is_empty() {
+                p.say(format!("{key}.choices: only a segmented item has choices"));
             }
             if let Some(tooltip) = &item.tooltip {
                 p.text(
@@ -2154,6 +2213,30 @@ name = "latest"
                 "[[contributes.status]]\nid = \"s\"\nslot = \"topbar.left\"\nkind = \"gauge\"\n",
             ),
             "not a kind of status item",
+        );
+        says(
+            &manifest(
+                "[[contributes.status]]\nid = \"s\"\nslot = \"pane.header\"\nkind = \"segmented\"\ncommand = \"lume.tab.new\"\nchoices = [{ value = \"a\", label = \"A\" }]\n",
+            ),
+            "from two to four choices",
+        );
+        says(
+            &manifest(
+                "[[contributes.status]]\nid = \"s\"\nslot = \"pane.header\"\nkind = \"segmented\"\nchoices = [{ value = \"a\", label = \"A\" }, { value = \"b\", label = \"B\" }]\n",
+            ),
+            "needs a command",
+        );
+        says(
+            &manifest(
+                "[[contributes.status]]\nid = \"s\"\nslot = \"pane.header\"\nkind = \"segmented\"\ncommand = \"lume.tab.new\"\nchoices = [{ value = \"a\", label = \"A\" }, { value = \"a\", label = \"B\" }]\n",
+            ),
+            "the value of another choice too",
+        );
+        says(
+            &manifest(
+                "[[contributes.status]]\nid = \"s\"\nslot = \"topbar.left\"\nkind = \"text\"\nchoices = [{ value = \"a\", label = \"A\" }, { value = \"b\", label = \"B\" }]\n",
+            ),
+            "only a segmented item has choices",
         );
         says(
             &manifest("[[contributes.status]]\nid = \"s\"\nkind = \"meter\"\n"),

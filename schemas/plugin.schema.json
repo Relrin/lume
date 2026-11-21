@@ -1066,6 +1066,32 @@
       ],
       "type": "object"
     },
+    "StatusChoice": {
+      "additionalProperties": false,
+      "description": "One part of a `segmented` status item.",
+      "properties": {
+        "icon": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "description": "What it is called: shown where there is room, and read out.",
+          "type": "string"
+        },
+        "value": {
+          "description": "What the item's command is given when this part is pressed, and what the\nplugin's code names it by.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "type": "object"
+    },
     "StatusItem": {
       "additionalProperties": false,
       "description": "A status item: a small piece of information, or a button, in a bar.",
@@ -1086,6 +1112,13 @@
             "null"
           ]
         },
+        "choices": {
+          "description": "The parts of a `segmented` item, from two to four: the user presses one, and\nthe item's command is run with its value. The plugin's code says which is\nchosen.",
+          "items": {
+            "$ref": "#/$defs/StatusChoice"
+          },
+          "type": "array"
+        },
         "command": {
           "default": null,
           "description": "A command the item runs when clicked, which makes it a button.",
@@ -1105,7 +1138,7 @@
           "type": "string"
         },
         "kind": {
-          "description": "`text`, `icon`, `meter`, `sparkline` or `badge`.",
+          "description": "`text`, `icon`, `meter`, `sparkline`, `badge` or `segmented`.",
           "type": "string"
         },
         "label": {

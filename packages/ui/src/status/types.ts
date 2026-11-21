@@ -127,8 +127,30 @@ export interface BadgeItem extends StatusBase {
   readonly text: string;
 }
 
+/** One part of a segmented item. */
+export interface StatusChoice {
+  readonly value: string;
+  readonly label: string;
+  readonly picture?: IconRef;
+}
+
+/**
+ * A few parts side by side, one of them the chosen one: pressing another runs the
+ * item's command, which is given the part's value beside what it is given anyway.
+ * The item only shows what is chosen; whoever owns it says so again once it changed.
+ */
+export interface SegmentedItem extends StatusBase {
+  readonly kind: "segmented";
+  /** What the parts choose between, read out. */
+  readonly label: string;
+  readonly choices: readonly StatusChoice[];
+  /** The value of the chosen part, if one is. */
+  readonly selected?: string;
+}
+
 /** One status item. */
-export type StatusItem = TextItem | IconItem | MeterItem | SparklineItem | BadgeItem;
+export type StatusItem =
+  TextItem | IconItem | MeterItem | SparklineItem | BadgeItem | SegmentedItem;
 
 /** The kinds of status item there are. */
 export const STATUS_KINDS = [
@@ -137,4 +159,5 @@ export const STATUS_KINDS = [
   "meter",
   "sparkline",
   "badge",
+  "segmented",
 ] as const satisfies readonly StatusItem["kind"][];

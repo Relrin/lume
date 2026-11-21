@@ -178,6 +178,43 @@ describe("the plugins' status items", () => {
     expect(badge?.args).toEqual({ pane: "p1" });
   });
 
+  it("show a segmented item with the part its code says is chosen", () => {
+    const store = createPluginsStore();
+    store.getState().set({
+      ...shown,
+      status: [
+        {
+          id: "acme.view",
+          plugin: "acme",
+          slot: "pane.header",
+          kind: "segmented",
+          order: 0,
+          label: "Pane view",
+          command: "acme.show-as",
+          choices: [
+            { value: "terminal", label: "Terminal", icon: { image: "acme:chip" } },
+            { value: "ui", label: "UI" },
+          ],
+        },
+      ],
+      values: [
+        { plugin: "acme", item: "acme.view", pane: "p1", value: { selected: "ui" } },
+        { plugin: "acme", item: "acme.view", pane: "p2", value: {} },
+      ],
+    });
+    const items = pluginStatusItems(store.getState());
+    expect(items.map((item) => item.id)).toEqual(["acme.view@p1", "acme.view@p2"]);
+    const [first, second] = items;
+    expect(first?.kind === "segmented" && first.selected).toBe("ui");
+    expect(first?.kind === "segmented" && first.choices).toEqual([
+      { value: "terminal", label: "Terminal", picture: { image: "acme:chip" } },
+      { value: "ui", label: "UI" },
+    ]);
+    // Its command is told which pane, as any item's in a header is.
+    expect(first?.args).toEqual({ pane: "p1" });
+    expect(second?.kind === "segmented" && second.selected).toBeUndefined();
+  });
+
   it("follow the switch of the plugin's settings they are shown under", () => {
     const store = createPluginsStore();
     store.getState().set(shown);

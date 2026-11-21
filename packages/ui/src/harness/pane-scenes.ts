@@ -57,7 +57,7 @@ const REPORTS: Readonly<Record<string, readonly SessionEvent[]>> = {
   p2: [
     { type: "cwd", url: "file://FIXTURE/home/fixture/notes" },
     { type: "foreground", pid: 20, name: "wsl" },
-    { type: "command_started", command: "vim todo.md" },
+    { type: "command_started", command: "tar czf notes.tgz ." },
     { type: "activity" },
   ],
   p3: [
@@ -162,7 +162,7 @@ export const PANE_SCENES: readonly Scene[] = [
       ...said(page, '.pane-card[data-pane="p1"] .pane-title', "pwsh"),
       ...said(page, '.pane-card[data-pane="p1"] .pane-cwd', "~\\src\\lume"),
       ...said(page, '.pane-card[data-pane="p1"] .pane-exit', "exit 3"),
-      ...said(page, '.pane-card[data-pane="p2"] .pane-title', "vim"),
+      ...said(page, '.pane-card[data-pane="p2"] .pane-title', "tar"),
       ...said(page, '.pane-card[data-pane="p2"] .pane-cwd', "Ubuntu:/home/fixture/notes"),
       ...said(page, '.pane-card[data-pane="p3"] .pane-status-label', "Waiting on you"),
       ...said(page, '.pane-card[data-pane="p4"] .pane-ended-reason', "Connection lost"),

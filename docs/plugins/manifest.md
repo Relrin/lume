@@ -91,6 +91,12 @@ The kinds of session event are `title`, `cwd`, `bell`, `command_started`, `comma
 `program_status`, `foreground`, `activity`, `disconnected`, `state` and `exit`. A plugin is started
 by a session event only if it holds the `workspace.read` permission.
 
+`state` is a session's whole state at once: its title, folder, running command, the program in
+front. It is reported for every session that was there before the plugins were read, such as a
+terminal that came back with the window, and again where reports were missed. A plugin that must
+know what already runs in the terminals lists `onSessionEvent:state`; the other kinds only tell of
+what happens from then on.
+
 A plugin is also started whenever one of its commands or services is called, or a row of one of its
 panels is opened, whether or not the manifest lists the event. Listing events is how a plugin says
 what else should start it. See [Performance](performance.md#choose-activation-events) for how to
@@ -208,22 +214,23 @@ A section of a menu: items a line sets apart, with a heading if it has a title.
 A status item: a small piece of information, or a button, in a bar. See
 [status items](placement.md#status-items).
 
-| Key            | Type    | Default | What it is                                                                                                           |
-| -------------- | ------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| `id`           | string  | needed  | The item's name.                                                                                                     |
-| `slot`         | string  | none    | Where it goes: `topbar.left`, `topbar.center`, `topbar.right`, `statusbar.left`, `statusbar.right` or `pane.header`. |
-| `slot-setting` | string  | none    | One of the plugin's settings whose value is the place it goes in.                                                    |
-| `kind`         | string  | needed  | `text`, `icon`, `meter`, `sparkline` or `badge`.                                                                     |
-| `label`        | string  | none    | What the item stands for. 64 characters at most.                                                                     |
-| `icon`         | string  | none    | A [picture](motion.md#pictures).                                                                                     |
-| `tooltip`      | string  | none    | What the pointer is told. 300 characters at most.                                                                    |
-| `command`      | string  | none    | A command the item runs when clicked, which makes it a button.                                                       |
-| `menu`         | string  | none    | A submenu of the plugin's own, in `menu.status`, the item opens when clicked.                                        |
-| `when`         | string  | none    | A [condition](placement.md#conditions) it is shown under.                                                            |
-| `shown-when`   | string  | none    | One of the plugin's boolean settings that must be on for the item to be shown.                                       |
-| `before`       | string  | none    | The neighbour it goes right before.                                                                                  |
-| `after`        | string  | none    | The neighbour it goes right after.                                                                                   |
-| `order`        | integer | none    | Where it goes when no neighbour is named.                                                                            |
+| Key            | Type    | Default | What it is                                                                                                                                |
+| -------------- | ------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`           | string  | needed  | The item's name.                                                                                                                          |
+| `slot`         | string  | none    | Where it goes: `topbar.left`, `topbar.center`, `topbar.right`, `statusbar.left`, `statusbar.right` or `pane.header`.                      |
+| `slot-setting` | string  | none    | One of the plugin's settings whose value is the place it goes in.                                                                         |
+| `kind`         | string  | needed  | `text`, `icon`, `meter`, `sparkline`, `badge` or `segmented`.                                                                             |
+| `choices`      | array   | none    | The parts of a `segmented` item, from two to four, each `{ value, label, icon? }`. See [a segmented item](placement.md#a-segmented-item). |
+| `label`        | string  | none    | What the item stands for. 64 characters at most.                                                                                          |
+| `icon`         | string  | none    | A [picture](motion.md#pictures).                                                                                                          |
+| `tooltip`      | string  | none    | What the pointer is told. 300 characters at most.                                                                                         |
+| `command`      | string  | none    | A command the item runs when clicked, which makes it a button.                                                                            |
+| `menu`         | string  | none    | A submenu of the plugin's own, in `menu.status`, the item opens when clicked.                                                             |
+| `when`         | string  | none    | A [condition](placement.md#conditions) it is shown under.                                                                                 |
+| `shown-when`   | string  | none    | One of the plugin's boolean settings that must be on for the item to be shown.                                                            |
+| `before`       | string  | none    | The neighbour it goes right before.                                                                                                       |
+| `after`        | string  | none    | The neighbour it goes right after.                                                                                                        |
+| `order`        | integer | none    | Where it goes when no neighbour is named.                                                                                                 |
 
 Give `slot` or `slot-setting`: one of them is needed, and not both. Give `command` or `menu`, not
 both.

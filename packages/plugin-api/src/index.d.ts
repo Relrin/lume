@@ -846,6 +846,10 @@ export interface StatusValue {
    */
   points?: number[];
   /**
+   * Which part of a segmented item is the chosen one, by its value.
+   */
+  selected?: string;
+  /**
    * The words of a text or badge item, or the amount written out beside a meter or
    * a sparkline.
    */

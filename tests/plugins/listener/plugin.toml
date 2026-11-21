@@ -1,0 +1,14 @@
+# A plugin for the end-to-end tests: it waits for sessions to say what they add up to,
+# and writes down each one it hears of.
+schema = 1
+id = "test.listener"
+name = "Listener"
+version = "1.0.0"
+description = "Hears what the sessions add up to."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-listener"
+activation = ["onSessionEvent:state"]
+
+[permissions]
+"workspace.read" = true
