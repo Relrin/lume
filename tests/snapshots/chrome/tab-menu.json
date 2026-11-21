@@ -272,6 +272,13 @@
                 "state": {
                   "checked": "false"
                 }
+              },
+              {
+                "role": "menuitemradio",
+                "name": "Custom colour…",
+                "state": {
+                  "checked": "false"
+                }
               }
             ]
           },

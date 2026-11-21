@@ -52,14 +52,22 @@
               },
               {
                 "role": "button",
-                "name": "Commands",
+                "name": "About"
+              },
+              {
+                "role": "heading",
+                "name": "Workspace"
+              },
+              {
+                "role": "button",
+                "name": "Keybindings",
                 "state": {
                   "current": "page"
                 }
               },
               {
                 "role": "button",
-                "name": "About"
+                "name": "Notifications"
               },
               {
                 "role": "heading",
@@ -84,7 +92,7 @@
             "parts": [
               {
                 "role": "heading",
-                "name": "Commands"
+                "name": "Keybindings"
               },
               {
                 "role": "button",
@@ -97,16 +105,113 @@
             "name": "Filter commands"
           },
           {
+            "role": "button",
+            "name": "Search by pressing keys",
+            "state": {
+              "pressed": "false"
+            }
+          },
+          {
+            "role": "group",
+            "name": "Show",
+            "parts": [
+              {
+                "role": "button",
+                "name": "All 7",
+                "state": {
+                  "pressed": "true"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Changed 0",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Unbound defaults 0",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Shared keys 0",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "No keys 4",
+                "state": {
+                  "pressed": "false"
+                }
+              }
+            ]
+          },
+          {
             "role": "heading",
             "name": "Tab1"
+          },
+          {
+            "role": "button",
+            "name": "Add a key for New Tab"
+          },
+          {
+            "role": "button"
+          },
+          {
+            "role": "button",
+            "name": "Unbind Ctrl+Shift+T"
           },
           {
             "role": "heading",
             "name": "Pane4"
           },
           {
+            "role": "button",
+            "name": "Add a key for Close Find"
+          },
+          {
+            "role": "button",
+            "name": "Add a key for Close Pane"
+          },
+          {
+            "role": "button",
+            "name": "Add a key for Find in Terminal"
+          },
+          {
+            "role": "button"
+          },
+          {
+            "role": "button",
+            "name": "Unbind Ctrl+Shift+F"
+          },
+          {
+            "role": "button",
+            "name": "Add a key for Split Right"
+          },
+          {
             "role": "heading",
             "name": "View2"
+          },
+          {
+            "role": "button",
+            "name": "Add a key for Command Palette"
+          },
+          {
+            "role": "button"
+          },
+          {
+            "role": "button",
+            "name": "Unbind Ctrl+Shift+P"
+          },
+          {
+            "role": "button",
+            "name": "Add a key for Increase Font Size"
           }
         ]
       }

@@ -341,6 +341,13 @@
                 "state": {
                   "checked": "false"
                 }
+              },
+              {
+                "role": "radio",
+                "name": "Custom colour…",
+                "state": {
+                  "checked": "false"
+                }
               }
             ]
           },

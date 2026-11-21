@@ -55,11 +55,19 @@
               },
               {
                 "role": "button",
-                "name": "Commands"
+                "name": "About"
+              },
+              {
+                "role": "heading",
+                "name": "Workspace"
               },
               {
                 "role": "button",
-                "name": "About"
+                "name": "Keybindings"
+              },
+              {
+                "role": "button",
+                "name": "Notifications"
               },
               {
                 "role": "heading",
@@ -180,16 +188,12 @@
               },
               {
                 "role": "radio",
-                "name": "Your own colour",
+                "name": "Custom colour…",
                 "state": {
                   "checked": "false"
                 }
               }
             ]
-          },
-          {
-            "role": "textbox",
-            "name": "Accent colour, as #rrggbb"
           },
           {
             "role": "heading",

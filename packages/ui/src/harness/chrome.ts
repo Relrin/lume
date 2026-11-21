@@ -359,7 +359,8 @@ async function mountSettings(
   };
   try {
     await until("the settings being listed", CHROME_START_TIMEOUT_MS, () => {
-      return container.querySelector(".settings-row") !== null;
+      // The commands' page lists its own kind of row.
+      return container.querySelector(".settings-row, .kb-row") !== null;
     });
   } catch (error) {
     unmount();

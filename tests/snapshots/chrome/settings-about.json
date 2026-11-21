@@ -52,14 +52,22 @@
               },
               {
                 "role": "button",
-                "name": "Commands"
-              },
-              {
-                "role": "button",
                 "name": "About",
                 "state": {
                   "current": "page"
                 }
+              },
+              {
+                "role": "heading",
+                "name": "Workspace"
+              },
+              {
+                "role": "button",
+                "name": "Keybindings"
+              },
+              {
+                "role": "button",
+                "name": "Notifications"
               },
               {
                 "role": "heading",

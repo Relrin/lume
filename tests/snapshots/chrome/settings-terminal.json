@@ -55,11 +55,19 @@
               },
               {
                 "role": "button",
-                "name": "Commands"
+                "name": "About"
+              },
+              {
+                "role": "heading",
+                "name": "Workspace"
               },
               {
                 "role": "button",
-                "name": "About"
+                "name": "Keybindings"
+              },
+              {
+                "role": "button",
+                "name": "Notifications"
               },
               {
                 "role": "heading",
