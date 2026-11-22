@@ -17,7 +17,7 @@ use lume_rex::{
     Control, DataConn, DataEnd, DataOpen, Endpoint, Link, Note, Opening, Piece, Reject, RexBackend,
     RexError, Splitter, Ticket, dial,
 };
-use lume_session::{Attachment, Hydrate, OutputFrame, SessionBackend, SessionError};
+use lume_session::{Attachment, Hydrate, OutputFrame, SessionBackend};
 use serde_json::{Value, json};
 
 /// Reads a stream until `done` says so, and returns what it held: the copy it opened
@@ -545,8 +545,6 @@ async fn a_terminal_of_a_real_server_is_attached_to() {
     assert_eq!((attachment.size.cols(), attachment.size.rows()), (80, 24));
     let rows = rows_of(&attachment.hydrate);
     assert!(rows.iter().any(|row| row == "lume-1-before"), "{rows:?}");
-    let again = backend.attach(id, facts()).await;
-    assert!(matches!(again, Err(SessionError::Refused(_))));
 
     // What is typed afterwards comes as output, and a new size in its place.
     let mut view = Viewing::new(attachment).await;
@@ -773,4 +771,126 @@ async fn a_terminal_of_a_real_server_is_typed_into_sized_and_read() {
 /// The id a server knows a client by.
 fn created_owner(control: &Control) -> Value {
     json!(control.welcome().client_id)
+}
+
+#[tokio::test]
+#[ignore = "needs a Rex server running on this machine"]
+async fn two_views_of_a_terminal_of_a_real_server_share_its_stream() {
+    let io = dial(&Endpoint::Local)
+        .await
+        .expect("is a Rex server running?");
+    let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
+    let created = other
+        .call(
+            "session.create",
+            json!({
+                "label": "lume-live-shared",
+                "initial_windows": [{"layout": {"block": plain_shell()}}],
+            }),
+        )
+        .await
+        .unwrap();
+    let session = created.payload["session_id"].as_str().unwrap().to_owned();
+    // Attached, so that it can destroy the session when all is done.
+    other
+        .call("session.attach", json!({ "session_id": session }))
+        .await
+        .unwrap();
+
+    let backend = RexBackend::connect(Endpoint::Local, client());
+    backend.ready().await.unwrap();
+    backend.open_session(&session).await.unwrap();
+    let id = backend.list().await.unwrap()[0].id;
+
+    // One view, and something typed in it.
+    let mut first = Viewing::new(backend.attach(id, facts()).await.unwrap()).await;
+    first
+        .attachment
+        .input
+        .write(echo("1-first").as_bytes())
+        .await
+        .unwrap();
+    first
+        .until("the echo", |view| view.shows("lume-1-first\r\n"))
+        .await;
+
+    // A second view of the same terminal, without the focus: the server gives this
+    // client no second stream, so the one there is begins again, and both views
+    // start from the same new copy, which holds what was typed.
+    let mut unfocused = facts();
+    unfocused.focused = false;
+    let second = backend.attach(id, unfocused.clone()).await.unwrap();
+    let rows = rows_of(&second.hydrate);
+    assert!(rows.iter().any(|row| row == "lume-1-first"), "{rows:?}");
+    let mut second = Viewing::new(second).await;
+    first
+        .until("the copy the first view starts again from", |view| {
+            !view.copies.is_empty()
+        })
+        .await;
+    assert_eq!(rows_of(&first.copies[0]), rows);
+
+    // What either types, both are sent.
+    second
+        .attachment
+        .input
+        .write(echo("2-second").as_bytes())
+        .await
+        .unwrap();
+    for view in [&mut first, &mut second] {
+        view.until("the echo in both", |view| view.shows("lume-2-second\r\n"))
+            .await;
+    }
+
+    // The view with the focus gives the size. The other's wish counts once it has the
+    // focus, without being said again.
+    second
+        .attachment
+        .input
+        .resize(TermSize::new(70, 20).unwrap(), CellPx { w: 8, h: 16 })
+        .await
+        .unwrap();
+    first
+        .attachment
+        .input
+        .resize(TermSize::new(110, 35).unwrap(), CellPx { w: 8, h: 16 })
+        .await
+        .unwrap();
+    for view in [&mut first, &mut second] {
+        view.until("the first view's size", |view| {
+            view.sizes.last() == Some(&(110, 35))
+        })
+        .await;
+    }
+    assert!(!second.sizes.contains(&(70, 20)));
+    unfocused.focused = true;
+    second.attachment.input.facts(&unfocused).await.unwrap();
+    for view in [&mut first, &mut second] {
+        view.until("the second view's size", |view| {
+            view.sizes.last() == Some(&(70, 20))
+        })
+        .await;
+    }
+
+    // One view goes; the other is served on, and the block stays this client's.
+    second.attachment.input.detach().await.unwrap();
+    first
+        .attachment
+        .input
+        .write(echo("3-alone").as_bytes())
+        .await
+        .unwrap();
+    first
+        .until("the echo, alone", |view| view.shows("lume-3-alone\r\n"))
+        .await;
+    assert_eq!(first.copies.len(), 1);
+
+    // The shell ends, and the view with it.
+    first.attachment.input.write(b"exit\r").await.unwrap();
+    first.until("the end", |view| view.over).await;
+
+    let _ = other
+        .call("session.destroy", json!({ "session_id": session }))
+        .await;
+    backend.shutdown();
 }

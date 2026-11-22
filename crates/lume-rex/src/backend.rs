@@ -33,9 +33,12 @@ use crate::error::RexError;
 use crate::ids::{BlockRef, Ids};
 use crate::input::type_text;
 use crate::screen;
-use crate::terminal::{self, Handle};
+use crate::terminal::FeedRef;
 use crate::transport::{Io, dial};
-use crate::tuning::{RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, SCREEN_POLL, SESSIONS_MAX};
+use crate::tuning::{
+    ATTACH_RETRY, ATTACH_TIMEOUT, RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, SCREEN_POLL,
+    SESSIONS_MAX,
+};
 
 /// How a backend stands with its server.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,17 +99,10 @@ struct State {
     ids: Ids,
     /// What continues the client after a lost connection, and when it was lost.
     resume: Option<(String, Instant)>,
-    /// The terminals that are attached to, or being attached to.
-    attached: HashMap<SessionId, Slot>,
-    /// The number of the last attachment made.
+    /// The terminals that have views, each with the feed that serves them.
+    feeds: HashMap<SessionId, FeedRef>,
+    /// The number of the last feed made.
     serial: u64,
-}
-
-/// One attachment to a terminal, as the backend keeps it.
-struct Slot {
-    serial: u64,
-    /// The way to end it. None while it is still being made.
-    handle: Option<Arc<Handle>>,
 }
 
 pub(crate) struct Shared {
@@ -145,28 +141,23 @@ impl Shared {
         self.link.subscribe()
     }
 
-    /// Notes that an attachment is over, so that its terminal can be attached to again.
+    /// Notes that a terminal's feed is over, so that the terminal can be attached to
+    /// anew.
     pub(crate) fn forget(&self, id: SessionId, serial: u64) {
         let mut state = self.state();
         if state
-            .attached
+            .feeds
             .get(&id)
-            .is_some_and(|slot| slot.serial == serial)
+            .is_some_and(|feed| feed.serial == serial)
         {
-            state.attached.remove(&id);
+            state.feeds.remove(&id);
         }
     }
 
-    /// Ends every attachment: the backend is going.
+    /// Ends every view of every terminal: the backend is going.
     fn end_attachments(&self) {
-        let handles: Vec<Arc<Handle>> = self
-            .state()
-            .attached
-            .values()
-            .filter_map(|slot| slot.handle.clone())
-            .collect();
-        for handle in handles {
-            handle.end_soon();
+        for feed in self.state().feeds.values() {
+            feed.close();
         }
     }
 }
@@ -442,49 +433,41 @@ impl SessionBackend for RexBackend {
         Err(unsupported("start a session"))
     }
 
-    /// Attaches to a terminal block of a session that was opened here. A server gives
-    /// a client one stream of a block at a time, so a terminal takes one attachment.
+    /// Attaches to a terminal block of a session that was opened here. A terminal's
+    /// views share one stream, since a server gives a client no more than one.
     async fn attach(&self, id: SessionId, facts: ClientFacts) -> lume_session::Result<Attachment> {
-        let refused = |code, what: &str| SessionError::Refused(ProtoError::new(code, what));
-        let (block, serial) = {
-            let mut state = self.shared.state();
-            let Some(block) = state.ids.block(id).cloned() else {
-                return Err(refused(
-                    ErrorCode::NotFound,
-                    "the Rex server has no such terminal",
-                ));
+        let until = tokio::time::Instant::now() + ATTACH_TIMEOUT;
+        loop {
+            let joining = {
+                let mut state = self.shared.state();
+                let State {
+                    feeds, ids, serial, ..
+                } = &mut *state;
+                let Some(block) = ids.block(id) else {
+                    return Err(SessionError::Refused(ProtoError::new(
+                        ErrorCode::NotFound,
+                        "the Rex server has no such terminal",
+                    )));
+                };
+                let feed = feeds.entry(id).or_insert_with(|| {
+                    *serial += 1;
+                    FeedRef::start(Arc::clone(&self.shared), id, *serial, block.clone())
+                });
+                feed.join(facts.clone())
             };
-            if state.attached.contains_key(&id) {
-                return Err(refused(
-                    ErrorCode::AlreadyAttached,
-                    "the terminal is already shown, and a Rex server gives one stream of it",
-                ));
+            let joined = match joining {
+                Some(joining) => joining.await.ok(),
+                None => None,
+            };
+            if let Some(joined) = joined {
+                return Ok(joined?);
             }
-            state.serial += 1;
-            let serial = state.serial;
-            state.attached.insert(
-                id,
-                Slot {
-                    serial,
-                    handle: None,
-                },
-            );
-            (block, serial)
-        };
-        match terminal::attach(Arc::clone(&self.shared), id, serial, block, &facts).await {
-            Ok((attachment, handle)) => {
-                // Unless it is over already.
-                if let Some(slot) = self.shared.state().attached.get_mut(&id)
-                    && slot.serial == serial
-                {
-                    slot.handle = Some(handle);
-                }
-                Ok(attachment)
+            // The feed was just ending, with the terminal's last view. Its stream is
+            // closed before it is forgotten, and then a new feed can begin one.
+            if tokio::time::Instant::now() > until {
+                return Err(SessionError::Disconnected);
             }
-            Err(error) => {
-                self.shared.forget(id, serial);
-                Err(error.into())
-            }
+            tokio::time::sleep(ATTACH_RETRY).await;
         }
     }
 

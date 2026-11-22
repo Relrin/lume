@@ -82,6 +82,11 @@ pub const REPLAY_PART_BYTES: usize = 900_000;
 /// given up.
 pub const RESTART_ATTEMPTS_MAX: u32 = 8;
 
+/// How long attaching waits for a terminal whose last view is just going, and how
+/// often it looks whether the way is free.
+pub const ATTACH_TIMEOUT: Duration = Duration::from_secs(10);
+pub const ATTACH_RETRY: Duration = Duration::from_millis(20);
+
 /// The most text typed into a terminal in one call.
 pub const INPUT_CALL_MAX_BYTES: usize = 65_536;
 /// The most a view may have typed that the server has not taken yet. A view that types

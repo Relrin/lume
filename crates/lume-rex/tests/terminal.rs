@@ -435,12 +435,197 @@ async fn a_copy_this_engine_cannot_load_gives_way_to_the_screen_written_out() {
 }
 
 #[tokio::test]
-async fn a_terminal_takes_one_attachment_at_a_time() {
+async fn the_views_of_a_terminal_share_its_one_stream() {
+    let mut setup = setup().await;
+    let (mut first, mut side) = setup.attach("as it stood").await;
+    first.input.credit(1000).await.unwrap();
+    side.bytes(b"one").await;
+    assert_eq!(
+        frame(&mut first).await,
+        Some(OutputFrame::Data(b"one".to_vec()))
+    );
+
+    // A second view: a copy of the terminal comes only at the head of a stream, so
+    // the stream is begun again, and the view that was following starts again too.
+    let closed = tokio::spawn(async move { side.closed_by_client().await });
+    let (mut second, mut side) = setup.attach("with one").await;
+    assert_eq!(closed.await.unwrap(), Some(1000));
+    assert_eq!(setup.data_connects(), 2);
+    match &second.hydrate {
+        Hydrate::Snapshot { bytes, .. } => assert_eq!(first_row(bytes), "with one"),
+        other => panic!("{other:?}"),
+    }
+    match frame(&mut first).await {
+        Some(OutputFrame::Hydrate(Hydrate::Snapshot { bytes, .. })) => {
+            assert_eq!(first_row(&bytes), "with one");
+        }
+        other => panic!("{other:?}"),
+    }
+
+    // Both are sent what the terminal prints, each as it grants.
+    side.bytes(b"both").await;
+    side.size(90, 30).await;
+    assert_eq!(
+        frame(&mut first).await,
+        Some(OutputFrame::Data(b"both".to_vec()))
+    );
+    let size = OutputFrame::Resized(TermSize::new(90, 30).unwrap());
+    assert_eq!(frame(&mut first).await, Some(size.clone()));
+    assert!(quiet(&mut second).await);
+    second.input.credit(2).await.unwrap();
+    assert_eq!(
+        frame(&mut second).await,
+        Some(OutputFrame::Data(b"bo".to_vec()))
+    );
+    second.input.credit(1000).await.unwrap();
+    assert_eq!(
+        frame(&mut second).await,
+        Some(OutputFrame::Data(b"th".to_vec()))
+    );
+    assert_eq!(frame(&mut second).await, Some(size));
+
+    // One view lets go of its screen: the other is still sent everything, and the
+    // stream stays.
+    second.input.release().await.unwrap();
+    side.bytes(b"for one").await;
+    assert_eq!(
+        frame(&mut first).await,
+        Some(OutputFrame::Data(b"for one".to_vec()))
+    );
+    assert!(quiet(&mut second).await);
+    assert_eq!(setup.data_connects(), 2);
+
+    // It asks for its screen again: a new stream, and both start from its copy.
+    let closed = tokio::spawn(async move { side.closed_by_client().await });
+    second.input.rehydrate().await.unwrap();
+    let mut side = setup.stream("for both again").await;
+    assert_eq!(closed.await.unwrap(), Some(1000));
+    for view in [&mut first, &mut second] {
+        // The new stream says the terminal is 80 by 24 again.
+        assert!(matches!(frame(view).await, Some(OutputFrame::Resized(_))));
+        match frame(view).await {
+            Some(OutputFrame::Hydrate(Hydrate::Snapshot { bytes, .. })) => {
+                assert_eq!(first_row(&bytes), "for both again");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // One view goes: the other is served on, on the same stream.
+    second.input.detach().await.unwrap();
+    assert_eq!(frame(&mut second).await, None);
+    side.bytes(b"alone").await;
+    assert_eq!(
+        frame(&mut first).await,
+        Some(OutputFrame::Data(b"alone".to_vec()))
+    );
+    assert_eq!(setup.data_connects(), 3);
+    assert!(setup.served.asked("session.disown_block").is_empty());
+
+    // The last view goes: the stream is closed and the block given up.
+    let closed = tokio::spawn(async move { side.closed_by_client().await });
+    first.input.detach().await.unwrap();
+    assert_eq!(closed.await.unwrap(), Some(1000));
+    assert_eq!(setup.served.asked("session.disown_block").len(), 1);
+}
+
+#[tokio::test]
+async fn a_view_that_takes_too_little_does_not_hold_the_others_back() {
+    let mut setup = setup().await;
+    let (mut quick, side) = setup.attach("first").await;
+    let closed = tokio::spawn(async move {
+        let mut side = side;
+        side.closed_by_client().await
+    });
+    let (mut slow, mut side) = setup.attach("second").await;
+    assert_eq!(closed.await.unwrap(), Some(1000));
+    assert!(matches!(
+        frame(&mut quick).await,
+        Some(OutputFrame::Hydrate(_))
+    ));
+
+    // More output than is kept for a view. One view takes all of it, the other none.
+    let piece = vec![b'x'; 65_536];
+    let pieces = PENDING_MAX_BYTES / piece.len() + 2;
+    let sending = tokio::spawn(async move {
+        for _ in 0..pieces {
+            side.bytes(&piece).await;
+        }
+        side
+    });
+    let mut taken = 0;
+    while taken < pieces * 65_536 {
+        quick.input.credit(65_536).await.unwrap();
+        match frame(&mut quick).await {
+            Some(OutputFrame::Data(bytes)) => taken += bytes.len(),
+            other => panic!("{other:?}"),
+        }
+    }
+    let mut side = sending.await.unwrap();
+    assert!(quiet(&mut slow).await);
+    // The stream was kept all along, for the view that followed it.
+    assert_eq!(setup.data_connects(), 2);
+    side.bytes(b"still here").await;
+    quick.input.credit(100).await.unwrap();
+    assert_eq!(
+        frame(&mut quick).await,
+        Some(OutputFrame::Data(b"still here".to_vec()))
+    );
+
+    // The slow view takes output again: it starts from a new copy, and so does the
+    // other, which a new stream leaves no choice.
+    let closed = tokio::spawn(async move { side.closed_by_client().await });
+    slow.input.credit(100).await.unwrap();
+    let mut side = setup.stream("third").await;
+    assert_eq!(closed.await.unwrap(), Some(1000));
+    for view in [&mut slow, &mut quick] {
+        match frame(view).await {
+            Some(OutputFrame::Hydrate(Hydrate::Snapshot { bytes, .. })) => {
+                assert_eq!(first_row(&bytes), "third");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    side.bytes(b"fresh").await;
+    assert_eq!(
+        frame(&mut slow).await,
+        Some(OutputFrame::Data(b"fresh".to_vec()))
+    );
+}
+
+#[tokio::test]
+async fn every_view_hears_of_the_programs_end() {
+    let mut setup = setup().await;
+    let (mut first, side) = setup.attach("first").await;
+    let closed = tokio::spawn(async move {
+        let mut side = side;
+        side.closed_by_client().await
+    });
+    let (mut second, mut side) = setup.attach("second").await;
+    closed.await.unwrap();
+    assert!(matches!(
+        frame(&mut first).await,
+        Some(OutputFrame::Hydrate(_))
+    ));
+    // One of them has let go of its screen, and hears of the end all the same.
+    second.input.release().await.unwrap();
+    side.note(NONCE, json!({ "type": "child_exited", "exit_code": 0 }))
+        .await;
+    for view in [&mut first, &mut second] {
+        assert_eq!(
+            frame(view).await,
+            Some(OutputFrame::Exit(ExitStatus::Code(0)))
+        );
+        assert_eq!(frame(view).await, None);
+    }
+    assert_eq!(side.closed_by_client().await, Some(1000));
+}
+
+#[tokio::test]
+async fn a_view_that_is_gone_is_refused_everything() {
     let mut setup = setup().await;
     let (mut attachment, mut side) = setup.attach("first").await;
 
-    let again = setup.backend.attach(setup.id, facts()).await;
-    assert_eq!(code_of(again.err().unwrap()), ErrorCode::AlreadyAttached);
     let unknown = setup
         .backend
         .attach(SessionId::new(9999).unwrap(), facts())
@@ -449,7 +634,6 @@ async fn a_terminal_takes_one_attachment_at_a_time() {
     assert_eq!(setup.data_connects(), 1);
 
     // More credit than a stream may hold is not taken.
-    attachment.input.credit(u32::MAX).await.unwrap_err();
     assert!(matches!(
         attachment.input.credit(u32::MAX).await,
         Err(SessionError::CreditOverflow)
@@ -466,6 +650,7 @@ async fn a_terminal_takes_one_attachment_at_a_time() {
         attachment.input.release().await,
         attachment.input.credit(1).await,
         attachment.input.write(b"x").await,
+        attachment.input.facts(&facts()).await,
     ] {
         assert!(
             matches!(refused, Err(SessionError::Detached)),

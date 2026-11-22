@@ -256,3 +256,88 @@ async fn a_terminal_is_typed_into_read_and_ended_without_a_view() {
         [json!({ "session_id": SESSION, "block_id": setup.block })]
     );
 }
+
+#[tokio::test]
+async fn two_views_of_a_terminal_are_one_client_to_the_server() {
+    let mut setup = setup_with(World::recorded()).await;
+    let (first, side) = setup.attach(facts(true)).await;
+    let closed = tokio::spawn(async move {
+        let mut side = side;
+        side.closed_by_client().await
+    });
+    // A second view, smaller and without the focus: it says nothing to the server.
+    let mut small = facts(false);
+    small.size = TermSize::new(60, 20).unwrap();
+    let (second, _side) = setup.attach(small.clone()).await;
+    closed.await.unwrap();
+    assert_eq!(
+        setup.said(),
+        [
+            "session.own_block",
+            "block.event",
+            "com.superlogical.terminal.resize",
+            "data.connect",
+            "data.connect"
+        ]
+    );
+
+    // It gains the focus while the first still has it: the block is taken again and
+    // the terminal takes this view's size, but is not told of a focus it already has.
+    small.focused = true;
+    second.input.facts(&small).await.unwrap();
+    until("the second view's size is asked for", || {
+        setup.served.asked("com.superlogical.terminal.resize").len() == 2
+    })
+    .await;
+    assert_eq!(
+        setup.said()[5..],
+        ["session.own_block", "com.superlogical.terminal.resize"]
+    );
+    assert_eq!(
+        setup.served.asked("com.superlogical.terminal.resize")[1]["args"]["columns"],
+        60
+    );
+
+    // From then on it is the second view whose size counts, and what either types is
+    // typed, each view's own text kept whole.
+    first
+        .input
+        .resize(TermSize::new(200, 50).unwrap(), CellPx::default())
+        .await
+        .unwrap();
+    let snowman = "☃".as_bytes();
+    first.input.write(&snowman[..1]).await.unwrap();
+    second.input.write(b"b").await.unwrap();
+    first.input.write(&snowman[1..]).await.unwrap();
+    until("both are typed", || setup.typed().concat().len() == 4).await;
+    assert_eq!(setup.typed().concat(), "b☃");
+    assert_eq!(
+        setup.served.asked("com.superlogical.terminal.resize").len(),
+        2
+    );
+
+    // The focus leaves one view and then the other: the terminal loses it with the
+    // last.
+    first.input.facts(&facts(false)).await.unwrap();
+    assert_eq!(setup.served.asked("block.event").len(), 1);
+    second.input.detach().await.unwrap();
+    until("the terminal is told it lost the focus", || {
+        setup.served.asked("block.event").len() == 2
+    })
+    .await;
+    assert_eq!(
+        setup.served.asked("block.event")[1]["event"]["payload"]["action"],
+        "out"
+    );
+    // The speaker is gone: the view that is left is heard again.
+    first
+        .input
+        .resize(TermSize::new(201, 50).unwrap(), CellPx::default())
+        .await
+        .unwrap();
+    until("the first view's size is asked for", || {
+        setup.served.asked("com.superlogical.terminal.resize").len() == 3
+    })
+    .await;
+    assert!(setup.served.asked("session.disown_block").is_empty());
+}
