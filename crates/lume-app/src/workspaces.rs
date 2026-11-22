@@ -291,6 +291,7 @@ impl Panes {
     /// offers to bring it back.
     pub async fn move_group(&self, group: GroupId, to: &str) -> Result<(), CommandError> {
         check_name(to)?;
+        self.own_workspace("moving a group to another workspace")?;
         let _one_at_a_time = self.switching.lock().await;
         let here = self.workspace();
         if here.name.eq_ignore_ascii_case(to) {
@@ -329,6 +330,7 @@ impl Panes {
         group: GroupId,
         window: lume_layout::WindowId,
     ) -> Result<(), CommandError> {
+        self.own_workspace("bringing a group from another workspace")?;
         check_name(from)?;
         let _one_at_a_time = self.switching.lock().await;
         let here = self.workspace();
@@ -353,10 +355,12 @@ impl Panes {
 
     /// The workspaces there are, in alphabetical order, each with its folder.
     pub fn workspaces(&self) -> Result<(String, Vec<WorkspaceEntry>), CommandError> {
-        let active = self.workspace().name;
+        let shown = self.workspace();
+        let active = shown.name;
         let mut names = self.store.list().map_err(store_error)?;
-        // The one on show may not have been written yet.
-        if !names.iter().any(|name| name == &active) {
+        // The one on show may not have been written yet. A server's is never written,
+        // and is not one of the application's workspaces.
+        if shown.backend.is_none() && !names.iter().any(|name| name == &active) {
             names.push(active.clone());
             names.sort_by_key(|name| name.to_ascii_lowercase());
         }
@@ -382,7 +386,8 @@ impl Panes {
         let _one_at_a_time = self.switching.lock().await;
         let old = self.workspace();
         let kept = self.store.contains(name).map_err(store_error)?;
-        let on_show = old.name.eq_ignore_ascii_case(name);
+        // A server's layout may be called what a workspace of the application is.
+        let on_show = old.backend.is_none() && old.name.eq_ignore_ascii_case(name);
         match find {
             Find::New if kept || on_show => {
                 return Err(CommandError::new(
@@ -419,15 +424,25 @@ impl Panes {
         // The settings of the workspace are in effect before its panes are, so the
         // sessions of its panes start where it says.
         self.config.set_workspace(Some(&name));
+        self.leave_server();
         self.layout.replace(opened.workspace);
         remember_workspace(self.config.dirs(), &name);
         if let Some(warning) = opened.warning {
             self.notice("warning", warning);
         }
+        self.end_sessions_put_away(&old, keep);
+        self.sync_tab_panel().await;
+        Ok(())
+    }
 
-        // The sessions of the workspace that was put away end with it, unless they are
-        // to be kept for when it is shown again. Its file names them.
-        if let Some(state) = self.state.upgrade().filter(|_| !keep) {
+    /// Ends the sessions of a workspace that was put away, unless they are to be kept
+    /// for when it is shown again: its file names them. The sessions in a copy of a
+    /// server's layout are the server's, and are left alone.
+    pub(crate) fn end_sessions_put_away(&self, old: &Workspace, keep: bool) {
+        if keep || old.backend.is_some() {
+            return;
+        }
+        if let Some(state) = self.state.upgrade() {
             for (pane, session) in old.sessions() {
                 let Some(found) = old.pane(pane) else {
                     continue;
@@ -447,14 +462,13 @@ impl Panes {
                 });
             }
         }
-        self.sync_tab_panel().await;
-        Ok(())
     }
 
     /// Gives the workspace on show another name: its two files are renamed and the
     /// layout follows. If either file cannot be renamed both keep their names.
     pub async fn rename(&self, to: &str) -> Result<(), CommandError> {
         check_name(to)?;
+        self.own_workspace("renaming the workspace")?;
         let _one_at_a_time = self.switching.lock().await;
         let from = self.workspace().name;
         if from == to {
@@ -509,7 +523,8 @@ impl Panes {
     pub async fn delete(&self, name: &str) -> Result<(), CommandError> {
         check_name(name)?;
         let _one_at_a_time = self.switching.lock().await;
-        if self.workspace().name.eq_ignore_ascii_case(name) {
+        let shown = self.workspace();
+        if shown.backend.is_none() && shown.name.eq_ignore_ascii_case(name) {
             return Err(CommandError::bad_request(format!(
                 "`{name}` is the workspace on show; show another before deleting it"
             )));
@@ -536,6 +551,7 @@ impl Panes {
     /// Sets the folder the new terminals of the workspace on show start in, or takes
     /// it away.
     pub async fn set_root(&self, root: Option<&str>) -> Result<(), CommandError> {
+        self.own_workspace("giving the workspace a folder")?;
         let root = root.map(str::trim).filter(|root| !root.is_empty());
         if let Some(root) = root
             && !Path::new(root).is_dir()

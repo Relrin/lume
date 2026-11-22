@@ -9,13 +9,13 @@ a Pi coding agent approach while allowing to adapt software to user's workflows.
 > Support Mitchell's product in the first place!
 >
 > Keep in mind that this is an unofficial app that implemented for experimenting with features and cover my own needs.
-> 
-> In order to work with Rex server, you would need to be signed up for a beta and install the latest binaries. The 
+>
+> In order to work with Rex server, you would need to be signed up for a beta and install the latest binaries. The
 > Rex multiplexer is still in the early access state, so expect breaking changes on the way.
 
 ## Features
 
-- The application and core libraries are implemented with Rustlang 
+- The application and core libraries are implemented with Rustlang
 - Made on the top of libghostty & WebGPU
 - An ability to run in a standalone mode and/or with [Rex server](https://www.superlogical.com/) (optional)
 - No built-in coding agents or other tools: a user decides what to use

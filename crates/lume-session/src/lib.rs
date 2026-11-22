@@ -27,7 +27,8 @@ pub mod wsl;
 use lume_proto::ProtoError;
 
 pub use backend::{
-    Attachment, FrameStream, Hydrate, InputSink, OutputFrame, ScreenText, SessionBackend, TextFound,
+    Attachment, FrameStream, Hydrate, InputSink, OutputFrame, ScreenText, SessionBackend, Sink,
+    TextFound,
 };
 pub use cwd::start_dir_from_report;
 pub use daemon::Daemon;

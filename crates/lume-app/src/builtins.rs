@@ -489,6 +489,13 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.workspace.show-server",
+        "Show a Server's Layout",
+        "Workspace",
+        Runs::Core,
+        false,
+    ),
+    (
         "lume.workspace.new",
         "New Workspace",
         "Workspace",
@@ -916,6 +923,13 @@ fn arguments(id: &str) -> Option<Value> {
                 "x-lume-choices": "workspaces",
             } }),
             &["name"],
+        )),
+        "lume.workspace.show-server" => Some(object(
+            json!({ "backend": {
+                "type": "string",
+                "description": "The backend whose server keeps the layout to show",
+            } }),
+            &["backend"],
         )),
         "lume.workspace.delete" => Some(object(
             json!({ "name": {
@@ -1748,6 +1762,12 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
         }
         "lume.workspace.switch" => {
             return panes.switch(&name(args)?, Find::Existing).await;
+        }
+        "lume.workspace.show-server" => {
+            let backend = argument::<String>(args, "backend")?
+                .filter(|backend| !backend.trim().is_empty())
+                .ok_or_else(|| CommandError::bad_request("which server: `backend`"))?;
+            return panes.show_served(&lume_proto::BackendId(backend)).await;
         }
         "lume.workspace.new" => {
             panes.switch(&name(args)?, Find::New).await?;

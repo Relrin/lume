@@ -346,3 +346,35 @@ describe("the workspace's name", () => {
     expect(toWorkspace(after).name).toBe("notes");
   });
 });
+
+describe("a layout that a server owns", () => {
+  it("says whose it is, and holds the place of what cannot be shown", () => {
+    const held = {
+      type: "pane" as const,
+      id: "p2",
+      title: null,
+      content: { type: "placeholder" as const, label: "Tunnel", kind: "com.example.tunnel" },
+    };
+    const served = {
+      ...oneTab(split("s1", "row", [500_000, 500_000], [pane("p1"), held]), "p1"),
+      backend: "server",
+    };
+    const store = createLayoutStore();
+    expect(store.getState().backend).toBeNull();
+
+    store.getState().reset(viewOf(served));
+
+    expect(store.getState().backend).toBe("server");
+    expect(store.getState().panes["p2"]?.content).toEqual(held.content);
+    expect(toWorkspace(store.getState()).backend).toBe("server");
+    // A change the server makes arrives as any change does, and leaves whose it is.
+    const renamed: LayoutChange = { type: "workspace_name", name: "elsewhere" };
+    expect(store.getState().apply(1, 1, [renamed])).toBe("applied");
+    expect(store.getState().backend).toBe("server");
+
+    // A workspace of the application's own takes its place again.
+    store.getState().reset(viewOf(oneTab(pane("p1"), "p1"), "w1", 2));
+    expect(store.getState().backend).toBeNull();
+    expect("backend" in toWorkspace(store.getState())).toBe(false);
+  });
+});

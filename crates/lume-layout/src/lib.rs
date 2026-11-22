@@ -25,6 +25,7 @@ mod error;
 mod geometry;
 mod ids;
 mod intent;
+mod mirror;
 mod model;
 mod normalise;
 mod persist;
@@ -40,6 +41,7 @@ pub use error::{IntentError, LayoutError, SpawnFailure};
 pub use geometry::{neighbour, tab_rects};
 pub use ids::{GroupId, PaneId, PanelId, SplitId, TabId, WindowId, WorkspaceId};
 pub use intent::{Dir, FocusTarget, Intent, NewContent, Place, SpawnRequest, TabTarget};
+pub use mirror::mirror;
 pub use model::{
     Area, Axis, Bounds, DockArea, DockAreas, Floating, Group, GroupIcon, Minimised, Node, Pane,
     PaneContent, Panel, PanelContent, Scratch, Shelved, Slot, Split, Tab, TabColor, TabGroup,

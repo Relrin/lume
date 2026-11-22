@@ -28,6 +28,11 @@ pub struct Workspace {
     /// The kept groups that were closed, the most recently closed last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shelf: Vec<Shelved>,
+    /// The backend whose server owns this layout, for a workspace that shows a layout
+    /// kept elsewhere. Without one the workspace is this application's own. A workspace
+    /// that has one is a copy of what its server says and is never written to a file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<BackendId>,
 }
 
 /// The scratch terminal: one floating pane a workspace keeps at hand. It is shown over
@@ -470,6 +475,14 @@ pub enum PaneContent {
         view: String,
         state: serde_json::Value,
     },
+    /// Something a server keeps in its layout that this application has no view for.
+    /// The pane holds its place and says what is there.
+    Placeholder {
+        /// What the server calls the thing, as a person would read it.
+        label: String,
+        /// The kind of thing it is, as the server names kinds.
+        kind: String,
+    },
 }
 
 /// A pane that shows a terminal session, and what is needed to start the session again.
@@ -809,6 +822,7 @@ impl Workspace {
             scratch: None,
             next_id: 1,
             shelf: Vec::new(),
+            backend: None,
         }
     }
 
@@ -951,7 +965,7 @@ impl Workspace {
             .into_iter()
             .filter_map(|pane| match &pane.content {
                 PaneContent::Terminal(terminal) => Some((pane.id, terminal.session?)),
-                PaneContent::PluginView { .. } => None,
+                PaneContent::PluginView { .. } | PaneContent::Placeholder { .. } => None,
             })
             .collect()
     }

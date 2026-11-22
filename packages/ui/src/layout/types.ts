@@ -50,6 +50,12 @@ export interface Workspace {
   readonly next_id: number;
   /** The kept groups that were closed, the most recently closed last. Left out when none. */
   readonly shelf?: readonly Shelved[];
+  /**
+   * The backend whose server owns this layout. Left out for a workspace of the
+   * application's own. What is asked of the tabs and panes of a workspace that has one
+   * is asked of its server, and shows once the server says its layout changed.
+   */
+  readonly backend?: string;
 }
 
 /** The scratch terminal: one floating pane a workspace keeps at hand. */
@@ -262,6 +268,14 @@ export type PaneContent =
       readonly plugin: string;
       readonly view: string;
       readonly state: unknown;
+    }
+  | {
+      /** Something a server keeps in its layout that the application has no view for. */
+      readonly type: "placeholder";
+      /** What the server calls it, as a person would read it. */
+      readonly label: string;
+      /** The kind of thing it is, as the server names kinds. */
+      readonly kind: string;
     };
 
 /** A pane that floats over a window's tabs. */

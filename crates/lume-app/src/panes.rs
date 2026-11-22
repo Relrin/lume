@@ -546,7 +546,7 @@ fn shows_a_session(change: &LayoutChange) -> bool {
 fn terminal_of(pane: &Pane) -> Option<&lume_layout::TerminalPane> {
     match &pane.content {
         PaneContent::Terminal(terminal) => Some(terminal),
-        PaneContent::PluginView { .. } => None,
+        PaneContent::PluginView { .. } | PaneContent::Placeholder { .. } => None,
     }
 }
 
@@ -605,6 +605,8 @@ pub struct Panes {
     /// Held while another workspace is put on show, or the one on show is renamed or
     /// one is deleted: these go one at a time.
     pub(crate) switching: tokio::sync::Mutex<()>,
+    /// The server whose layout is on show, while one is.
+    pub(crate) served: Mutex<Option<crate::served::Served>>,
     /// Held while the workspace is written to its file, and while its file is being
     /// renamed, so that it is not written under the name it is just losing.
     saving: tokio::sync::Mutex<()>,
@@ -664,6 +666,7 @@ impl Panes {
             closing: AtomicBool::new(false),
             ending_on_purpose: Mutex::new(HashSet::new()),
             switching: tokio::sync::Mutex::new(()),
+            served: Mutex::new(None),
             saving: tokio::sync::Mutex::new(()),
             closed: Mutex::new(Vec::new()),
         });
@@ -841,13 +844,22 @@ impl Panes {
     ///
     /// An intent that makes a terminal pane and does not say how large the pane will
     /// be has the window's page asked, since only the page knows the window's pixels.
+    ///
+    /// Where a server owns the layout on show, what is asked of its tabs and panes is
+    /// asked of the server, and shows once the server says its layout changed.
     pub async fn apply(&self, intent: Intent) -> Result<Applied, CommandError> {
+        if let Some(answer) = self.ask_server(&intent).await {
+            return answer;
+        }
         let intent = self.sized(intent).await;
         Ok(self.layout.apply(intent).await?)
     }
 
     /// Applies an intent on the application's own behalf.
     pub async fn apply_core(&self, intent: Intent) -> Result<Applied, CommandError> {
+        if let Some(answer) = self.ask_server_as_core(&intent).await {
+            return answer;
+        }
         Ok(self.layout.apply_core(intent).await?)
     }
 
@@ -1170,6 +1182,11 @@ impl Panes {
         if self.closing.load(Ordering::Relaxed) || lock(&self.ending_on_purpose).remove(key) {
             return;
         }
+        // What becomes of a pane whose program ended is the say of whoever owns the
+        // layout.
+        if self.served_by().is_some() {
+            return;
+        }
         let panes = self.panes_of(key);
         let Some(&pane) = panes.first() else {
             return;
@@ -1343,6 +1360,11 @@ impl Panes {
                     // Another pane still shows it.
                     return;
                 }
+                // A pane that leaves a server's layout may only have been moved out of
+                // sight there. Its session is the server's to end.
+                if self.served_by().is_some() {
+                    return;
+                }
                 // Not waited for: a session that is slow to end must not hold up what
                 // the pages are told next.
                 let state = Arc::clone(state);
@@ -1382,6 +1404,11 @@ impl Panes {
         if self.closing.load(Ordering::Relaxed)
             || !self.config.current().config.window.close_with_last_tab
         {
+            return;
+        }
+        // A server's layout with nothing in it is still the server's: the window stays
+        // to show what comes next.
+        if self.served_by().is_some() {
             return;
         }
         let empty = self
@@ -1463,6 +1490,10 @@ impl Panes {
     pub(crate) async fn save(&self) {
         let _one_at_a_time = self.saving.lock().await;
         let workspace = self.workspace();
+        // A copy of a server's layout is the server's to keep.
+        if workspace.backend.is_some() {
+            return;
+        }
         let live = self.live_dirs();
         let store = Arc::clone(&self.store);
         let written = tokio::task::spawn_blocking(move || {
@@ -1486,6 +1517,9 @@ impl Panes {
     /// sessions that end: from here on they end because the application is closing.
     pub fn close(&self) {
         if self.closing.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        if self.workspace().backend.is_some() {
             return;
         }
         let workspace = Self::to_save(self.workspace(), self.live_dirs());

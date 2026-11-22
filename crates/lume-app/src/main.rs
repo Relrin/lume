@@ -58,6 +58,7 @@ mod plugins;
 mod profiles;
 mod registry;
 mod rex;
+mod served;
 mod services;
 mod sessions;
 mod state;

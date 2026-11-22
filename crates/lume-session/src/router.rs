@@ -35,6 +35,15 @@ impl Router {
             .insert(id, backend);
     }
 
+    /// Takes a backend out, as when its host is removed. Attachments already open carry
+    /// on until the backend ends them; new ones are refused as for an unknown backend.
+    pub fn remove(&self, id: &BackendId) -> Option<Arc<dyn SessionBackend>> {
+        self.backends
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id)
+    }
+
     pub fn get(&self, id: &BackendId) -> Result<Arc<dyn SessionBackend>> {
         self.backends
             .read()

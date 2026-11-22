@@ -139,6 +139,8 @@ export interface LayoutState {
   /** The workspace's id and name. */
   readonly workspaceId: string;
   readonly name: string;
+  /** The backend whose server owns the layout, or null for one of the application's own. */
+  readonly backend: string | null;
   /** The window the user last worked in. */
   readonly focusedWindow: WindowId | null;
   readonly scratch: Scratch | null;
@@ -179,6 +181,7 @@ const EMPTY: Data = {
   revision: 0,
   workspaceId: "",
   name: "",
+  backend: null,
   focusedWindow: null,
   scratch: null,
   shelf: NO_SHELF,
@@ -624,6 +627,7 @@ function dataOf(view: LayoutView): Data {
   draft.put("revision", view.revision);
   draft.put("workspaceId", workspace.id);
   draft.put("name", workspace.name);
+  draft.put("backend", workspace.backend ?? null);
   draft.put("focusedWindow", workspace.focused_window);
   draft.put("scratch", workspace.scratch);
   const shelf = workspace.shelf ?? NO_SHELF;
@@ -723,6 +727,7 @@ export function toWorkspace(state: LayoutState): Workspace {
     focused_window: state.focusedWindow,
     scratch: state.scratch,
     next_id: 0,
+    ...(state.backend === null ? {} : { backend: state.backend }),
     ...(state.shelf.length === 0
       ? {}
       : {

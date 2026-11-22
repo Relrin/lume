@@ -18,6 +18,7 @@ use tokio::sync::broadcast::error::{RecvError, TryRecvError};
 
 use crate::apply::{Started, apply, check, needs};
 use crate::change::{Applied, Created, LayoutEvent, LayoutSnapshot};
+use crate::diff::diff;
 use crate::error::{IntentError, LayoutError, SpawnFailure};
 use crate::intent::{Intent, SpawnRequest};
 use crate::model::Workspace;
@@ -145,6 +146,33 @@ impl LocalLayout {
             .events
             .send(LayoutEvent::Reset(Box::new(snapshot.clone())));
         snapshot
+    }
+
+    /// Brings the workspace to the one `make` gives for it, as a step in the same
+    /// layout: followers are sent what differs and keep everything else they have.
+    /// This is how a copy of a layout that is owned elsewhere follows its owner.
+    ///
+    /// `make` is given the workspace as it is and nothing changes the workspace while
+    /// it runs, so it must not wait for anything. When it gives none, nothing happens
+    /// and none is returned. Nothing is sent when nothing differs.
+    pub fn update(
+        &self,
+        make: impl FnOnce(&Workspace) -> Option<Workspace>,
+    ) -> Option<LayoutSnapshot> {
+        let mut state = self.state();
+        let workspace = make(&state.workspace)?;
+        let changes = diff(&state.workspace, &workspace);
+        state.workspace = workspace;
+        if !changes.is_empty() {
+            state.revision += 1;
+            // Sent while the state is held, so events leave in the order they happened.
+            let _ = self.events.send(LayoutEvent::Changed {
+                epoch: state.epoch,
+                revision: state.revision,
+                changes,
+            });
+        }
+        Some(state.snapshot())
     }
 
     /// Applies an intent on the application's own behalf: one of those nobody else may
@@ -383,7 +411,7 @@ mod tests {
     fn session_of(layout: &LocalLayout, pane: PaneId) -> Option<SessionId> {
         match &layout.workspace().pane(pane)?.content {
             PaneContent::Terminal(terminal) => terminal.session,
-            PaneContent::PluginView { .. } => None,
+            PaneContent::PluginView { .. } | PaneContent::Placeholder { .. } => None,
         }
     }
 

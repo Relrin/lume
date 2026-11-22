@@ -151,7 +151,9 @@ pub struct FrameStream {
 }
 
 impl FrameStream {
-    pub(crate) fn new(frames: mpsc::UnboundedReceiver<OutputFrame>) -> Self {
+    /// A stream of the frames sent into the other end of `frames`. A backend keeps to
+    /// the credit its sink was granted, so what waits here stays bounded.
+    pub fn new(frames: mpsc::UnboundedReceiver<OutputFrame>) -> Self {
         Self { frames }
     }
 
@@ -161,9 +163,10 @@ impl FrameStream {
     }
 }
 
-/// What a backend does with the frames a view sends. One per attachment.
+/// What a backend does with the frames a view sends. One per attachment. Each method is
+/// the backend's side of the [`InputSink`] method of the same name.
 #[async_trait]
-pub(crate) trait Sink: Send + Sync {
+pub trait Sink: Send + Sync {
     async fn write(&self, bytes: &[u8]) -> Result<()>;
     async fn resize(&self, size: TermSize, cell_px: CellPx) -> Result<()>;
     async fn facts(&self, facts: &ClientFacts) -> Result<()>;
@@ -180,7 +183,8 @@ pub struct InputSink {
 }
 
 impl InputSink {
-    pub(crate) fn new(sink: Arc<dyn Sink>) -> Self {
+    /// The way to a session through a backend's own sink.
+    pub fn new(sink: Arc<dyn Sink>) -> Self {
         Self { sink }
     }
 

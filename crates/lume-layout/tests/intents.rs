@@ -38,7 +38,9 @@ fn focus_pane(workspace: &mut Workspace, pane: PaneId) {
 fn terminal_of(workspace: &Workspace, pane: PaneId) -> lume_layout::TerminalPane {
     match &workspace.pane(pane).unwrap().content {
         PaneContent::Terminal(terminal) => terminal.clone(),
-        PaneContent::PluginView { .. } => panic!("{pane} is not a terminal"),
+        PaneContent::PluginView { .. } | PaneContent::Placeholder { .. } => {
+            panic!("{pane} is not a terminal")
+        }
     }
 }
 

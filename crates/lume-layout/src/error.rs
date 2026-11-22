@@ -112,6 +112,9 @@ pub enum LayoutError {
     /// The authority can no longer be reached.
     #[error("the layout can no longer be reached")]
     Closed,
+    /// Whoever owns the layout has no way to do what was asked.
+    #[error("{0}")]
+    Unsupported(String),
 }
 
 impl LayoutError {
@@ -121,6 +124,7 @@ impl LayoutError {
             LayoutError::Intent(error) => error.code(),
             LayoutError::Spawn(failure) => &failure.code,
             LayoutError::Closed => "disconnected",
+            LayoutError::Unsupported(_) => "unsupported",
         }
     }
 }

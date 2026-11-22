@@ -36,6 +36,8 @@ function folderName(path: string): string {
 export function WorkspaceSwitcher() {
   const app = useShell();
   const name = useStore(app.layout, (state) => state.name);
+  // A layout a server keeps is not one of the application's workspaces, and says so.
+  const served = useStore(app.layout, (state) => state.backend !== null);
   const known = useStore(app.commandStore, (state) => state.byId);
   // The dot says whether the session host can be reached, whatever the theme's accent.
   const connected = useStore(app.hostLink, (state) => state.connected);
@@ -117,8 +119,9 @@ export function WorkspaceSwitcher() {
         className="switcher-button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-description={linkLabel}
-        title={`Workspace: ${name}\n${linkLabel}`}
+        aria-description={served ? `Layout kept by a server. ${linkLabel}` : linkLabel}
+        data-served={served || undefined}
+        title={`${served ? "Layout kept by a server" : "Workspace"}: ${name}\n${linkLabel}`}
         onClick={() => setOpen(!open)}
       >
         {/* The dot is said in the button's description, not in its name. */}

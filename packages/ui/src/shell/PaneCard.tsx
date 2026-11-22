@@ -492,6 +492,10 @@ export function PaneCard({
     const content = state.panes[pane]?.content;
     return content?.type === "plugin_view" ? content : undefined;
   });
+  const held = useStore(app.layout, (state) => {
+    const content = state.panes[pane]?.content;
+    return content?.type === "placeholder" ? content : undefined;
+  });
   if (plugin !== undefined) {
     return (
       <PluginPaneCard
@@ -504,7 +508,80 @@ export function PaneCard({
     );
   }
   if (parked) return null;
+  if (held !== undefined) {
+    return <HeldPaneCard pane={pane} header={header} floating={floating} content={held} />;
+  }
   return <TerminalPaneCard pane={pane} header={header} floating={floating} />;
+}
+
+/** The content of a pane that holds the place of something there is no view for. */
+type HeldContent = Extract<PaneContent, { type: "placeholder" }>;
+
+/**
+ * The card of a pane that holds the place of something a server keeps in its layout and
+ * the application cannot show: the header every pane has, and what is there in words.
+ */
+function HeldPaneCard({
+  pane,
+  header,
+  floating,
+  content,
+}: {
+  pane: PaneId;
+  header: boolean;
+  floating: boolean;
+  content: HeldContent;
+}) {
+  const app = useShell();
+  const card = useRef<HTMLElement>(null);
+  const focused = useStore(app.layout, (state) => state.ready && selectFocus(state) === pane);
+  useLayoutEffect(() => {
+    const element = card.current;
+    if (!element) return undefined;
+    return app.area.registerPane(pane, element);
+  }, [app, pane]);
+  return (
+    <section
+      ref={card}
+      className="pane-card"
+      data-pane={pane}
+      data-focused={focused}
+      data-floating={floating}
+      data-content="placeholder"
+      aria-label={`Pane ${pane}`}
+      onPointerDown={() => {
+        if (focused) return;
+        app.client
+          .layoutApply({ type: "focus", target: { type: "pane", pane } })
+          .catch(() => undefined);
+      }}
+    >
+      {(header || floating) && <PaneHeader pane={pane} focused={focused} floating={floating} />}
+      <div className="pane-plugin">
+        <div className="panel-placeholder">
+          <p className="panel-placeholder-name">{content.label}</p>
+          <p>
+            The server keeps something here that cannot be shown yet
+            {content.kind === "" ? "" : ": "}
+            <span className="panel-placeholder-plugin">{content.kind}</span>.
+          </p>
+        </div>
+      </div>
+      {floating &&
+        FLOAT_EDGES.map((edge) => (
+          <div
+            key={edge}
+            className="float-edge"
+            data-edge={edge}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              app.area.startFloatDrag(pane, edge, event.nativeEvent, event.currentTarget);
+            }}
+          />
+        ))}
+    </section>
+  );
 }
 
 /** The content of a pane that shows a plugin's view. */

@@ -105,6 +105,13 @@ impl Terminal {
     /// version. Its colours, cell size and colour scheme start unset, as in a new
     /// terminal, and are set again by whoever shows it.
     pub fn from_snapshot(bytes: &[u8]) -> Result<Self> {
+        Self::from_snapshot_prefix(bytes).map(|(terminal, _)| terminal)
+    }
+
+    /// Loads a terminal from a snapshot that other bytes may follow, as when a stream
+    /// opens with one. Returns the terminal and the snapshot's length: `bytes` from
+    /// there on are not part of it and were not read.
+    pub fn from_snapshot_prefix(bytes: &[u8]) -> Result<(Self, usize)> {
         let mut decoder = Decoder(std::ptr::null_mut());
         // SAFETY: the pointer and length describe `bytes`, which outlives the decoder.
         check(unsafe {
@@ -121,9 +128,24 @@ impl Terminal {
         let mut raw: sys::GhosttyTerminal = std::ptr::null_mut();
         // SAFETY: the decoder is live and has not started; `raw` is a valid out pointer.
         check(unsafe { sys::ghostty_snapshot_decoder_decode(decoder.0, &mut raw) })?;
+        let mut consumed = 0usize;
+        // SAFETY: the decoder is live and finished without error, and the offset's
+        // output type is size_t.
+        let offset = check(unsafe {
+            sys::ghostty_snapshot_decoder_get(
+                decoder.0,
+                sys::GHOSTTY_SNAPSHOT_DECODER_DATA_SOURCE_OFFSET,
+                (&raw mut consumed).cast(),
+            )
+        });
         drop(decoder);
         if raw.is_null() {
             return Err(Error(sys::GHOSTTY_OUT_OF_MEMORY as i32));
+        }
+        if let Err(error) = offset {
+            // SAFETY: the handle came from the decoder, is owned here, and is freed once.
+            unsafe { sys::ghostty_terminal_free(raw) };
+            return Err(error);
         }
         // The size is read before the handle is adopted; if reading fails the handle
         // is freed here.
@@ -136,7 +158,7 @@ impl Terminal {
         let size = read(sys::GHOSTTY_TERMINAL_DATA_COLS)
             .and_then(|cols| read(sys::GHOSTTY_TERMINAL_DATA_ROWS).map(|rows| (cols, rows)));
         match size {
-            Ok((cols, rows)) => Self::adopt(raw, cols, rows),
+            Ok((cols, rows)) => Self::adopt(raw, cols, rows).map(|terminal| (terminal, consumed)),
             Err(error) => {
                 // SAFETY: the handle came from the decoder, is owned here, and is freed once.
                 unsafe { sys::ghostty_terminal_free(raw) };
@@ -335,6 +357,24 @@ mod tests {
         original.write(more);
         restored.write(more);
         assert_eq!(view(&restored), view(&original));
+    }
+
+    #[test]
+    fn a_snapshot_followed_by_other_bytes_reports_where_it_ends() {
+        let mut original = Terminal::new(40, 6).unwrap();
+        original.write(b"before\r\n");
+        let snapshot = original.snapshot().unwrap();
+        let mut stream = snapshot.clone();
+        stream.extend_from_slice(b"after");
+
+        let (mut restored, consumed) = Terminal::from_snapshot_prefix(&stream).unwrap();
+        assert_eq!(consumed, snapshot.len());
+        restored.write(&stream[consumed..]);
+        assert_eq!(restored.row_text(0).unwrap().trim_end(), "before");
+        assert_eq!(restored.row_text(1).unwrap().trim_end(), "after");
+
+        let (_, alone) = Terminal::from_snapshot_prefix(&snapshot).unwrap();
+        assert_eq!(alone, snapshot.len());
     }
 
     #[test]
