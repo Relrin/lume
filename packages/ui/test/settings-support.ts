@@ -164,6 +164,22 @@ export const SCHEMA = {
             list: "fonts",
           },
         },
+        "ui-family": {
+          type: "string",
+          default: "Inter",
+          "x-lume-settings": {
+            page: "appearance",
+            group: "Theme",
+            order: 25,
+            label: "Interface font",
+            control: "select",
+            options: [
+              { value: "Inter", label: "Inter" },
+              { value: "system-ui", label: "The system font" },
+            ],
+            list: "interface-fonts",
+          },
+        },
       },
     },
     appearance: {
@@ -270,6 +286,7 @@ export const LISTS: SettingsLists = {
     { id: "ember", name: "Ember", scheme: "dark", builtin: false },
   ],
   fonts: ["Cascadia Mono", "Consolas"],
+  interfaceFonts: ["Cascadia Mono", "Consolas", "Inter", "Segoe UI"],
   shells: [{ name: "PowerShell", program: "pwsh.exe" }],
   workspaces: ["default", "notes"],
   profiles: [

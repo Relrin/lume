@@ -105,8 +105,8 @@ pub struct Shown {
     /// The choices that are always the same.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<Choice>,
-    /// The choices that depend on the machine: `themes`, `fonts`, `shells` or
-    /// `workspaces`. They follow the fixed ones.
+    /// The choices that depend on the machine: `themes`, `fonts`, `interface-fonts`,
+    /// `shells` or `workspaces`. They follow the fixed ones.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub list: Option<&'static str>,
     /// The colours a swatch control offers.
@@ -570,7 +570,14 @@ mod tests {
                 other => panic!("{path:?} is set by `{other}`"),
             }
             if let Some(list) = says.get("list") {
-                let known = ["themes", "fonts", "shells", "workspaces", "profiles"];
+                let known = [
+                    "themes",
+                    "fonts",
+                    "interface-fonts",
+                    "shells",
+                    "workspaces",
+                    "profiles",
+                ];
                 assert!(known.contains(&list.as_str().unwrap()), "{path:?}");
             }
             if let Some(platform) = says.get("platform") {

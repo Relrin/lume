@@ -425,8 +425,9 @@ const PROFILES: ProfileList = {
   ],
 };
 
-/** The fixed-width fonts a fixture's machine has. */
+/** The fixed-width fonts a fixture's machine has, and all it has. */
 const FONTS: readonly string[] = ["Cascadia Mono", "Consolas", "JetBrains Mono"];
+const ALL_FONTS: readonly string[] = [...FONTS, "Georgia", "Segoe UI"].sort();
 
 /** What the fake core keeps of a tab besides its tree. */
 interface TabFacts {
@@ -859,7 +860,7 @@ export class FakeCore implements Carrier {
             : { ms: 24 },
         );
       case "font_families":
-        return answer(FONTS);
+        return answer(args["all"] === true ? ALL_FONTS : FONTS);
       // No picture is behind the panes: no bytes.
       case "background_image":
         return answer(new ArrayBuffer(0));

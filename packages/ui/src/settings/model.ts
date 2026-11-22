@@ -27,7 +27,8 @@ export type SettingValue = string | number | boolean;
 export type SettingControl = "switch" | "select" | "segmented" | "text" | "number" | "swatch";
 
 /** The lists a setting's choices may be taken from. */
-export type SettingList = "themes" | "fonts" | "shells" | "workspaces" | "profiles";
+export type SettingList =
+  "themes" | "fonts" | "interface-fonts" | "shells" | "workspaces" | "profiles";
 
 /** What the schema says of a setting a person is shown: the keyword `x-lume-settings`. */
 export interface SettingAnnotation {
@@ -182,6 +183,8 @@ export interface SettingsPage {
 export interface SettingsLists {
   readonly themes: readonly ThemeEntry[];
   readonly fonts: readonly string[];
+  /** Every font the machine has, where `fonts` are those a terminal can use. */
+  readonly interfaceFonts: readonly string[];
   readonly shells: readonly ShellEntry[];
   readonly workspaces: readonly string[];
   readonly profiles: readonly Profile[];
@@ -191,6 +194,7 @@ export interface SettingsLists {
 export const NO_LISTS: SettingsLists = {
   themes: [],
   fonts: [],
+  interfaceFonts: [],
   shells: [],
   workspaces: [],
   profiles: [],
@@ -287,7 +291,14 @@ const CONTROLS: readonly SettingControl[] = [
   "number",
   "swatch",
 ];
-const LISTS: readonly SettingList[] = ["themes", "fonts", "shells", "workspaces", "profiles"];
+const LISTS: readonly SettingList[] = [
+  "themes",
+  "fonts",
+  "interface-fonts",
+  "shells",
+  "workspaces",
+  "profiles",
+];
 
 /** What the schema says of a setting, if it says it in the form this reads. */
 function annotationOf(raw: unknown): SettingAnnotation | undefined {
@@ -461,6 +472,8 @@ function listed(list: SettingList, lists: SettingsLists): SettingChoice[] {
       return lists.themes.map((theme) => ({ value: theme.id, label: theme.name }));
     case "fonts":
       return lists.fonts.map((font) => ({ value: font, label: font }));
+    case "interface-fonts":
+      return lists.interfaceFonts.map((font) => ({ value: font, label: font }));
     case "shells":
       return lists.shells.map((shell) => ({ value: shell.program, label: shell.name }));
     case "workspaces":

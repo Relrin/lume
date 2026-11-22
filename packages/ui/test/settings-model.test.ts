@@ -40,6 +40,7 @@ describe("the settings as pages of rows", () => {
     expect(appearance.groups[0]!.rows.map((held) => held.path)).toEqual([
       "appearance.theme",
       "appearance.theme-dark",
+      "font.ui-family",
       "font.family",
       "appearance.accent",
     ]);
@@ -198,6 +199,15 @@ describe("the settings as pages of rows", () => {
       "JetBrains Mono",
       "Cascadia Mono",
       "Consolas",
+    ]);
+    // The interface's font: what comes with the application and the system's own
+    // first, then every font the machine has, each once.
+    expect(row(pages, "font.ui-family").choices).toEqual([
+      { value: "Inter", label: "Inter" },
+      { value: "system-ui", label: "The system font" },
+      { value: "Cascadia Mono", label: "Cascadia Mono" },
+      { value: "Consolas", label: "Consolas" },
+      { value: "Segoe UI", label: "Segoe UI" },
     ]);
     const theme = row(pages, "appearance.theme");
     expect(theme.choices).toEqual([

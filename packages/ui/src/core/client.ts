@@ -159,6 +159,11 @@ export class CoreClient {
     return this.transport.command("font_families");
   }
 
+  /** Every font installed on this machine, for the interface to be drawn in. */
+  interfaceFontFamilies(): Promise<string[]> {
+    return this.transport.command("font_families", { all: true });
+  }
+
   /**
    * The picture the configuration puts behind the panes, as the bytes of its file.
    * Empty when there is none.

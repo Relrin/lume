@@ -8,6 +8,10 @@
 //! nothing at all. The sandbox gives the page an origin of its own that matches no other
 //! page, so it holds no storage and cannot reach the window it is in.
 //!
+//! One path belongs to no install: `<base>/lume/fonts/<file>`, where the application
+//! offers the fonts it ships to every page, so a plugin's view is drawn in the window's
+//! own fonts without each package carrying them. `lume` can be no plugin's id.
+//!
 //! Nothing here reads a file: this works out what was asked for, whether it may be
 //! served, and what goes with it.
 
@@ -64,6 +68,38 @@ pub fn split(url_path: &str) -> Result<Asked, Refused> {
         install: install.to_owned(),
         path: rest.to_owned(),
     })
+}
+
+/// The path, below the base, that the application's own fonts are served under.
+pub const SHARED_FONTS: &str = "lume/fonts";
+
+/// The file a request for one of the application's fonts names
+/// (`/lume/fonts/<file>.woff2`), or nothing if the path is not one of those. The name is
+/// letters, digits and hyphens before its ending, so it can name nothing but a file.
+pub fn shared_font(url_path: &str) -> Option<&str> {
+    let path = url_path
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_start_matches('/');
+    let name = path.strip_prefix(SHARED_FONTS)?.strip_prefix('/')?;
+    let stem = name.strip_suffix(".woff2")?;
+    let plain = !stem.is_empty() && stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    plain.then_some(name)
+}
+
+/// The headers one of the application's fonts is served with. A page's frame has an
+/// origin of its own, and a font is only taken from another origin that says anyone
+/// may have it; these are fonts anyone may have. They never change while the
+/// application runs.
+pub fn shared_font_headers() -> Vec<(&'static str, String)> {
+    vec![
+        ("Content-Type", "font/woff2".to_owned()),
+        ("Access-Control-Allow-Origin", "*".to_owned()),
+        ("Cross-Origin-Resource-Policy", "cross-origin".to_owned()),
+        ("X-Content-Type-Options", "nosniff".to_owned()),
+        ("Cache-Control", "max-age=86400".to_owned()),
+    ]
 }
 
 /// Whether a file name is one Windows keeps for a device (`con`, `nul`, `com1`, …),
@@ -159,7 +195,8 @@ pub fn content_type(path: &str) -> &'static str {
 /// The content security policy of every file served for `install`, where `base` is the
 /// address frames are served from (no `/` at its end).
 ///
-/// Scripts, pictures, fonts and media come only from below the install's own path.
+/// Scripts, pictures, fonts and media come only from below the install's own path;
+/// fonts may also be the application's own (`SHARED_FONTS`).
 /// Styles may also be written in the page (many interface libraries set colours and
 /// sizes that way), which is safe here because a style has no way to send anything
 /// out: every other kind of request is held to the install's path or refused. Workers
@@ -172,7 +209,7 @@ pub fn content_security_policy(base: &str, install: &str) -> String {
         format!("script-src {own}"),
         format!("style-src {own} 'unsafe-inline'"),
         format!("img-src {own} data: blob:"),
-        format!("font-src {own} data:"),
+        format!("font-src {own} {base}/{SHARED_FONTS}/ data:"),
         format!("media-src {own} blob:"),
         format!("worker-src {own} blob:"),
         "connect-src 'none'".to_owned(),
@@ -339,6 +376,44 @@ mod tests {
         // Only styles may be written in the page.
         assert_eq!(policy.matches("'unsafe-inline'").count(), 1);
         assert!(policy.contains(&format!("style-src {own} 'unsafe-inline'")));
+        // Fonts are its own or the application's, and nothing else is the application's.
+        assert!(policy.contains(&format!(
+            "font-src {own} http://lume-plugin.localhost/lume/fonts/ data:"
+        )));
+        assert_eq!(policy.matches("/lume/").count(), 1);
+    }
+
+    #[test]
+    fn the_applications_fonts_have_a_path_no_plugin_can_have() {
+        assert_eq!(
+            shared_font("/lume/fonts/InterVariable.woff2"),
+            Some("InterVariable.woff2")
+        );
+        assert_eq!(
+            shared_font("lume/fonts/JetBrainsMono-Bold.woff2?x=1"),
+            Some("JetBrainsMono-Bold.woff2")
+        );
+        for path in [
+            "/lume/fonts/",
+            "/lume/fonts/x.ttf",
+            "/lume/fonts/../x.woff2",
+            "/lume/fonts/a/b.woff2",
+            "/lume/fonts/a%2fb.woff2",
+            "/lume/fonts/.woff2",
+            "/lume/other/x.woff2",
+            "/lume.fonts/x.woff2",
+            "/acme.review/lume/fonts/x.woff2",
+        ] {
+            assert_eq!(shared_font(path), None, "{path}");
+        }
+        // The path is the application's alone: it names no install.
+        assert_eq!(
+            split("/lume/fonts/InterVariable.woff2"),
+            Err(Refused::NoInstall)
+        );
+        let headers = shared_font_headers();
+        assert!(headers.contains(&("Content-Type", "font/woff2".to_owned())));
+        assert!(headers.contains(&("Access-Control-Allow-Origin", "*".to_owned())));
     }
 
     #[test]

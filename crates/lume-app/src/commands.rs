@@ -349,8 +349,12 @@ pub fn page_reply(
     state.answer(webview.label(), carrier, id, result.into())
 }
 
-/// The installed monospace font families, in alphabetical order.
+/// The installed font families, in alphabetical order: the monospace ones, which a
+/// terminal can use, or with `all` every one, for the interface.
 #[tauri::command]
-pub async fn font_families(fonts: State<'_, Fonts>) -> Result<Vec<String>, CommandError> {
-    fonts.families().await
+pub async fn font_families(
+    fonts: State<'_, Fonts>,
+    all: Option<bool>,
+) -> Result<Vec<String>, CommandError> {
+    fonts.families(all == Some(true)).await
 }

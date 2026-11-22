@@ -12,7 +12,7 @@ const FONTS = new URL("../src/fonts/", import.meta.url);
 describe("the fonts shipped with the application", () => {
   it("are the files their checksums were taken from", () => {
     const sums = readFileSync(new URL("SHA256SUMS", FONTS), "utf8").trim().split("\n");
-    expect(sums).toHaveLength(4);
+    expect(sums).toHaveLength(6);
     for (const line of sums) {
       const [sum, name] = line.split(/\s+/);
       const bytes = readFileSync(new URL(name ?? "", FONTS));
@@ -29,7 +29,9 @@ describe("the fonts shipped with the application", () => {
     expect(declared.sort()).toEqual(
       [...sums.matchAll(/ {2}(\S+)$/gm)].map((match) => match[1]).sort(),
     );
-    expect(readFileSync(new URL("OFL.txt", FONTS), "utf8")).toContain("SIL Open Font License");
+    for (const licence of ["OFL.txt", "OFL-Inter.txt"]) {
+      expect(readFileSync(new URL(licence, FONTS), "utf8")).toContain("SIL Open Font License");
+    }
   });
 });
 

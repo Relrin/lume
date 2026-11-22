@@ -104,8 +104,9 @@
 # The weights of ordinary and bold text.
 # weight = 400
 # bold-weight = 700
-# The font and size of everything that is not a terminal.
-# ui-family = "system-ui"
+# The font and size of everything that is not a terminal. Inter comes with Lume;
+# "system-ui" is the system's own.
+# ui-family = "Inter"
 # ui-size = 12.0
 
 [terminal]

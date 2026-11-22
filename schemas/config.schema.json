@@ -1378,7 +1378,7 @@
         "family": "JetBrains Mono",
         "line-height": 1.2,
         "size": 14.0,
-        "ui-family": "system-ui",
+        "ui-family": "Inter",
         "ui-size": 12.0,
         "weight": 400
       },
@@ -1454,9 +1454,28 @@
           }
         },
         "ui-family": {
-          "default": "system-ui",
-          "description": "The font of everything that is not a terminal: tabs, headers, menus.",
-          "type": "string"
+          "default": "Inter",
+          "description": "The font of everything that is not a terminal: tabs, headers, menus. `Inter` comes\nwith the application; `system-ui` is the system's own; any other is one that is\ninstalled.",
+          "type": "string",
+          "x-lume-settings": {
+            "control": "select",
+            "group": "Type",
+            "help": "The font of tabs, menus, settings and the views of plugins",
+            "label": "Interface font",
+            "list": "interface-fonts",
+            "options": [
+              {
+                "label": "Inter",
+                "value": "Inter"
+              },
+              {
+                "label": "The system's font",
+                "value": "system-ui"
+              }
+            ],
+            "order": 5,
+            "page": "appearance"
+          }
         },
         "ui-size": {
           "default": 12.0,

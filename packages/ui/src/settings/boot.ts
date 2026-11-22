@@ -214,13 +214,14 @@ export async function startSettings(
   void Promise.all([
     some(client.themesList(), []),
     some(client.fontFamilies(), []),
+    some(client.interfaceFontFamilies(), []),
     some(client.shellsList(), []),
     some(
       client.workspacesList().then((listed) => listed.workspaces.map((entry) => entry.name)),
       [],
     ),
-  ]).then(([themes, fonts, shells, workspaces]) => {
-    lists.setState({ ...lists.getState(), themes, fonts, shells, workspaces });
+  ]).then(([themes, fonts, interfaceFonts, shells, workspaces]) => {
+    lists.setState({ ...lists.getState(), themes, fonts, interfaceFonts, shells, workspaces });
   });
   // Looking at the machine for profiles takes the core a moment; the list comes on
   // its own, and again whenever it changes.

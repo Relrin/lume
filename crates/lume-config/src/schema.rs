@@ -934,7 +934,13 @@ pub struct FontConfig {
     /// The weight of bold text.
     #[schemars(range(min = 1, max = 1000))]
     pub bold_weight: u16,
-    /// The font of everything that is not a terminal: tabs, headers, menus.
+    /// The font of everything that is not a terminal: tabs, headers, menus. `Inter` comes
+    /// with the application; `system-ui` is the system's own; any other is one that is
+    /// installed.
+    #[schemars(extend("x-lume-settings" = Shown::select("appearance", "Type", 5, "Interface font")
+        .options(&[("Inter", "Inter"), ("system-ui", "The system's font")])
+        .list("interface-fonts")
+        .help("The font of tabs, menus, settings and the views of plugins")))]
     pub ui_family: String,
     /// The size of that text, in pixels.
     #[schemars(range(min = UI_FONT_SIZE_MIN, max = UI_FONT_SIZE_MAX))]
@@ -960,7 +966,7 @@ impl Default for FontConfig {
             line_height: 1.2,
             weight: 400,
             bold_weight: 700,
-            ui_family: "system-ui".to_owned(),
+            ui_family: "Inter".to_owned(),
             ui_size: 12.0,
         }
     }

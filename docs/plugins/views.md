@@ -102,6 +102,7 @@ Every file is served with a policy that holds the page to its own package:
 | scripts                            | files of the plugin's package only: none inline, no `eval`                                    |
 | styles                             | files of the package, and inline styles                                                       |
 | pictures, fonts, media             | files of the package; also `data:` for pictures and fonts, and `blob:` for pictures and media |
+| the window's fonts                 | `/lume/fonts/`, where the application serves the fonts it ships                               |
 | workers                            | files of the package, and `blob:`                                                             |
 | `fetch`, WebSocket, any connection | nothing                                                                                       |
 | frames                             | none                                                                                          |
@@ -241,6 +242,23 @@ for (const [name, value] of Object.entries(hello.tokens)) {
 ```
 
 A `tokens` message comes whenever the theme or a setting that changes the look does.
+
+Two of the tokens name fonts: `--lume-font-ui-family` for the interface and `--lume-font-family`
+for terminals and code. The application ships the fonts it uses by default, Inter and JetBrains
+Mono, and serves them to every view at `/lume/fonts/`, so a view need not carry them. The kit
+declares their faces when the view connects. A view that does without the kit declares the ones it
+uses:
+
+```css
+@font-face {
+  font-family: "Inter";
+  font-weight: 100 900;
+  src: url("/lume/fonts/InterVariable.woff2") format("woff2");
+}
+```
+
+The files are `InterVariable.woff2` and `InterVariable-Italic.woff2` (every weight in each), and
+`JetBrainsMono-Regular.woff2`, `-Bold`, `-Italic` and `-BoldItalic`.
 
 A view in a pane or a panel stands on a card, `--lume-color-card`. On the plugin's page in the
 settings window it stands on the window itself: leave the page's background clear there, and the

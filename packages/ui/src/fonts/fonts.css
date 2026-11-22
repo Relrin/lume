@@ -1,8 +1,25 @@
 /*
- * The font shipped with the application: JetBrains Mono in the four faces a terminal
- * draws with. A face is fetched when something first asks for it, and text waits for
- * it rather than being drawn in another font first.
+ * The fonts shipped with the application: Inter for the interface, upright and italic,
+ * each one file that holds every weight; and JetBrains Mono in the four faces a
+ * terminal draws with. A face is fetched when something first asks for it, and text
+ * waits for it rather than being drawn in another font first.
  */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("./InterVariable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("./InterVariable-Italic.woff2") format("woff2");
+}
 
 @font-face {
   font-family: "JetBrains Mono";

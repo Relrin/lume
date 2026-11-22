@@ -20,12 +20,14 @@
 
 import { keyToPass, type KeyLike, type PassedKey } from "./keys";
 import { type StreamClock, type StreamPortLike, ViewStream } from "./streams";
+import { addWindowFonts } from "./fonts";
 import { applyPlace, applyTokens, type ThemeTokens } from "./tokens";
 
 export { describeKey, editingKey, keyToPass, worthForwarding } from "./keys";
 export type { KeyLike, PassedKey } from "./keys";
 export { ACK_EVERY_MS, ViewStream, WRITE_MAX } from "./streams";
 export type { PieceListener, StreamEnd } from "./streams";
+export { addWindowFonts } from "./fonts";
 export { applyPlace, applyTokens } from "./tokens";
 export type { ThemeTokens } from "./tokens";
 
@@ -380,7 +382,8 @@ export function createView(hello: Hello, port: PortLike, effects: ViewEffects = 
 export interface ConnectOptions {
   /**
    * Whether the window's look is set on the page as CSS variables, when the view
-   * starts and whenever it changes. On unless told otherwise.
+   * starts and whenever it changes, and the window's fonts are declared on it. On
+   * unless told otherwise.
    */
   readonly applyTokens?: boolean | undefined;
   /**
@@ -417,6 +420,8 @@ let connecting: Promise<View> | null = null;
  */
 export function connect(options: ConnectOptions = {}): Promise<View> {
   if (connecting !== null) return connecting;
+  // Before the window answers, so the faces are on their way when the first text is drawn.
+  if (options.applyTokens !== false) addWindowFonts();
   connecting = new Promise<View>((resolve) => {
     const received = (event: MessageEvent) => {
       const port = event.ports[0];

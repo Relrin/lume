@@ -5,6 +5,9 @@
 //! plugins that are installed, turned on, intact and that show pages of their own are
 //! served, and only files inside their packages, with the policy that holds each page
 //! to its own files (see `lume_plugin::serve`).
+//!
+//! The fonts the application ships are served to every page from one path of their own,
+//! so a plugin's view is drawn in the window's fonts.
 
 use std::sync::{Arc, Weak};
 
@@ -24,6 +27,52 @@ pub fn base() -> &'static str {
     } else {
         "lume-plugin://localhost"
     }
+}
+
+/// The fonts the application ships, by file name: the same files the window's own page
+/// is built with.
+const FONTS: &[(&str, &[u8])] = &[
+    (
+        "InterVariable.woff2",
+        include_bytes!("../../../packages/ui/src/fonts/InterVariable.woff2"),
+    ),
+    (
+        "InterVariable-Italic.woff2",
+        include_bytes!("../../../packages/ui/src/fonts/InterVariable-Italic.woff2"),
+    ),
+    (
+        "JetBrainsMono-Regular.woff2",
+        include_bytes!("../../../packages/ui/src/fonts/JetBrainsMono-Regular.woff2"),
+    ),
+    (
+        "JetBrainsMono-Bold.woff2",
+        include_bytes!("../../../packages/ui/src/fonts/JetBrainsMono-Bold.woff2"),
+    ),
+    (
+        "JetBrainsMono-Italic.woff2",
+        include_bytes!("../../../packages/ui/src/fonts/JetBrainsMono-Italic.woff2"),
+    ),
+    (
+        "JetBrainsMono-BoldItalic.woff2",
+        include_bytes!("../../../packages/ui/src/fonts/JetBrainsMono-BoldItalic.woff2"),
+    ),
+];
+
+/// One of the application's fonts, if `path` asks for one.
+fn font(path: &str) -> Option<Response<Vec<u8>>> {
+    let name = serve::shared_font(path)?;
+    let Some((_, bytes)) = FONTS.iter().find(|(known, _)| *known == name) else {
+        return Some(plain(StatusCode::NOT_FOUND, "not found"));
+    };
+    let mut response = Response::builder().status(StatusCode::OK);
+    for (name, value) in serve::shared_font_headers() {
+        response = response.header(name, value);
+    }
+    Some(
+        response
+            .body(bytes.to_vec())
+            .unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR, "error")),
+    )
 }
 
 /// Where a plugin's files are, for the handler: set once the plugins are known.
@@ -51,8 +100,11 @@ pub fn handle<R: Runtime>(
     tauri::async_runtime::spawn(async move {
         let response = match (method_ok, services) {
             (false, _) => plain(StatusCode::METHOD_NOT_ALLOWED, "only GET"),
-            (true, None) => plain(StatusCode::SERVICE_UNAVAILABLE, "not ready"),
-            (true, Some(services)) => answer(&services, &path).await,
+            (true, services) => match (font(&path), services) {
+                (Some(font), _) => font,
+                (None, None) => plain(StatusCode::SERVICE_UNAVAILABLE, "not ready"),
+                (None, Some(services)) => answer(&services, &path).await,
+            },
         };
         responder.respond(response);
     });
