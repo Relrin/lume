@@ -738,9 +738,27 @@ export const PLUGIN_SCENES: readonly Scene[] = [
       if (Math.abs(next.left - at.right - between) > 0.5) {
         problems.push(`the tool is ${next.left - at.right}px from the bar's, not ${between}px`);
       }
+      // One that counts keeps further off, by the room its mark is given: the mark's
+      // middle is on the picture's corner, and it is not to be read as the next tool's.
       const before = tool.getBoundingClientRect();
-      if (Math.abs(at.left - before.right - between) > 0.5) {
-        problems.push(`the two tools are ${at.left - before.right}px apart, not ${between}px`);
+      const room = Number.parseFloat(getComputedStyle(tool).marginRight) || 0;
+      if (Math.abs(at.left - before.right - between - room) > 0.5) {
+        problems.push(
+          `the two tools are ${at.left - before.right}px apart, not ${between + room}px`,
+        );
+      }
+      const mark = tool.querySelector(".status-badge")?.getBoundingClientRect();
+      const picture = tool.querySelector(".status-picture")?.getBoundingClientRect();
+      const drawing = own.querySelector("svg")?.getBoundingClientRect();
+      if (!mark || !picture || !drawing) return [...problems, "the tool's count has no mark"];
+      const middle = { x: mark.left + mark.width / 2, y: mark.top + mark.height / 2 };
+      if (Math.abs(middle.x - picture.right) > 0.5 || Math.abs(middle.y - picture.top) > 0.5) {
+        problems.push("the count's mark is not centred on the picture's top right corner");
+      }
+      if (drawing.left - mark.right < 8) {
+        problems.push(
+          `the count's mark is ${drawing.left - mark.right}px from the next tool's drawing, closer than 8px`,
+        );
       }
       if (Math.abs(at.top - next.top) > 0.5) problems.push("the tool is not level with the bar's");
       return problems;

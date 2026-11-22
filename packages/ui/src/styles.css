@@ -1229,25 +1229,85 @@
     color: inherit;
   }
 
+  /*
+   * The count's mark is a small pill whose middle is on the picture's top right
+   * corner, so a quarter of it lies over the picture and it grows evenly to both sides
+   * with its figures. It is as wide as they need, which the item says the number of.
+   */
+  .status-item[data-tool] {
+    --status-badge-width: calc(14px + (var(--status-badge-chars, 1) - 1) * 6.5px);
+  }
+
   .status-item[data-tool] .status-badge {
     position: absolute;
-    top: 1px;
-    right: 0;
-    min-width: 13px;
-    height: 13px;
-    padding: 0 3px;
+    top: 0;
+    left: calc(23px - var(--status-badge-width) / 2);
+    width: var(--status-badge-width);
+    min-width: 0;
+    height: 14px;
+    padding: 0;
     border: none;
     border-radius: 7px;
     background: var(--lume-color-status-info);
-    box-shadow: 0 0 0 2px var(--lume-color-surface);
     color: var(--lume-color-text-inverse);
-    font-size: 9px;
+    /*
+     * The count is centred by its digits, not by its line: the line's box is cut to
+     * the digits' own height, so what is left above them is what is left below. The
+     * figures are the interface's, each as wide as the next.
+     */
+    font-family: var(--font-ui);
+    font-size: 10px;
     font-weight: 600;
-    line-height: 13px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    text-box: trim-both cap alphabetic;
   }
 
   .status-item[data-tool] .status-badge:empty {
     display: none;
+  }
+
+  /*
+   * A button that counts stands further from what follows it by as much as its mark
+   * reaches past its picture, so the mark is not read as the next button's.
+   */
+  .status-item[data-tool]:has(> .status-badge:not(:empty)) {
+    margin-right: calc(var(--status-badge-width) / 2 - 2px);
+  }
+
+  /*
+   * The picture is cut away round the mark, two pixels wide of it, so what is behind
+   * the bar shows between them whatever the theme, the glow or the picture behind the
+   * window is: no ring of one colour could match those. What is cut is the mark's own
+   * shape, a round end at each side and the stretch between, measured from the
+   * picture's corner.
+   */
+  .status-item[data-tool]:has(> .status-badge:not(:empty)) > .status-picture {
+    mask-image:
+      linear-gradient(#000 0 0),
+      radial-gradient(
+        circle 9px at calc(9px + var(--status-badge-width) / 2) 0,
+        #000 8.5px,
+        transparent 9px
+      ),
+      radial-gradient(
+        circle 9px at calc(23px - var(--status-badge-width) / 2) 0,
+        #000 8.5px,
+        transparent 9px
+      ),
+      linear-gradient(#000 0 0);
+    mask-size:
+      auto,
+      auto,
+      auto,
+      calc(var(--status-badge-width) - 14px) 9px;
+    mask-position:
+      0 0,
+      0 0,
+      0 0,
+      calc(23px - var(--status-badge-width) / 2) 0;
+    mask-repeat: no-repeat;
+    mask-composite: exclude, add, add;
   }
 
   /* An item of a plugin whose code was stopped is held up, and says why when asked. */

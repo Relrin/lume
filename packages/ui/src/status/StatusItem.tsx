@@ -406,10 +406,6 @@ export function StatusItemView({ item }: { item: StatusItem }) {
     item.problem === undefined
       ? item.tooltip
       : `${label === "" ? "This item" : label} is held up: ${item.problem}`;
-  const style =
-    item.color === undefined
-      ? undefined
-      : ({ "--status-tone": `var(--lume-${item.color.replaceAll(".", "-")})` } as CSSProperties);
   // A picture in the top bar that is pressed is drawn as one of the bar's tools: the
   // picture alone on a square button, a badge's count over a corner of it.
   const toolLike =
@@ -419,6 +415,17 @@ export function StatusItemView({ item }: { item: StatusItem }) {
       (item.kind === "icon" &&
         !item.show_label &&
         (item.command !== undefined || item.menu !== undefined)));
+  // Such a count's mark is as wide as its figures, so the styles are told how many there are.
+  const counted = toolLike && item.kind === "badge" && item.text !== "";
+  const style =
+    item.color === undefined && !counted
+      ? undefined
+      : ({
+          ...(item.color === undefined
+            ? {}
+            : { "--status-tone": `var(--lume-${item.color.replaceAll(".", "-")})` }),
+          ...(counted ? { "--status-badge-chars": [...item.text].length } : {}),
+        } as CSSProperties);
   const content = (
     <>
       {item.picture !== undefined && (
