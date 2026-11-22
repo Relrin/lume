@@ -70,6 +70,18 @@ pub const SNAPSHOT_MAX_BYTES: usize = 64 * 1024 * 1024 - 1024;
 /// like a longer one is left in the output as it is.
 pub const STREAM_NOTE_MAX_BYTES: usize = 65_536;
 
+/// How long a stream may take to give the copy of its terminal and the terminal's size.
+pub const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(60);
+/// The most output kept for a view that is not taking it. Past this the stream is let
+/// go, and begun again from a new copy of the terminal once the view takes output again.
+pub const PENDING_MAX_BYTES: usize = 8 * 1024 * 1024;
+/// How much of a terminal's screen is asked for in one call when it is read as output
+/// that rebuilds it. A server gives at most 960 KiB at once.
+pub const REPLAY_PART_BYTES: usize = 900_000;
+/// How many times in a row beginning a stream again may fail before its terminal is
+/// given up.
+pub const RESTART_ATTEMPTS_MAX: u32 = 8;
+
 /// How long to wait before connecting again after a connection was lost: this long the
 /// first time, twice as long each time after, up to the most.
 pub const RECONNECT_FIRST: Duration = Duration::from_millis(250);

@@ -31,6 +31,7 @@ use crate::control::{Control, Events};
 use crate::endpoint::Endpoint;
 use crate::error::RexError;
 use crate::ids::Ids;
+use crate::terminal::{self, Handle};
 use crate::transport::{Io, dial};
 use crate::tuning::{RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, SESSIONS_MAX};
 
@@ -93,11 +94,22 @@ struct State {
     ids: Ids,
     /// What continues the client after a lost connection, and when it was lost.
     resume: Option<(String, Instant)>,
+    /// The terminals that are attached to, or being attached to.
+    attached: HashMap<SessionId, Slot>,
+    /// The number of the last attachment made.
+    serial: u64,
 }
 
-struct Shared {
+/// One attachment to a terminal, as the backend keeps it.
+struct Slot {
+    serial: u64,
+    /// The way to end it. None while it is still being made.
+    handle: Option<Arc<Handle>>,
+}
+
+pub(crate) struct Shared {
     /// The server, in what is said of failures.
-    name: String,
+    pub(crate) name: String,
     dialer: Box<dyn Dialer>,
     client: ClientInfo,
     state: Mutex<State>,
@@ -116,8 +128,44 @@ impl Shared {
             .send_modify(|count| *count = count.wrapping_add(1));
     }
 
-    fn control(&self) -> Result<Arc<Control>, RexError> {
+    /// The control connection, while there is one.
+    pub(crate) fn control(&self) -> Result<Arc<Control>, RexError> {
         self.state().control.clone().ok_or(RexError::Disconnected)
+    }
+
+    /// A new stream to the server, for a connection of its own.
+    pub(crate) async fn dial(&self) -> Result<Box<dyn Io>, RexError> {
+        self.dialer.dial().await
+    }
+
+    /// How the backend stands with its server, now and as it changes.
+    pub(crate) fn link(&self) -> watch::Receiver<Link> {
+        self.link.subscribe()
+    }
+
+    /// Notes that an attachment is over, so that its terminal can be attached to again.
+    pub(crate) fn forget(&self, id: SessionId, serial: u64) {
+        let mut state = self.state();
+        if state
+            .attached
+            .get(&id)
+            .is_some_and(|slot| slot.serial == serial)
+        {
+            state.attached.remove(&id);
+        }
+    }
+
+    /// Ends every attachment: the backend is going.
+    fn end_attachments(&self) {
+        let handles: Vec<Arc<Handle>> = self
+            .state()
+            .attached
+            .values()
+            .filter_map(|slot| slot.handle.clone())
+            .collect();
+        for handle in handles {
+            handle.end_soon();
+        }
     }
 }
 
@@ -130,13 +178,14 @@ pub struct RexBackend {
 impl Drop for RexBackend {
     fn drop(&mut self) {
         self.keeper.abort();
+        self.shared.end_attachments();
         if let Some(control) = self.shared.state().control.take() {
             control.close();
         }
     }
 }
 
-fn unsupported(what: &str) -> SessionError {
+pub(crate) fn unsupported(what: &str) -> SessionError {
     SessionError::Refused(ProtoError::new(
         ErrorCode::Unsupported,
         format!("a Rex server cannot {what} yet"),
@@ -249,6 +298,7 @@ impl RexBackend {
     /// Ends the backend: its connection is closed and not made again.
     pub fn shutdown(&self) {
         self.keeper.abort();
+        self.shared.end_attachments();
         if let Some(control) = self.shared.state().control.take() {
             control.close();
         }
@@ -376,12 +426,50 @@ impl SessionBackend for RexBackend {
         Err(unsupported("start a session"))
     }
 
-    async fn attach(
-        &self,
-        _id: SessionId,
-        _facts: ClientFacts,
-    ) -> lume_session::Result<Attachment> {
-        Err(unsupported("show a terminal"))
+    /// Attaches to a terminal block of a session that was opened here. A server gives
+    /// a client one stream of a block at a time, so a terminal takes one attachment.
+    async fn attach(&self, id: SessionId, _facts: ClientFacts) -> lume_session::Result<Attachment> {
+        let refused = |code, what: &str| SessionError::Refused(ProtoError::new(code, what));
+        let (block, serial) = {
+            let mut state = self.shared.state();
+            let Some(block) = state.ids.block(id).cloned() else {
+                return Err(refused(
+                    ErrorCode::NotFound,
+                    "the Rex server has no such terminal",
+                ));
+            };
+            if state.attached.contains_key(&id) {
+                return Err(refused(
+                    ErrorCode::AlreadyAttached,
+                    "the terminal is already shown, and a Rex server gives one stream of it",
+                ));
+            }
+            state.serial += 1;
+            let serial = state.serial;
+            state.attached.insert(
+                id,
+                Slot {
+                    serial,
+                    handle: None,
+                },
+            );
+            (block, serial)
+        };
+        match terminal::attach(Arc::clone(&self.shared), id, serial, block).await {
+            Ok((attachment, handle)) => {
+                // Unless it is over already.
+                if let Some(slot) = self.shared.state().attached.get_mut(&id)
+                    && slot.serial == serial
+                {
+                    slot.handle = Some(handle);
+                }
+                Ok(attachment)
+            }
+            Err(error) => {
+                self.shared.forget(id, serial);
+                Err(error.into())
+            }
+        }
     }
 
     async fn kill(&self, _id: SessionId) -> lume_session::Result<()> {
@@ -599,7 +687,7 @@ async fn follow(shared: &Shared, opened: Opened) -> RexError {
 }
 
 /// How long to wait before the connection is tried again.
-fn backoff(attempts: u32) -> Duration {
+pub(crate) fn backoff(attempts: u32) -> Duration {
     RECONNECT_FIRST
         .saturating_mul(1u32 << attempts.saturating_sub(1).min(16))
         .min(RECONNECT_MOST)

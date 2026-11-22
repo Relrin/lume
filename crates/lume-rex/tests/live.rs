@@ -10,12 +10,14 @@ mod common;
 use std::time::Duration;
 
 use common::{client, until};
+use lume_proto::tuning::CREDIT_WINDOW;
+use lume_proto::{CellPx, ClientFacts, ColorScheme, ExitStatus, Palette, TermSize};
 use lume_rex::tuning::{TERMINAL_DATA_REF, TERMINAL_SUBPROTOCOL};
 use lume_rex::{
     Control, DataConn, DataEnd, DataOpen, Endpoint, Link, Note, Opening, Piece, Reject, RexBackend,
     RexError, Splitter, Ticket, dial,
 };
-use lume_session::SessionBackend;
+use lume_session::{Attachment, Hydrate, OutputFrame, SessionBackend, SessionError};
 use serde_json::{Value, json};
 
 /// Reads a stream until `done` says so, and returns what it held: the copy it opened
@@ -80,6 +82,17 @@ impl Reading {
         {
             panic!("{what} never happened");
         }
+    }
+}
+
+fn facts() -> ClientFacts {
+    ClientFacts {
+        size: TermSize::new(80, 24).unwrap(),
+        cell_px: CellPx { w: 8, h: 16 },
+        palette: Palette::default(),
+        scheme: ColorScheme::Dark,
+        focused: true,
+        visible: true,
     }
 }
 
@@ -375,5 +388,191 @@ async fn the_backend_follows_a_real_server() {
     // What the server refuses comes back as it said it.
     let refused = other.call("no.such_method", Value::Null).await.unwrap_err();
     assert_eq!(refused.code(), "method_not_found");
+    backend.shutdown();
+}
+
+/// The frames of an attachment as a view would take them: output is granted as it is
+/// consumed, and everything is kept to be looked at.
+struct Viewing {
+    attachment: Attachment,
+    output: Vec<u8>,
+    sizes: Vec<(u16, u16)>,
+    copies: Vec<Hydrate>,
+    exit: Option<ExitStatus>,
+    over: bool,
+}
+
+impl Viewing {
+    async fn new(attachment: Attachment) -> Self {
+        attachment.input.credit(CREDIT_WINDOW).await.unwrap();
+        Self {
+            attachment,
+            output: Vec::new(),
+            sizes: Vec::new(),
+            copies: Vec::new(),
+            exit: None,
+            over: false,
+        }
+    }
+
+    async fn until(&mut self, what: &str, done: impl Fn(&Self) -> bool) {
+        let viewing = async {
+            while !done(self) {
+                match self.attachment.output.next().await {
+                    Some(OutputFrame::Data(bytes)) => {
+                        let count = u32::try_from(bytes.len()).unwrap();
+                        self.output.extend(bytes);
+                        let _ = self.attachment.input.credit(count).await;
+                    }
+                    Some(OutputFrame::Resized(size)) => self.sizes.push((size.cols(), size.rows())),
+                    Some(OutputFrame::Hydrate(copy)) => self.copies.push(copy),
+                    Some(OutputFrame::Exit(status)) => self.exit = Some(status),
+                    Some(OutputFrame::Event(_)) => {}
+                    None => {
+                        self.over = true;
+                        assert!(done(self), "the attachment ended before {what}");
+                    }
+                }
+            }
+        };
+        if tokio::time::timeout(Duration::from_secs(20), viewing)
+            .await
+            .is_err()
+        {
+            panic!("{what} never happened");
+        }
+    }
+
+    fn shows(&self, text: &str) -> bool {
+        String::from_utf8_lossy(&self.output).contains(text)
+    }
+}
+
+/// The rows of a copy of a terminal, loaded in this application's own engine.
+fn rows_of(copy: &Hydrate) -> Vec<String> {
+    match copy {
+        Hydrate::Snapshot { vt_version, bytes } => {
+            assert_eq!(vt_version, lume_vt::library_version());
+            let terminal = lume_vt::Terminal::from_snapshot(bytes).unwrap();
+            terminal.screen_text().unwrap()
+        }
+        other => panic!("not a copy this engine loads: {other:?}"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a Rex server running on this machine"]
+async fn a_terminal_of_a_real_server_is_attached_to() {
+    let io = dial(&Endpoint::Local)
+        .await
+        .expect("is a Rex server running?");
+    let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
+    let created = other
+        .call(
+            "session.create",
+            json!({
+                "label": "lume-live-attach",
+                "initial_windows": [{"layout": {"block": plain_shell()}}],
+            }),
+        )
+        .await
+        .unwrap();
+    let session = created.payload["session_id"].as_str().unwrap().to_owned();
+    let block = created.payload["initial_windows"][0]["block_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    other
+        .call("session.attach", json!({ "session_id": session }))
+        .await
+        .unwrap();
+    let of_block = |args: Value| json!({ "session_id": session, "block_id": block, "args": args });
+    let typed = |tag: &str| {
+        other.call(
+            "com.superlogical.terminal.write",
+            of_block(json!({ "data": echo(tag) })),
+        )
+    };
+
+    let backend = RexBackend::connect(Endpoint::Local, client());
+    backend.ready().await.unwrap();
+    backend.open_session(&session).await.unwrap();
+    let id = backend.list().await.unwrap()[0].id;
+
+    // Something on the screen before anyone looks.
+    typed("1-before").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // The view starts from the server's copy of the terminal, which this engine loads.
+    let attachment = backend.attach(id, facts()).await.unwrap();
+    assert_eq!((attachment.size.cols(), attachment.size.rows()), (80, 24));
+    let rows = rows_of(&attachment.hydrate);
+    assert!(rows.iter().any(|row| row == "lume-1-before"), "{rows:?}");
+    let again = backend.attach(id, facts()).await;
+    assert!(matches!(again, Err(SessionError::Refused(_))));
+
+    // What is typed afterwards comes as output, and a new size in its place.
+    let mut view = Viewing::new(attachment).await;
+    typed("2-after").await.unwrap();
+    view.until("the echo", |view| view.shows("lume-2-after\r\n"))
+        .await;
+    other
+        .call(
+            "com.superlogical.terminal.resize",
+            of_block(json!({ "columns": 100, "rows": 30 })),
+        )
+        .await
+        .unwrap();
+    view.until("the new size", |view| view.sizes == [(100, 30)])
+        .await;
+
+    // The view lets go of its screen; what is printed meanwhile is in the copy it
+    // starts again from, at the terminal's size.
+    view.attachment.input.release().await.unwrap();
+    typed("3-unseen").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    view.attachment.input.rehydrate().await.unwrap();
+    view.until("a new copy", |view| !view.copies.is_empty())
+        .await;
+    let rows = rows_of(&view.copies[0]);
+    assert_eq!(rows.len(), 30);
+    for line in ["lume-1-before", "lume-2-after", "lume-3-unseen"] {
+        assert!(rows.iter().any(|row| row == line), "{line}: {rows:?}");
+    }
+    assert!(!view.shows("lume-3-unseen\r\n"));
+    typed("4-again").await.unwrap();
+    view.until("the echo after the copy", |view| {
+        view.shows("lume-4-again\r\n")
+    })
+    .await;
+
+    // Detached and attached again: the stream was closed, so the way is free.
+    view.attachment.input.detach().await.unwrap();
+    let attachment = backend.attach(id, facts()).await.unwrap();
+    assert_eq!((attachment.size.cols(), attachment.size.rows()), (100, 30));
+    let mut view = Viewing::new(attachment).await;
+
+    // The shell ends: the view hears of it, and nothing after.
+    other
+        .call(
+            "com.superlogical.terminal.write",
+            of_block(json!({ "data": "exit 7\r" })),
+        )
+        .await
+        .unwrap();
+    view.until("the end", |view| view.over).await;
+    assert!(
+        matches!(
+            view.exit,
+            Some(ExitStatus::Code(7)) | Some(ExitStatus::Unknown)
+        ),
+        "{:?}",
+        view.exit
+    );
+    println!("the shell's end was told as {:?}", view.exit);
+
+    let _ = other
+        .call("session.destroy", json!({ "session_id": session }))
+        .await;
     backend.shutdown();
 }

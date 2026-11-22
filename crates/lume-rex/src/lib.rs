@@ -24,6 +24,7 @@ mod endpoint;
 mod error;
 mod ids;
 mod stream;
+mod terminal;
 mod transport;
 pub mod tuning;
 mod ws;

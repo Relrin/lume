@@ -431,6 +431,30 @@ pub(crate) struct TerminalTitle {
     pub title: String,
 }
 
+/// What `data.connect` returns.
+#[derive(Deserialize)]
+pub(crate) struct Ticketed {
+    pub ticket: String,
+}
+
+/// What `com.superlogical.terminal.format` returns: a terminal's screen and scrollback
+/// in the form asked for, or the first part of it.
+#[derive(Deserialize)]
+pub(crate) struct Formatted {
+    pub content: String,
+    /// Names the rest, when there is more than `content` holds.
+    #[serde(default)]
+    pub id: Option<u64>,
+}
+
+/// What `com.superlogical.terminal.blob_read` returns: a further part of a result.
+#[derive(Deserialize)]
+pub(crate) struct BlobPart {
+    pub data: String,
+    #[serde(default)]
+    pub eof: bool,
+}
+
 /// An event about the sessions of a server, as far as this client acts on it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ServerEvent {

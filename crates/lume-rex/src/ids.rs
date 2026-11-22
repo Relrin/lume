@@ -48,7 +48,6 @@ impl Ids {
     }
 
     /// The block a number names, if it names one.
-    #[allow(dead_code)]
     pub(crate) fn block(&self, id: SessionId) -> Option<&BlockRef> {
         self.by_id.get(&id)
     }

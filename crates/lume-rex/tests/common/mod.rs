@@ -320,8 +320,17 @@ pub struct DataSide {
     pub first: Vec<u8>,
     /// The subprotocol the client asked for.
     pub asked: Option<String>,
+    /// How many bytes of the stream were sent.
+    pub sent: u64,
 }
 
+/// A message of the server's own, as it stands in a terminal's stream.
+pub fn note_bytes(nonce: u64, json: &Value) -> Vec<u8> {
+    format!("\u{1b}_rex1;{nonce};{json}\u{1b}\\").into_bytes()
+}
+
+/// The ticket a pretend server gives for a data connection.
+pub const TICKET: &str = "AAECAwQFBgcICQoLDA0ODw";
 /// The token a pretend server welcomes a data connection with.
 pub const DATA_TOKEN: [u8; 16] = [0xa5; 16];
 /// The nonce a pretend server marks its streams with.
@@ -353,6 +362,7 @@ impl DataSide {
             socket,
             first: Vec::new(),
             asked: asked.lock().unwrap().clone(),
+            sent: 0,
         };
         side.first = match side.socket.next().await {
             Some(Ok(Message::Binary(first))) => first.to_vec(),
@@ -375,24 +385,36 @@ impl DataSide {
         message.extend([0; 3]);
         message.extend(keep_ms.to_le_bytes());
         message.extend(nonce.to_le_bytes());
-        self.bytes(&message).await;
+        let _ = self.socket.send(Message::binary(message)).await;
     }
 
     /// Answers the first message with a rejection, and closes as a server does then.
     pub async fn reject(mut self, reason: u8) {
-        self.bytes(&[0x82, reason]).await;
+        let _ = self.socket.send(Message::binary(vec![0x82, reason])).await;
         self.close(1008, "data handshake rejected").await;
     }
 
-    /// Sends one binary message.
+    /// Sends one binary message of the stream.
     pub async fn bytes(&mut self, bytes: &[u8]) {
+        self.sent += bytes.len() as u64;
         let _ = self.socket.send(Message::binary(bytes.to_vec())).await;
+    }
+
+    /// Says the terminal's size, as a server does in a stream.
+    pub async fn size(&mut self, cols: u16, rows: u16) {
+        self.note(
+            NONCE,
+            json!({
+                "type": "resize", "cols": cols, "rows": rows,
+                "cell_width_px": 8, "cell_height_px": 16, "owner": null,
+            }),
+        )
+        .await;
     }
 
     /// Sends a message of the server's own, as it stands in a terminal's stream.
     pub async fn note(&mut self, nonce: u64, json: Value) {
-        self.bytes(format!("\u{1b}_rex1;{nonce};{json}\u{1b}\\").as_bytes())
-            .await;
+        self.bytes(&note_bytes(nonce, &json)).await;
     }
 
     /// Closes the connection as a server does, with a status and a reason.
@@ -426,6 +448,9 @@ impl DataSide {
 pub struct World {
     pub sessions: Vec<(String, String)>,
     pub views: HashMap<String, Value>,
+    /// A terminal's screen written out as output that rebuilds it, in the parts it is
+    /// given in.
+    pub screen: Vec<String>,
 }
 
 /// The session and the block that were recorded.
@@ -440,6 +465,7 @@ impl World {
         Self {
             sessions: vec![(SESSION.to_owned(), "lume-fixture".to_owned())],
             views: HashMap::from([(SESSION.to_owned(), view)]),
+            screen: vec![String::new()],
         }
     }
 
@@ -465,6 +491,31 @@ impl World {
             }
             "session.view" => view.cloned(),
             "session.detach" => view.map(|_| json!({})),
+            "data.connect" => view.map(|_| json!({ "ticket": TICKET, "expires_in_ms": 60_000 })),
+            "com.superlogical.terminal.format" => view.map(|_| {
+                let mut reply = json!({ "content": self.screen[0] });
+                if self.screen.len() > 1 {
+                    reply["id"] = json!(7);
+                }
+                reply
+            }),
+            "com.superlogical.terminal.blob_read" => view.map(|_| {
+                // The part that begins where the caller says it has read to.
+                let offset = asked.payload["args"]["offset"].as_u64().unwrap();
+                let mut begins = 0;
+                let mut found = json!({ "id": 7, "data": "", "total": 0, "eof": true });
+                for (nth, part) in self.screen.iter().enumerate() {
+                    if begins == offset {
+                        found["data"] = json!(part);
+                        found["eof"] = json!(nth + 1 == self.screen.len());
+                        break;
+                    }
+                    begins += part.len() as u64;
+                }
+                let total: usize = self.screen.iter().map(String::len).sum();
+                found["total"] = json!(total);
+                found
+            }),
             "com.superlogical.terminal.size"
             | "com.superlogical.terminal.process"
             | "com.superlogical.terminal.title" => view.map(|_| recorded.result(&asked.method, 0)),

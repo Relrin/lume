@@ -6,7 +6,7 @@ mod common;
 use std::future::Future;
 use std::time::Duration;
 
-use common::{DATA_TOKEN, DataSide, NONCE, pair};
+use common::{DATA_TOKEN, DataSide, NONCE, TICKET, pair};
 use futures_util::SinkExt;
 use lume_rex::tuning::DATA_MESSAGE_MAX_BYTES;
 use lume_rex::{
@@ -16,8 +16,6 @@ use lume_rex::{
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio_tungstenite::tungstenite::Message;
-
-const TICKET: &str = "AAECAwQFBgcICQoLDA0ODw";
 
 fn ticket() -> Ticket {
     Ticket::read(TICKET).unwrap()
