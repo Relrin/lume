@@ -451,6 +451,8 @@ pub struct World {
     /// A terminal's screen written out as output that rebuilds it, in the parts it is
     /// given in.
     pub screen: Vec<String>,
+    /// Whether a terminal shows its alternate screen.
+    pub alternate: bool,
 }
 
 /// The session and the block that were recorded.
@@ -466,6 +468,7 @@ impl World {
             sessions: vec![(SESSION.to_owned(), "lume-fixture".to_owned())],
             views: HashMap::from([(SESSION.to_owned(), view)]),
             screen: vec![String::new()],
+            alternate: false,
         }
     }
 
@@ -483,6 +486,12 @@ impl World {
         let recorded = Recorded::load();
         let session = asked.payload.get("session_id").and_then(Value::as_str);
         let view = session.and_then(|session| self.views.get(session));
+        // A server takes a block method's own arguments as an object, or not at all.
+        if asked.payload.get("args").is_some_and(Value::is_null) {
+            conn.fail(&asked.id, "bad_request", 400, "validating input: type null")
+                .await;
+            return;
+        }
         let reply = match asked.method.as_str() {
             "server.version" => Some(recorded.result("server.version", 0)),
             "session.attach_all" | "session.list" => Some(self.listed()),
@@ -491,6 +500,32 @@ impl World {
             }
             "session.view" => view.cloned(),
             "session.detach" => view.map(|_| json!({})),
+            "com.superlogical.terminal.write" => view.map(|_| {
+                let typed = asked.payload["args"]["data"].as_str().unwrap();
+                json!({ "bytes_written": typed.len() })
+            }),
+            "com.superlogical.terminal.resize" | "block.event" => view.map(|_| json!({})),
+            "com.superlogical.terminal.modes" => view.map(|_| {
+                let screen = if self.alternate {
+                    "alternate"
+                } else {
+                    "primary"
+                };
+                json!({ "screen": screen, "modes": [] })
+            }),
+            "session.own_block" | "session.disown_block" => view.map(|_| {
+                let owner = (asked.method == "session.own_block").then_some("client:test");
+                let blocks: Vec<Value> = asked.payload["block_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|block| json!({ "block_id": block, "owner": owner }))
+                    .collect();
+                json!({ "blocks": blocks })
+            }),
+            "block.close" => {
+                view.map(|_| json!({ "block_id": asked.payload["block_id"], "revision": 9 }))
+            }
             "data.connect" => view.map(|_| json!({ "ticket": TICKET, "expires_in_ms": 60_000 })),
             "com.superlogical.terminal.format" => view.map(|_| {
                 let mut reply = json!({ "content": self.screen[0] });
@@ -552,6 +587,8 @@ pub struct Served {
     tell: mpsc::UnboundedSender<Tell>,
     /// The methods the client called, in order.
     pub called: Arc<Mutex<Vec<String>>>,
+    /// What each was called with.
+    pub payloads: Arc<Mutex<Vec<(String, Value)>>>,
     pub hello: Value,
     done: tokio::task::JoinHandle<()>,
 }
@@ -565,6 +602,24 @@ impl Served {
         self.called.lock().unwrap().clone()
     }
 
+    /// What a method was called with, each time, in order.
+    pub fn asked(&self, method: &str) -> Vec<Value> {
+        let payloads = self.payloads.lock().unwrap();
+        payloads
+            .iter()
+            .filter(|(called, _)| called == method)
+            .map(|(_, payload)| payload.clone())
+            .collect()
+    }
+
+    /// The methods called whose names begin with one of `prefixes`, in order.
+    pub fn called_of(&self, prefixes: &[&str]) -> Vec<String> {
+        self.called()
+            .into_iter()
+            .filter(|method| prefixes.iter().any(|prefix| method.starts_with(prefix)))
+            .collect()
+    }
+
     /// Waits for the connection to be over.
     pub async fn over(self) {
         let _ = self.done.await;
@@ -576,6 +631,8 @@ pub fn serve(mut conn: Conn, mut world: World) -> Served {
     let (tell, mut told) = mpsc::unbounded_channel();
     let called = Arc::new(Mutex::new(Vec::new()));
     let noted = Arc::clone(&called);
+    let payloads = Arc::new(Mutex::new(Vec::new()));
+    let kept = Arc::clone(&payloads);
     let hello = conn.hello.clone();
     let done = tokio::spawn(async move {
         loop {
@@ -583,6 +640,9 @@ pub fn serve(mut conn: Conn, mut world: World) -> Served {
                 asked = conn.asked() => {
                     let Some(asked) = asked else { return };
                     noted.lock().unwrap().push(asked.method.clone());
+                    kept.lock()
+                        .unwrap()
+                        .push((asked.method.clone(), asked.payload.clone()));
                     world.answer(&mut conn, &asked).await;
                 }
                 what = told.recv() => match what {
@@ -603,6 +663,7 @@ pub fn serve(mut conn: Conn, mut world: World) -> Served {
     Served {
         tell,
         called,
+        payloads,
         hello,
         done,
     }

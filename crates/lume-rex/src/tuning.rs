@@ -82,6 +82,14 @@ pub const REPLAY_PART_BYTES: usize = 900_000;
 /// given up.
 pub const RESTART_ATTEMPTS_MAX: u32 = 8;
 
+/// The most text typed into a terminal in one call.
+pub const INPUT_CALL_MAX_BYTES: usize = 65_536;
+/// The most a view may have typed that the server has not taken yet. A view that types
+/// more is refused until some has gone.
+pub const INPUT_PENDING_MAX_BYTES: usize = 1024 * 1024;
+/// How often a terminal's screen is read while text is waited for on it.
+pub const SCREEN_POLL: Duration = Duration::from_millis(200);
+
 /// How long to wait before connecting again after a connection was lost: this long the
 /// first time, twice as long each time after, up to the most.
 pub const RECONNECT_FIRST: Duration = Duration::from_millis(250);

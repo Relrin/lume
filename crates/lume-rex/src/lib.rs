@@ -23,6 +23,8 @@ mod data;
 mod endpoint;
 mod error;
 mod ids;
+mod input;
+mod screen;
 mod stream;
 mod terminal;
 mod transport;

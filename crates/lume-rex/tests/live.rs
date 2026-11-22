@@ -67,6 +67,16 @@ impl Reading {
         }
     }
 
+    /// Reads until the stream has been quiet for a moment.
+    async fn settle(&mut self, conn: &mut DataConn) {
+        while let Ok(next) = tokio::time::timeout(Duration::from_millis(400), conn.next()).await {
+            match next {
+                Ok(bytes) => self.take(bytes),
+                Err(end) => panic!("the stream ended: {end:?}"),
+            }
+        }
+    }
+
     async fn until(&mut self, conn: &mut DataConn, what: &str, done: impl Fn(&Self) -> bool) {
         let reading = async {
             while !done(self) {
@@ -187,6 +197,31 @@ async fn a_terminals_stream_is_read_from_a_real_server() {
         Ok(_) => panic!("a ticket worked twice"),
     }
 
+    // A client has one stream of a block at a time: a second one, with a ticket of its
+    // own, is refused while the first is open.
+    let second = ticket(&control, &session, &block).await;
+    let io = dial(&Endpoint::Local).await.unwrap();
+    match DataConn::open(io, "local", DataOpen::Start(&second)).await {
+        Err(RexError::Rejected(Reject::AlreadyConnected)) => {}
+        Err(other) => panic!("{other:?}"),
+        Ok(_) => panic!("a client was given two streams of one block"),
+    }
+    // Another client of the same server is given its own.
+    let io = dial(&Endpoint::Local).await.unwrap();
+    let (other, _other_events) = Control::open(io, "local", &client(), None).await.unwrap();
+    other
+        .call("session.attach", json!({ "session_id": session }))
+        .await
+        .unwrap();
+    let theirs = ticket(&other, &session, &block).await;
+    let io = dial(&Endpoint::Local).await.unwrap();
+    let their_conn = DataConn::open(io, "local", DataOpen::Start(&theirs))
+        .await
+        .unwrap();
+    assert_ne!(their_conn.welcome().nonce, conn.welcome().nonce);
+    their_conn.close().await;
+    drop(other);
+
     // What is typed comes back as output, and a new size is said in the stream.
     control
         .call(
@@ -215,7 +250,9 @@ async fn a_terminals_stream_is_read_from_a_real_server() {
     assert_eq!(reading.sizes[1], (100, 30));
 
     // The connection drops, more is printed, and the stream is continued from the very
-    // byte it stopped at: nothing twice, nothing missing.
+    // byte it stopped at: nothing twice, nothing missing. Everything the server sent
+    // is read first: a server does not continue a stream from before what it sent.
+    reading.settle(&mut conn).await;
     let token = conn.welcome().token.clone();
     let nonce = conn.welcome().nonce;
     drop(conn);
@@ -516,11 +553,10 @@ async fn a_terminal_of_a_real_server_is_attached_to() {
     typed("2-after").await.unwrap();
     view.until("the echo", |view| view.shows("lume-2-after\r\n"))
         .await;
-    other
-        .call(
-            "com.superlogical.terminal.resize",
-            of_block(json!({ "columns": 100, "rows": 30 })),
-        )
+    // The view has the focus, so the block is its own and the size is its to give.
+    view.attachment
+        .input
+        .resize(TermSize::new(100, 30).unwrap(), CellPx { w: 8, h: 16 })
         .await
         .unwrap();
     view.until("the new size", |view| view.sizes == [(100, 30)])
@@ -546,10 +582,11 @@ async fn a_terminal_of_a_real_server_is_attached_to() {
     })
     .await;
 
-    // Detached and attached again: the stream was closed, so the way is free.
+    // Detached and attached again: the stream was closed, so the way is free. The new
+    // view has the focus and its own size, which the terminal has before it is shown.
     view.attachment.input.detach().await.unwrap();
     let attachment = backend.attach(id, facts()).await.unwrap();
-    assert_eq!((attachment.size.cols(), attachment.size.rows()), (100, 30));
+    assert_eq!((attachment.size.cols(), attachment.size.rows()), (80, 24));
     let mut view = Viewing::new(attachment).await;
 
     // The shell ends: the view hears of it, and nothing after.
@@ -575,4 +612,165 @@ async fn a_terminal_of_a_real_server_is_attached_to() {
         .call("session.destroy", json!({ "session_id": session }))
         .await;
     backend.shutdown();
+}
+
+#[tokio::test]
+#[ignore = "needs a Rex server running on this machine"]
+async fn a_terminal_of_a_real_server_is_typed_into_sized_and_read() {
+    let io = dial(&Endpoint::Local)
+        .await
+        .expect("is a Rex server running?");
+    let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
+    let created = other
+        .call(
+            "session.create",
+            json!({
+                "label": "lume-live-input",
+                "initial_windows": [{"layout": {"block": plain_shell()}}],
+            }),
+        )
+        .await
+        .unwrap();
+    let session = created.payload["session_id"].as_str().unwrap().to_owned();
+    let block = created.payload["initial_windows"][0]["block_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    other
+        .call("session.attach", json!({ "session_id": session }))
+        .await
+        .unwrap();
+    let of_block = |args: Value| json!({ "session_id": session, "block_id": block, "args": args });
+
+    let backend = RexBackend::connect(Endpoint::Local, client());
+    backend.ready().await.unwrap();
+    backend.open_session(&session).await.unwrap();
+    let id = backend.list().await.unwrap()[0].id;
+
+    // A view with the focus gives the terminal its size before its stream begins.
+    let mut wanted = facts();
+    wanted.size = TermSize::new(100, 30).unwrap();
+    let attachment = backend.attach(id, wanted.clone()).await.unwrap();
+    assert_eq!((attachment.size.cols(), attachment.size.rows()), (100, 30));
+    let mut view = Viewing::new(attachment).await;
+
+    // What the view types is typed, in order, however it is cut up.
+    let line = echo("1-typed");
+    for piece in line.as_bytes().chunks(3) {
+        view.attachment.input.write(piece).await.unwrap();
+    }
+    view.until("the echo", |view| view.shows("lume-1-typed\r\n"))
+        .await;
+
+    // The screen is read without a view, and says what the view was sent.
+    backend.send(id, &echo("2-sent")).await.unwrap();
+    let found = backend
+        .wait_text(id, "lume-2-sent", Duration::from_secs(10))
+        .await
+        .unwrap();
+    let screen = backend.screen(id).await.unwrap();
+    assert_eq!((screen.size.cols(), screen.size.rows()), (100, 30));
+    assert!(!screen.alternate);
+    assert_eq!(screen.lines.len(), 30);
+    for line in ["lume-1-typed", "lume-2-sent"] {
+        assert!(
+            screen.lines.iter().any(|row| row == line),
+            "{line}: {screen:?}"
+        );
+    }
+    assert!(found.line.contains("lume-2-sent"));
+    // The cursor stands after the prompt, on the last row that holds anything.
+    let last = screen
+        .lines
+        .iter()
+        .rposition(|row| !row.is_empty())
+        .unwrap();
+    assert_eq!(usize::from(screen.cursor.row), last);
+    assert_eq!(
+        usize::from(screen.cursor.col),
+        screen.lines[last].chars().count()
+    );
+    println!("the screen as read: {:?}", &screen.lines[..=last]);
+
+    // The view changes size, and the terminal with it.
+    view.attachment
+        .input
+        .resize(TermSize::new(90, 25).unwrap(), CellPx { w: 8, h: 16 })
+        .await
+        .unwrap();
+    view.until("the view's new size", |view| view.sizes == [(90, 25)])
+        .await;
+
+    // Another client takes the block and wants another size: the terminal follows it.
+    other
+        .call(
+            "session.own_block",
+            json!({ "session_id": session, "block_ids": [block], "mode": "take" }),
+        )
+        .await
+        .unwrap();
+    other
+        .call(
+            "com.superlogical.terminal.resize",
+            of_block(json!({ "columns": 70, "rows": 20 })),
+        )
+        .await
+        .unwrap();
+    view.until("the other client's size", |view| {
+        view.sizes.last() == Some(&(70, 20))
+    })
+    .await;
+    // While it is not the owner, what the view asks for does not change the terminal.
+    view.attachment
+        .input
+        .resize(TermSize::new(95, 28).unwrap(), CellPx { w: 8, h: 16 })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let size = other
+        .call("com.superlogical.terminal.size", of_block(json!({})))
+        .await
+        .unwrap();
+    assert_eq!(
+        (&size.payload["columns"], &size.payload["rows"]),
+        (&json!(70), &json!(20))
+    );
+    // The view gains the focus: it takes the block, and the terminal has the size the
+    // view last asked for.
+    wanted.focused = false;
+    view.attachment.input.facts(&wanted).await.unwrap();
+    wanted.focused = true;
+    view.attachment.input.facts(&wanted).await.unwrap();
+    view.until("the view's size again", |view| {
+        view.sizes.last() == Some(&(95, 28))
+    })
+    .await;
+    println!("the sizes the view was told: {:?}", view.sizes);
+
+    // Detached, the view gives the block up; the other client is next in line.
+    view.attachment.input.detach().await.unwrap();
+    let size = other
+        .call("com.superlogical.terminal.size", of_block(json!({})))
+        .await
+        .unwrap();
+    assert_eq!(size.payload["owner"], created_owner(&other));
+
+    // Ended without a view.
+    backend.kill(id).await.unwrap();
+    until("the block is gone", || {
+        backend
+            .view(&session)
+            .is_none_or(|view| view.blocks().count() == 0)
+    })
+    .await;
+
+    let _ = other
+        .call("session.destroy", json!({ "session_id": session }))
+        .await;
+    backend.shutdown();
+}
+
+/// The id a server knows a client by.
+fn created_owner(control: &Control) -> Value {
+    json!(control.welcome().client_id)
 }

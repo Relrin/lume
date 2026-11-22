@@ -18,7 +18,7 @@ use lume_proto::{
     BackendCaps, ClientFacts, ErrorCode, ExitStatus, HydrateKinds, ProtoError, Responder,
     SessionId, SessionInfo, SessionStats, SpawnSpec, TermSize,
 };
-use lume_session::{Attachment, SessionBackend, SessionError};
+use lume_session::{Attachment, ScreenText, SessionBackend, SessionError, TextFound};
 use serde_json::{Value, json};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -30,10 +30,12 @@ use crate::api::{
 use crate::control::{Control, Events};
 use crate::endpoint::Endpoint;
 use crate::error::RexError;
-use crate::ids::Ids;
+use crate::ids::{BlockRef, Ids};
+use crate::input::type_text;
+use crate::screen;
 use crate::terminal::{self, Handle};
 use crate::transport::{Io, dial};
-use crate::tuning::{RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, SESSIONS_MAX};
+use crate::tuning::{RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, SCREEN_POLL, SESSIONS_MAX};
 
 /// How a backend stands with its server.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -305,6 +307,20 @@ impl RexBackend {
         self.shared.link.send_replace(Link::Closed);
     }
 
+    /// The control connection and the block a number names, for something asked of
+    /// that block.
+    fn block(&self, id: SessionId) -> lume_session::Result<(Arc<Control>, BlockRef)> {
+        let state = self.shared.state();
+        let block = state.ids.block(id).cloned().ok_or_else(|| {
+            SessionError::Refused(ProtoError::new(
+                ErrorCode::NotFound,
+                "the Rex server has no such terminal",
+            ))
+        })?;
+        let control = state.control.clone().ok_or(SessionError::Disconnected)?;
+        Ok((control, block))
+    }
+
     /// What one terminal block is, as the application lists a session.
     async fn describe(
         &self,
@@ -428,7 +444,7 @@ impl SessionBackend for RexBackend {
 
     /// Attaches to a terminal block of a session that was opened here. A server gives
     /// a client one stream of a block at a time, so a terminal takes one attachment.
-    async fn attach(&self, id: SessionId, _facts: ClientFacts) -> lume_session::Result<Attachment> {
+    async fn attach(&self, id: SessionId, facts: ClientFacts) -> lume_session::Result<Attachment> {
         let refused = |code, what: &str| SessionError::Refused(ProtoError::new(code, what));
         let (block, serial) = {
             let mut state = self.shared.state();
@@ -455,7 +471,7 @@ impl SessionBackend for RexBackend {
             );
             (block, serial)
         };
-        match terminal::attach(Arc::clone(&self.shared), id, serial, block).await {
+        match terminal::attach(Arc::clone(&self.shared), id, serial, block, &facts).await {
             Ok((attachment, handle)) => {
                 // Unless it is over already.
                 if let Some(slot) = self.shared.state().attached.get_mut(&id)
@@ -472,8 +488,49 @@ impl SessionBackend for RexBackend {
         }
     }
 
-    async fn kill(&self, _id: SessionId) -> lume_session::Result<()> {
-        Err(unsupported("end a session"))
+    /// Closes a terminal block, which ends the program in it.
+    async fn kill(&self, id: SessionId) -> lume_session::Result<()> {
+        let (control, block) = self.block(id)?;
+        control
+            .call(
+                "block.close",
+                json!({ "session_id": block.session_id, "block_id": block.block_id }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn send(&self, id: SessionId, text: &str) -> lume_session::Result<()> {
+        let (control, block) = self.block(id)?;
+        Ok(type_text(&control, &block, text).await?)
+    }
+
+    async fn screen(&self, id: SessionId) -> lume_session::Result<ScreenText> {
+        let (control, block) = self.block(id)?;
+        Ok(screen::read(&control, &block).await?)
+    }
+
+    /// Reads the screen again and again until the text is on it.
+    async fn wait_text(
+        &self,
+        id: SessionId,
+        text: &str,
+        timeout: Duration,
+    ) -> lume_session::Result<TextFound> {
+        let until = tokio::time::Instant::now() + timeout;
+        loop {
+            let (control, block) = self.block(id)?;
+            if let Some(found) = screen::find(&screen::read(&control, &block).await?, text) {
+                return Ok(found);
+            }
+            if tokio::time::Instant::now() + SCREEN_POLL > until {
+                return Err(SessionError::Refused(ProtoError::new(
+                    ErrorCode::Timeout,
+                    "the text did not appear on the terminal's screen in time",
+                )));
+            }
+            tokio::time::sleep(SCREEN_POLL).await;
+        }
     }
 }
 

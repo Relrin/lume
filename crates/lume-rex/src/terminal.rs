@@ -16,7 +16,7 @@
 
 use std::collections::VecDeque;
 use std::future::pending;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
@@ -29,11 +29,12 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::api::{BlobPart, Formatted, Ticketed};
-use crate::backend::{Link, Shared, backoff, unsupported};
+use crate::backend::{Link, Shared, backoff};
 use crate::control::Control;
 use crate::data::{DataConn, DataEnd, DataOpen, Reject, ResumeToken, Ticket};
 use crate::error::RexError;
 use crate::ids::BlockRef;
+use crate::input::{self, Input};
 use crate::stream::{Note, Opening, Piece, Splitter};
 use crate::tuning::{
     DATA_CLOSE_TIMEOUT, PENDING_MAX_BYTES, REPLAY_PART_BYTES, RESTART_ATTEMPTS_MAX,
@@ -100,7 +101,7 @@ async fn load(mut copy: Vec<u8>) -> Result<(Vec<u8>, Vec<u8>), String> {
 }
 
 /// Reads a terminal's screen and scrollback as output that rebuilds them in any engine.
-async fn read_replay(control: &Control, block: &BlockRef) -> Result<Vec<u8>, RexError> {
+pub(crate) async fn read_replay(control: &Control, block: &BlockRef) -> Result<Vec<u8>, RexError> {
     let of_block = |args: serde_json::Value| json!({ "session_id": block.session_id, "block_id": block.block_id, "args": args });
     let (first, _) = control
         .call_as::<Formatted>(
@@ -584,6 +585,9 @@ struct RexSink {
     handle: Arc<Handle>,
     commands: mpsc::UnboundedSender<Command>,
     credit: Arc<AtomicU64>,
+    input: Input,
+    /// Whether the view last said it has the focus.
+    focused: AtomicBool,
 }
 
 impl RexSink {
@@ -604,17 +608,24 @@ impl RexSink {
 
 #[async_trait]
 impl Sink for RexSink {
-    async fn write(&self, _bytes: &[u8]) -> Result<(), SessionError> {
+    async fn write(&self, bytes: &[u8]) -> Result<(), SessionError> {
         self.check_open()?;
-        Err(unsupported("be typed into"))
+        self.input.write(bytes)
     }
 
-    async fn resize(&self, _size: TermSize, _cell_px: CellPx) -> Result<(), SessionError> {
-        self.check_open()
+    async fn resize(&self, size: TermSize, cell_px: CellPx) -> Result<(), SessionError> {
+        self.check_open()?;
+        self.input.resize(size, cell_px)
     }
 
-    async fn facts(&self, _facts: &ClientFacts) -> Result<(), SessionError> {
-        self.check_open()
+    /// Of what a view says of itself, a server is told whether it has the focus. A
+    /// view's colours are its own: a server's terminal has one set for all its clients.
+    async fn facts(&self, facts: &ClientFacts) -> Result<(), SessionError> {
+        self.check_open()?;
+        if self.focused.swap(facts.focused, Ordering::AcqRel) != facts.focused {
+            self.input.focus(facts.focused)?;
+        }
+        Ok(())
     }
 
     async fn credit(&self, bytes: u32) -> Result<(), SessionError> {
@@ -649,13 +660,15 @@ impl Sink for RexSink {
 
 /// Attaches to a block: begins its stream and starts the task that follows it. `id` is
 /// the block as the application names it, and `serial` tells this attachment from
-/// others to the same block.
+/// others to the same block. `facts` describes the view.
 pub(crate) async fn attach(
     shared: Arc<Shared>,
     id: SessionId,
     serial: u64,
     block: BlockRef,
+    facts: &ClientFacts,
 ) -> Result<(Attachment, Arc<Handle>), RexError> {
+    input::arrive(&shared, &block, facts).await;
     let started = start(&shared, &block).await?;
     let (frames, taken) = mpsc::unbounded_channel();
     let (commands, told) = mpsc::unbounded_channel();
@@ -676,6 +689,7 @@ pub(crate) async fn attach(
     };
     task.take(started.after);
 
+    let (input, typing) = Input::start(Arc::clone(&shared), task.block.clone());
     let running = tokio::spawn(async move {
         tokio::select! {
             () = task.run() => {}
@@ -685,6 +699,9 @@ pub(crate) async fn attach(
         if let Some(live) = task.live.take() {
             live.conn.close().await;
         }
+        typing.abort();
+        let leaving = input::leave(&task.shared, &task.block);
+        let _ = tokio::time::timeout(DATA_CLOSE_TIMEOUT, leaving).await;
         task.shared.forget(id, serial);
     });
     let handle = Arc::new(Handle {
@@ -695,6 +712,8 @@ pub(crate) async fn attach(
         handle: Arc::clone(&handle),
         commands,
         credit,
+        input,
+        focused: AtomicBool::new(facts.focused),
     };
     let attachment = Attachment {
         size,

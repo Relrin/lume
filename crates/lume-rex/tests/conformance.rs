@@ -147,7 +147,56 @@ fn requests() -> Vec<(&'static str, Value)> {
         ("session.detach", of_session),
         ("com.superlogical.terminal.size", of_block.clone()),
         ("com.superlogical.terminal.process", of_block.clone()),
-        ("com.superlogical.terminal.title", of_block),
+        ("com.superlogical.terminal.title", of_block.clone()),
+        ("com.superlogical.terminal.modes", of_block.clone()),
+        (
+            "data.connect",
+            json!({
+                "session_id": "session:1", "block_id": "block:1",
+                "data_ref_id": "terminal", "subprotocol": "rex.data.terminal.v1",
+            }),
+        ),
+        (
+            "com.superlogical.terminal.write",
+            json!({ "session_id": "session:1", "block_id": "block:1", "args": { "data": "ls\r" } }),
+        ),
+        (
+            "com.superlogical.terminal.resize",
+            json!({
+                "session_id": "session:1", "block_id": "block:1",
+                "args": { "columns": 80, "rows": 24, "cell_width_px": 8, "cell_height_px": 16 },
+            }),
+        ),
+        (
+            "com.superlogical.terminal.format",
+            json!({
+                "session_id": "session:1", "block_id": "block:1",
+                "args": { "format": "vt", "max_bytes": 900_000, "extra_cursor": true },
+            }),
+        ),
+        (
+            "com.superlogical.terminal.blob_read",
+            json!({
+                "session_id": "session:1", "block_id": "block:1",
+                "args": { "id": 7, "offset": 900_000, "max_bytes": 900_000 },
+            }),
+        ),
+        (
+            "session.own_block",
+            json!({ "session_id": "session:1", "block_ids": ["block:1"], "mode": "take" }),
+        ),
+        (
+            "session.disown_block",
+            json!({ "session_id": "session:1", "block_ids": ["block:1"] }),
+        ),
+        (
+            "block.event",
+            json!({
+                "session_id": "session:1", "block_id": "block:1",
+                "event": { "type": "focus", "payload": { "action": "in" } },
+            }),
+        ),
+        ("block.close", of_block),
     ]
 }
 

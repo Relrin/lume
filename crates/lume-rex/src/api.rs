@@ -431,6 +431,14 @@ pub(crate) struct TerminalTitle {
     pub title: String,
 }
 
+/// What `com.superlogical.terminal.modes` returns, as far as it is used.
+#[derive(Deserialize)]
+pub(crate) struct TerminalModes {
+    /// `primary`, or `alternate` while a full-screen program has switched to it.
+    #[serde(default)]
+    pub screen: String,
+}
+
 /// What `data.connect` returns.
 #[derive(Deserialize)]
 pub(crate) struct Ticketed {

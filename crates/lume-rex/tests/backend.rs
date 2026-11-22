@@ -521,18 +521,29 @@ async fn a_backend_that_is_shut_down_says_goodbye_and_stays_away() {
 }
 
 #[tokio::test]
-async fn what_this_client_cannot_do_yet_is_refused_as_unsupported() {
+async fn what_is_asked_of_a_terminal_that_is_not_known_is_refused() {
     let (dialer, mut listener) = streams();
     let backend = RexBackend::over("test".to_owned(), dialer, client());
     let _served = serve(listener.accept().await, World::recorded());
     backend.ready().await.unwrap();
 
     let id = lume_proto::SessionId::new(1).unwrap();
-    match backend.kill(id).await.unwrap_err() {
-        SessionError::Refused(error) => {
-            assert_eq!(error.code, lume_proto::ErrorCode::Unsupported);
+    let refusals = [
+        backend.kill(id).await.unwrap_err(),
+        backend.send(id, "text").await.unwrap_err(),
+        backend.screen(id).await.unwrap_err(),
+        backend
+            .wait_text(id, "text", Duration::from_millis(10))
+            .await
+            .unwrap_err(),
+    ];
+    for refusal in refusals {
+        match refusal {
+            SessionError::Refused(error) => {
+                assert_eq!(error.code, lume_proto::ErrorCode::NotFound);
+            }
+            other => panic!("{other:?}"),
         }
-        other => panic!("{other:?}"),
     }
     assert!(backend.layout().is_none());
 }
