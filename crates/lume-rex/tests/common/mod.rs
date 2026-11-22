@@ -313,6 +313,114 @@ impl Conn {
     }
 }
 
+/// The server's side of one data connection.
+pub struct DataSide {
+    pub socket: WebSocketStream<DuplexStream>,
+    /// The first message the client sent.
+    pub first: Vec<u8>,
+    /// The subprotocol the client asked for.
+    pub asked: Option<String>,
+}
+
+/// The token a pretend server welcomes a data connection with.
+pub const DATA_TOKEN: [u8; 16] = [0xa5; 16];
+/// The nonce a pretend server marks its streams with.
+pub const NONCE: u64 = 12_491_831_766_469_670_801;
+
+impl DataSide {
+    /// Shakes hands as a server does and takes the first message, without answering it.
+    #[allow(clippy::result_large_err)]
+    pub async fn shake(stream: DuplexStream) -> Self {
+        let asked = Arc::new(Mutex::new(None));
+        let noted = Arc::clone(&asked);
+        let socket = accept_hdr_async(
+            stream,
+            move |request: &Request, mut response: Response| -> Result<Response, ErrorResponse> {
+                assert_eq!(request.uri().path(), "/api/data");
+                let protocol = request.headers().get("Sec-WebSocket-Protocol").cloned();
+                if let Some(protocol) = protocol {
+                    *noted.lock().unwrap() = protocol.to_str().ok().map(str::to_owned);
+                    response
+                        .headers_mut()
+                        .insert("Sec-WebSocket-Protocol", protocol);
+                }
+                Ok(response)
+            },
+        )
+        .await
+        .unwrap();
+        let mut side = Self {
+            socket,
+            first: Vec::new(),
+            asked: asked.lock().unwrap().clone(),
+        };
+        side.first = match side.socket.next().await {
+            Some(Ok(Message::Binary(first))) => first.to_vec(),
+            other => panic!("no first message: {other:?}"),
+        };
+        side
+    }
+
+    /// Shakes hands, takes the first message and welcomes the connection.
+    pub async fn accept(stream: DuplexStream) -> Self {
+        let mut side = Self::shake(stream).await;
+        side.welcome(DATA_TOKEN, 60_000, NONCE).await;
+        side
+    }
+
+    /// Answers the first message with a welcome.
+    pub async fn welcome(&mut self, token: [u8; 16], keep_ms: u32, nonce: u64) {
+        let mut message = vec![0x81];
+        message.extend(token);
+        message.extend([0; 3]);
+        message.extend(keep_ms.to_le_bytes());
+        message.extend(nonce.to_le_bytes());
+        self.bytes(&message).await;
+    }
+
+    /// Answers the first message with a rejection, and closes as a server does then.
+    pub async fn reject(mut self, reason: u8) {
+        self.bytes(&[0x82, reason]).await;
+        self.close(1008, "data handshake rejected").await;
+    }
+
+    /// Sends one binary message.
+    pub async fn bytes(&mut self, bytes: &[u8]) {
+        let _ = self.socket.send(Message::binary(bytes.to_vec())).await;
+    }
+
+    /// Sends a message of the server's own, as it stands in a terminal's stream.
+    pub async fn note(&mut self, nonce: u64, json: Value) {
+        self.bytes(format!("\u{1b}_rex1;{nonce};{json}\u{1b}\\").as_bytes())
+            .await;
+    }
+
+    /// Closes the connection as a server does, with a status and a reason.
+    pub async fn close(mut self, code: u16, reason: &str) {
+        let _ = self
+            .socket
+            .close(Some(CloseFrame {
+                code: CloseCode::from(code),
+                reason: reason.to_owned().into(),
+            }))
+            .await;
+        while let Some(Ok(_)) = self.socket.next().await {}
+    }
+
+    /// Waits for the client to close the connection, and says with what status.
+    pub async fn closed_by_client(&mut self) -> Option<u16> {
+        loop {
+            match self.socket.next().await {
+                Some(Ok(Message::Close(frame))) => {
+                    return frame.map(|frame| u16::from(frame.code));
+                }
+                Some(Ok(_)) => {}
+                Some(Err(_)) | None => return None,
+            }
+        }
+    }
+}
+
 /// What a pretend server holds: its sessions in order, and each one's view.
 #[derive(Clone)]
 pub struct World {

@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+data-encoding.workspace = true
 futures-util.workspace = true
 lume-proto.workspace = true
 lume-session.workspace = true

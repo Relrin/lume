@@ -2646,6 +2646,7 @@ name = "lume-rex"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "data-encoding",
  "futures-util",
  "lume-ipc",
  "lume-proto",

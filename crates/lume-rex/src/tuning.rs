@@ -49,6 +49,27 @@ pub const SPLIT_DEPTH_MAX: usize = 64;
 /// The longest id or label taken from a server, in bytes. Longer ones are cut.
 pub const TEXT_MAX_BYTES: usize = 1024;
 
+/// The path of a data connection.
+pub const DATA_PATH: &str = "/api/data";
+/// The subprotocol of a data connection that carries a terminal's stream.
+pub const TERMINAL_SUBPROTOCOL: &str = "rex.data.terminal.v1";
+/// The name of a terminal block's stream among the data the block offers.
+pub const TERMINAL_DATA_REF: &str = "terminal";
+
+/// The most bytes of a stream a server puts in one message.
+pub const DATA_MESSAGE_MAX_BYTES: usize = 65_536;
+/// How long the server is given to answer the first message of a data connection.
+pub const DATA_ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long closing a data connection properly may take before it is simply dropped.
+pub const DATA_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The largest copy of a terminal taken from the start of a stream. A larger one is
+/// passed over, and the terminal is shown from what the server says is on its screen.
+pub const SNAPSHOT_MAX_BYTES: usize = 64 * 1024 * 1024 - 1024;
+/// The longest message of the server's own taken out of a terminal's stream. What looks
+/// like a longer one is left in the output as it is.
+pub const STREAM_NOTE_MAX_BYTES: usize = 65_536;
+
 /// How long to wait before connecting again after a connection was lost: this long the
 /// first time, twice as long each time after, up to the most.
 pub const RECONNECT_FIRST: Duration = Duration::from_millis(250);

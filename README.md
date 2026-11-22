@@ -3,7 +3,7 @@
 A cross-platform terminal with a focus on modularity and Rex server support
 
 The Lume project is a focused on bringing an idea of a terminal that built on a top of libghostty while embracing  
-a Pi coding agent approach while allowing to adapt software to user's workflows.
+a Pi coding agent approach and allowing to adapt software to user's workflows.
 
 > [!NOTE]
 > Support Mitchell's product in the first place!

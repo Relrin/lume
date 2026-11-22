@@ -19,21 +19,20 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot, watch};
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::error::ProtocolError;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
-use tokio_tungstenite::{WebSocketStream, client_async_with_config};
 
 use crate::api::{ApiRevisions, ClientInfo, Hello, Secret, Welcome, WireWelcome, cut};
 use crate::error::RexError;
 use crate::transport::Io;
 use crate::tuning::{
-    API_MIN_REVISION, API_REVISION, CALL_TIMEOUT, CONNECT_TIMEOUT, CONTROL_PATH,
-    CONTROL_SUBPROTOCOL, EVENT_BACKLOG, HELLO_MAX_BYTES, MESSAGE_FLOOR_BYTES, MESSAGE_MAX_BYTES,
-    REQUEST_BACKLOG, TEXT_MAX_BYTES, WELCOME_TIMEOUT,
+    API_MIN_REVISION, API_REVISION, CALL_TIMEOUT, CONTROL_PATH, CONTROL_SUBPROTOCOL, EVENT_BACKLOG,
+    HELLO_MAX_BYTES, MESSAGE_FLOOR_BYTES, MESSAGE_MAX_BYTES, REQUEST_BACKLOG, TEXT_MAX_BYTES,
+    WELCOME_TIMEOUT,
 };
+use crate::ws;
 
 /// The answer to a request.
 #[derive(Clone, Debug, PartialEq)]
@@ -196,34 +195,14 @@ impl Control {
         token: Option<&str>,
     ) -> Result<(Self, Events), RexError> {
         let hello = hello_text(client, token)?;
-        let mut request = format!("ws://localhost{CONTROL_PATH}")
-            .into_client_request()
-            .map_err(|error| protocol(error.to_string()))?;
-        request.headers_mut().insert(
-            "Sec-WebSocket-Protocol",
-            CONTROL_SUBPROTOCOL
-                .parse()
-                .map_err(|_| protocol("the subprotocol is not a header value"))?,
-        );
-        let config = WebSocketConfig::default()
-            .max_message_size(Some(MESSAGE_MAX_BYTES))
-            .max_frame_size(Some(MESSAGE_MAX_BYTES));
-        let shaken = tokio::time::timeout(
-            CONNECT_TIMEOUT,
-            client_async_with_config(request, io, Some(config)),
+        let mut socket = ws::open(
+            io,
+            endpoint,
+            CONTROL_PATH,
+            CONTROL_SUBPROTOCOL,
+            MESSAGE_MAX_BYTES,
         )
-        .await
-        .map_err(|_| RexError::Timeout("the connection".to_owned()))?;
-        let (mut socket, response) = shaken.map_err(|error| handshake_error(endpoint, error))?;
-        let spoken = response
-            .headers()
-            .get("Sec-WebSocket-Protocol")
-            .and_then(|value| value.to_str().ok());
-        if spoken != Some(CONTROL_SUBPROTOCOL) {
-            return Err(protocol(format!(
-                "the server did not agree to speak {CONTROL_SUBPROTOCOL}"
-            )));
-        }
+        .await?;
 
         socket
             .send(Message::text(hello))
@@ -404,36 +383,6 @@ impl Control {
         if let Some(closing) = closing {
             let _ = closing.send(());
         }
-    }
-}
-
-/// What a failed handshake says: a server that does not let a caller in answers every
-/// request with status 403 and a JSON body that says why.
-fn handshake_error(endpoint: &str, error: WsError) -> RexError {
-    match error {
-        WsError::Http(response) => {
-            let status = response.status().as_u16();
-            let said = response
-                .body()
-                .as_deref()
-                .and_then(|body| serde_json::from_slice::<Value>(body).ok())
-                .and_then(|body| body.get("error")?.as_str().map(str::to_owned));
-            let mut reason = said.unwrap_or_else(|| format!("status {status}"));
-            cut(&mut reason, TEXT_MAX_BYTES);
-            if status == 403 {
-                RexError::Refused {
-                    endpoint: endpoint.to_owned(),
-                    reason,
-                }
-            } else {
-                protocol(format!("the server answered the handshake with {reason}"))
-            }
-        }
-        WsError::Io(source) => RexError::Unreachable {
-            endpoint: endpoint.to_owned(),
-            source,
-        },
-        other => protocol(format!("the handshake failed: {other}")),
     }
 }
 

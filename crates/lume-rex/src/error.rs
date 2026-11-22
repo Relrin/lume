@@ -5,6 +5,8 @@ use std::io;
 use lume_proto::{ErrorCode, ProtoError};
 use lume_session::SessionError;
 
+use crate::data::Reject;
+
 /// Why something asked of a Rex server did not happen.
 #[derive(Debug, thiserror::Error)]
 pub enum RexError {
@@ -40,6 +42,9 @@ pub enum RexError {
     /// The server closed the connection.
     #[error("the Rex server closed the connection: {reason} (status {code})")]
     Closed { code: u16, reason: String },
+    /// The server refused a data connection at its handshake.
+    #[error("the Rex server refused the data connection: {0}")]
+    Rejected(Reject),
     /// The connection ended without a word.
     #[error("the connection to the Rex server was lost")]
     Disconnected,
@@ -58,6 +63,7 @@ impl RexError {
             RexError::Revision(_) => "version_mismatch",
             RexError::Protocol(_) => "protocol_error",
             RexError::Call { code, .. } => code,
+            RexError::Rejected(_) => "rejected",
             RexError::Closed { .. } | RexError::Disconnected => "disconnected",
             RexError::Timeout(_) => "timeout",
         }
@@ -85,6 +91,12 @@ impl From<RexError> for SessionError {
             RexError::Refused { .. } => ErrorCode::Unsupported,
             RexError::Revision(_) => ErrorCode::VersionMismatch,
             RexError::Timeout(_) => ErrorCode::Timeout,
+            RexError::Rejected(reason) => match reason {
+                Reject::Unavailable => ErrorCode::NotFound,
+                Reject::AlreadyConnected => ErrorCode::AlreadyAttached,
+                Reject::Limit => ErrorCode::LimitExceeded,
+                _ => ErrorCode::Internal,
+            },
             RexError::Call { status, .. } => match status {
                 404 => ErrorCode::NotFound,
                 400 => ErrorCode::BadRequest,

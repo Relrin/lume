@@ -9,6 +9,8 @@
 //!   Unix socket elsewhere.
 //! - [`Control`] is the control connection: one WebSocket that carries every method
 //!   call and every event.
+//! - [`DataConn`] is a data connection: one WebSocket that carries what one terminal
+//!   prints. [`Opening`] and [`Splitter`] take such a stream apart.
 //! - [`RexBackend`] is a server as the application sees any place sessions run.
 //!
 //! What a server sends is not trusted. Everything read from it is bounded and checked
@@ -17,11 +19,14 @@
 mod api;
 mod backend;
 mod control;
+mod data;
 mod endpoint;
 mod error;
 mod ids;
+mod stream;
 mod transport;
 pub mod tuning;
+mod ws;
 
 pub use api::{
     ApiRevisions, ClientInfo, ServerVersion, SessionSummary, View, ViewBlock, ViewLayer, ViewNode,
@@ -29,8 +34,13 @@ pub use api::{
 };
 pub use backend::{Dialer, Link, RexBackend, RexSession};
 pub use control::{Control, Event, Events, Response};
+pub use data::{
+    Answer, DataConn, DataEnd, DataOpen, DataWelcome, Reject, ResumeToken, Ticket, hello,
+    read_answer, resume,
+};
 pub use endpoint::Endpoint;
 pub use error::RexError;
+pub use stream::{Note, Opened, Opening, Piece, Splitter, Theme};
 pub use transport::{Io, dial};
 
 /// The result of something asked of a Rex server.
