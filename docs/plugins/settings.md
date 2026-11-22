@@ -28,11 +28,47 @@ unit = "s"
 | `integer` | a whole number    | an integer            |
 | `number`  | any number        | an integer or a float |
 | `string`  | text              | a string              |
+| `table`   | a table           | a table, often `{}`   |
 
 - `minimum` and `maximum` are for `integer` and `number` only. The default must lie within them.
 - `choices` lists the values a setting may have, each with the label the settings window shows:
   `{ value = 2, label = "2 s" }`. Every value must be of the setting's type, and the default must
   be one of them.
+
+### Tables
+
+A `table` setting holds whatever tables and values the user writes under its key. It is for things
+there are any number of, each with a name of its own: accounts, sources, presets.
+
+```toml
+[[contributes.settings]]
+key = "sources"
+type = "table"
+default = {}
+help = "One table for each source, by name."
+```
+
+The user writes it in the configuration file:
+
+```toml
+[plugins."acme.metrics".sources.office]
+address = "10.0.0.4"
+every = 5
+
+[plugins."acme.metrics".sources.home]
+address = "192.168.1.20"
+```
+
+- A table is set in the file only. It has no row in the settings window, with or without a `label`,
+  and takes no `control`, `choices`, `shown-when`, `minimum`, `maximum`, `unit`, `step`, `page`,
+  `group`, `before`, `after` or `order`.
+- Lume checks only that the value is a table. What is inside is the plugin's to read and to check:
+  say what is wrong with it in the plugin's own view or log.
+- A workspace's file is laid over the user's key by key, at every depth. A workspace that writes
+  `[plugins."acme.metrics".sources.office]` with `every = 1` changes that one value; the other
+  keys of `office`, and `home`, stay as the user's file has them.
+- `lume.settings.get("sources")` gives the whole table, merged, as an object. The default is used
+  when the user has written nothing under the key, or something that is not a table.
 
 ### Controls
 

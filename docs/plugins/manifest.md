@@ -242,7 +242,7 @@ One of the plugin's settings. See [Settings](settings.md).
 | Key          | Type           | Default       | What it is                                                                |
 | ------------ | -------------- | ------------- | ------------------------------------------------------------------------- |
 | `key`        | string         | needed        | The setting's name inside the plugin's table of the configuration.        |
-| `type`       | string         | needed        | `boolean`, `integer`, `number` or `string`.                               |
+| `type`       | string         | needed        | `boolean`, `integer`, `number`, `string` or `table`.                      |
 | `default`    | value          | needed        | Its value until the user sets one. It must be of the type.                |
 | `minimum`    | number         | none          | The least it may be. Only for `integer` and `number`.                     |
 | `maximum`    | number         | none          | The most it may be. Only for `integer` and `number`.                      |
@@ -258,6 +258,9 @@ One of the plugin's settings. See [Settings](settings.md).
 | `before`     | string         | none          | Another of the plugin's settings it goes right before.                    |
 | `after`      | string         | none          | Another of the plugin's settings it goes right after.                     |
 | `order`      | integer        | none          | Where it goes when no neighbour is named.                                 |
+
+A `table` setting is written in the configuration file only: of the keys above it takes `key`,
+`type`, `default`, `label` and `help`. See [tables](settings.md#tables).
 
 ## `[[contributes.setting-groups]]`
 
@@ -329,6 +332,98 @@ view opens at once. The view starts with what was opened as its [state](views.md
 | `schemes`  | list of strings | none    | Kinds of address it opens, such as `acme-review` for `acme-review:…`. The schemes of the web, of files and of Lume itself cannot be taken. |
 
 An opener names at least one pattern or scheme.
+
+## `[[contributes.cli]]`
+
+A verb for the command line. `lume <verb> [arguments]` runs one of the plugin's commands in the
+running application, prints what it gives back and ends with its status.
+
+```toml
+[[contributes.commands]]
+id = "show"
+title = "Show the figures"
+palette = false
+
+[[contributes.cli]]
+verb = "metrics show"
+command = "show"
+summary = "Print the figures once"
+usage = "lume metrics show [--json]"
+```
+
+| Key       | Type   | Default | What it is                                                                            |
+| --------- | ------ | ------- | ------------------------------------------------------------------------------------- |
+| `verb`    | string | needed  | One to three words with a space between them: lower-case letters, digits and hyphens. |
+| `command` | string | needed  | One of the plugin's own commands, by its name.                                        |
+| `summary` | string | needed  | What it does, in a line. `lume ctl verbs` lists it. 300 characters at most.           |
+| `usage`   | string | none    | How it is written, for the plugin's own help. 300 characters at most.                 |
+
+- The first word cannot be one of lume's own: `help`, `ctl`, `host`, `plugin`, `config`, `keymap`,
+  `theme`, `shell-integration`.
+- Where the words on the command line begin with more than one verb, the one with the most words
+  is meant: with `metrics` and `metrics show` both there, `lume metrics show x` runs the second.
+- A verb belongs to the first plugin that adds it, in the order plugins load in. Another plugin
+  that adds the same verb is told so on its page of the add-ons.
+- The application has to be running: it is the application that runs the plugin's code. The
+  plugin is started for the verb if it is not running.
+
+### The command of a verb
+
+The command is called with an object:
+
+| Key     | Type            | What it is                                                                                                    |
+| ------- | --------------- | ------------------------------------------------------------------------------------------------------------- |
+| `argv`  | list of strings | Everything written after the verb, as written. The plugin reads its own options from it, `--help` among them. |
+| `cwd`   | string          | The directory `lume` was run in.                                                                              |
+| `stdin` | string          | What was piped in, if anything was: text, 512 KiB at most.                                                    |
+
+It gives back an object, or nothing:
+
+| Key    | Type    | What it is                                                                        |
+| ------ | ------- | --------------------------------------------------------------------------------- |
+| `out`  | string  | Printed on standard output, as it is: end lines yourself. 256 KiB at most a step. |
+| `err`  | string  | Printed on standard error. 256 KiB at most a step.                                |
+| `next` | any     | If given, the command is called again, with `{ next }`. 64 KiB at most as JSON.   |
+| `code` | integer | The status `lume` ends with, 0 to 255, when there is no `next`. 0 if left out.    |
+
+A verb that takes a while runs in steps. Each call gives back what there is to print so far and a
+`next` to be called again with; the call without a `next` ends the verb. What the plugin needs to
+find the run again (an id it made up) travels in `next`.
+
+```js
+const runs = new Map();
+let started = 0;
+
+lume.commands.register("show", async (args) => {
+  if (args.cancel) {
+    runs.get(args.next)?.stop();
+    runs.delete(args.next);
+    return {};
+  }
+  if (args.next === undefined) {
+    if (args.argv.includes("--help")) return { out: "usage: lume metrics show [--json]\n" };
+    const id = ++started;
+    runs.set(id, startReading(args.argv));
+    return { err: "reading...\n", next: id };
+  }
+  const run = runs.get(args.next);
+  // Wait for more, but not for long: give back within about 20 seconds.
+  const lines = await run.more(15_000);
+  if (!run.done) return { out: lines, next: args.next };
+  runs.delete(args.next);
+  return { out: lines, code: run.failed ? 1 : 0 };
+});
+```
+
+- Each call has the time any command has, 30 seconds, not counting time the user is being asked
+  something. Give back within about 20 seconds, with nothing to print if there is nothing, and be
+  called again. A verb may go on for as long as it likes this way.
+- If the user interrupts `lume`, or it goes away, the command is called once more with
+  `{ next, cancel: true }`. Stop what the run started; what this call gives back is not printed.
+- A call that throws, runs out of time or gives back something else ends the verb with status 1
+  and a line on standard error.
+- `lume` reads its standard input to the end before it asks for the verb, when that is not a
+  terminal. A verb started with a pipe that stays open waits for it.
 
 ## `[[contributes.services]]`
 

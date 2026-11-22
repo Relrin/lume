@@ -16,6 +16,7 @@ usage: lume [--endpoint <name>] [--workspace <name>] [-e <program> [<arg>...]]
        lume shell-integration bash|zsh|fish|powershell
        lume host [--endpoint <name>] status | start | stop [--end-sessions]
        lume plugin <command> [--json]
+       lume [--endpoint <name>] <verb> [<argument>...]
        lume --help | --version
 
 Without a command, lume starts the application, or brings its window to the front if
@@ -64,6 +65,8 @@ Commands of lume ctl, which drive the running application:
                                  whether each can be used, whether its code runs, how
                                  it has fared, what its status items show, its log
   plugin activate <id>           start a plugin's code, as its activation events would
+  verbs                          list the verbs add-ons add to lume, with the add-on
+                                 each comes from
   quit                           close the application
 
 A <target> is --pane <id> (as in p12) or --session <id>. A command that names neither
@@ -138,8 +141,15 @@ running:
   logs <id> [--lines <n>]        the end of what the plugin's code logged
 --json prints one JSON object instead.
 
+Add-ons can add verbs of their own: one to three words after lume, as in lume agent
+run. A verb is carried out by the running application; everything after it is the
+add-on's to read, and so is what is piped in. What it prints is printed here as it
+comes, and it ends with the status the add-on gives. Interrupting it stops it. lume ctl
+verbs lists the verbs there are.
+
 Exit status: 0 done, 1 refused or failed (for config check: something is wrong), 2
-arguments not understood, 3 a wait ran out of time, 4 the application is not running.";
+arguments not understood, 3 a wait ran out of time, 4 the application is not running.
+A verb ends with the status its add-on gives.";
 
 /// How long a wait may last when `--timeout` is not given.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -165,6 +175,12 @@ pub enum Command {
     Host(HostCommand),
     /// Install plugins or change what is installed.
     Plugin(crate::plugin::PluginCommand),
+    /// Run a verb a plugin adds, in the running application.
+    Verb {
+        endpoint: Option<String>,
+        /// The word that is not one of lume's own and everything after it, as written.
+        words: Vec<String>,
+    },
 }
 
 /// A command for the session host.
@@ -645,6 +661,10 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
             nothing_more(words, "plugins")?;
             AppRequestBody::Plugins {}
         }
+        "verbs" => {
+            nothing_more(words, "verbs")?;
+            AppRequestBody::Verbs {}
+        }
         "plugin" => {
             match words.next().as_deref() {
                 Some("activate") => {}
@@ -817,6 +837,14 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
             "keymap" => return keymap(&mut words).map(Command::Offline),
             "theme" => return theme(&mut words).map(Command::Offline),
             "shell-integration" => return shell_integration(&mut words).map(Command::Offline),
+            // A word that could be a plugin's verb: it and the rest are for the running
+            // application to make sense of.
+            other if lume_plugin::cli::word_ok(other) => {
+                return Ok(Command::Verb {
+                    endpoint,
+                    words: std::iter::once(word).chain(words).collect(),
+                });
+            }
             other => return Err(format!("{other} is not something lume knows")),
         }
     }
@@ -952,6 +980,55 @@ mod tests {
         assert!(parsed(&["ctl", "list", "all"]).is_err());
         assert!(parsed(&["ctl"]).is_err());
         assert!(parsed(&["ctl", "dance"]).is_err());
+    }
+
+    #[test]
+    fn a_word_lume_does_not_know_is_a_verb_with_everything_after_it() {
+        assert_eq!(
+            parsed(&["agent", "run", "--profile", "fast", "--help", "do it"]),
+            Ok(Command::Verb {
+                endpoint: None,
+                words: ["agent", "run", "--profile", "fast", "--help", "do it"]
+                    .map(str::to_owned)
+                    .to_vec(),
+            })
+        );
+        assert_eq!(
+            parsed(&["--endpoint", "trial", "review"]),
+            Ok(Command::Verb {
+                endpoint: Some("trial".to_owned()),
+                words: vec!["review".to_owned()],
+            })
+        );
+        // What could not begin a verb is still not understood.
+        for unknown in ["--frobnicate", "-x", "Agent", "9lives", "a_b"] {
+            assert!(parsed(&[unknown]).is_err(), "{unknown}");
+        }
+        assert_eq!(request(&["ctl", "verbs"]), AppRequestBody::Verbs {});
+        assert!(parsed(&["ctl", "verbs", "more"]).is_err());
+    }
+
+    #[test]
+    fn the_words_plugins_may_not_begin_a_verb_with_are_lumes_own() {
+        // Each word the command line reads itself is kept from plugins, and none of
+        // them is taken for a verb.
+        let own = [
+            "help",
+            "ctl",
+            "host",
+            "plugin",
+            "config",
+            "keymap",
+            "theme",
+            "shell-integration",
+        ];
+        assert_eq!(lume_plugin::cli::RESERVED_WORDS, own);
+        for word in own {
+            assert!(
+                !matches!(parsed(&[word, "x"]), Ok(Command::Verb { .. })),
+                "{word}"
+            );
+        }
     }
 
     #[test]

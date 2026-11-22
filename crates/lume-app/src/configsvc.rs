@@ -23,10 +23,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use lume_config::schema::TitleBar;
-use lume_config::source::{join_path, split_path};
+use lume_config::source::split_path;
 use lume_config::{
     ColorScheme, ConfigError, ConfigStore, Dirs, Dropped, Keymap, Platform, PluginBinding, Problem,
-    ProblemKind, Resolved, Theme, Themes, TokenValue, WatchEvent, Watcher, check_value,
+    Resolved, Theme, Themes, TokenValue, WatchEvent, Watcher, check_value, plugin_setting_problems,
     resolve_keymap_with, resolve_tokens,
 };
 use serde::Serialize;
@@ -178,43 +178,12 @@ impl ConfigService {
     /// is, and nothing is said of it.
     fn plugin_problems(&self, resolved: &Resolved) -> Vec<Problem> {
         let plugins = lock(&self.plugins);
-        let mut problems = Vec::new();
-        for (local, table) in &resolved.config.plugins {
-            let Some(fragment) = plugins.fragments.get(local) else {
-                continue;
-            };
-            if !plugins.enabled.contains(local) {
-                continue;
-            }
-            let Some(table) = table.as_object() else {
-                continue;
-            };
-            for (key, value) in table {
-                let path = join_path(&["plugins", local.as_str(), key.as_str()]);
-                let source = resolved.sources.get(&path);
-                let (file, line) = source
-                    .and_then(|source| source.location())
-                    .map_or((None, 0), |(file, line)| (Some(file.clone()), line));
-                let (kind, message) = match fragment.pointer(&format!("/properties/{key}")) {
-                    None => (ProblemKind::UnknownKey, format!("unknown key `{path}`")),
-                    Some(schema) => match check_value(value, schema) {
-                        Ok(()) => continue,
-                        Err(message) => (ProblemKind::InvalidValue, format!("`{path}`: {message}")),
-                    },
-                };
-                problems.push(Problem {
-                    kind,
-                    path,
-                    file,
-                    line,
-                    column: 0,
-                    message,
-                    suggestion: None,
-                });
-            }
-        }
-        problems.sort_by(|one, other| one.path.cmp(&other.path));
-        problems
+        plugin_setting_problems(
+            &resolved.config.plugins,
+            &resolved.sources,
+            &plugins.fragments,
+            &|local| plugins.enabled.contains(local),
+        )
     }
 
     /// The colour behind the panes under the theme in use: what a window is filled with
@@ -679,6 +648,77 @@ mod tests {
             .set("plugins.\"acme.meters\".rate", &json!(5))
             .unwrap();
         assert_eq!(service.plugin_settings("acme.meters")["rate"], 5);
+    }
+
+    #[test]
+    fn a_plugins_table_setting_is_merged_from_the_users_file_and_the_workspaces() {
+        let dir = TempDir::new("plugin-tables");
+        std::fs::create_dir_all(dir.dirs().workspaces_dir()).unwrap();
+        std::fs::write(
+            dir.dirs().config_file(),
+            "[plugins.\"acme.agents\".profiles.fast]\nagent = \"one\"\nmodel = \"small\"\n\n\
+             [plugins.\"acme.agents\".profiles.deep]\nagent = \"two\"\n\n\
+             [plugins.\"acme.agents\"]\nlimits = 3\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.dirs().workspace_file("work"),
+            "[plugins.\"acme.agents\".profiles.fast]\nmodel = \"large\"\n\n\
+             [plugins.\"acme.agents\".profiles.local]\nagent = \"three\"\n",
+        )
+        .unwrap();
+        let service = ConfigService::load(dir.dirs(), None);
+        let mut fragments = BTreeMap::new();
+        fragments.insert(
+            "acme.agents".to_owned(),
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "profiles": { "type": "object", "default": {} },
+                    "limits": { "type": "object", "default": { "runs": 2 } },
+                },
+            }),
+        );
+        service.set_plugins(PluginConfig {
+            fragments,
+            enabled: ["acme.agents".to_owned()].into_iter().collect(),
+            ..PluginConfig::default()
+        });
+        assert_eq!(
+            service.plugin_settings("acme.agents"),
+            json!({
+                "profiles": {
+                    "fast": { "agent": "one", "model": "small" },
+                    "deep": { "agent": "two" },
+                },
+                // Not a table: the default stands in for it.
+                "limits": { "runs": 2 },
+            })
+        );
+        let view = service.view();
+        let problems = view["problems"].as_array().unwrap();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert_eq!(problems[0]["path"], "plugins.\"acme.agents\".limits");
+        assert_eq!(problems[0]["line"], 9);
+        assert!(
+            problems[0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("expected a table"),
+            "{problems:?}"
+        );
+
+        // The workspace's file is laid over the user's key by key, at every depth.
+        service.set_workspace(Some("work"));
+        assert_eq!(
+            service.plugin_settings("acme.agents")["profiles"],
+            json!({
+                "fast": { "agent": "one", "model": "large" },
+                "deep": { "agent": "two" },
+                "local": { "agent": "three" },
+            })
+        );
     }
 
     #[test]

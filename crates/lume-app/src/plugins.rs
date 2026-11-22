@@ -45,7 +45,7 @@ use std::time::{Duration, Instant};
 use lume_config::Dirs;
 use lume_plugin::Store;
 use lume_plugin::broker::{Broker, allows, holds};
-use lume_plugin::contributions::{self, Commands, Contributions, Install, PanelDef};
+use lume_plugin::contributions::{self, Commands, Contributions, Install, PanelDef, VerbOut};
 use lume_plugin::id::{check_name, full_id};
 use lume_plugin::manifest::{Activation, Manifest};
 use lume_plugin::order::{Resolution, State};
@@ -889,6 +889,9 @@ impl Plugins {
             generation,
             queue: self.queue.clone(),
         };
+        // What the code finds when it reads its settings as it starts. A change is told
+        // against this, so the first one after a start is not taken for the start.
+        let settings = self.settings_of(local);
         let mut inner = self.inner();
         let loaded = inner
             .loaded
@@ -906,6 +909,7 @@ impl Plugins {
         let plugin = Plugin::start(spec, Box::new(link)).map_err(|error| error.to_string())?;
         let (sender, receiver) = oneshot::channel();
         loaded.health.starts += 1;
+        loaded.told_settings = Some(settings);
         loaded.running = Some(Running {
             plugin: Arc::new(plugin),
             generation,
@@ -1967,6 +1971,15 @@ impl Plugins {
     /// Runs one of a plugin's commands: starts its code if need be, gives it the command
     /// and waits for it to be carried out.
     pub async fn run_command(self: &Arc<Self>, id: &str, args: &Value) -> Result<(), CommandError> {
+        self.call_command(id, args).await.map(drop)
+    }
+
+    /// Runs one of a plugin's commands and gives what its code gave back.
+    pub async fn call_command(
+        self: &Arc<Self>,
+        id: &str,
+        args: &Value,
+    ) -> Result<Value, CommandError> {
         let (local, name) = {
             let inner = self.inner();
             inner
@@ -2002,7 +2015,7 @@ impl Plugins {
             .insert(invocation, (local.clone(), generation, sender));
         plugin.command(invocation, &name, args.clone());
         match self.asked.within(COMMAND_WAIT, receiver).await {
-            Some(Ok(Ok(_))) => Ok(()),
+            Some(Ok(Ok(value))) => Ok(value),
             Some(Ok(Err(error))) => Err(CommandError::new(
                 "failed",
                 format!("{id}: {}", error.message),
@@ -2430,6 +2443,23 @@ impl Plugins {
             .iter()
             .find(|panel| panel.id == id)
             .cloned()
+    }
+
+    /// The verb of the command line that `words` begin with, and how many of the words
+    /// are the verb's.
+    pub fn verb_for(&self, words: &[String]) -> Option<(VerbOut, usize)> {
+        let inner = self.inner();
+        let verbs = &inner.shown.contributions.verbs;
+        let found =
+            lume_plugin::cli::longest_match(verbs.iter().map(|verb| verb.words.as_slice()), words)?;
+        let verb = verbs[found].clone();
+        let taken = verb.words.len();
+        Some((verb, taken))
+    }
+
+    /// The verbs plugins add to the command line, in the order plugins load in.
+    pub fn verbs(&self) -> Vec<VerbOut> {
+        self.inner().shown.contributions.verbs.clone()
     }
 
     /// The plugins' things a window has on screen now. Things newly on screen start the

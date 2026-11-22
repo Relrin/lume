@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use lume_ipc::{Endpoint, Stream};
 use lume_proto::app::{
-    APP_PROTO_VERSION, AppError, AppEvent, AppMessage, AppReply, AppRequest, AppRequestBody,
-    AppResponse, ENDPOINT_NAME,
+    APP_PROTO_VERSION, AppDone, AppError, AppEvent, AppMessage, AppOutput, AppReply, AppRequest,
+    AppRequestBody, AppResponse, ENDPOINT_NAME,
 };
 use lume_proto::{ClientKind, ControlDecoder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -26,6 +26,18 @@ pub enum Failure {
     Broken(io::Error),
     /// The application refused the request or could not carry it out.
     Refused(AppError),
+}
+
+/// Something the application sends without being asked each time, on a connection
+/// whose last request goes on after its answer.
+#[derive(Debug)]
+pub enum Sent {
+    /// What a session reported, to a client that follows sessions.
+    Event(AppEvent),
+    /// What a verb printed.
+    Output(AppOutput),
+    /// How a verb ended.
+    Done(AppDone),
 }
 
 /// The endpoint the application serves: the one named, or the default.
@@ -108,7 +120,10 @@ impl Client {
                     }
                     // An answer to nothing this connection is waiting for.
                     AppMessage::Response(_) => {}
-                    AppMessage::Request(_) | AppMessage::Event(_) => {
+                    AppMessage::Request(_)
+                    | AppMessage::Event(_)
+                    | AppMessage::Output(_)
+                    | AppMessage::Done(_) => {
                         return Err(io::Error::other(
                             "the application sent something that is not an answer",
                         ));
@@ -135,11 +150,26 @@ impl Client {
     /// The next thing a session reported, on a connection that has asked to follow
     /// sessions. `None` once the application has closed the connection.
     pub async fn event(&mut self) -> io::Result<Option<AppEvent>> {
+        loop {
+            match self.next().await? {
+                Some(Sent::Event(event)) => return Ok(Some(event)),
+                // Not what a connection that follows sessions is sent.
+                Some(Sent::Output(_) | Sent::Done(_)) => {}
+                None => return Ok(None),
+            }
+        }
+    }
+
+    /// The next thing the application sends on a connection whose request goes on
+    /// after its answer. `None` once the application has closed the connection.
+    pub async fn next(&mut self) -> io::Result<Option<Sent>> {
         let mut chunk = vec![0; READ_CHUNK];
         loop {
             while let Some(json) = self.decoder.next().map_err(io::Error::other)? {
                 match AppMessage::decode(&json).map_err(io::Error::other)? {
-                    AppMessage::Event(event) => return Ok(Some(event)),
+                    AppMessage::Event(event) => return Ok(Some(Sent::Event(event))),
+                    AppMessage::Output(output) => return Ok(Some(Sent::Output(output))),
+                    AppMessage::Done(done) => return Ok(Some(Sent::Done(done))),
                     // An answer to something this connection no longer waits for.
                     AppMessage::Response(_) => {}
                     AppMessage::Request(_) => {

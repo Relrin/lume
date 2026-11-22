@@ -13,8 +13,8 @@ use lume_config::generate::pretty_json;
 use lume_config::theme::Themes;
 use lume_config::{
     ColorScheme, Config, ConfigStore, Dirs, LayerInput, LayerKind, Platform, Problem,
-    config_schema, import_ghostty, parse_theme, resolve_keymap, resolve_layers, resolve_tokens,
-    write_when,
+    config_schema, import_ghostty, parse_theme, plugin_setting_problems, resolve_keymap,
+    resolve_layers, resolve_tokens, write_when,
 };
 use serde_json::{Value, json};
 
@@ -100,6 +100,33 @@ fn derived_problems(
     problems
 }
 
+/// The schema of each installed plugin's table of settings, by install: of the plugins
+/// that can be used, as the application would find them. Empty where the folders are
+/// not known or the installed plugins cannot be read.
+fn plugin_fragments(dirs: Option<&Dirs>) -> BTreeMap<String, Value> {
+    let Some(dirs) = dirs else {
+        return BTreeMap::new();
+    };
+    let store = lume_plugin::Store::of(dirs);
+    match store.resolve(true) {
+        Ok((installed, resolution)) => {
+            crate::plugin::contributions(&store, &installed, &resolution)
+                .settings
+                .fragments
+        }
+        Err(_) => BTreeMap::new(),
+    }
+}
+
+/// What is wrong with the plugins' settings under some settings.
+fn plugin_problems(
+    config: &Config,
+    sources: &BTreeMap<String, lume_config::Source>,
+    fragments: &BTreeMap<String, Value>,
+) -> Vec<Problem> {
+    plugin_setting_problems(&config.plugins, sources, fragments, &|_| true)
+}
+
 /// The name of the folder a file is in.
 fn folder(file: &Path) -> Option<&str> {
     file.parent()?.file_name()?.to_str()
@@ -136,6 +163,11 @@ fn check_file(file: &Path, dirs: Option<&Dirs>) -> Result<Vec<Problem>, String> 
     let mut problems = layered.fatal;
     problems.extend(layered.problems);
     problems.extend(derived_problems(&layered.config, &layered.sources, &themes));
+    problems.extend(plugin_problems(
+        &layered.config,
+        &layered.sources,
+        &plugin_fragments(dirs),
+    ));
     Ok(problems)
 }
 
@@ -149,6 +181,12 @@ fn check_all(dirs: &Dirs) -> Vec<Problem> {
         &current.config,
         &current.sources,
         &current.themes,
+    ));
+    let fragments = plugin_fragments(Some(dirs));
+    problems.extend(plugin_problems(
+        &current.config,
+        &current.sources,
+        &fragments,
     ));
 
     let mut workspaces: Vec<PathBuf> = std::fs::read_dir(dirs.workspaces_dir())
@@ -166,6 +204,7 @@ fn check_all(dirs: &Dirs) -> Vec<Problem> {
         let with = store.set_workspace(Some(&stem(&file)));
         let mut found = with.problems.clone();
         found.extend(derived_problems(&with.config, &with.sources, &with.themes));
+        found.extend(plugin_problems(&with.config, &with.sources, &fragments));
         // Only what this file adds: the rest has been said.
         for problem in found {
             if !problems.contains(&problem) {
@@ -527,6 +566,70 @@ mod tests {
             "{out}"
         );
         assert!(out.ends_with("3 problems\n"), "{out}");
+    }
+
+    #[test]
+    fn checking_holds_an_installed_plugins_settings_to_what_its_manifest_says() {
+        let sandbox = Sandbox::new("check-plugins");
+        sandbox.write(
+            "package/plugin.toml",
+            "schema = 1\nid = \"acme.agents\"\nname = \"Agents\"\nversion = \"1.0.0\"\n\
+             api = \"1\"\n\n[[contributes.settings]]\nkey = \"profiles\"\ntype = \"table\"\n\
+             default = {}\n\n[[contributes.settings]]\nkey = \"shown\"\ntype = \"boolean\"\n\
+             default = true\n",
+        );
+        let store = lume_plugin::Store::of(&sandbox.dirs);
+        let prepared = store
+            .prepare(
+                sandbox.root.join("package").as_path(),
+                lume_plugin::store::InstallOptions::default(),
+            )
+            .unwrap();
+        store.commit(prepared).unwrap();
+
+        let file = sandbox.write(
+            "config/config.toml",
+            "[plugins.\"acme.agents\".profiles.fast]\nagent = \"one\"\n\n\
+             [plugins.\"gone.x\"]\nanything = 1\n",
+        );
+        let (status, out, _) = sandbox.run(check(None));
+        assert_eq!((status, out.as_str()), (DONE, "no problems\n"));
+
+        sandbox.write(
+            "config/config.toml",
+            "[plugins.\"acme.agents\"]\nprofiles = 3\nshown = \"yes\"\nmore = 1\n",
+        );
+        let (status, out, _) = sandbox.run(check(None));
+        assert_eq!(status, FAILED);
+        assert!(
+            out.contains("`plugins.\"acme.agents\".profiles`: expected a table"),
+            "{out}"
+        );
+        assert!(out.contains(":2:"), "{out}");
+        assert!(
+            out.contains("`plugins.\"acme.agents\".shown`: expected"),
+            "{out}"
+        );
+        assert!(
+            out.contains("unknown key `plugins.\"acme.agents\".more`"),
+            "{out}"
+        );
+        assert!(out.ends_with("3 problems\n"), "{out}");
+        // One file alone is held to the same.
+        let (status, out, _) = sandbox.run(check(Some(&file)));
+        assert_eq!(status, FAILED);
+        assert!(out.ends_with("3 problems\n"), "{out}");
+
+        // A workspace's file is checked as it lies over the user's.
+        sandbox.write("config/config.toml", "");
+        sandbox.write(
+            "config/workspaces/work.toml",
+            "[plugins.\"acme.agents\"]\nprofiles = \"none\"\n",
+        );
+        let (status, out, _) = sandbox.run(check(None));
+        assert_eq!(status, FAILED);
+        assert!(out.contains("work.toml"), "{out}");
+        assert!(out.ends_with("1 problem\n"), "{out}");
     }
 
     #[test]

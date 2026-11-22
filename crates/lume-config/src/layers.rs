@@ -310,6 +310,65 @@ pub fn check_value(value: &Value, schema: &Value) -> Result<(), String> {
     check(value, schema)
 }
 
+/// What is wrong with the settings of plugins: a key a plugin does not have, or a
+/// value it does not take. `plugins` is the settings' `plugins` table, `fragments` the
+/// schema of each plugin's table by plugin, and `on` says whether a plugin is one whose
+/// settings are in use. The table of a plugin without a schema, or one that is not on,
+/// is passed over.
+pub fn plugin_setting_problems(
+    plugins: &BTreeMap<String, Value>,
+    sources: &BTreeMap<String, Source>,
+    fragments: &BTreeMap<String, Value>,
+    on: &dyn Fn(&str) -> bool,
+) -> Vec<Problem> {
+    let mut problems = Vec::new();
+    for (local, table) in plugins {
+        let Some(fragment) = fragments.get(local) else {
+            continue;
+        };
+        if !on(local) {
+            continue;
+        }
+        let Some(table) = table.as_object() else {
+            continue;
+        };
+        for (key, value) in table {
+            let path = join_path(&["plugins", local.as_str(), key.as_str()]);
+            // A table has no line of its own: the first thing written in it stands
+            // for it.
+            let within = format!("{path}.");
+            let source = sources.get(&path).or_else(|| {
+                sources
+                    .range(within.clone()..)
+                    .next()
+                    .filter(|(inner, _)| inner.starts_with(&within))
+                    .map(|(_, source)| source)
+            });
+            let (file, line) = source
+                .and_then(|source| source.location())
+                .map_or((None, 0), |(file, line)| (Some(file.clone()), line));
+            let (kind, message) = match fragment.pointer(&format!("/properties/{key}")) {
+                None => (ProblemKind::UnknownKey, format!("unknown key `{path}`")),
+                Some(schema) => match check(value, schema) {
+                    Ok(()) => continue,
+                    Err(message) => (ProblemKind::InvalidValue, format!("`{path}`: {message}")),
+                },
+            };
+            problems.push(Problem {
+                kind,
+                path,
+                file,
+                line,
+                column: 0,
+                message,
+                suggestion: None,
+            });
+        }
+    }
+    problems.sort_by(|one, other| one.path.cmp(&other.path));
+    problems
+}
+
 pub(crate) fn check(value: &Value, schema: &Value) -> Result<(), String> {
     let schema = match schema {
         Value::Bool(false) => return Err("nothing is allowed here".to_owned()),

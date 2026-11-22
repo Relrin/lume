@@ -21,7 +21,7 @@ use serde_json::{Map, Value, json};
 
 use crate::assets;
 use crate::id::{Reference, full_id};
-use crate::manifest::{Manifest, OWN_PAGE, Placement, Setting};
+use crate::manifest::{Manifest, OWN_PAGE, Placement, Setting, TABLE_KIND};
 use crate::motion;
 use crate::placement::{Anchor, BUILTIN_RANK, Placed, Side, Warning, arrange};
 use crate::places::{self, NodeKind};
@@ -264,6 +264,21 @@ pub struct KeyOut {
     pub when: Option<String>,
 }
 
+/// A verb a plugin adds to the command line, with its command's name made full.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct VerbOut {
+    /// The verb as it is typed, its words with a space between them.
+    pub verb: String,
+    #[serde(skip)]
+    pub words: Vec<String>,
+    pub plugin: String,
+    /// `<install>.<name>`.
+    pub command: String,
+    pub summary: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<String>,
+}
+
 /// What a plugin adds to the settings: the part of the configuration's schema for its
 /// table, and its own page if it has one.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -290,6 +305,8 @@ pub struct Contributions {
     pub themes: Vec<lume_config::Theme>,
     pub keys: Vec<KeyOut>,
     pub settings: SettingsOut,
+    /// The verbs the plugins add to the command line.
+    pub verbs: Vec<VerbOut>,
     /// What could not be done as asked, by install.
     pub warnings: Vec<(String, String)>,
 }
@@ -646,7 +663,37 @@ pub fn build(installs: &[Install<'_>], commands: &dyn Commands, read: &mut Read)
         }
     }
     settings(installs, &mut out);
+    verbs(installs, &mut out);
     out
+}
+
+/// The verbs the installs add to the command line. A verb belongs to the first plugin
+/// that adds it, in the order plugins load in; another that adds the same is told.
+fn verbs(installs: &[Install<'_>], out: &mut Contributions) {
+    for install in installs {
+        let local = install.local;
+        for written in &install.manifest.contributes.cli {
+            let Ok(words) = crate::cli::parse_verb(&written.verb) else {
+                continue;
+            };
+            if let Some(taken) = out.verbs.iter().find(|verb| verb.words == words) {
+                let message = format!(
+                    "the verb `{}` is not added: {} adds it already",
+                    written.verb, taken.plugin
+                );
+                out.warn(local, message);
+                continue;
+            }
+            out.verbs.push(VerbOut {
+                verb: words.join(" "),
+                words,
+                plugin: local.to_owned(),
+                command: full_id(local, &written.command),
+                summary: written.summary.clone(),
+                usage: written.usage.clone(),
+            });
+        }
+    }
 }
 
 /// Reads the pictures a plugin declares, and those its things name by path.
@@ -1304,7 +1351,13 @@ fn panels(installs: &[Install<'_>], out: &mut Contributions) {
 /// The schema of one plugin setting, with how the settings window shows it.
 fn setting_schema(setting: &Setting) -> Value {
     let mut schema = Map::new();
-    schema.insert("type".to_owned(), json!(setting.kind));
+    // A table is an object to the schema, open: what is in it is the plugin's to read.
+    let kind = if setting.kind == TABLE_KIND {
+        "object"
+    } else {
+        setting.kind.as_str()
+    };
+    schema.insert("type".to_owned(), json!(kind));
     if let Some(default) = toml_json(Some(&setting.default)) {
         schema.insert("default".to_owned(), default);
     }
@@ -1384,9 +1437,14 @@ fn settings(installs: &[Install<'_>], out: &mut Contributions) {
         let mut properties = Map::new();
         for (index, setting) in contributes.settings.iter().enumerate() {
             let mut schema = setting_schema(setting);
-            let Some(label) = &setting.label else {
-                properties.insert(setting.key.clone(), schema);
-                continue;
+            // A setting without a label, and a table with or without one, is only in
+            // the file.
+            let label = match &setting.label {
+                Some(label) if setting.kind != TABLE_KIND => label,
+                _ => {
+                    properties.insert(setting.key.clone(), schema);
+                    continue;
+                }
             };
             let page = setting.page.clone().unwrap_or_else(|| OWN_PAGE.to_owned());
             let heading = match &setting.group {
@@ -2218,5 +2276,100 @@ file = "themes/night.toml"
             .unwrap();
         assert_eq!(menus["options"][0]["value"], "acme.fx/pop");
         assert_eq!(menus["unset"], "Lume's own");
+    }
+
+    #[test]
+    fn a_table_setting_is_an_open_object_and_has_no_row() {
+        let dir = TempDir::new("contributions-table");
+        let one = manifest(
+            "acme.tables",
+            r#"
+[[contributes.settings]]
+key = "shown"
+type = "boolean"
+default = true
+label = "Shown"
+
+[[contributes.settings]]
+key = "sources"
+type = "table"
+default = { local = { path = "." } }
+label = "Sources"
+help = "By name."
+"#,
+        );
+        let bound = BTreeMap::new();
+        let installs = [install("acme.tables", &one, &dir, 0, &bound)];
+        let out = build(&installs, &Known, &mut Read::default());
+        let fragment = &out.settings.fragments["acme.tables"];
+        let sources = &fragment["properties"]["sources"];
+        assert_eq!(sources["type"], "object");
+        assert_eq!(sources["default"], json!({ "local": { "path": "." } }));
+        assert_eq!(sources["description"], "By name.");
+        assert!(sources.get("x-lume-settings").is_none(), "{sources}");
+        assert!(sources.get("properties").is_none(), "{sources}");
+        assert!(
+            fragment["properties"]["shown"]
+                .get("x-lume-settings")
+                .is_some()
+        );
+        assert_eq!(out.warnings, Vec::new());
+    }
+
+    #[test]
+    fn a_verb_belongs_to_the_first_plugin_that_adds_it() {
+        let dir = TempDir::new("contributions-verbs");
+        let verbs = r#"
+[[contributes.commands]]
+id = "run"
+title = "Run"
+
+[[contributes.cli]]
+verb = "agent run"
+command = "run"
+summary = "Runs once"
+usage = "lume agent run <prompt>"
+
+[[contributes.cli]]
+verb = "agent"
+command = "run"
+summary = "Says what there is"
+"#;
+        let one = manifest("acme.one", verbs);
+        let two = manifest("acme.two", verbs);
+        let bound = BTreeMap::new();
+        let installs = [
+            install("acme.one", &one, &dir, 0, &bound),
+            install("acme.two", &two, &dir, 1, &bound),
+        ];
+        let out = build(&installs, &Known, &mut Read::default());
+        assert_eq!(out.verbs.len(), 2);
+        assert_eq!(out.verbs[0].verb, "agent run");
+        assert_eq!(out.verbs[0].words, ["agent", "run"]);
+        assert_eq!(out.verbs[0].plugin, "acme.one");
+        assert_eq!(out.verbs[0].command, "acme.one.run");
+        assert_eq!(out.verbs[1].verb, "agent");
+        assert_eq!(
+            out.warnings,
+            [
+                (
+                    "acme.two".to_owned(),
+                    "the verb `agent run` is not added: acme.one adds it already".to_owned()
+                ),
+                (
+                    "acme.two".to_owned(),
+                    "the verb `agent` is not added: acme.one adds it already".to_owned()
+                ),
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(&out.verbs[1]).unwrap(),
+            json!({
+                "verb": "agent",
+                "plugin": "acme.one",
+                "command": "acme.one.run",
+                "summary": "Says what there is",
+            })
+        );
     }
 }

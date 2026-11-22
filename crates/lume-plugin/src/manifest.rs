@@ -291,6 +291,26 @@ pub struct Contributes {
     /// Effects the cursor plays, drawn by shaders in the package.
     #[serde(default)]
     pub cursor_effects: Vec<CursorEffect>,
+    /// Verbs for the command line, each carried out by one of the plugin's commands.
+    #[serde(default)]
+    pub cli: Vec<CliVerb>,
+}
+
+/// A verb of the command line: `lume <verb> [arguments]` runs the command in the
+/// running application, prints what it gives back and ends with its status.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct CliVerb {
+    /// One to three words, as in `agent run`: lower-case letters, digits and hyphens.
+    /// The first is not one of lume's own.
+    pub verb: String,
+    /// The plugin's own command that carries it out.
+    pub command: String,
+    /// What it does, in a line.
+    pub summary: String,
+    /// How it is written, as in `lume agent run --profile <name> "prompt"`.
+    #[serde(default)]
+    pub usage: Option<String>,
 }
 
 /// Where a thing goes among its neighbours. `before` and `after` name a neighbour; the
@@ -495,7 +515,8 @@ pub struct StatusChoice {
 pub struct Setting {
     /// The setting's name inside the plugin's table.
     pub key: String,
-    /// `boolean`, `integer`, `number` or `string`.
+    /// `boolean`, `integer`, `number`, `string` or `table`. A table is written in the
+    /// configuration file only: it has no control and no row in the settings.
     #[serde(rename = "type")]
     pub kind: String,
     #[schemars(with = "serde_json::Value")]
@@ -1077,7 +1098,10 @@ impl<'a> Own<'a> {
 }
 
 /// The kinds a setting may be.
-const SETTING_KINDS: [&str; 4] = ["boolean", "integer", "number", "string"];
+const SETTING_KINDS: [&str; 5] = ["boolean", "integer", "number", "string", TABLE_KIND];
+
+/// The kind of setting that holds a table, which is written in the file only.
+pub const TABLE_KIND: &str = "table";
 
 /// The controls a setting may be shown with.
 const CONTROLS: [&str; 5] = ["switch", "select", "segmented", "text", "number"];
@@ -1118,6 +1142,7 @@ fn of_kind(kind: &str, value: &toml::Value) -> bool {
         "integer" => value.is_integer(),
         "number" => value.is_integer() || value.is_float(),
         "string" => value.is_str(),
+        TABLE_KIND => value.is_table(),
         _ => false,
     }
 }
@@ -1455,6 +1480,37 @@ impl Contributes {
             if !of_kind(&setting.kind, &setting.default) {
                 p.say(format!("{key}.default: is not a {}", setting.kind));
             }
+            if setting.kind == TABLE_KIND {
+                // A table is written in the file: nothing that draws or places a row
+                // means anything for it.
+                let refused = [
+                    ("control", setting.control.is_some()),
+                    ("choices", !setting.choices.is_empty()),
+                    ("shown-when", setting.shown_when.is_some()),
+                    ("minimum", setting.minimum.is_some()),
+                    ("maximum", setting.maximum.is_some()),
+                    ("unit", setting.unit.is_some()),
+                    ("step", setting.step.is_some()),
+                    ("page", setting.page.is_some()),
+                    ("group", setting.group.is_some()),
+                    ("before", setting.before.is_some()),
+                    ("after", setting.after.is_some()),
+                    ("order", setting.order.is_some()),
+                ];
+                for (name, _) in refused.iter().filter(|(_, given)| *given) {
+                    p.say(format!(
+                        "{key}.{name}: a table is set in the configuration file only, and \
+                         takes no {name}"
+                    ));
+                }
+                if let Some(label) = &setting.label {
+                    p.text(&format!("{key}.label"), label, LABEL_MAX_CHARS, true);
+                }
+                if let Some(help) = &setting.help {
+                    p.text(&format!("{key}.help"), help, DESCRIPTION_MAX_CHARS, true);
+                }
+                continue;
+            }
             let numeric = matches!(setting.kind.as_str(), "integer" | "number");
             if !numeric && (setting.minimum.is_some() || setting.maximum.is_some()) {
                 p.say(format!("{key}: only a number has a minimum and a maximum"));
@@ -1658,6 +1714,34 @@ impl Contributes {
                 if let Err(problem) = check_opener_scheme(scheme) {
                     p.say(format!("{key}.schemes[{at}]: {problem}"));
                 }
+            }
+        }
+
+        let mut seen = BTreeSet::new();
+        for (index, verb) in self.cli.iter().enumerate() {
+            let key = format!("contributes.cli[{index}]");
+            match crate::cli::parse_verb(&verb.verb) {
+                Err(problem) => p.say(format!("{key}.verb: {problem}")),
+                Ok(_) => {
+                    if !seen.insert(verb.verb.clone()) {
+                        p.say(format!("{key}.verb: `{}` is given twice", verb.verb));
+                    }
+                }
+            }
+            if !own.commands.contains(verb.command.as_str()) {
+                p.say(format!(
+                    "{key}.command: `{}` is not one of the plugin's commands",
+                    verb.command
+                ));
+            }
+            p.text(
+                &format!("{key}.summary"),
+                &verb.summary,
+                DESCRIPTION_MAX_CHARS,
+                true,
+            );
+            if let Some(usage) = &verb.usage {
+                p.text(&format!("{key}.usage"), usage, DESCRIPTION_MAX_CHARS, true);
             }
         }
 
@@ -2086,6 +2170,18 @@ default = "statusbar.right"
 choices = [{{ value = "statusbar.right", label = "Status bar" }}, {{ value = "topbar.right", label = "Top bar" }}]
 label = "Show in"
 
+[[contributes.settings]]
+key = "sources"
+type = "table"
+default = {{}}
+help = "One table for each source, by name."
+
+[[contributes.cli]]
+verb = "metrics show"
+command = "refresh"
+summary = "Print the figures once"
+usage = "lume metrics show [--json]"
+
 [[contributes.themes]]
 id = "night"
 file = "themes/night.toml"
@@ -2108,6 +2204,77 @@ name = "latest"
         assert!(manifest.dependencies["acme.extra"].optional());
         assert!(!manifest.dependencies["acme.core"].optional());
         assert_eq!(manifest.limits.memory_mib(), 32);
+        assert_eq!(manifest.contributes.cli[0].verb, "metrics show");
+        assert!(manifest.contributes.settings.iter().any(|setting| {
+            setting.key == "sources" && setting.kind == TABLE_KIND && setting.default.is_table()
+        }));
+    }
+
+    #[test]
+    fn a_table_setting_is_for_the_file_only() {
+        let table = |extra: &str| {
+            format!(
+                "{MINIMAL}[[contributes.settings]]\nkey = \"t\"\ntype = \"table\"\n\
+                 default = {{}}\n{extra}"
+            )
+        };
+        assert_eq!(problems(&table("")), Vec::<String>::new());
+        assert_eq!(
+            problems(&table("label = \"Sources\"\nhelp = \"By name.\"\n")),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            problems(&table("").replace("default = {}", "default = { a = { b = 1 } }")),
+            Vec::<String>::new()
+        );
+        says(
+            &table("").replace("default = {}", "default = 3"),
+            "is not a table",
+        );
+        says(&table("control = \"text\"\n"), "takes no control");
+        says(
+            &table("choices = [{ value = \"a\", label = \"A\" }]\n"),
+            "takes no choices",
+        );
+        says(&table("shown-when = \"t\"\n"), "takes no shown-when");
+        says(&table("minimum = 1\n"), "takes no minimum");
+        says(&table("page = \"terminal\"\n"), "takes no page");
+        says(&table("order = 1\n"), "takes no order");
+    }
+
+    #[test]
+    fn a_verb_names_one_of_the_plugins_own_commands() {
+        let verb = |verb: &str, command: &str| {
+            format!(
+                "{MINIMAL}main = \"host.js\"\n[[contributes.commands]]\nid = \"run\"\n\
+                 title = \"Run\"\n[[contributes.cli]]\nverb = \"{verb}\"\n\
+                 command = \"{command}\"\nsummary = \"Runs it\"\n"
+            )
+        };
+        assert_eq!(problems(&verb("agent run", "run")), Vec::<String>::new());
+        says(&verb("Agent", "run"), "is not a verb");
+        says(&verb("a b c d", "run"), "more than 3 words");
+        says(&verb("plugin run", "run"), "one of lume's own words");
+        says(&verb("help", "run"), "one of lume's own words");
+        says(
+            &verb("agent run", "walk"),
+            "not one of the plugin's commands",
+        );
+        says(
+            &verb("agent run", "lume.tab.new"),
+            "not one of the plugin's commands",
+        );
+        says(
+            &format!(
+                "{}[[contributes.cli]]\nverb = \"agent run\"\ncommand = \"run\"\nsummary = \"Again\"\n",
+                verb("agent run", "run")
+            ),
+            "is given twice",
+        );
+        says(
+            &verb("agent run", "run").replace("summary = \"Runs it\"", "summary = \"\""),
+            "summary: must not be empty",
+        );
     }
 
     #[test]

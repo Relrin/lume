@@ -1,0 +1,85 @@
+# A plugin for the end-to-end tests: verbs for the command line, each carried out by a
+# command, and a setting that is a table.
+schema = 1
+id = "test.verbs"
+name = "Verbs"
+version = "1.0.0"
+description = "Verbs that print, fail, go on and go wrong."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-verbs"
+activation = [
+  "onCommand:echo",
+  "onCommand:table",
+  "onCommand:fail",
+  "onCommand:hang",
+  "onCommand:broken",
+  "onCommand:throw",
+]
+
+[[contributes.settings]]
+key = "profiles"
+type = "table"
+default = {}
+help = "One table for each profile, by name."
+
+[[contributes.commands]]
+id = "echo"
+title = "Echo"
+palette = false
+
+[[contributes.commands]]
+id = "table"
+title = "Table"
+palette = false
+
+[[contributes.commands]]
+id = "fail"
+title = "Fail"
+palette = false
+
+[[contributes.commands]]
+id = "hang"
+title = "Hang"
+palette = false
+
+[[contributes.commands]]
+id = "broken"
+title = "Broken"
+palette = false
+
+[[contributes.commands]]
+id = "throw"
+title = "Throw"
+palette = false
+
+[[contributes.cli]]
+verb = "verbs echo"
+command = "echo"
+summary = "Print the arguments, then what was piped in"
+usage = "lume verbs echo [<word>...]"
+
+[[contributes.cli]]
+verb = "verbs table"
+command = "table"
+summary = "Print the profiles setting"
+
+[[contributes.cli]]
+verb = "verbs fail"
+command = "fail"
+summary = "End with status 7"
+
+[[contributes.cli]]
+verb = "verbs hang"
+command = "hang"
+summary = "Go on until stopped"
+
+[[contributes.cli]]
+verb = "verbs broken"
+command = "broken"
+summary = "Give back what is not a step"
+
+[[contributes.cli]]
+verb = "verbs throw"
+command = "throw"
+summary = "Throw in the second step"

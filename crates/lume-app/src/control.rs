@@ -19,9 +19,9 @@ use std::time::Duration;
 use lume_ipc::{Endpoint, Listener};
 use lume_layout::{Bounds, Dir, Intent, NewContent, PaneId, SpawnRequest, UNITS, WindowId};
 use lume_proto::app::{
-    APP_PROTO_VERSION, AppError, AppEvent, AppMessage, AppReply, AppReplyBody, AppRequest,
-    AppRequestBody, AppResponse, AppSession, Direction, Focused, PageRequestBody, SessionNews,
-    SpawnPlace, codes,
+    APP_PROTO_VERSION, AppDone, AppError, AppEvent, AppMessage, AppOutput, AppReply, AppReplyBody,
+    AppRequest, AppRequestBody, AppResponse, AppSession, Direction, Focused, PageRequestBody,
+    SessionNews, SpawnPlace, codes,
 };
 use lume_proto::{
     Body, BytesKind, ClientFacts, ClientKind, ColorScheme, ControlDecoder, ErrorCode, FrameDecoder,
@@ -36,6 +36,7 @@ use crate::carrier::{Link, SessionKey};
 use crate::services::{Asker, Services};
 use crate::sessions::News;
 use crate::tuning::{ATTACH_CELL_PX, PAGE_ANSWER_TIMEOUT, PAGE_OPEN_TIMEOUT, WAIT_MAX, WAIT_SLACK};
+use crate::verbs::{OUTPUT_PIECE_MAX, STDIN_MAX, Step, pieces, read_step};
 use crate::window::label_of;
 
 /// How many bytes are read from a client at a time.
@@ -108,6 +109,16 @@ enum Then {
     /// The client asked to be shown a session; the connection carries the attachment
     /// from here on.
     Attach(Box<Attachment>),
+    /// The client asked for a verb; what it prints is sent to it from here on.
+    Verb(Box<VerbRun>),
+}
+
+/// A verb that is about to be run for a client.
+struct VerbRun {
+    /// The plugin's command that carries it out, by its full id.
+    command: String,
+    /// What the command is first called with.
+    first: serde_json::Value,
 }
 
 /// Which sessions a client follows: the one in a pane, whichever that is at the time,
@@ -393,6 +404,15 @@ impl Control {
                 Err(error) => (Err(error), Then::Carry),
             };
         }
+        let body = match body {
+            AppRequestBody::Verb { words, cwd, stdin } => {
+                return match self.verb(&words, cwd, stdin) {
+                    Ok((answer, run)) => (Ok(answer), Then::Verb(Box::new(run))),
+                    Err(error) => (Err(error), Then::Carry),
+                };
+            }
+            other => other,
+        };
         let quit = matches!(body, AppRequestBody::Quit {});
         let result = self.carry_out(body).await;
         let then = if quit && result.is_ok() {
@@ -401,6 +421,143 @@ impl Control {
             Then::Carry
         };
         (result, then)
+    }
+
+    /// Finds the verb the words begin with and what its command is first called with.
+    fn verb(
+        &self,
+        words: &[String],
+        cwd: String,
+        stdin: Option<String>,
+    ) -> Result<(AppReply, VerbRun), AppError> {
+        if stdin.as_ref().is_some_and(|text| text.len() > STDIN_MAX) {
+            return Err(AppError::new(
+                codes::BAD_REQUEST,
+                format!("a verb is given {} KiB at most", STDIN_MAX / 1024),
+            ));
+        }
+        let Some((verb, taken)) = self.services.plugins.verb_for(words) else {
+            return Err(AppError::new(
+                codes::NOT_FOUND,
+                match words.first() {
+                    Some(word) => format!("no add-on adds a verb that begins with {word}"),
+                    None => "no verb was named".to_owned(),
+                },
+            ));
+        };
+        let mut first = serde_json::json!({ "argv": words[taken..], "cwd": cwd });
+        if let Some(stdin) = stdin {
+            first["stdin"] = serde_json::Value::String(stdin);
+        }
+        let answer = reply(
+            format!("running {} of {}", verb.verb, verb.plugin),
+            AppReplyBody::Running {
+                verb: verb.verb,
+                plugin: verb.plugin,
+            },
+        )?;
+        Ok((
+            answer,
+            VerbRun {
+                command: verb.command,
+                first,
+            },
+        ))
+    }
+
+    /// Runs a verb for the client on `io`: calls its command step by step, sends what
+    /// each step prints, and ends with the status of the last. A client that leaves
+    /// stops it: the command is called once more, told that the run is cancelled.
+    async fn run_verb<S>(&self, io: &mut S, run: VerbRun) -> io::Result<()>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        let plugins = &self.services.plugins;
+        let command = run.command.as_str();
+        let cancel = |next: Option<serde_json::Value>| async move {
+            if let Some(next) = next {
+                let told = serde_json::json!({ "next": next, "cancel": true });
+                if let Err(error) = plugins.call_command(command, &told).await {
+                    tracing::debug!(
+                        error = %error.message,
+                        command,
+                        "a verb's command did not take its cancelling"
+                    );
+                }
+            }
+        };
+        let mut args = run.first;
+        // What the call that is out was given to go on from, once there has been one.
+        let mut held: Option<serde_json::Value> = None;
+        let mut chunk = vec![0; READ_CHUNK];
+        loop {
+            let result = {
+                let call = plugins.call_command(command, &args);
+                tokio::pin!(call);
+                loop {
+                    tokio::select! {
+                        result = &mut call => break result,
+                        // Nothing more is taken from the client; this is how its
+                        // leaving is seen.
+                        read = io.read(&mut chunk) => {
+                            if matches!(read, Ok(0) | Err(_)) {
+                                // Only the first call can say what the run is called,
+                                // so it is waited for.
+                                let next = match held {
+                                    Some(next) => Some(next),
+                                    None => call
+                                        .await
+                                        .ok()
+                                        .and_then(|value| read_step(value).ok())
+                                        .and_then(|step| step.next),
+                                };
+                                cancel(next).await;
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            };
+            let step = match result {
+                Ok(value) => {
+                    read_step(value).map_err(|problem| (format!("{command} {problem}"), true))
+                }
+                // A command that failed has ended the run itself. One that is still
+                // at it after its time is told that nobody waits any more.
+                Err(error) => {
+                    let late = error.code == codes::TIMEOUT;
+                    Err((error.message, late))
+                }
+            };
+            let step = match step {
+                Ok(step) => step,
+                Err((problem, tell)) => {
+                    if tell {
+                        cancel(held).await;
+                    }
+                    let failed = Step {
+                        err: format!("lume: {problem}\n"),
+                        code: 1,
+                        ..Step::default()
+                    };
+                    write_step(io, &failed).await?;
+                    return write_message(io, &AppMessage::Done(AppDone { code: 1 })).await;
+                }
+            };
+            if let Err(error) = write_step(io, &step).await {
+                cancel(step.next).await;
+                return Err(error);
+            }
+            match step.next {
+                Some(next) => {
+                    args = serde_json::json!({ "next": next });
+                    held = Some(next);
+                }
+                None => {
+                    return write_message(io, &AppMessage::Done(AppDone { code: step.code })).await;
+                }
+            }
+        }
     }
 
     /// Attaches to the session a request means, for a client that shows it in a real
@@ -964,7 +1121,9 @@ impl Control {
                 )
             }
             // Answered before it gets here, since its answer is not the end of it.
-            AppRequestBody::Events { .. } | AppRequestBody::Attach { .. } => Err(AppError::new(
+            AppRequestBody::Events { .. }
+            | AppRequestBody::Attach { .. }
+            | AppRequestBody::Verb { .. } => Err(AppError::new(
                 codes::INTERNAL,
                 "a request that goes on after its answer was handled as a plain request",
             )),
@@ -1003,6 +1162,16 @@ impl Control {
                 reply(
                     format!("ran {id} in window {window}"),
                     AppReplyBody::Ran { command: id },
+                )
+            }
+            AppRequestBody::Verbs {} => {
+                let verbs = self.services.plugins.verbs();
+                let count = verbs.len();
+                let verbs = serde_json::to_value(verbs)
+                    .map_err(|error| AppError::new(codes::INTERNAL, error.to_string()))?;
+                reply(
+                    format!("listed {count} verbs"),
+                    AppReplyBody::Verbs { verbs },
                 )
             }
             AppRequestBody::Plugins {} => {
@@ -1230,6 +1399,27 @@ fn greet(body: &AppRequestBody) -> Result<(AppReply, ClientKind), AppError> {
     Ok((reply, *client_kind))
 }
 
+async fn write_message<S: AsyncWrite + Unpin>(io: &mut S, message: &AppMessage) -> io::Result<()> {
+    let mut bytes = Vec::new();
+    message.encode(&mut bytes).map_err(io::Error::other)?;
+    io.write_all(&bytes).await?;
+    io.flush().await
+}
+
+/// Sends what a step of a verb prints: the result first, then what is said beside it.
+async fn write_step<S: AsyncWrite + Unpin>(io: &mut S, step: &Step) -> io::Result<()> {
+    for (text, error) in [(&step.out, false), (&step.err, true)] {
+        for piece in pieces(text, OUTPUT_PIECE_MAX) {
+            let output = AppOutput {
+                text: piece.to_owned(),
+                error,
+            };
+            write_message(io, &AppMessage::Output(output)).await?;
+        }
+    }
+    Ok(())
+}
+
 /// Serves one client until it disconnects or breaks the rules.
 pub async fn serve_client<S>(mut io: S, control: &Control) -> io::Result<()>
 where
@@ -1251,7 +1441,10 @@ where
         };
         let AppRequest { id, body } = match AppMessage::decode(&json).map_err(io::Error::other)? {
             AppMessage::Request(request) => request,
-            AppMessage::Response(_) | AppMessage::Event(_) => {
+            AppMessage::Response(_)
+            | AppMessage::Event(_)
+            | AppMessage::Output(_)
+            | AppMessage::Done(_) => {
                 return Err(io::Error::other(
                     "a client sent what only the application sends",
                 ));
@@ -1283,6 +1476,7 @@ where
                 return Ok(());
             }
             Then::Follow(followed) => return control.follow(&mut io, followed).await,
+            Then::Verb(run) => return control.run_verb(&mut io, *run).await,
             Then::Attach(attachment) => {
                 let rest = std::mem::take(&mut decoder).into_rest();
                 return control.carry_attachment(&mut io, rest, *attachment).await;
@@ -1341,7 +1535,10 @@ pub async fn launch_running(
             AppMessage::Response(AppResponse {
                 result: Err(error), ..
             }) => return Err(io::Error::other(error)),
-            AppMessage::Request(_) | AppMessage::Event(_) => {
+            AppMessage::Request(_)
+            | AppMessage::Event(_)
+            | AppMessage::Output(_)
+            | AppMessage::Done(_) => {
                 return Err(io::Error::other(
                     "the application sent something that is not an answer",
                 ));
@@ -2482,6 +2679,36 @@ mod tests {
         // A detach ends what the connection was for.
         send(&mut app.client.io, Body::Detach).await;
         while next(&mut frames, &mut app.client.io).await.is_some() {}
+        stop(app).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_verb_no_plugin_adds_is_refused_and_the_connection_carries_on() {
+        let mut app = running("verbs").await;
+        app.client.hello().await;
+        let listed = app.client.ask(AppRequestBody::Verbs {}).await.unwrap();
+        assert_eq!(
+            listed.body,
+            AppReplyBody::Verbs {
+                verbs: serde_json::json!([])
+            }
+        );
+        let verb = |stdin: Option<String>| AppRequestBody::Verb {
+            words: vec!["agent".to_owned(), "run".to_owned()],
+            cwd: "/work".to_owned(),
+            stdin,
+        };
+        let refused = app.client.ask(verb(None)).await.unwrap_err();
+        assert_eq!(refused.code, codes::NOT_FOUND);
+        assert!(refused.message.contains("agent"), "{refused:?}");
+        let refused = app
+            .client
+            .ask(verb(Some("x".repeat(STDIN_MAX + 1))))
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, codes::BAD_REQUEST);
+        // Neither ended the connection.
+        app.client.ask(AppRequestBody::Verbs {}).await.unwrap();
         stop(app).await;
     }
 }

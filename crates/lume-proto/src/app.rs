@@ -28,7 +28,7 @@ use crate::frame::{Kind, encode_control_json};
 use crate::types::{BackendId, ExitStatus, Launcher, SessionId, SessionInfo, TermSize};
 
 /// The version of the control endpoint's messages this crate speaks.
-pub const APP_PROTO_VERSION: u32 = 9;
+pub const APP_PROTO_VERSION: u32 = 10;
 
 /// The name the control endpoint is served under, and looked for, when none is given.
 ///
@@ -76,6 +76,28 @@ pub enum AppMessage {
     Response(AppResponse),
     /// Something a session reported, sent to a client that asked to follow sessions.
     Event(AppEvent),
+    /// Text a verb gave, sent to the client that ran it, in the order it was given.
+    Output(AppOutput),
+    /// A verb has ended. Nothing follows it on the connection.
+    Done(AppDone),
+}
+
+/// Text a verb gave, for the client to print as it is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppOutput {
+    pub text: String,
+    /// Whether it is said beside the result (the client's standard error) and not part
+    /// of it (its standard output).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub error: bool,
+}
+
+/// How a verb ended: the status the client exits with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppDone {
+    pub code: u8,
 }
 
 /// What there is to tell about a session: something it reported, or how its program
@@ -325,6 +347,23 @@ pub enum AppRequestBody {
     /// Starts a plugin's code, as one of its activation events would.
     PluginActivate {
         id: String,
+    },
+    /// Lists the verbs plugins add to the command line.
+    Verbs {},
+    /// Runs the verb that `words` begin with, giving it the words after it.
+    ///
+    /// Like `events` this does not end with its answer: after it the application sends
+    /// what the verb prints as [`AppMessage::Output`] and ends with
+    /// [`AppMessage::Done`]. No further request is read from the connection; a client
+    /// that closes it stops the verb.
+    Verb {
+        /// Everything written after the program's name.
+        words: Vec<String>,
+        /// The directory the client was run in.
+        cwd: String,
+        /// What was piped to the client, if anything was.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdin: Option<String>,
     },
 }
 
@@ -627,6 +666,19 @@ pub enum AppReplyBody {
     },
     /// The sessions are being followed: their reports come next on this connection.
     Following {},
+    /// The verbs plugins add: for each its words, the plugin, the command, a summary
+    /// and how it is written.
+    Verbs {
+        verbs: serde_json::Value,
+    },
+    /// A verb is being run: what it prints comes next on this connection, then how it
+    /// ended.
+    Running {
+        /// The verb that was found at the front of the words.
+        verb: String,
+        /// The plugin that adds it.
+        plugin: String,
+    },
     /// The attachment is open on stream 1 of this connection.
     Attached {
         /// The pane that shows the session, if one does.
@@ -754,6 +806,49 @@ mod tests {
     }
 
     #[test]
+    fn what_a_verb_prints_and_how_it_ends_are_messages_of_their_own() {
+        let cases = [
+            (
+                AppMessage::Output(AppOutput {
+                    text: "one\n".to_owned(),
+                    error: false,
+                }),
+                r#"{"output":{"text":"one\n"}}"#,
+            ),
+            (
+                AppMessage::Output(AppOutput {
+                    text: "no".to_owned(),
+                    error: true,
+                }),
+                r#"{"output":{"text":"no","error":true}}"#,
+            ),
+            (
+                AppMessage::Done(AppDone { code: 7 }),
+                r#"{"done":{"code":7}}"#,
+            ),
+            (
+                AppMessage::Response(AppResponse {
+                    id: 2,
+                    result: Ok(AppReply {
+                        effect: "running".to_owned(),
+                        body: AppReplyBody::Running {
+                            verb: "agent run".to_owned(),
+                            plugin: "acme.agents".to_owned(),
+                        },
+                    }),
+                }),
+                r#"{"response":{"id":2,"ok":{"effect":"running","body":{"type":"running","verb":"agent run","plugin":"acme.agents"}}}}"#,
+            ),
+        ];
+        for (message, json) in cases {
+            assert_eq!(serde_json::to_string(&message).unwrap(), json);
+            assert_eq!(AppMessage::decode(json.as_bytes()).unwrap(), message);
+        }
+        assert!(AppMessage::decode(br#"{"done":{"code":256}}"#).is_err());
+        assert!(AppMessage::decode(br#"{"output":{"text":"x","more":1}}"#).is_err());
+    }
+
+    #[test]
     fn requests_have_the_documented_shape() {
         let cases = [
             (
@@ -781,6 +876,23 @@ mod tests {
                 r#"{"type":"launch","workspace":"site","exec":["htop","-d"],"cwd":"/work"}"#,
             ),
             (AppRequestBody::Workspaces {}, r#"{"type":"workspaces"}"#),
+            (AppRequestBody::Verbs {}, r#"{"type":"verbs"}"#),
+            (
+                AppRequestBody::Verb {
+                    words: vec!["agent".to_owned(), "run".to_owned(), "--x".to_owned()],
+                    cwd: "/work".to_owned(),
+                    stdin: None,
+                },
+                r#"{"type":"verb","words":["agent","run","--x"],"cwd":"/work"}"#,
+            ),
+            (
+                AppRequestBody::Verb {
+                    words: vec!["review".to_owned()],
+                    cwd: "/work".to_owned(),
+                    stdin: Some("a\nb".to_owned()),
+                },
+                r#"{"type":"verb","words":["review"],"cwd":"/work","stdin":"a\nb"}"#,
+            ),
             (AppRequestBody::Profiles {}, r#"{"type":"profiles"}"#),
             (
                 AppRequestBody::Spawn {

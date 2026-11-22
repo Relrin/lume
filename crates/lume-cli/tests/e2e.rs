@@ -4028,3 +4028,234 @@ fn the_time_a_question_is_on_show_is_not_taken_from_what_a_command_may_take() {
     app.wait_text_in(&pane, "lume-waited");
     app.quit();
 }
+
+/// Runs `lume <words>` against an application, with `piped` on its standard input if
+/// there is any, and returns its status, what it printed and what it said beside.
+fn verb_at(endpoint: &str, words: &[&str], piped: Option<&str>) -> (i32, String, String) {
+    use std::io::Write as _;
+    let mut child = Command::new(lume())
+        .args(["--endpoint", endpoint])
+        .args(words)
+        .stdin(if piped.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("lume runs");
+    if let Some(text) = piped {
+        let mut input = child.stdin.take().expect("its input is a pipe");
+        input
+            .write_all(text.as_bytes())
+            .expect("the input is written");
+    }
+    let output = child.wait_with_output().expect("lume ends");
+    (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugins_verb_prints_what_its_command_gives_and_ends_with_its_status() {
+    let home = home_with_plugins(&["verbs"]);
+    let config = home.join("config").join("config.toml");
+    let base = std::fs::read_to_string(&config).unwrap();
+    let profiles = "\n[plugins.\"test.verbs\".profiles.fast]\nagent = \"one\"\n";
+    std::fs::write(&config, format!("{base}{profiles}")).unwrap();
+    std::fs::create_dir_all(home.join("config").join("workspaces")).unwrap();
+    let app = App::start_in(home, false);
+    app.until_plugin("test.verbs", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+
+    // The verbs are listed with the plugin each comes from.
+    let listed = app.ctl(&["verbs"]).ok("verbs");
+    let verbs = listed["verbs"].as_array().unwrap();
+    assert_eq!(verbs.len(), 6, "{verbs:?}");
+    assert_eq!(verbs[0]["verb"], "verbs echo");
+    assert_eq!(verbs[0]["plugin"], "test.verbs");
+    assert_eq!(verbs[0]["command"], "test.verbs.echo");
+    assert_eq!(verbs[0]["usage"], "lume verbs echo [<word>...]");
+
+    // Two steps, in order; the arguments are the plugin's own to read, and what is
+    // piped in reaches it.
+    let (status, out, err) = verb_at(
+        &app.endpoint,
+        &["verbs", "echo", "a", "--help", "c d"],
+        Some("piped\n"),
+    );
+    assert_eq!(status, 0, "{err}");
+    assert_eq!(out, "argv [\"a\",\"--help\",\"c d\"]\nstdin \"piped\\n\"\n");
+    assert_eq!(err, "cwd true\nechoed\n");
+    let (status, out, _) = verb_at(&app.endpoint, &["verbs", "echo"], None);
+    assert_eq!((status, out.as_str()), (0, "argv []\nstdin null\n"));
+
+    // The status is the command's, and what it says beside goes to standard error.
+    let (status, out, err) = verb_at(&app.endpoint, &["verbs", "fail"], None);
+    assert_eq!((status, out.as_str(), err.as_str()), (7, "", "it failed\n"));
+
+    // A command that gives what is not a step, or throws, fails the verb and says so.
+    let (status, out, err) = verb_at(&app.endpoint, &["verbs", "broken"], None);
+    assert_eq!((status, out.as_str()), (1, ""), "{err}");
+    assert!(err.contains("test.verbs.broken gave back text"), "{err}");
+    let (status, out, err) = verb_at(&app.endpoint, &["verbs", "throw"], None);
+    assert_eq!((status, out.as_str()), (1, "first\n"), "{err}");
+    assert!(err.contains("the second step went wrong"), "{err}");
+
+    // A setting that is a table is read as it is written in the file.
+    let (status, out, err) = verb_at(&app.endpoint, &["verbs", "table"], None);
+    assert_eq!(status, 0, "{err}");
+    assert_eq!(out, "{\"fast\":{\"agent\":\"one\"}}\n");
+
+    // A change in the file reaches the plugin's code, which is running by now.
+    let from = plugin_log_len(&app.home, "test.verbs");
+    let more = "\n[plugins.\"test.verbs\".profiles.deep]\nagent = \"two\"\n";
+    std::fs::write(&config, format!("{base}{profiles}{more}")).unwrap();
+    let log = plugin_log_until(&app.home, "test.verbs", from, "profiles now");
+    assert!(log.contains("\"deep\":{\"agent\":\"two\"}"), "{log}");
+    let (_, out, _) = verb_at(&app.endpoint, &["verbs", "table"], None);
+    assert_eq!(
+        out,
+        "{\"deep\":{\"agent\":\"two\"},\"fast\":{\"agent\":\"one\"}}\n"
+    );
+
+    // Words no plugin adds a verb for are not understood, and the verbs are named.
+    let (status, out, err) = verb_at(&app.endpoint, &["verbs", "nope"], None);
+    assert_eq!((status, out.as_str()), (2, ""), "{err}");
+    assert!(err.contains("verbs is not something lume knows"), "{err}");
+    assert!(err.contains("lume verbs echo"), "{err}");
+    assert!(err.contains("(test.verbs)"), "{err}");
+    let (status, _, err) = verb_at(&app.endpoint, &["frobnicate"], None);
+    assert_eq!(status, 2, "{err}");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_verb_goes_on_past_a_calls_limit_and_stops_when_its_client_goes_away() {
+    use std::io::{BufRead as _, BufReader};
+    let home = home_with_plugins(&["verbs"]);
+    let app = App::start_in(home, false);
+    app.until_plugin("test.verbs", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+
+    let mut child = Command::new(lume())
+        .args(["--endpoint", &app.endpoint, "verbs", "hang"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("lume runs");
+    let mut printed = BufReader::new(child.stdout.take().expect("its output is a pipe"));
+    let mut line = String::new();
+    printed.read_line(&mut line).expect("the first step prints");
+    assert_eq!(line, "started\n");
+
+    // Longer than one call of a command may take: the run is many short calls, and
+    // none of them counts against the plugin.
+    std::thread::sleep(Duration::from_secs(35));
+    assert!(
+        child.try_wait().expect("lume can be waited for").is_none(),
+        "the verb ended by itself"
+    );
+    let from = plugin_log_len(&app.home, "test.verbs");
+    child.kill().expect("lume is stopped");
+    child.wait().expect("lume has ended");
+    let log = plugin_log_until(&app.home, "test.verbs", from, "hang cancelled after");
+    assert!(log.contains("hang started"), "{log}");
+
+    // The plugin is as it was: on, running, and its verbs answer.
+    let plugin = app.until_plugin("test.verbs", "the plugin to be listed", |_| true);
+    assert_eq!(plugin["state"], "ready", "{plugin}");
+    assert_eq!(plugin["breaches"], 0, "{plugin}");
+    let (status, _, err) = verb_at(&app.endpoint, &["verbs", "fail"], None);
+    assert_eq!(status, 7, "{err}");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_verb_two_plugins_add_belongs_to_the_first_and_the_other_is_told() {
+    let home = home_with_plugins(&["verbs"]);
+    install_plugin_as(&home, &fixture("verbs"), "test.verbs2");
+    let app = App::start_in(home, false);
+    let second = app.until_plugin("test.verbs2", "the second plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    let told = second.to_string();
+    assert!(
+        told.contains("the verb `verbs echo` is not added: test.verbs adds it already"),
+        "{told}"
+    );
+    let listed = app.ctl(&["verbs"]).ok("verbs");
+    let verbs = listed["verbs"].as_array().unwrap();
+    assert_eq!(verbs.len(), 6, "{verbs:?}");
+    assert!(verbs.iter().all(|verb| verb["plugin"] == "test.verbs"));
+    let (status, _, err) = verb_at(&app.endpoint, &["verbs", "fail"], None);
+    assert_eq!(status, 7, "{err}");
+    app.quit();
+}
+
+#[test]
+fn a_verb_needs_the_application_and_says_so() {
+    let endpoint = format!("e2e-{}-nothing-runs-here", std::process::id());
+    let (status, out, err) = verb_at(&endpoint, &["agent", "run", "--profile", "x"], None);
+    assert_eq!((status, out.as_str()), (4, ""), "{err}");
+    assert!(
+        err.contains("agent is not one of lume's own commands"),
+        "{err}"
+    );
+    assert!(err.contains("the application is not running"), "{err}");
+    // What cannot begin a verb is refused before anything is asked of anyone.
+    let (status, _, err) = verb_at(&endpoint, &["--frobnicate"], None);
+    assert_eq!(status, 2, "{err}");
+    assert!(
+        err.contains("--frobnicate is not something lume knows"),
+        "{err}"
+    );
+}
+
+#[test]
+fn checking_the_configuration_holds_a_plugins_table_setting_to_a_table() {
+    let home = home_with_plugins(&["verbs"]);
+    let config = home.join("config").join("config.toml");
+    let base = std::fs::read_to_string(&config).unwrap();
+    let check = || {
+        let output = Command::new(lume())
+            .args(["config", "check"])
+            .env("LUME_CONFIG_DIR", home.join("config"))
+            .env("LUME_STATE_DIR", home.join("state"))
+            .output()
+            .expect("lume runs");
+        (
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+        )
+    };
+    std::fs::write(
+        &config,
+        format!("{base}\n[plugins.\"test.verbs\".profiles.fast]\nagent = \"one\"\n"),
+    )
+    .unwrap();
+    assert_eq!(check(), (0, "no problems\n".to_owned()));
+
+    std::fs::write(
+        &config,
+        format!("{base}\n[plugins.\"test.verbs\"]\nprofiles = \"fast\"\n"),
+    )
+    .unwrap();
+    let (status, out) = check();
+    assert_eq!(status, 1, "{out}");
+    assert!(
+        out.contains("`plugins.\"test.verbs\".profiles`: expected a table"),
+        "{out}"
+    );
+    assert!(out.ends_with("1 problem\n"), "{out}");
+    let _ = std::fs::remove_dir_all(&home);
+}

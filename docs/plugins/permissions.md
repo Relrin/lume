@@ -303,6 +303,13 @@ their permission.
 
 A plugin cannot run another plugin's commands. It reaches another plugin through its services.
 
+### Verbs of the command line
+
+A [verb](manifest.md#contributescli) a plugin adds to `lume` runs one of that plugin's own
+commands, as the palette or a key would. It needs no permission and gives none: the command's code
+may do what the plugin may do, and no more, whoever typed the verb. Only the user who runs the
+application can reach it from the command line.
+
 ## The audit log
 
 Every call that needs a permission is written to an audit log, allowed or refused: the time, the

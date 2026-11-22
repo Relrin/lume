@@ -65,6 +65,7 @@ mod synthetic;
 #[cfg(test)]
 mod testing;
 mod tuning;
+mod verbs;
 mod window;
 mod workspaces;
 

@@ -766,13 +766,12 @@ impl lume_plugin::contributions::Commands for Unchecked {
     }
 }
 
-/// What could not be placed or read of what the plugins that can be used add, by
-/// install, as the application would find it.
-fn contribution_warnings(
+/// What the plugins that can be used add, as the application would find it.
+pub(crate) fn contributions(
     store: &Store,
     installed: &[Installed],
     resolution: &lume_plugin::order::Resolution,
-) -> Vec<(String, String)> {
+) -> lume_plugin::contributions::Contributions {
     let empty = std::collections::BTreeMap::new();
     let installs: Vec<lume_plugin::contributions::Install<'_>> = resolution
         .order
@@ -800,12 +799,11 @@ fn contribution_warnings(
         &Unchecked,
         &mut lume_plugin::contributions::Read::default(),
     )
-    .warnings
 }
 
 fn list(store: &Store, json: bool, out: &mut dyn Write) -> Result<Outcome, String> {
     let (installed, mut resolution) = store.resolve(true).map_err(|error| error.to_string())?;
-    let added = contribution_warnings(store, &installed, &resolution);
+    let added = contributions(store, &installed, &resolution).warnings;
     resolution.warnings.extend(added);
     let by_id = |local: &str| installed.iter().find(|one| one.entry.local == local);
     if json {

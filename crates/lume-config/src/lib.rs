@@ -52,7 +52,9 @@ pub use keymap::{
     resolve_keymap_with,
 };
 pub use keys::{Chord, KeySequence, WhenTerm, parse_when, write_when};
-pub use layers::{LayerInput, LayerKind, Layered, check_value, resolve_layers};
+pub use layers::{
+    LayerInput, LayerKind, Layered, check_value, plugin_setting_problems, resolve_layers,
+};
 pub use paths::{Dirs, Platform, check_workspace_name, host_log_file, log_file};
 pub use profiles::{
     LauncherKind, Profile, ProfileEntry, ProfileOrigin, ShellIntegration, merge_profiles,

@@ -28,6 +28,38 @@
       ],
       "type": "object"
     },
+    "CliVerb": {
+      "additionalProperties": false,
+      "description": "A verb of the command line: `lume <verb> [arguments]` runs the command in the\nrunning application, prints what it gives back and ends with its status.",
+      "properties": {
+        "command": {
+          "description": "The plugin's own command that carries it out.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "What it does, in a line.",
+          "type": "string"
+        },
+        "usage": {
+          "default": null,
+          "description": "How it is written, as in `lume agent run --profile <name> \"prompt\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verb": {
+          "description": "One to three words, as in `agent run`: lower-case letters, digits and hyphens.\nThe first is not one of lume's own.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "verb",
+        "command",
+        "summary"
+      ],
+      "type": "object"
+    },
     "Command": {
       "additionalProperties": false,
       "description": "A command: something the user can run from the palette, a key or a menu, carried out\nby the plugin's code.",
@@ -62,6 +94,13 @@
       "additionalProperties": false,
       "description": "Everything the plugin adds.",
       "properties": {
+        "cli": {
+          "description": "Verbs for the command line, each carried out by one of the plugin's commands.",
+          "items": {
+            "$ref": "#/$defs/CliVerb"
+          },
+          "type": "array"
+        },
         "commands": {
           "items": {
             "$ref": "#/$defs/Command"
@@ -967,7 +1006,7 @@
           ]
         },
         "type": {
-          "description": "`boolean`, `integer`, `number` or `string`.",
+          "description": "`boolean`, `integer`, `number`, `string` or `table`. A table is written in the\nconfiguration file only: it has no control and no row in the settings.",
           "type": "string"
         },
         "unit": {

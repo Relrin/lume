@@ -10,6 +10,9 @@
 //!
 //! `lume plugin` installs plugins and changes what is installed.
 //!
+//! A word that is none of these is a verb a plugin adds: it is run in the application,
+//! and what it prints is printed here.
+//!
 //! `lume config`, `lume keymap` and `lume theme` read and write the configuration's
 //! files and need no application: they check a file, list the keys that are bound, and
 //! make a theme from another terminal's colour scheme.
@@ -24,6 +27,7 @@ mod host;
 mod launch;
 mod offline;
 mod plugin;
+mod verb;
 
 use std::process::ExitCode;
 
@@ -40,7 +44,7 @@ fn main() -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    let (start, ctl) = match command {
+    let (start, ctl, verb) = match command {
         Command::Help => {
             println!("{}", args::USAGE);
             return ExitCode::SUCCESS;
@@ -83,8 +87,10 @@ fn main() -> ExitCode {
                 exec,
             }),
             None,
+            None,
         ),
-        Command::Ctl(ctl) => (None, Some(ctl)),
+        Command::Ctl(ctl) => (None, Some(ctl), None),
+        Command::Verb { endpoint, words } => (None, None, Some((endpoint, words))),
         Command::Host(command) => {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -112,6 +118,9 @@ fn main() -> ExitCode {
     runtime.block_on(async {
         if let Some(ctl) = ctl {
             return ExitCode::from(ctl::run(ctl).await);
+        }
+        if let Some((endpoint, words)) = verb {
+            return ExitCode::from(verb::run(endpoint.as_deref(), words).await);
         }
         match launch::start(start.unwrap_or_default()).await {
             Ok(()) => ExitCode::SUCCESS,
