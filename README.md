@@ -3,19 +3,23 @@
 A cross-platform terminal with a focus on modularity and Rex server support
 
 The Lume project is a focused on bringing an idea of a terminal that built on a top of libghostty while embracing  
-a Pi coding agent approach with allowing a developer to adapt the software to its own needs and workflows.
+a Pi coding agent approach while allowing to adapt software to user's workflows.
 
 > [!NOTE]
-> Keep in mind that this is an unofficial app that implemented for experimenting with features and cover my own needs.
+> Support Mitchell's product in the first place!
 >
-> In order to work with Rex server, you would need to be signed up for a closed beta. The Rex multiplexer is still in
-> the early access state, so expect potential breaking changes on the way.
+> Keep in mind that this is an unofficial app that implemented for experimenting with features and cover my own needs.
+> 
+> In order to work with Rex server, you would need to be signed up for a beta and install the latest binaries. The 
+> Rex multiplexer is still in the early access state, so expect breaking changes on the way.
 
 ## Features
 
-- Simple core with WASM support for extending the behavior, layouts and UI
+- The application and core libraries are implemented with Rustlang 
+- Made on the top of libghostty & WebGPU
 - An ability to run in a standalone mode and/or with [Rex server](https://www.superlogical.com/) (optional)
-- No built-in coding agents or other tools: a developer decides what to use
+- No built-in coding agents or other tools: a user decides what to use
+- Supports addons in TypeScript / JavaScript
 - Supports Windows, Linux and macOS
 
 ## Development
