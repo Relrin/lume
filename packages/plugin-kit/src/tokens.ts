@@ -35,3 +35,12 @@ export function applyTokens(tokens: ThemeTokens, scheme: string, root?: Styleabl
   target.style.setProperty("color-scheme", plain);
   target.setAttribute?.("data-scheme", plain);
 }
+
+/**
+ * Says on `root` where the view is shown (`data-place`), for styles that differ by it:
+ * a view on a page of the settings window is drawn on the window's own ground.
+ */
+export function applyPlace(place: string, root?: Styleable): void {
+  const target = root ?? globalThis.document?.documentElement;
+  target?.setAttribute?.("data-place", place);
+}

@@ -181,6 +181,15 @@ impl Plugins {
                     .filter(|at| at.elapsed() < BREACH_WINDOW)
                     .count();
                 let log: Vec<&String> = loaded.log.iter().rev().take(TAIL_LINES).rev().collect();
+                // The view it is set up in, which its page here shows.
+                let settings_view = manifest.and_then(|manifest| {
+                    let view = manifest
+                        .contributes
+                        .pane_views
+                        .iter()
+                        .find(|view| view.settings)?;
+                    Some(json!({ "view": view.id, "title": view.title, "entry": view.entry }))
+                });
                 json!({
                     "id": local,
                     "manifestId": entry.manifest_id,
@@ -198,6 +207,7 @@ impl Plugins {
                     "dependencies": dependencies,
                     "permissions": granted,
                     "later": later,
+                    "settingsView": settings_view,
                     "health": {
                         "running": loaded.running.is_some(),
                         "starts": loaded.health.starts,

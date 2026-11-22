@@ -1,6 +1,6 @@
 /**
- * A plugin's own page, shown in a sandboxed frame: a pane view, or a panel that shows a
- * page.
+ * A plugin's own page, shown in a sandboxed frame: a pane view, a panel that shows a
+ * page, or the view a plugin is set up in, on its page in the settings window.
  *
  * The frame may run scripts and nothing else: it has an origin that matches no other
  * page, so it holds no storage and cannot reach this page, and it can neither navigate
@@ -27,9 +27,9 @@ import { useStore } from "zustand";
 
 import { CSS_VARIABLES } from "@lume/tokens";
 
-import { useShell } from "../../shell/context.ts";
 import { FrameStreams, STREAM_WINDOW } from "../../transport/view-streams.ts";
 import { FrameBridge, type Hello, pageUrl, pluginBase } from "./bridge.ts";
+import { type FrameHost, useFrameHost } from "./host.ts";
 import { keepFrame, keepFrameReload, keepPaneFrame, nextViewName } from "./registry.ts";
 
 /** How long a frame has to say it is ready. */
@@ -61,7 +61,7 @@ export interface PluginFrameProps {
   readonly plugin: string;
   /** The view's name in its manifest. */
   readonly view: string;
-  readonly place: "pane" | "panel";
+  readonly place: "pane" | "panel" | "settings";
   /** The page, as a path in the package. */
   readonly entry: string;
   /** What the frame is called, for assistive technology. */
@@ -78,7 +78,7 @@ export interface PluginFrameProps {
 
 /** A plugin's page in a sandboxed frame, with the bridge to its code. */
 export function PluginFrame(props: PluginFrameProps) {
-  const app = useShell();
+  const app = useFrameHost();
   const [attempt, setAttempt] = useState(0);
   const shown = props.shown ?? true;
   // A frame that starts out of sight is not loaded until it is first shown.
@@ -130,7 +130,7 @@ function FrameRun({
   keep,
   again,
 }: PluginFrameProps & {
-  app: ReturnType<typeof useShell>;
+  app: FrameHost;
   keep: (state: unknown) => void;
   again: () => void;
 }) {
@@ -225,15 +225,29 @@ function FrameRun({
   useEffect(
     () =>
       app.config.subscribe((now, before) => {
-        if (now.view !== before.view) {
-          bridge.current?.tokens(frameTokens(), now.view?.theme.scheme ?? "dark");
-        }
+        if (now.view === before.view) return;
+        // The window writes its new look right after it has told of the change: the
+        // tokens are read once it has, and not as they were.
+        queueMicrotask(() => {
+          const view = app.config.getState().view;
+          bridge.current?.tokens(frameTokens(), view?.theme.scheme ?? "dark");
+        });
       }),
     [app.config],
   );
 
-  // A pane's frame that is ready can be given the keyboard, and says when it took it.
+  // A frame whose page is light or dark as the window is has nothing drawn behind
+  // it, so a page that leaves its ground clear shows the window's. Until the page has
+  // taken the look it is neither, and is left as it came.
   const ready = shown.kind === "ready";
+  useEffect(() => {
+    const element = frame.current;
+    if (!element) return;
+    if (ready) element.style.colorScheme = scheme === "light" ? "light" : "dark";
+    else element.style.removeProperty("color-scheme");
+  }, [ready, scheme]);
+
+  // A pane's frame that is ready can be given the keyboard, and says when it took it.
   useEffect(() => {
     if (!ready || place !== "pane" || host === undefined) return undefined;
     return keepPaneFrame(host, () => {
@@ -269,7 +283,7 @@ function FrameRun({
       call: (name, args) => app.client.viewCall(instance.page, name, args),
       ready: () => setShown((now) => (now.kind === "loading" ? { kind: "ready" } : now)),
       state: keepState,
-      key: (key) => app.forwardKey(key, place === "pane" ? host : undefined),
+      key: (key) => app.forwardKey?.(key, place === "pane" ? host : undefined),
       stream: (grant) =>
         streams.open(grant, () => {
           const ends = new MessageChannel();

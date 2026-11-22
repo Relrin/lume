@@ -60,6 +60,9 @@ A panel is shown and hidden by the user, like any panel. A pane view is opened:
 - by the command `lume.view.open`, with `{ "plugin": …, "view": … }`;
 - by an opener, when the user opens a file or an address it matches.
 
+A pane view marked `settings = true` is also shown on the plugin's page in the settings window. See
+[a view of the plugin's own](settings.md#a-view-of-the-plugins-own).
+
 ## A pane's picture
 
 A pane that shows a view has the view's `icon` in its header, in its tab and in its marker when it
@@ -126,17 +129,17 @@ window.addEventListener("message", (event) => {
 
 The message says who the view is and how the window looks:
 
-| Key        | What it is                                                                      |
-| ---------- | ------------------------------------------------------------------------------- |
-| `lume`     | `"connect"`.                                                                    |
-| `api`      | The version of this contract: `1`.                                              |
-| `instance` | What tells this open view from every other. The plugin's code knows it by this. |
-| `plugin`   | The id the plugin is installed under.                                           |
-| `view`     | The view's name in the manifest.                                                |
-| `place`    | `"pane"` or `"panel"`.                                                          |
-| `state`    | What the view last asked to have kept, or `null`.                               |
-| `tokens`   | The window's look: every design token's CSS variable and its value.             |
-| `scheme`   | `"light"` or `"dark"`.                                                          |
+| Key        | What it is                                                                        |
+| ---------- | --------------------------------------------------------------------------------- |
+| `lume`     | `"connect"`.                                                                      |
+| `api`      | The version of this contract: `1`.                                                |
+| `instance` | What tells this open view from every other. The plugin's code knows it by this.   |
+| `plugin`   | The id the plugin is installed under.                                             |
+| `view`     | The view's name in the manifest.                                                  |
+| `place`    | `"pane"`, `"panel"`, or `"settings"` on the plugin's page in the settings window. |
+| `state`    | What the view last asked to have kept, or `null`.                                 |
+| `tokens`   | The window's look: every design token's CSS variable and its value.               |
+| `scheme`   | `"light"` or `"dark"`.                                                            |
 
 The port is the view's only way out. The view must post `{ t: "ready" }` within ten seconds, or it
 is shown as stopped, with a button to load it again.
@@ -238,6 +241,11 @@ for (const [name, value] of Object.entries(hello.tokens)) {
 ```
 
 A `tokens` message comes whenever the theme or a setting that changes the look does.
+
+A view in a pane or a panel stands on a card, `--lume-color-card`. On the plugin's page in the
+settings window it stands on the window itself: leave the page's background clear there, and the
+window's shows through. `@lume/plugin-kit` does both, and says where the view is with `data-place`
+on the page's root.
 
 ## Keys
 

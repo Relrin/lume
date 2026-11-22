@@ -386,7 +386,7 @@ export interface Hello {
   readonly instance: string;
   readonly plugin: string;
   readonly view: string;
-  readonly place: "pane" | "panel";
+  readonly place: "pane" | "panel" | "settings";
   readonly state: unknown;
   readonly tokens: Readonly<Record<string, string>>;
   readonly scheme: string;

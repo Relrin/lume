@@ -14,6 +14,7 @@ import { applyConfig, describeProblem } from "../config/apply.ts";
 import { createConfigStore, type ConfigStore } from "../config/store.ts";
 import { CoreClient } from "../core/client.ts";
 import type { Notice, ProfileList } from "../core/types.ts";
+import { deliverViewEvent, reloadPluginFrames } from "../plugins/frame/registry.ts";
 import { NoticeStore, sentence } from "../shell/notices.ts";
 import { TauriCarrier, type Carrier } from "../transport/carrier.ts";
 import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
@@ -183,6 +184,13 @@ export async function startSettings(
         break;
       case "settings_show":
         shown.getState().show(notice.section);
+        break;
+      // What a plugin's code says to its view, for the one a plugin's page shows here.
+      case "view_event":
+        deliverViewEvent(notice.view, notice.event, notice.payload);
+        break;
+      case "plugin_view_reload":
+        reloadPluginFrames(notice.plugin);
         break;
       case "notice":
         notices.push(notice.level, notice.message);

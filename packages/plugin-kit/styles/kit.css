@@ -40,6 +40,11 @@ body {
   overflow: hidden;
 }
 
+/* On a page of the settings window the view stands on the window's own ground. */
+[data-place="settings"] body {
+  background: transparent;
+}
+
 #root {
   height: 100%;
 }

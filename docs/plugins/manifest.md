@@ -311,13 +311,14 @@ not.
 A page of the plugin's own that is shown in a pane, where a terminal would be. See
 [views](views.md).
 
-| Key       | Type    | Default | What it is                                                                   |
-| --------- | ------- | ------- | ---------------------------------------------------------------------------- |
-| `id`      | string  | needed  | The view's name. A pane view and a panel of one plugin may not share a name. |
-| `title`   | string  | needed  | What its pane is called until the plugin titles it. 64 characters at most.   |
-| `entry`   | string  | needed  | The page: an `.html` file in the package.                                    |
-| `icon`    | string  | none    | A [picture](motion.md#pictures), which its pane is known by.                 |
-| `persist` | boolean | `true`  | Whether what the view asks to have kept is saved with the workspace.         |
+| Key        | Type    | Default | What it is                                                                                                          |
+| ---------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `id`       | string  | needed  | The view's name. A pane view and a panel of one plugin may not share a name.                                        |
+| `title`    | string  | needed  | What its pane is called until the plugin titles it. 64 characters at most.                                          |
+| `entry`    | string  | needed  | The page: an `.html` file in the package.                                                                           |
+| `icon`     | string  | none    | A [picture](motion.md#pictures), which its pane is known by.                                                        |
+| `persist`  | boolean | `true`  | Whether what the view asks to have kept is saved with the workspace.                                                |
+| `settings` | boolean | `false` | Whether the plugin is set up in this view. See [settings](settings.md#a-view-of-the-plugins-own). One view at most. |
 
 ## `[[contributes.openers]]`
 

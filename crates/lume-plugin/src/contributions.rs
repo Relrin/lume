@@ -212,6 +212,9 @@ pub struct PaneViewDef {
     /// The page it shows, as a path in the package.
     pub entry: String,
     pub persist: bool,
+    /// Whether the settings window shows it on the plugin's page.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub settings: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<Icon>,
 }
@@ -1292,6 +1295,7 @@ fn views(installs: &[Install<'_>], out: &mut Contributions) {
                 title: view.title.clone(),
                 entry: view.entry.clone(),
                 persist: view.persist,
+                settings: view.settings,
                 icon: names.icon(view.icon.as_ref(), &out.images),
             });
         }

@@ -743,6 +743,44 @@ function stillMotion(): boolean {
 }
 
 /**
+ * Tells when the row, or anything in it, changes size. A tab's label is written without
+ * the row being drawn again, and a row that is full keeps its own size whatever its
+ * tabs do: each tab and label is watched for itself.
+ */
+function useRowResize(list: RefObject<HTMLDivElement | null>, resized: () => void): void {
+  const told = useRef(resized);
+  told.current = resized;
+  const watch = useRef<{ observer: ResizeObserver; seen: Set<Element> } | null>(null);
+
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!element || typeof ResizeObserver !== "function") return undefined;
+    const observer = new ResizeObserver(() => told.current());
+    observer.observe(element);
+    watch.current = { observer, seen: new Set() };
+    return () => {
+      observer.disconnect();
+      watch.current = null;
+    };
+  }, [list]);
+
+  // After every render: what came is watched, and what went is let go of.
+  useLayoutEffect(() => {
+    const element = list.current;
+    const watching = watch.current;
+    if (!element || !watching) return;
+    const now = new Set<Element>(element.querySelectorAll(":scope > :not(.tab-mark)"));
+    for (const item of watching.seen) {
+      if (!now.has(item)) watching.observer.unobserve(item);
+    }
+    for (const item of now) {
+      if (!watching.seen.has(item)) watching.observer.observe(item);
+    }
+    watching.seen = now;
+  });
+}
+
+/**
  * Keeps a row of tabs that holds more than fits in hand: its ends fade where they hide
  * tabs, a wheel that turns up and down moves it sideways, and the tab on show is
  * brought into sight when it changes. Says whether the row holds more than fits, and
@@ -835,16 +873,14 @@ function useStripScroll(
     element.addEventListener("scrollend", sync, { passive: true });
     element.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("keydown", onKey, true);
-    const resized = new ResizeObserver(sync);
-    resized.observe(element);
     return () => {
       element.removeEventListener("scroll", sync);
       element.removeEventListener("scrollend", sync);
       element.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", onKey, true);
-      resized.disconnect();
     };
   }, [app, list, sync]);
+  useRowResize(list, sync);
 
   // Tabs that come, go, fold or are renamed change how long the row is.
   useLayoutEffect(sync);
@@ -906,18 +942,16 @@ export function TabStrip() {
       groupExit: (group) => made.groupExit(group),
       groupFade: (group) => made.groupFade(group),
     });
-    // Tabs grow and shrink with their labels: the mark keeps to its tab, without moving.
-    const resized = new ResizeObserver(() =>
-      made.sync({ ...current.current, animate: false, renamed: null }),
-    );
-    resized.observe(element);
     return () => {
-      resized.disconnect();
       made.dispose();
       motion.current = null;
       if (app.tabUi.getState().row !== null) app.tabUi.getState().setRow(null);
     };
   }, [app]);
+  // Tabs grow and shrink with their labels: the mark keeps to its tab, without moving.
+  useRowResize(list, () =>
+    motion.current?.sync({ ...current.current, animate: false, renamed: null }),
+  );
 
   // After every render: the row's tabs slide to their places, and the mark to its tab.
   useLayoutEffect(() => {

@@ -569,6 +569,12 @@ impl AppState {
             .collect()
     }
 
+    /// The carrier of one connected page by its webview's label, the settings window's
+    /// as well: what is said to a view goes to the page that shows it.
+    pub fn link_of(&self, label: &str) -> Option<Arc<Link>> {
+        lock(&self.links).get(label).cloned()
+    }
+
     /// Tells every connected page something, the settings window's page as well.
     pub fn broadcast(&self, notice: &serde_json::Value) {
         let links: Vec<Arc<Link>> = lock(&self.links).values().cloned().collect();

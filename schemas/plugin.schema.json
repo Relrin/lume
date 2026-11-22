@@ -746,6 +746,11 @@
           "description": "Whether a pane showing it is kept in the workspace and opened again with it.",
           "type": "boolean"
         },
+        "settings": {
+          "default": false,
+          "description": "Whether it is where the plugin is set up: the settings window shows it on the\nplugin's page as well. One view of a plugin at most.",
+          "type": "boolean"
+        },
         "title": {
           "type": "string"
         }

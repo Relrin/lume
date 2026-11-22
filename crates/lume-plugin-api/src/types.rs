@@ -910,7 +910,8 @@ pub struct ViewInstance {
     pub instance: String,
     /// The view's name, as the manifest gives it.
     pub view: String,
-    /// Where it is shown: `pane` or `panel`.
+    /// Where it is shown: `pane`, `panel`, or `settings` for the plugin's page in the
+    /// settings window.
     pub place: String,
     /// The pane it is shown in, for a view in a pane.
     #[serde(default, skip_serializing_if = "Option::is_none")]

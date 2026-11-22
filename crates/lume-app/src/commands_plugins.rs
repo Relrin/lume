@@ -61,8 +61,9 @@ pub async fn ui_panel_expand(
     services.plugins.expand(&panel, path).await
 }
 
-/// The page opened one of a plugin's views in a frame: a pane view (`place = "pane"`)
-/// or a panel that shows a page (`"panel"`). `view` is the page's own name for it, and
+/// The page opened one of a plugin's views in a frame: a pane view (`place = "pane"`),
+/// a panel that shows a page (`"panel"`), or the view a plugin is set up in, on its page
+/// in the settings window (`"settings"`). `view` is the page's own name for it, and
 /// `host` the pane or the panel it is shown in.
 /// Gives the instance the plugin's code knows it by.
 #[tauri::command]
@@ -75,8 +76,9 @@ pub fn view_opened(
     place: String,
     host: Option<String>,
 ) -> Result<String, CommandError> {
-    let place = crate::plugins::ViewPlace::parse(&place)
-        .ok_or_else(|| CommandError::bad_request("a view is in a pane or a panel"))?;
+    let place = crate::plugins::ViewPlace::parse(&place).ok_or_else(|| {
+        CommandError::bad_request("a view is in a pane, a panel or the settings window")
+    })?;
     services
         .plugins
         .view_opened(window.label(), &view, &plugin, &name, place, host)

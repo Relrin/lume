@@ -98,6 +98,9 @@ impl Pipe for ViewPipe {
 pub enum Place {
     Pane,
     Panel,
+    /// The plugin's page in the settings window, which shows the view the plugin is
+    /// set up in.
+    Settings,
 }
 
 impl Place {
@@ -105,6 +108,7 @@ impl Place {
         match text {
             "pane" => Some(Self::Pane),
             "panel" => Some(Self::Panel),
+            "settings" => Some(Self::Settings),
             _ => None,
         }
     }
@@ -113,6 +117,7 @@ impl Place {
         match self {
             Self::Pane => "pane",
             Self::Panel => "panel",
+            Self::Settings => "settings",
         }
     }
 }
@@ -238,14 +243,23 @@ impl Plugins {
                     .panels
                     .iter()
                     .any(|def| def.plugin == local && def.view == view && def.entry.is_some()),
+                Place::Settings => shown
+                    .pane_views
+                    .iter()
+                    .any(|def| def.plugin == local && def.view == view && def.settings),
             }
         };
         if !known {
-            return Err(CommandError::not_found(format!(
-                "{local} has no {} called {view} that shows a page",
-                place.name()
-            )));
+            return Err(CommandError::not_found(match place {
+                Place::Settings => format!("{local} is not set up in a view called {view}"),
+                _ => format!(
+                    "{local} has no {} called {view} that shows a page",
+                    place.name()
+                ),
+            }));
         }
+        // The settings window shows a view where nothing is kept for it.
+        let host = host.filter(|_| place != Place::Settings);
         let open = Open {
             local: local.to_owned(),
             view: view.to_owned(),
@@ -379,6 +393,8 @@ impl Plugins {
                     state,
                 }
             }
+            // Nothing is kept for a view the settings window shows.
+            Place::Settings => return Ok(()),
         };
         services.panes.apply_core(intent).await.map(drop)
     }
@@ -774,7 +790,6 @@ impl Plugins {
         if targets.is_empty() {
             return Ok(Value::Null);
         }
-        let links = self.state.links();
         // One notice for every view it goes to, with only the view's name changed: what
         // it carries is not copied for each.
         let mut notice = json!({
@@ -784,7 +799,7 @@ impl Plugins {
             "payload": payload,
         });
         for (window, page) in targets {
-            if let Some((_, link)) = links.iter().find(|(label, _)| *label == window) {
+            if let Some(link) = self.state.link_of(&window) {
                 notice["view"] = Value::String(page);
                 link.notify(&notice);
             }
@@ -830,6 +845,7 @@ mod tests {
         assert!(!page_name_ok(&"x".repeat(65)));
         assert_eq!(instance_of("w-1", "v3"), "w-1/v3");
         assert_eq!(Place::parse("pane"), Some(Place::Pane));
+        assert_eq!(Place::parse("settings"), Some(Place::Settings));
         assert_eq!(Place::parse("window"), None);
     }
 }

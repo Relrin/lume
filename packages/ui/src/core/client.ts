@@ -205,7 +205,7 @@ export class CoreClient {
     view: string,
     plugin: string,
     name: string,
-    place: "pane" | "panel",
+    place: "pane" | "panel" | "settings",
     host: string | null,
   ): Promise<string> {
     return this.transport.command("view_opened", { view, plugin, name, place, host });

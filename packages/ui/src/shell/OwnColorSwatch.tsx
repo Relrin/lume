@@ -51,10 +51,12 @@ export function OwnColorSwatch({
       }}
       onKeyDown={onKeyDown}
     >
+      {/* As wide as the swatch, so the plus is in its middle whatever the size; the
+          drawing takes the middle 55% of it. */}
       <svg
-        width={Math.round(size * 0.55)}
-        height={Math.round(size * 0.55)}
-        viewBox="0 0 24 24"
+        width={size}
+        height={size}
+        viewBox="-9.8 -9.8 43.6 43.6"
         fill="none"
         stroke="currentColor"
         strokeWidth="3"

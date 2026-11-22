@@ -151,6 +151,27 @@ group = "sampling"
 - Settings inside a group are placed the same way. `before` and `after` name another of the
   plugin's settings.
 
+### A view of the plugin's own
+
+A plugin whose settings do not fit rows of switches and choices draws them itself, in a
+[pane view](views.md), and marks that view:
+
+```toml
+[[contributes.pane-views]]
+id = "settings"
+title = "Meters"
+entry = "ui/settings.html"
+settings = true
+```
+
+The plugin's page in the settings window then has two sides: **Settings**, which shows the view,
+and **Details**, with the rows the plugin declares, what it may do and how it fares. The view is
+the same page the plugin opens in a pane, started a second time: it is told `place: "settings"`,
+its calls reach the same code, and nothing is kept for it there. The settings window passes no keys
+on from it and opens no streams for it.
+
+A plugin that is turned off, or that cannot be used, shows only its details.
+
 ### Rows on the application's pages
 
 A setting can sit on one of the application's own pages instead. Give the page's id, and the group

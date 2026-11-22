@@ -138,7 +138,7 @@ export interface ViewFrom {
   readonly instance: string;
   /** The view's name, as the manifest gives it. */
   readonly view: string;
-  /** Where it is shown: `pane` or `panel`. */
+  /** Where it is shown: `pane`, `panel`, or `settings` for the plugin's page in the settings window. */
   readonly place: string;
   /** The pane it is shown in, for a view in a pane. */
   readonly pane?: string;

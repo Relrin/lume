@@ -1369,7 +1369,7 @@ One open view of the plugin's.
 |---|---|---|
 | `instance` | `string` | What tells this open view from every other: calls from it carry it, and `views.post` reaches it by it. |
 | `pane` | `string` | optional. The pane it is shown in, for a view in a pane. |
-| `place` | `string` | Where it is shown: `pane` or `panel`. |
+| `place` | `string` | Where it is shown: `pane`, `panel`, or `settings` for the plugin's page in the settings window. |
 | `view` | `string` | The view's name, as the manifest gives it. |
 
 ### `ViewPlace`

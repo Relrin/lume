@@ -256,6 +256,23 @@ export const TAB_SCENES: readonly Scene[] = [
       if (!page.querySelector(".tab-strip .tab-group-label[data-empty]")) {
         problems.push("the group with neither a name nor a picture is not drawn as a mark");
       }
+      // A label's line is where its tabs' lines are, however tall the label, and runs
+      // on into the first tab's.
+      for (const label of page.querySelectorAll(
+        ".tab-strip .tab-group-label:not([data-collapsed])",
+      )) {
+        const own = label.querySelector(".tab-group-line")?.getBoundingClientRect();
+        const next = label.nextElementSibling?.querySelector(".tab-group-line");
+        const first = next?.getBoundingClientRect();
+        if (!own || !first) continue;
+        const name = label.getAttribute("aria-label") ?? "";
+        if (Math.abs(own.top - first.top) > 0.5 || Math.abs(own.bottom - first.bottom) > 0.5) {
+          problems.push(`the line under "${name}" is not level with its tabs' line`);
+        }
+        if (Math.abs(own.right - first.left) > 0.5) {
+          problems.push(`the line under "${name}" does not meet its first tab's line`);
+        }
+      }
       return problems;
     },
   },
@@ -443,6 +460,43 @@ export const TAB_SCENES: readonly Scene[] = [
       }
       if (page.querySelector(".tab-all-list"))
         problems.push("the list of every tab is open unasked");
+      return problems;
+    },
+  },
+  {
+    // A tab's name is written without the row being drawn again, and a full row keeps
+    // its size: the mark is to follow its tab all the same.
+    name: "tabs-rename-overflow",
+    window: CROWDED,
+    prepare: async (app) => {
+      await crowdedSettled();
+      const tab = await tabOf(`t${MANY}`);
+      const before = tab.getBoundingClientRect().width;
+      app.commands.run("lume.tab.rename", {
+        tab: `t${MANY}`,
+        title: "release checklist for the billing service",
+      });
+      await until("the tab growing with its new name", () =>
+        tab.getBoundingClientRect().width > before + 8 ? true : null,
+      );
+      await crowdedSettled();
+      // The row is measured when the frame is drawn.
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    },
+    check: (page) => {
+      const tab = page.querySelector<HTMLElement>('.tab-strip .tab[data-active="true"]');
+      const mark = page.querySelector<HTMLElement>(".tab-strip .tab-mark");
+      if (!tab || !mark) return ["there is no tab on show, or no mark"];
+      const own = tab.getBoundingClientRect();
+      const drawn = mark.getBoundingClientRect();
+      const problems: string[] = [];
+      if (Math.abs(drawn.left - own.left) > 2 || Math.abs(drawn.right - own.right) > 2) {
+        problems.push(
+          `the mark spans ${Math.round(drawn.left)}–${Math.round(drawn.right)}, its tab ${Math.round(own.left)}–${Math.round(own.right)}`,
+        );
+      }
+      const list = tab.parentElement?.getBoundingClientRect();
+      if (list && own.right > list.right + 1) problems.push("the renamed tab is not in sight");
       return problems;
     },
   },

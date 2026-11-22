@@ -39,7 +39,9 @@ import { WindowButtons } from "../shell/WindowControls.tsx";
 import { currentPlatform, KeyLayout } from "../terminal/keyboard.ts";
 import { TRAFFIC_LIGHTS_INSET_PX } from "../tuning.ts";
 import { AboutPage } from "./About.tsx";
-import { withAddons } from "./addons.ts";
+import { PluginFrame } from "../plugins/frame/PluginFrame.tsx";
+import { type FrameHost, FrameHostContext } from "../plugins/frame/host.ts";
+import { settingsViewOf, withAddons } from "./addons.ts";
 import { AddonSections, AddonsManager } from "./Addons.tsx";
 import type { SettingsApp } from "./boot.ts";
 import { CommandsPage } from "./Commands.tsx";
@@ -195,6 +197,16 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
 
   const current: SettingsPage | undefined = pages.find((page) => page.id === picked) ?? pages[0];
   const searching = query.trim() !== "";
+
+  // A plugin that is set up in a view of its own has two sides to its page: that view,
+  // and what the window says of the plugin. Each page starts on the view.
+  const ownView = settingsViewOf(addons?.find((addon) => addon.id === current?.addon));
+  const [details, setDetails] = useState<string | null>(null);
+  const framed = ownView != null && !searching && details !== current?.id;
+  const frames = useMemo<FrameHost>(
+    () => ({ client: app.client, config: app.config }),
+    [app.client, app.config],
+  );
   const found = useMemo(() => searchSettings(pages, query), [pages, query]);
 
   const search = useRef<HTMLInputElement>(null);
@@ -332,13 +344,38 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
             <h1>{title}</h1>
             <span className="settings-meta">{meta}</span>
             <span className="settings-head-space" />
+            {ownView != null && !searching && current && (
+              <div className="settings-segmented" role="group" aria-label={`${title}: show`}>
+                <button type="button" aria-pressed={framed} onClick={() => setDetails(null)}>
+                  Settings
+                </button>
+                <button type="button" aria-pressed={!framed} onClick={() => setDetails(current.id)}>
+                  Details
+                </button>
+              </div>
+            )}
             <Button quiet onPress={app.openFile}>
               Open config.toml
             </Button>
           </div>
+          {framed && current?.addon !== undefined && (
+            <div className="settings-view">
+              <FrameHostContext value={frames}>
+                <PluginFrame
+                  key={current.addon}
+                  plugin={current.addon}
+                  view={ownView.view}
+                  place="settings"
+                  entry={ownView.entry}
+                  title={ownView.title}
+                />
+              </FrameHostContext>
+            </div>
+          )}
           <div
             ref={scroller}
             className="settings-scroll"
+            hidden={framed}
             onScroll={(event) => {
               // Written straight to the element: scrolling renders nothing.
               const scrolled = String(event.currentTarget.scrollTop > 2);

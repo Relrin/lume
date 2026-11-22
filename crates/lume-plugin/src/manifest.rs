@@ -645,6 +645,10 @@ pub struct PaneView {
     /// Whether a pane showing it is kept in the workspace and opened again with it.
     #[serde(default = "yes")]
     pub persist: bool,
+    /// Whether it is where the plugin is set up: the settings window shows it on the
+    /// plugin's page as well. One view of a plugin at most.
+    #[serde(default)]
+    pub settings: bool,
 }
 
 /// Files or addresses that one of the plugin's pane views can open.
@@ -1690,6 +1694,11 @@ impl Contributes {
             p.file(&format!("{key}.entry"), &view.entry, &["html"]);
             if let Some(icon) = &view.icon {
                 check_icon(p, &format!("{key}.icon"), icon, own);
+            }
+            if view.settings && self.pane_views[..index].iter().any(|other| other.settings) {
+                p.say(format!(
+                    "{key}.settings: another view is already where the plugin is set up;                      one view at most"
+                ));
             }
         }
 

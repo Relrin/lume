@@ -1356,6 +1356,11 @@
     scroll-padding-inline: 32px;
   }
 
+  /* A row whose tabs all fit cuts nothing off: the mark's glow reaches past the row. */
+  .tab-strip > .tab-list:not([data-over="true"]) {
+    overflow: visible;
+  }
+
   /*
    * A row that holds more tabs than fit scrolls, and fades at an end while that end
    * hides tabs: the page sets how wide each fade is, nothing or the whole of it.
@@ -1918,13 +1923,17 @@
     outline-offset: 2px;
   }
 
+  /* The label is shorter than a tab and stands in the row's middle: its line is put
+     where the tabs' lines are whatever its height, and reaches the first tab across the
+     label's margin and the row's gap. */
   .tab-group-label > .tab-group-line {
-    bottom: -8px;
+    right: -5px;
+    bottom: calc((100% - var(--lume-size-tab)) / 2 - 4px);
     border-radius: 2px 0 0 2px;
   }
 
   .tab-group-label[data-joining] > .tab-group-line {
-    bottom: -9px;
+    bottom: calc((100% - var(--lume-size-tab)) / 2 - 5px);
   }
 
   .tab-group-label[data-joining] {
@@ -1942,7 +1951,7 @@
 
   /* A group with neither a name nor a picture is a small mark in its colour. */
   .tab-group-label[data-empty] {
-    min-width: 14px;
+    min-width: 16px;
     height: 16px;
     padding: 0;
     border-radius: 8px;
@@ -5531,6 +5540,12 @@
     white-space: nowrap;
   }
 
+  /* The name and what stands beside it share a baseline, whatever their sizes. */
+  .settings-head h1,
+  .settings-meta {
+    align-self: baseline;
+  }
+
   .settings-meta {
     @apply text-ink-muted;
     flex-shrink: 0;
@@ -5550,6 +5565,17 @@
     scrollbar-width: thin;
     scrollbar-color: var(--settings-off) transparent;
     scrollbar-gutter: stable;
+  }
+
+  /* A plugin's own view of its settings takes the page whole, and scrolls itself. */
+  .settings-view {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .settings-scroll[hidden] {
+    display: none;
   }
 
   /*

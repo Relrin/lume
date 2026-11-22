@@ -20,13 +20,13 @@
 
 import { keyToPass, type KeyLike, type PassedKey } from "./keys";
 import { type StreamClock, type StreamPortLike, ViewStream } from "./streams";
-import { applyTokens, type ThemeTokens } from "./tokens";
+import { applyPlace, applyTokens, type ThemeTokens } from "./tokens";
 
 export { describeKey, editingKey, keyToPass, worthForwarding } from "./keys";
 export type { KeyLike, PassedKey } from "./keys";
 export { ACK_EVERY_MS, ViewStream, WRITE_MAX } from "./streams";
 export type { PieceListener, StreamEnd } from "./streams";
-export { applyTokens } from "./tokens";
+export { applyPlace, applyTokens } from "./tokens";
 export type { ThemeTokens } from "./tokens";
 
 /** The version of the channel this kit speaks. */
@@ -71,7 +71,7 @@ export interface Hello {
   readonly plugin: string;
   /** The view's name in the manifest. */
   readonly view: string;
-  readonly place: "pane" | "panel";
+  readonly place: ViewPlace;
   /** What was last kept for the view, or `null`. */
   readonly state: unknown;
   readonly tokens: ThemeTokens;
@@ -99,8 +99,8 @@ export interface View {
   readonly plugin: string;
   /** The view's name in the manifest. */
   readonly view: string;
-  /** Whether the view is a pane view or a panel. */
-  readonly place: "pane" | "panel";
+  /** Where the view is shown. */
+  readonly place: ViewPlace;
 
   readonly host: {
     /**
@@ -180,6 +180,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Where a view is shown: in a pane, in a panel, or on the plugin's page in the settings
+ * window, which shows the pane view its manifest marks with `settings = true`.
+ */
+export type ViewPlace = "pane" | "panel" | "settings";
+
 /** Whether a message is the window's first to a view. */
 export function isHello(data: unknown): data is Hello {
   return (
@@ -188,7 +194,7 @@ export function isHello(data: unknown): data is Hello {
     typeof data["instance"] === "string" &&
     typeof data["plugin"] === "string" &&
     typeof data["view"] === "string" &&
-    (data["place"] === "pane" || data["place"] === "panel")
+    (data["place"] === "pane" || data["place"] === "panel" || data["place"] === "settings")
   );
 }
 
@@ -416,6 +422,7 @@ export function connect(options: ConnectOptions = {}): Promise<View> {
       const port = event.ports[0];
       if (!isHello(event.data) || event.ports.length !== 1 || port === undefined) return;
       window.removeEventListener("message", received);
+      if (options.applyTokens !== false) applyPlace(event.data.place);
       const view = createView(event.data, port as unknown as PortLike, {
         applyTheme:
           options.applyTokens === false

@@ -61,6 +61,13 @@ export interface AddonEntry {
   readonly permissions: readonly AddonPermission[];
   /** What it may ask for while it runs. */
   readonly later: readonly string[];
+  /** The view it is set up in, which its page here shows: one of its pane views. */
+  readonly settingsView?: {
+    readonly view: string;
+    readonly title: string;
+    /** The page, as a path in its package. */
+    readonly entry: string;
+  } | null;
   readonly health: {
     readonly running: boolean;
     readonly starts: number;
@@ -142,6 +149,16 @@ export type Inspection = InstallPreview | InstallTaken;
 
 /** The id of the page that manages the plugins. */
 export const MANAGE_PAGE = "addons";
+
+/**
+ * The view a plugin is set up in, where its page can show it: a plugin that is turned
+ * off or cannot be used has no code to answer its view.
+ */
+export function settingsViewOf(addon: AddonEntry | undefined): AddonEntry["settingsView"] {
+  if (addon === undefined || !addon.enabled || !addon.state.ready) return null;
+  if (addon.modified || addon.missing) return null;
+  return addon.settingsView ?? null;
+}
 
 /** The id of a plugin's own page. */
 export function addonPage(id: string): string {

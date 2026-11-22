@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "What the page of the settings window may call: the configuration, what there is to choose from, its own window, and the plugins it manages, with a folder picker to install one from, and fetching one from a repository. It lists the commands and the keys bound to them, says what the application is, and puts that on the clipboard when asked. It starts no session, sees no layout and runs no command. Nothing else from Tauri's core plugins is granted.",
+  "description": "What the page of the settings window may call: the configuration, what there is to choose from, its own window, and the plugins it manages, with a folder picker to install one from, and fetching one from a repository. On a plugin's page it shows the view the plugin is set up in, and passes that view's calls to the plugin's code. It lists the commands and the keys bound to them, says what the application is, and puts that on the clipboard when asked. It starts no session, sees no layout and runs no command. Nothing else from Tauri's core plugins is granted.",
   "windows": ["settings"],
   "permissions": [
     "allow-frame-token",
@@ -33,6 +33,9 @@
     "allow-addon-check-update",
     "allow-addon-install",
     "allow-addon-cancel",
+    "allow-view-opened",
+    "allow-view-call",
+    "allow-view-closed",
     "dialog:allow-open"
   ]
 }
