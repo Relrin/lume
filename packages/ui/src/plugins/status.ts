@@ -111,6 +111,7 @@ function itemOf(
     ...(rows && rows.length > 0 ? { card: rows } : {}),
     ...(problem === undefined ? {} : { problem }),
     ...(pane === undefined ? {} : { pane }),
+    ...(def.separator === true ? { separator: true } : {}),
   };
   switch (def.kind) {
     case "text":

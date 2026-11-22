@@ -405,6 +405,13 @@ impl Plugins {
     /// from then on their messages, the sessions' reports and the lock file are followed.
     pub fn start(self: &Arc<Self>, services: &Arc<Services>) {
         let _ = self.services.set(Arc::downgrade(services));
+        // What plugins show in a pane's header goes with the pane.
+        let host = Arc::downgrade(self);
+        services.panes.when_pane_closed(move |pane| {
+            if let Some(host) = host.upgrade() {
+                host.pane_gone(&pane.to_string());
+            }
+        });
         let this = Arc::clone(self);
         self.state.runtime().spawn(async move {
             let began = Instant::now();
@@ -1741,6 +1748,36 @@ impl Plugins {
         });
         loaded.next.status.insert(key, fresh);
         Ok(Value::Null)
+    }
+
+    /// A pane left the layout: what plugins showed in its header is shown no more, and
+    /// is not there to be found by a pane that is later given the same id.
+    pub fn pane_gone(self: &Arc<Self>, pane: &str) {
+        let any = {
+            let mut guard = self.inner();
+            let inner = &mut *guard;
+            let mut any = false;
+            for (local, loaded) in &mut inner.loaded {
+                let of_pane = |(_, at): &(String, Option<String>)| at.as_deref() == Some(pane);
+                // What a turn under way set for the pane goes with it too.
+                loaded.next.status.retain(|key, _| !of_pane(key));
+                let gone: Vec<_> = loaded
+                    .status
+                    .keys()
+                    .filter(|key| of_pane(key))
+                    .cloned()
+                    .collect();
+                for key in gone {
+                    loaded.status.remove(&key);
+                    inner.pending.status.insert((local.clone(), key.0, key.1));
+                    any = true;
+                }
+            }
+            any
+        };
+        if any {
+            self.tell_soon();
+        }
     }
 
     /// Runs a command for a plugin: one of its own, or one of the application's that its

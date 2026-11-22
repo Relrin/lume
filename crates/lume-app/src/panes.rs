@@ -608,7 +608,12 @@ pub struct Panes {
     /// Held while the workspace is written to its file, and while its file is being
     /// renamed, so that it is not written under the name it is just losing.
     saving: tokio::sync::Mutex<()>,
+    /// Who is told when a pane leaves the layout, whatever it showed.
+    closed: Mutex<Vec<PaneListener>>,
 }
+
+/// Something that is told of a pane, by its id.
+type PaneListener = Box<dyn Fn(PaneId) + Send + Sync>;
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -660,6 +665,7 @@ impl Panes {
             ending_on_purpose: Mutex::new(HashSet::new()),
             switching: tokio::sync::Mutex::new(()),
             saving: tokio::sync::Mutex::new(()),
+            closed: Mutex::new(Vec::new()),
         });
         panes.sync_tab_panel().await;
         (panes, opened.fresh)
@@ -1255,6 +1261,11 @@ impl Panes {
                         link.notify(&notice);
                     }
                     for change in &changes {
+                        if let LayoutChange::PaneClosed { pane, .. } = change {
+                            for told in lock(&self.closed).iter() {
+                                told(*pane);
+                            }
+                        }
                         self.act_on(&state, change, shell.as_ref()).await;
                     }
                     names_a_session = changes.iter().any(shows_a_session);
@@ -1306,6 +1317,12 @@ impl Panes {
             // Whoever waits for a pane to have a session looks again.
             state.wake();
         }
+    }
+
+    /// Has `told` called with each pane that leaves the layout from now on. It is called
+    /// between two changes to the layout, and must not wait for anything.
+    pub fn when_pane_closed(&self, told: impl Fn(PaneId) + Send + Sync + 'static) {
+        lock(&self.closed).push(Box::new(told));
     }
 
     /// Does what one change to the layout calls for outside the layout.

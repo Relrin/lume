@@ -444,6 +444,7 @@ export function StatusItemView({ item }: { item: StatusItem }) {
     "data-tool": toolLike || undefined,
     "data-tone": item.tone ?? "neutral",
     "data-problem": item.problem === undefined ? undefined : true,
+    "data-separator": item.separator === true ? true : undefined,
     "data-plugin": item.plugin,
     title: card === null ? tooltip : undefined,
     style,

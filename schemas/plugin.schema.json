@@ -1205,6 +1205,11 @@
             "null"
           ]
         },
+        "separator": {
+          "default": false,
+          "description": "Whether a thin rule is drawn after the item, to set what a plugin adds apart\nfrom what follows it: in a pane's header, the pane's own buttons.",
+          "type": "boolean"
+        },
         "shown-when": {
           "default": null,
           "description": "One of the plugin's boolean settings that must be on for the item to be shown.\nThe window reads it itself, so an item the user turns on is shown, and starts\nthe plugin that waits for it to be seen, without the plugin's code.",

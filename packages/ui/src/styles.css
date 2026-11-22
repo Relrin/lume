@@ -982,6 +982,28 @@
     white-space: nowrap;
   }
 
+  /*
+   * An item that asks for a rule after it: a thin line the height of a word, as far
+   * from the item as from what follows, which sets a plugin's things apart from the
+   * pane's own buttons or from the next item.
+   */
+  .status-item[data-separator] {
+    position: relative;
+    margin-right: 9px;
+  }
+
+  .status-item[data-separator]::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: -9px;
+    width: var(--lume-size-border);
+    height: 14px;
+    translate: 0 -50%;
+    background: var(--lume-color-border);
+    pointer-events: none;
+  }
+
   .status-item[data-tone="info"] {
     --status-tone: var(--lume-color-status-info);
   }

@@ -150,6 +150,9 @@ pub struct StatusDef {
     /// The plugin's setting that chooses which of the bars' places it is in.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slot_setting: Option<SlotSetting>,
+    /// Whether a thin rule is drawn after it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub separator: bool,
 }
 
 /// One part of a segmented status item.
@@ -1253,6 +1256,7 @@ fn status(installs: &[Install<'_>], commands: &dyn Commands, out: &mut Contribut
                         .unwrap_or(true),
                 }),
                 slot_setting: slot_setting.map(|(_, setting)| setting),
+                separator: item.separator,
             };
             containers.entry(container).or_default().push(placed(
                 &names,
@@ -1959,6 +1963,7 @@ slot = "topbar.right"
 kind = "text"
 icon = "wifi"
 after = "cpu"
+separator = true
 
 [[contributes.menus]]
 id = "options"
@@ -1994,6 +1999,11 @@ order = 1
             ids,
             ["acme.other.first", "acme.meters.cpu", "acme.meters.net"]
         );
+        // A rule is drawn after the item that asks for one, and after no other.
+        assert!(out.status[2].separator && !out.status[1].separator);
+        let sent = serde_json::to_value(&out.status).unwrap();
+        assert_eq!(sent[2]["separator"], true);
+        assert!(sent[1].get("separator").is_none());
         assert_eq!(
             out.status[1].icon,
             Some(Icon::Image("acme.meters:chip".to_owned()))

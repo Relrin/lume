@@ -377,6 +377,24 @@ The window reads the setting itself. An item the user turns off goes at once, an
 comes back, without the plugin's code. An item that comes back counts as coming on screen, so it
 starts a plugin whose manifest lists `onView:cpu`.
 
+### `separator`: a rule after an item
+
+`separator = true` draws a thin vertical rule after the item. Use it on the last of the things a
+plugin puts in a pane's header, to set them apart from the pane's own buttons, or between two
+groups of items in a bar. It is off unless asked for, and it goes with the item: an item that is
+not shown draws no rule.
+
+```toml
+[[contributes.status]]
+id = "settings"
+slot = "pane.header"
+kind = "icon"
+icon = "gear"
+label = "Settings"
+command = "settings"
+separator = true
+```
+
 ### `slot-setting`: a place the user chooses
 
 `slot-setting` names one of the plugin's settings whose value is the place the item goes in. Use it

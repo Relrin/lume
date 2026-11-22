@@ -82,6 +82,8 @@ interface StatusBase {
   readonly card?: readonly StatusCardRow[];
   /** What went wrong with the plugin's code, which the item shows it is held up by. */
   readonly problem?: string;
+  /** Whether a thin rule is drawn after the item, to set it apart from what follows. */
+  readonly separator?: boolean;
 }
 
 /** A few words. */

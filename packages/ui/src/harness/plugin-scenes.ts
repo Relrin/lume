@@ -504,6 +504,51 @@ const WITH_PANE_PICTURES: FakeCoreOptions = {
   paneIcons: { p1: "claude", p2: "image:acme.tools:gear" },
 };
 
+/**
+ * The same, with a plugin's things in the header of its view's pane: a switch of two
+ * parts and a button after it, which asks for a rule to set them apart from the pane's
+ * own buttons. The terminal's header has none of it.
+ */
+const WITH_PANE_HEADER: FakeCoreOptions = {
+  ...WITH_FRAME_PANE,
+  contributions: {
+    ...PLUGIN_CONTRIBUTIONS,
+    pane_views: WITH_FRAME_PANE.contributions?.pane_views ?? [],
+    status: [
+      ...PLUGIN_CONTRIBUTIONS.status,
+      {
+        id: "acme.tools.form",
+        plugin: "acme.tools",
+        slot: "pane.header",
+        kind: "segmented",
+        order: 0,
+        label: "Shown as",
+        command: "acme.tools.jobs",
+        choices: [
+          { value: "list", label: "List" },
+          { value: "page", label: "Page" },
+        ],
+      },
+      {
+        id: "acme.tools.set-up",
+        plugin: "acme.tools",
+        slot: "pane.header",
+        kind: "icon",
+        order: 1,
+        label: "Set up",
+        icon: { image: "acme.tools:gear" },
+        command: "acme.tools.jobs",
+        separator: true,
+      },
+    ],
+    values: [
+      ...PLUGIN_CONTRIBUTIONS.values,
+      { plugin: "acme.tools", item: "acme.tools.form", pane: "p2", value: { selected: "page" } },
+      { plugin: "acme.tools", item: "acme.tools.set-up", pane: "p2", value: {} },
+    ],
+  },
+};
+
 export const PLUGIN_SCENES: readonly Scene[] = [
   {
     // A plugin's own page in a pane beside a terminal, while it loads: the pane has the
@@ -561,6 +606,39 @@ export const PLUGIN_SCENES: readonly Scene[] = [
       );
       if (!tab.includes("claude") || !tab.includes("picture")) {
         problems.push(`the tab shows ${tab.join(", ")}`);
+      }
+      return problems;
+    },
+  },
+  {
+    // A plugin's things in a pane's header, the last of which asks for a rule after it:
+    // the rule stands between them and the pane's own buttons, and only in that pane.
+    name: "plugin-pane-header",
+    window: WITH_PANE_HEADER,
+    prepare: async () => {
+      await statusItem("acme.tools.set-up@p2");
+    },
+    check: (page) => {
+      const ruled = [...page.querySelectorAll<HTMLElement>(".pane-header [data-separator]")];
+      if (ruled.length !== 1) return [`${ruled.length} items in the headers ask for a rule`];
+      const item = ruled[0] as HTMLElement;
+      const header = item.closest(".pane-header");
+      const buttons = header?.querySelector<HTMLElement>(".pane-buttons");
+      if (!header || !buttons) return ["the header has no buttons of its own"];
+      const problems: string[] = [];
+      if (!header.querySelector('[data-status="acme.tools.form@p2"] [aria-pressed="true"]')) {
+        problems.push("the switch shows no part as chosen");
+      }
+      const rule = getComputedStyle(item, "::after");
+      if (rule.content === "none" || parseFloat(rule.width) < 1 || parseFloat(rule.height) < 8) {
+        problems.push(`the rule is ${rule.width} by ${rule.height}`);
+      }
+      // The rule is as far from the button as from the pane's own.
+      const gap = buttons.getBoundingClientRect().left - item.getBoundingClientRect().right;
+      if (gap < 12 || gap > 22) problems.push(`the pane's buttons are ${gap}px after the item`);
+      const others = [...page.querySelectorAll(".pane-header")].filter((one) => one !== header);
+      if (others.some((one) => one.querySelector(".status-item"))) {
+        problems.push("another pane's header shows the plugin's things");
       }
       return problems;
     },

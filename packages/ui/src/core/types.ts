@@ -266,6 +266,8 @@ export interface StatusDef {
    * it may choose. Until the user sets it, the item is in `slot`.
    */
   readonly slot_setting?: { readonly key: string; readonly slots: readonly string[] };
+  /** Whether a thin rule is drawn after it. */
+  readonly separator?: boolean;
 }
 
 /** A plugin's panel, as its manifest says it: a list, or its own page (`frame`). */

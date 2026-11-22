@@ -494,6 +494,10 @@ pub struct StatusItem {
     /// the plugin that waits for it to be seen, without the plugin's code.
     #[serde(default)]
     pub shown_when: Option<String>,
+    /// Whether a thin rule is drawn after the item, to set what a plugin adds apart
+    /// from what follows it: in a pane's header, the pane's own buttons.
+    #[serde(default)]
+    pub separator: bool,
 }
 
 /// One part of a `segmented` status item.

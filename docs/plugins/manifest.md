@@ -228,6 +228,7 @@ A status item: a small piece of information, or a button, in a bar. See
 | `menu`         | string  | none    | A submenu of the plugin's own, in `menu.status`, the item opens when clicked.                                                             |
 | `when`         | string  | none    | A [condition](placement.md#conditions) it is shown under.                                                                                 |
 | `shown-when`   | string  | none    | One of the plugin's boolean settings that must be on for the item to be shown.                                                            |
+| `separator`    | boolean | `false` | Whether a thin rule is drawn after the item. See [a rule after an item](placement.md#separator-a-rule-after-an-item).                     |
 | `before`       | string  | none    | The neighbour it goes right before.                                                                                                       |
 | `after`        | string  | none    | The neighbour it goes right after.                                                                                                        |
 | `order`        | integer | none    | Where it goes when no neighbour is named.                                                                                                 |
