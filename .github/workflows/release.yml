@@ -1,0 +1,60 @@
+name: Release
+
+# A tag of a version (v*) gets a release that carries what a plugin's own repository
+# builds against: @lume/plugin-api and @lume/plugin-kit as packed packages, and the
+# SHA-256 of each. A repository of plugins names the tag and the hashes, fetches the
+# packages once, and checks them.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # The same system packages the other workflow installs for a build on Linux.
+  LINUX_PACKAGES: >-
+    build-essential curl file xz-utils libclang-dev xvfb dbus
+    libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+jobs:
+  plugin-packages:
+    name: Plugin packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y $LINUX_PACKAGES
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache pinned tools and libghostty-vt builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tools
+            vendor/ghostty
+            target/vt
+            packages/vt/dist
+          key: vt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools.toml') }}
+      - run: cargo xtask setup
+      - name: Pack the typings and the kit
+        run: cargo xtask api --pack
+      - name: Gather the packages and their hashes
+        run: |
+          mkdir -p target/release-packages
+          cp target/plugin-api/*.tgz target/plugin-kit/*.tgz target/release-packages/
+          cd target/release-packages
+          sha256sum *.tgz > plugin-packages.sha256
+          cat plugin-packages.sha256
+      - name: Attach them to the tag's release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "" --verify-tag
+          gh release upload "$TAG" target/release-packages/* --clobber
