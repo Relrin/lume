@@ -1352,6 +1352,173 @@
     margin: -6px;
     overflow-x: auto;
     scrollbar-width: none;
+    /* A tab that is brought into sight stops clear of the fade at the row's end. */
+    scroll-padding-inline: 32px;
+  }
+
+  /*
+   * A row that holds more tabs than fit scrolls, and fades at an end while that end
+   * hides tabs: the page sets how wide each fade is, nothing or the whole of it.
+   */
+  .tab-strip > .tab-list[data-over="true"] {
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black var(--tab-fade-start),
+      black calc(100% - var(--tab-fade-end)),
+      transparent 100%
+    );
+    transition:
+      --tab-fade-start var(--lume-motion-duration-fast) var(--lume-motion-easing-standard),
+      --tab-fade-end var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
+  }
+
+  /* Every tab as a list, under a button at the row's end while the row holds more than fits. */
+  .tab-all {
+    position: relative;
+    flex-shrink: 0;
+    margin-left: 2px;
+  }
+
+  .tab-all-button {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: min(7px, var(--lume-radius-control));
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    transition: scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
+  }
+
+  .tab-all-button:hover,
+  .tab-all-button[aria-expanded="true"] {
+    @apply text-ink;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .tab-all-button:active {
+    scale: 0.94;
+  }
+
+  .tab-all-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+  }
+
+  .tab-all-list {
+    @apply bg-popover;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 46;
+    width: 320px;
+    max-width: calc(100vw - 16px);
+    padding: 6px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 2px));
+    box-shadow: var(--lume-shadow-popover);
+    transform-origin: calc(100% - 24px) 0;
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  .tab-all-find {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    margin-bottom: 4px;
+    padding: 0 10px;
+    border-radius: min(8px, var(--lume-radius-control));
+    background-color: var(--lume-color-control-hover);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    cursor: text;
+  }
+
+  .tab-all-find:focus-within {
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border-focus);
+  }
+
+  .tab-all-find input {
+    @apply text-ink;
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: none;
+    font-size: 12.5px;
+  }
+
+  .tab-all-rows {
+    max-height: 320px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .tab-all-row {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: 32px;
+    padding: 0 8px;
+    border-radius: min(7px, var(--lume-radius-control));
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .tab-all-row[aria-selected="true"] {
+    @apply text-ink;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .tab-all-icon {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .tab-all-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tab-all-row small {
+    flex-shrink: 0;
+    font-size: 11px;
+    opacity: 0.7;
+  }
+
+  .tab-all-row small[data-kind="current"] {
+    color: var(--lume-color-status-info);
+    opacity: 1;
+  }
+
+  .tab-all-empty {
+    @apply text-ink-muted;
+    padding: 14px 10px 16px;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tab-all-list {
+      animation: none;
+    }
+
+    .tab-strip > .tab-list[data-over="true"],
+    .tab-all-button {
+      transition: none;
+    }
   }
 
   .tab {
@@ -1359,9 +1526,10 @@
     position: relative;
     display: flex;
     align-items: center;
-    flex: 0 1 auto;
-    min-width: 48px;
-    max-width: 210px;
+    /* As wide as what it is called, within limits, and never squeezed: the row scrolls. */
+    flex: 0 0 auto;
+    min-width: 72px;
+    max-width: 200px;
     height: var(--lume-size-tab);
     border-radius: var(--lume-radius-control);
     touch-action: pan-y;
@@ -7351,4 +7519,17 @@
   syntax: "<number>";
   inherits: false;
   initial-value: 0;
+}
+
+/* How wide the fade at each end of a row of tabs is, registered so it can be eased. */
+@property --tab-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --tab-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
 }

@@ -21,6 +21,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
@@ -54,8 +55,10 @@ import {
   type DropBox,
   type RowTab,
 } from "./tab-drop.ts";
+import { TabListButton } from "./TabList.tsx";
 import { ownColorStyle, tabCount, UNNAMED_GROUP } from "./tab-looks.ts";
 import { TabMotion } from "./tab-motion.ts";
+import { away, edgeSpeed, FADE_PX, fades, KEY_RECENT_MS, wheelShift } from "./tab-scroll.ts";
 import { anchorOf, groupOfLabel, labelId, type DropSide, type TabDrag } from "./tab-ui.ts";
 
 /** How far past the row the pointer may go and still be dragging along it. */
@@ -112,11 +115,6 @@ function useRowDrag(
     y: number;
     moved: boolean;
   } | null>(null);
-  const along = useCallback(
-    (event: { clientX: number; clientY: number }) => (vertical ? event.clientY : event.clientX),
-    [vertical],
-  );
-
   // Escape puts what is being dragged back where it was.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -143,6 +141,58 @@ function useRowDrag(
         folded: item.dataset["folded"] === "true",
       };
     });
+  };
+
+  /** Works out where what is dragged would land, with the pointer where it is. */
+  const aim = (source: string, x: number, y: number) => {
+    const ui = app.tabUi.getState();
+    const now = ui.drag;
+    if (!now || now.dropped) return;
+    const box = list.current?.getBoundingClientRect();
+    const across = vertical ? x : y;
+    const outside =
+      box !== undefined &&
+      (vertical
+        ? across < box.left - DRAG_LEAVE_PX || across > box.right + DRAG_LEAVE_PX
+        : across < box.top - DRAG_LEAVE_PX || across > box.bottom + DRAG_LEAVE_PX);
+    if (outside) {
+      if (now.target !== null) ui.setDrag({ ...now, target: null });
+      return;
+    }
+    const place = dropPlace(boxes(), source, vertical ? y : x);
+    if (!place) return;
+    if (place.target !== now.target || place.side !== now.side) {
+      ui.setDrag({ ...now, target: place.target, side: place.side });
+    }
+  };
+
+  // A tab held at an end of a row that holds more than fits brings more of the row
+  // under it, faster the nearer the end it is held.
+  const edge = useRef({ frame: 0, x: 0, y: 0 });
+  const stopEdge = () => {
+    if (edge.current.frame !== 0) cancelAnimationFrame(edge.current.frame);
+    edge.current.frame = 0;
+  };
+  useEffect(() => stopEdge, []);
+  const followEdge = (source: string) => {
+    if (vertical || edge.current.frame !== 0) return;
+    const step = () => {
+      edge.current.frame = 0;
+      const element = list.current;
+      if (!held.current?.moved || !element) return;
+      const box = element.getBoundingClientRect();
+      const { x, y } = edge.current;
+      const along = y >= box.top - DRAG_LEAVE_PX && y <= box.bottom + DRAG_LEAVE_PX;
+      const speed = along ? edgeSpeed(x, box.left, box.right) : 0;
+      if (speed !== 0) {
+        const before = element.scrollLeft;
+        element.scrollLeft = before + speed;
+        // The row moved under the pointer: what lies under it now is another place.
+        if (element.scrollLeft !== before) aim(source, x, y);
+      }
+      edge.current.frame = requestAnimationFrame(step);
+    };
+    edge.current.frame = requestAnimationFrame(step);
   };
 
   const letGo = (source: string, drag: TabDrag | null) => {
@@ -205,28 +255,15 @@ function useRowDrag(
         ui.close();
         ui.setDrag({ source, target: null, side: "before", dropped: false });
       }
-      const now = ui.drag;
-      if (!now || now.dropped) return;
-      const box = list.current?.getBoundingClientRect();
-      const across = vertical ? event.clientX : event.clientY;
-      const outside =
-        box !== undefined &&
-        (vertical
-          ? across < box.left - DRAG_LEAVE_PX || across > box.right + DRAG_LEAVE_PX
-          : across < box.top - DRAG_LEAVE_PX || across > box.bottom + DRAG_LEAVE_PX);
-      if (outside) {
-        if (now.target !== null) ui.setDrag({ ...now, target: null });
-        return;
-      }
-      const place = dropPlace(boxes(), source, along(event));
-      if (!place) return;
-      if (place.target !== now.target || place.side !== now.side) {
-        ui.setDrag({ ...now, target: place.target, side: place.side });
-      }
+      edge.current.x = event.clientX;
+      edge.current.y = event.clientY;
+      followEdge(source);
+      aim(source, event.clientX, event.clientY);
     },
     onPointerUp: (event) => {
       const drag = held.current;
       held.current = null;
+      stopEdge();
       if (!drag || drag.pointerId !== event.pointerId) return;
       if (!drag.moved) {
         press(false);
@@ -237,6 +274,7 @@ function useRowDrag(
     onPointerCancel: () => {
       if (held.current?.moved) app.tabUi.getState().setDrag(null);
       held.current = null;
+      stopEdge();
     },
   });
 }
@@ -696,7 +734,145 @@ function useSettledDrag(app: ShellApp, items: readonly StripItem[]): void {
   }, [app, items]);
 }
 
-/** The row of tabs and the button that opens another. */
+/** How long after a tab was brought into sight the row still follows it as it settles. */
+const FOLLOW_SETTLE_MS = 1500;
+
+/** Whether motion is to be kept still, as the user's system asks. */
+function stillMotion(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/**
+ * Keeps a row of tabs that holds more than fits in hand: its ends fade where they hide
+ * tabs, a wheel that turns up and down moves it sideways, and the tab on show is
+ * brought into sight when it changes. Says whether the row holds more than fits, and
+ * which tabs are out of sight when asked.
+ */
+function useStripScroll(
+  app: ShellApp,
+  list: RefObject<HTMLDivElement | null>,
+  active: TabId | null,
+  items: readonly StripItem[],
+): { over: boolean; away(): string[] } {
+  const [over, setOver] = useState(false);
+  const shown = useRef(false);
+  const lastKey = useRef(0);
+  /** The tab on show, how long the row was when it was last measured, and when the tab was last brought into sight. */
+  const follow = useRef({ active, full: 0, at: 0 });
+  follow.current.active = active;
+
+  const bring = useCallback(
+    (glide: boolean) => {
+      const tab = follow.current.active;
+      if (tab === null) return;
+      const element = list.current?.querySelector<HTMLElement>(
+        `:scope > [data-tab-id="${CSS.escape(tab)}"]`,
+      );
+      if (typeof element?.scrollIntoView !== "function") return;
+      follow.current.at = performance.now();
+      element.scrollIntoView({
+        inline: "nearest",
+        block: "nearest",
+        behavior: glide && !stillMotion() ? "smooth" : "auto",
+      });
+    },
+    [list],
+  );
+
+  const sync = useCallback(() => {
+    const element = list.current;
+    if (!element) return;
+    // How long the row is, by its tabs and labels: the mark's glow and a group's line
+    // reach past them, and are no reason to scroll.
+    let last = 0;
+    for (const item of element.querySelectorAll<HTMLElement>(":scope > [data-tab-id]")) {
+      last = Math.max(last, item.offsetLeft + item.offsetWidth);
+    }
+    const room = Number.parseFloat(getComputedStyle(element).paddingRight) || 0;
+    const now = fades({
+      scroll: element.scrollLeft,
+      view: element.clientWidth,
+      full: last + room,
+    });
+    element.style.setProperty("--tab-fade-start", now.start ? `${FADE_PX}px` : "0px");
+    element.style.setProperty("--tab-fade-end", now.end ? `${FADE_PX}px` : "0px");
+    if (now.over) element.dataset["over"] = "true";
+    else delete element.dataset["over"];
+    // A tab that was just brought into sight is named a moment later, and the row grows
+    // under it: it is kept in sight while the row settles.
+    const full = last + room;
+    if (full !== follow.current.full) {
+      follow.current.full = full;
+      if (performance.now() - follow.current.at < FOLLOW_SETTLE_MS) bring(false);
+    }
+    // Told only when it changes: the row is measured far more often than that.
+    if (shown.current !== now.over) {
+      shown.current = now.over;
+      setOver(now.over);
+    }
+  }, [list, bring]);
+
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!element) return undefined;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || element.dataset["over"] !== "true") return;
+      const shift = wheelShift(event.deltaX, event.deltaY, event.deltaMode, element.clientWidth);
+      if (shift === null) return;
+      event.preventDefault();
+      // A menu open over a tab would be left behind by its tab.
+      const popup = app.tabUi.getState().popup;
+      if (popup?.kind === "tab" || popup?.kind === "group") app.tabUi.getState().close();
+      // The row is the user's from here: it does not go back to the tab on show.
+      follow.current.at = 0;
+      element.scrollLeft += shift;
+    };
+    const onKey = () => {
+      lastKey.current = performance.now();
+    };
+    element.addEventListener("scroll", sync, { passive: true });
+    // The end of a glide is told apart, for a page that was not drawing while it glided.
+    element.addEventListener("scrollend", sync, { passive: true });
+    element.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("keydown", onKey, true);
+    const resized = new ResizeObserver(sync);
+    resized.observe(element);
+    return () => {
+      element.removeEventListener("scroll", sync);
+      element.removeEventListener("scrollend", sync);
+      element.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKey, true);
+      resized.disconnect();
+    };
+  }, [app, list, sync]);
+
+  // Tabs that come, go, fold or are renamed change how long the row is.
+  useLayoutEffect(sync);
+
+  // The tab on show is brought into sight: gliding for the pointer, at once for a key.
+  const count = items.length;
+  useEffect(() => {
+    bring(performance.now() - lastKey.current >= KEY_RECENT_MS);
+    // Again when the list of every tab comes or goes: it takes room from the row.
+  }, [bring, active, count, over]);
+
+  const awayNow = useCallback(() => {
+    const element = list.current;
+    if (!element) return [];
+    const box = element.getBoundingClientRect();
+    const spans = [...element.querySelectorAll<HTMLElement>(":scope > .tab[data-tab-id]")].map(
+      (item) => {
+        const own = item.getBoundingClientRect();
+        return { id: item.dataset["tabId"] ?? "", start: own.left, end: own.right };
+      },
+    );
+    return away(spans, box.left, box.right);
+  }, [list]);
+
+  return { over, away: awayNow };
+}
+
+/** The row of tabs, and the list of them all while the row holds more than fits. */
 export function TabStrip() {
   const app = useShell();
   const items = useStripItems(app);
@@ -757,6 +933,7 @@ export function TabStrip() {
   const gap = drag ? `${drag.target ?? ""}:${drag.side}` : "";
   useEffect(() => motion.current?.followLayout(), [items, gap]);
 
+  const scroll = useStripScroll(app, list, active, items);
   const rowHandlers = useRowDrag(app, list, false, motion);
   const handlers = useRef(rowHandlers);
   handlers.current = rowHandlers;
@@ -783,6 +960,7 @@ export function TabStrip() {
           <RowItems items={items} active={active} drag={drag} />
         </RowContext>
       </div>
+      {scroll.over && <TabListButton away={scroll.away} />}
     </div>
   );
 }

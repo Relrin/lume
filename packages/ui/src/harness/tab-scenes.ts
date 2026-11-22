@@ -1,7 +1,8 @@
 /**
  * The scenes of the window's tabs: tabs with colours and a lock, tabs in groups with
- * one group folded, the menu of a tab and its second step, the editor of a group, and
- * the menu of groups that were kept when they were closed.
+ * one group folded, the menu of a tab and its second step, the editor of a group, the
+ * menu of groups that were kept when they were closed, and a row that holds more tabs
+ * than fit, with the list of them all.
  */
 
 import type { CommandSpec } from "../core/types.ts";
@@ -78,6 +79,55 @@ const GROUPED: FakeCoreOptions = {
     { tabs: [3, 4], name: "Infra", color: "blue", icon: "server" },
   ],
 };
+
+/** How many tabs the crowded row holds: more than fit in the window the scenes run in. */
+const MANY = 16;
+
+/** What the crowded row's tabs are called. */
+const MANY_TITLES: readonly string[] = [
+  "Fix tax rounding",
+  "cargo test",
+  "TODO.md",
+  "terraform apply",
+  "Processes",
+  "api logs",
+  "deploy staging",
+  "review notes",
+  "migrations",
+  "docker compose",
+  "benchmarks",
+  "release checklist",
+  "ssh bastion",
+  "queue worker",
+  "storybook",
+  "scratch",
+];
+
+/** A row of more tabs than fit, the last of them on show. */
+const CROWDED: FakeCoreOptions = {
+  tabs: Array.from({ length: MANY }, () => 1),
+  commands: COMMANDS,
+  bindings: FIXTURE_BINDINGS,
+  titleBar: "custom",
+  activeTab: `t${MANY}`,
+  tabLooks: Object.fromEntries(MANY_TITLES.map((title, index) => [`t${index + 1}`, { title }])),
+};
+
+/** The width of the fade at one end of the row of tabs, as the page set it. */
+function fadeOf(list: HTMLElement, end: "start" | "end"): string {
+  return list.style.getPropertyValue(`--tab-fade-${end}`);
+}
+
+/** Waits for the crowded row to have brought its last tab, the one on show, into sight. */
+async function crowdedSettled(): Promise<HTMLElement> {
+  const list = await until("the row of tabs holding more than fits", () =>
+    document.querySelector<HTMLElement>('.tab-strip > .tab-list[data-over="true"]'),
+  );
+  await until("the row reaching its end, and its fades following", () =>
+    fadeOf(list, "start") !== "0px" && fadeOf(list, "end") === "0px" ? true : null,
+  );
+  return list;
+}
 
 async function until<T>(what: string, find: () => T | null | undefined): Promise<T> {
   const deadline = performance.now() + CHROME_START_TIMEOUT_MS;
@@ -355,6 +405,102 @@ export const TAB_SCENES: readonly Scene[] = [
         (label) => label.textContent ?? "",
       );
       return compare(rows, ["Release 0.15"], "the menu of kept groups");
+    },
+  },
+  {
+    name: "tabs-overflow",
+    window: CROWDED,
+    prepare: async () => {
+      await crowdedSettled();
+    },
+    check: (page) => {
+      const problems: string[] = [];
+      const list = page.querySelector<HTMLElement>(".tab-strip > .tab-list");
+      if (!list) return ["there is no row of tabs"];
+      const tabs = [...list.querySelectorAll<HTMLElement>(":scope > .tab")];
+      if (tabs.length !== MANY) problems.push(`the row holds ${tabs.length} tabs, not ${MANY}`);
+      // Tabs keep what they are called: the row scrolls before it squeezes them.
+      const narrow = tabs.filter((tab) => tab.getBoundingClientRect().width < 71).length;
+      if (narrow > 0) problems.push(`${narrow} tabs are squeezed narrower than they may be`);
+      const box = list.getBoundingClientRect();
+      const shown = page.querySelector<HTMLElement>('.tab-strip .tab[data-active="true"]');
+      const own = shown?.getBoundingClientRect();
+      if (!own || own.left < box.left || own.right > box.right + 1) {
+        problems.push("the tab on show is not in sight");
+      }
+      // Only the end that hides tabs fades.
+      if (fadeOf(list, "start") !== "28px" || fadeOf(list, "end") !== "0px") {
+        problems.push(
+          `the row fades ${fadeOf(list, "start")} at its start and ${fadeOf(list, "end")} at its end, not 28px and 0px`,
+        );
+      }
+      if (getComputedStyle(list).maskImage === "none") problems.push("the row has no fade drawn");
+      const button = page.querySelector(".tab-strip .tab-all-button");
+      if (button?.textContent?.trim() !== String(MANY)) {
+        problems.push(
+          `the button that lists every tab says "${button?.textContent ?? ""}", not ${MANY}`,
+        );
+      }
+      if (page.querySelector(".tab-all-list"))
+        problems.push("the list of every tab is open unasked");
+      return problems;
+    },
+  },
+  {
+    name: "tabs-all-list",
+    window: CROWDED,
+    prepare: async () => {
+      await crowdedSettled();
+      const button = await until("the button that lists every tab", () =>
+        document.querySelector<HTMLButtonElement>(".tab-strip .tab-all-button"),
+      );
+      button.click();
+      const field = await until("the list's field taking the keyboard", () =>
+        document.activeElement instanceof HTMLInputElement &&
+        document.activeElement.closest(".tab-all-list")
+          ? document.activeElement
+          : null,
+      );
+      // Typed as a person types, so that the page hears of it.
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      set?.call(field, "t");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      const wanted = MANY_TITLES.filter((title) => title.toLowerCase().includes("t")).length;
+      await until("the list narrowing to what was typed", () =>
+        document.querySelectorAll(".tab-all-list .tab-all-row").length === wanted ? true : null,
+      );
+    },
+    check: (page) => {
+      const problems: string[] = [];
+      const rows = [...page.querySelectorAll(".tab-all-list .tab-all-row")];
+      const wanted = MANY_TITLES.filter((title) => title.toLowerCase().includes("t"));
+      problems.push(
+        ...compare(
+          rows.map((row) => row.querySelector(".tab-all-title")?.textContent ?? ""),
+          wanted,
+          "the list of every tab",
+        ),
+      );
+      const current = rows.filter((row) => row.querySelector('small[data-kind="current"]'));
+      if (
+        current.length !== 1 ||
+        current[0]?.querySelector(".tab-all-title")?.textContent !== "scratch"
+      ) {
+        problems.push("the list does not say which tab is on show");
+      }
+      const hidden = rows.filter((row) => row.querySelector("small:not([data-kind])")).length;
+      if (hidden === 0) problems.push("the list says of no tab that it is out of view");
+      // The first tabs are the ones scrolled away, with the last one on show.
+      if (!rows[0]?.querySelector("small:not([data-kind])")) {
+        problems.push("the first tab is not said to be out of view");
+      }
+      if (rows.filter((row) => row.getAttribute("aria-selected") === "true").length !== 1) {
+        problems.push("the list does not mark one row for the keyboard");
+      }
+      if (page.querySelector(".tab-all-button")?.getAttribute("aria-expanded") !== "true") {
+        problems.push("the button does not say its list is open");
+      }
+      return problems;
     },
   },
 ];
