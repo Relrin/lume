@@ -10,6 +10,7 @@ mod fetch;
 mod generate;
 mod latency;
 mod paths;
+mod rex;
 mod run;
 mod smoke;
 mod suites;
@@ -72,6 +73,9 @@ Commands:
   api --pack   The same, then pack @lume/plugin-api into target/plugin-api/ and
                @lume/plugin-kit into target/plugin-kit/ for a plugin's own
                repository to install
+  rex-api <dump> <revision>
+               Keep the shapes of a Rex server's methods, from the output of
+               `rex api call help.all`, in crates/lume-rex/api/<revision>.json
   lint         Run format, clippy, licence and JS lint checks
   dev          Run the app with hot reload
 ";
@@ -116,6 +120,7 @@ fn main() -> Result<()> {
             generate::write(GeneratedKind::Api, "api")?;
             generate::pack_api()
         }
+        ["rex-api", dump, revision] => rex::capture(dump, revision),
         ["lint"] => lint(),
         ["dev"] => dev(),
         [] | ["help"] | ["--help"] | ["-h"] => {

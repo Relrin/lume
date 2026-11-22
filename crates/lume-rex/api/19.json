@@ -1,0 +1,7154 @@
+{
+  "api_revision": 19,
+  "methods": {
+    "block.close": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": "string"
+          },
+          "keep_last": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "block_id",
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "block.event": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": "string"
+          },
+          "event": {
+            "properties": {
+              "payload": {},
+              "type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "block_id",
+          "event"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "block.method": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {},
+          "block_id": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "block_id",
+          "method"
+        ],
+        "type": "object"
+      },
+      "output": null
+    },
+    "block_creator.list": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "creators": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "api": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "events": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "methods": {
+                      "additionalProperties": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "actions": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "args": {},
+                                "category": {
+                                  "type": "string"
+                                },
+                                "description": {
+                                  "type": "string"
+                                },
+                                "keywords": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "repeats": {
+                                  "type": "boolean"
+                                },
+                                "title": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "title"
+                              ],
+                              "type": "object"
+                            },
+                            "type": [
+                              "null",
+                              "array"
+                            ]
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "input_schema": {},
+                          "output_schema": {}
+                        },
+                        "type": "object"
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "features": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "flavors": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "description": {
+                        "type": "string"
+                      },
+                      "flavor": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "options_schema": {},
+                      "title": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "flavor",
+                      "title",
+                      "description"
+                    ],
+                    "type": "object"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "host_id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "title",
+                "description",
+                "flavors",
+                "api"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "creators"
+        ],
+        "type": "object"
+      }
+    },
+    "client.action": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "args": {},
+          "block_id": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "server": {
+            "type": "string"
+          },
+          "servers": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "id"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "client_actions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "args": {}
+              },
+              "required": [
+                "action"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "ordered_after": {
+            "type": "string"
+          },
+          "result": {}
+        },
+        "required": [
+          "client_actions"
+        ],
+        "type": "object"
+      }
+    },
+    "client.inspect": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {},
+                "category": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "keywords": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "repeats": {
+                  "type": "boolean"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "client": {
+            "additionalProperties": false,
+            "properties": {
+              "client_id": {
+                "type": "string"
+              },
+              "connected_at": {
+                "type": "string"
+              },
+              "connection_lost_at": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
+              "connection_state": {
+                "type": "string"
+              },
+              "info": {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "platform": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "principal": {
+                "additionalProperties": false,
+                "properties": {
+                  "display": {
+                    "type": "string"
+                  },
+                  "gid": {
+                    "type": [
+                      "null",
+                      "integer"
+                    ]
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "login_name": {
+                    "type": "string"
+                  },
+                  "node": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "pid": {
+                    "type": [
+                      "null",
+                      "integer"
+                    ]
+                  },
+                  "remote_addr": {
+                    "type": "string"
+                  },
+                  "sid": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "transport": {
+                    "type": "string"
+                  },
+                  "uid": {
+                    "type": [
+                      "null",
+                      "integer"
+                    ]
+                  },
+                  "user_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "transport",
+                  "display"
+                ],
+                "type": "object"
+              },
+              "session_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "client_id",
+              "principal",
+              "connected_at"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "client"
+        ],
+        "type": "object"
+      }
+    },
+    "client.key": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": "string"
+          },
+          "key": {
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "enum": [
+                  "press",
+                  "release",
+                  "repeat"
+                ],
+                "type": "string"
+              },
+              "composing": {
+                "type": "boolean"
+              },
+              "consumed_mods": {
+                "type": "string"
+              },
+              "key": {
+                "enum": [
+                  "unidentified",
+                  "backquote",
+                  "backslash",
+                  "bracket_left",
+                  "bracket_right",
+                  "comma",
+                  "digit_0",
+                  "digit_1",
+                  "digit_2",
+                  "digit_3",
+                  "digit_4",
+                  "digit_5",
+                  "digit_6",
+                  "digit_7",
+                  "digit_8",
+                  "digit_9",
+                  "equal",
+                  "intl_backslash",
+                  "intl_ro",
+                  "intl_yen",
+                  "key_a",
+                  "key_b",
+                  "key_c",
+                  "key_d",
+                  "key_e",
+                  "key_f",
+                  "key_g",
+                  "key_h",
+                  "key_i",
+                  "key_j",
+                  "key_k",
+                  "key_l",
+                  "key_m",
+                  "key_n",
+                  "key_o",
+                  "key_p",
+                  "key_q",
+                  "key_r",
+                  "key_s",
+                  "key_t",
+                  "key_u",
+                  "key_v",
+                  "key_w",
+                  "key_x",
+                  "key_y",
+                  "key_z",
+                  "minus",
+                  "period",
+                  "quote",
+                  "semicolon",
+                  "slash",
+                  "alt_left",
+                  "alt_right",
+                  "backspace",
+                  "caps_lock",
+                  "context_menu",
+                  "control_left",
+                  "control_right",
+                  "enter",
+                  "meta_left",
+                  "meta_right",
+                  "shift_left",
+                  "shift_right",
+                  "space",
+                  "tab",
+                  "convert",
+                  "kana_mode",
+                  "non_convert",
+                  "delete",
+                  "end",
+                  "help",
+                  "home",
+                  "insert",
+                  "page_down",
+                  "page_up",
+                  "arrow_down",
+                  "arrow_left",
+                  "arrow_right",
+                  "arrow_up",
+                  "num_lock",
+                  "numpad_0",
+                  "numpad_1",
+                  "numpad_2",
+                  "numpad_3",
+                  "numpad_4",
+                  "numpad_5",
+                  "numpad_6",
+                  "numpad_7",
+                  "numpad_8",
+                  "numpad_9",
+                  "numpad_add",
+                  "numpad_backspace",
+                  "numpad_clear",
+                  "numpad_clear_entry",
+                  "numpad_comma",
+                  "numpad_decimal",
+                  "numpad_divide",
+                  "numpad_enter",
+                  "numpad_equal",
+                  "numpad_memory_add",
+                  "numpad_memory_clear",
+                  "numpad_memory_recall",
+                  "numpad_memory_store",
+                  "numpad_memory_subtract",
+                  "numpad_multiply",
+                  "numpad_paren_left",
+                  "numpad_paren_right",
+                  "numpad_subtract",
+                  "numpad_separator",
+                  "numpad_up",
+                  "numpad_down",
+                  "numpad_right",
+                  "numpad_left",
+                  "numpad_begin",
+                  "numpad_home",
+                  "numpad_end",
+                  "numpad_insert",
+                  "numpad_delete",
+                  "numpad_page_up",
+                  "numpad_page_down",
+                  "escape",
+                  "f1",
+                  "f2",
+                  "f3",
+                  "f4",
+                  "f5",
+                  "f6",
+                  "f7",
+                  "f8",
+                  "f9",
+                  "f10",
+                  "f11",
+                  "f12",
+                  "f13",
+                  "f14",
+                  "f15",
+                  "f16",
+                  "f17",
+                  "f18",
+                  "f19",
+                  "f20",
+                  "f21",
+                  "f22",
+                  "f23",
+                  "f24",
+                  "f25",
+                  "fn",
+                  "fn_lock",
+                  "print_screen",
+                  "scroll_lock",
+                  "pause",
+                  "browser_back",
+                  "browser_favorites",
+                  "browser_forward",
+                  "browser_home",
+                  "browser_refresh",
+                  "browser_search",
+                  "browser_stop",
+                  "eject",
+                  "launch_app_1",
+                  "launch_app_2",
+                  "launch_mail",
+                  "media_play_pause",
+                  "media_select",
+                  "media_stop",
+                  "media_track_next",
+                  "media_track_previous",
+                  "power",
+                  "sleep",
+                  "audio_volume_down",
+                  "audio_volume_mute",
+                  "audio_volume_up",
+                  "wake_up",
+                  "copy",
+                  "cut",
+                  "paste"
+                ],
+                "type": "string"
+              },
+              "mods": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "unshifted_codepoint": {
+                "maximum": 2147483647,
+                "minimum": -2147483648,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "key",
+              "mods",
+              "consumed_mods",
+              "text",
+              "unshifted_codepoint",
+              "composing",
+              "action"
+            ],
+            "type": "object"
+          },
+          "prefix": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "key"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "handled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "handled"
+        ],
+        "type": "object"
+      }
+    },
+    "client.keymap": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {},
+                "category": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "keywords": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "repeats": {
+                  "type": "boolean"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "defaults": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "bindings": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "type": "string"
+                      },
+                      "args": {},
+                      "keys": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": [
+                          "null",
+                          "array"
+                        ]
+                      },
+                      "mode": {
+                        "type": "string"
+                      },
+                      "source": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "keys",
+                      "action"
+                    ],
+                    "type": "object"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "removals": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "type": "string"
+                      },
+                      "keys": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": [
+                          "null",
+                          "array"
+                        ]
+                      },
+                      "mode": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "keys"
+                    ],
+                    "type": "object"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "overrides": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "bindings": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "type": "string"
+                      },
+                      "args": {},
+                      "keys": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": [
+                          "null",
+                          "array"
+                        ]
+                      },
+                      "mode": {
+                        "type": "string"
+                      },
+                      "source": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "keys",
+                      "action"
+                    ],
+                    "type": "object"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "removals": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "action": {
+                        "type": "string"
+                      },
+                      "keys": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": [
+                          "null",
+                          "array"
+                        ]
+                      },
+                      "mode": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "keys"
+                    ],
+                    "type": "object"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "server_actions": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {},
+                "category": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "keywords": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "repeats": {
+                  "type": "boolean"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "bindings": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "args": {},
+                "keys": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "keys",
+                "action"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "config": {
+            "additionalProperties": false,
+            "properties": {
+              "exists": {
+                "type": "boolean"
+              },
+              "generation": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "hash": {
+                "type": "string"
+              },
+              "instance_id": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "exists",
+              "generation",
+              "instance_id",
+              "hash"
+            ],
+            "type": "object"
+          },
+          "diagnostics": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "severity",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "modes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "blocked": {
+                  "items": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "exclusive": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "exclusive"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "bindings",
+          "diagnostics",
+          "config"
+        ],
+        "type": "object"
+      }
+    },
+    "client.list": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "clients": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "client_id": {
+                  "type": "string"
+                },
+                "connected_at": {
+                  "type": "string"
+                },
+                "connection_lost_at": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "connection_state": {
+                  "type": "string"
+                },
+                "info": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "platform": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "principal": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "display": {
+                      "type": "string"
+                    },
+                    "gid": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "login_name": {
+                      "type": "string"
+                    },
+                    "node": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "pid": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "remote_addr": {
+                      "type": "string"
+                    },
+                    "sid": {
+                      "type": "string"
+                    },
+                    "tags": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "transport": {
+                      "type": "string"
+                    },
+                    "uid": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "user_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "transport",
+                    "display"
+                  ],
+                  "type": "object"
+                },
+                "session_ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                }
+              },
+              "required": [
+                "client_id",
+                "principal",
+                "connected_at"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "clients"
+        ],
+        "type": "object"
+      }
+    },
+    "client.perform": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "args": {},
+          "block_id": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_id",
+          "action"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "performed_by": {
+            "type": "string"
+          },
+          "result": {}
+        },
+        "required": [
+          "performed_by"
+        ],
+        "type": "object"
+      }
+    },
+    "client.reply": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "call_id": {
+            "type": "string"
+          },
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "result": {}
+        },
+        "required": [
+          "call_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "client.set_label": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "client.set_script": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "scripts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "scripts"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "all_keys": {
+            "type": "boolean"
+          },
+          "bindings": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "diagnostics": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "severity",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "type": "object"
+      }
+    },
+    "com.superlogical.onboarding.set_step": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "step": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "generation"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.onboarding.state": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "step": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "generation"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.blob_read": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "eof": {
+            "type": "boolean"
+          },
+          "id": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "data",
+          "total",
+          "eof"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.clear": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.clipboard_read": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "type": "string"
+          },
+          "eof": {
+            "type": "boolean"
+          },
+          "id": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "data",
+          "total",
+          "eof"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.download_begin": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_in_ms": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "modified_at": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "not_modified": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "ticket": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "size",
+          "modified_at"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.format": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "eof": {
+            "type": "boolean"
+          },
+          "id": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.input_mode": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "canonical": {
+            "type": "boolean"
+          },
+          "echo": {
+            "type": "boolean"
+          },
+          "signals": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "echo",
+          "canonical",
+          "signals"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.list_dir": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "file": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "symlink": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "home": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "home",
+          "status",
+          "entries",
+          "truncated"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.modes": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "modes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "ansi": {
+                  "type": "boolean"
+                },
+                "default": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "number": {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "set": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name",
+                "number",
+                "set"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "screen": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "screen",
+          "modes"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.ports": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ports": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "address": {
+                  "type": "string"
+                },
+                "first_seen_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                },
+                "port": {
+                  "maximum": 65535,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "protocol": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "port",
+                "address",
+                "protocol",
+                "first_seen_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "processes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "argv0": {
+                  "type": "string"
+                },
+                "cwd": {
+                  "type": "string"
+                },
+                "invoked_path": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                },
+                "script": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                },
+                "user_id": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "pid",
+                "user_id",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "ports",
+          "processes"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.process": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "ancestors": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "argv0": {
+                  "type": "string"
+                },
+                "cwd": {
+                  "type": "string"
+                },
+                "invoked_path": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "pid": {
+                  "type": "integer"
+                },
+                "script": {
+                  "type": "string"
+                },
+                "user": {
+                  "type": "string"
+                },
+                "user_id": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "pid",
+                "user_id",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "child": {
+            "additionalProperties": false,
+            "properties": {
+              "argv0": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "invoked_path": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "integer"
+              },
+              "script": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              },
+              "user_id": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "pid",
+              "user_id",
+              "name"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "foreground": {
+            "additionalProperties": false,
+            "properties": {
+              "argv0": {
+                "type": "string"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "invoked_path": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "integer"
+              },
+              "script": {
+                "type": "string"
+              },
+              "user": {
+                "type": "string"
+              },
+              "user_id": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "pid",
+              "user_id",
+              "name"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "home": {
+            "type": "string"
+          },
+          "last_exit": {
+            "additionalProperties": false,
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "exit_code": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "exit_code"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "required": [
+          "last_exit"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.program_status": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "records": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "app": {
+                  "type": "string"
+                },
+                "effective_app": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "msg": {
+                  "type": "string"
+                },
+                "owner": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "pid": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "pid",
+                    "name"
+                  ],
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
+                "progress": {
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": [
+                    "null",
+                    "integer"
+                  ]
+                },
+                "state": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "updated_at": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "records"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.pwd": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "owner": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "pid",
+              "name"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "pwd": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.reset": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.resize": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.set_theme": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.size": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "cell_height_px": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cell_width_px": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "columns": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "desired": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "client_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "columns": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "rows": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "updated_at": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "client_id",
+                "columns",
+                "rows",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "owner": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rows": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "columns",
+          "rows",
+          "cell_width_px",
+          "cell_height_px",
+          "owner",
+          "desired"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.title": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "owner": {
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "pid": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "pid",
+              "name"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.upload_begin": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_in_ms": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ticket": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_in_ms"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.terminal.write": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes_written": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bytes_written"
+        ],
+        "type": "object"
+      }
+    },
+    "com.superlogical.tunnel.info": {
+      "input": null,
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "client_address": {
+            "type": "string"
+          },
+          "client_target": {
+            "type": "string"
+          },
+          "connections": {
+            "type": "integer"
+          },
+          "flavor": {
+            "type": "string"
+          },
+          "last_owner": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "flavor",
+          "connections"
+        ],
+        "type": "object"
+      }
+    },
+    "data.connect": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": "string"
+          },
+          "data_ref_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "subprotocol": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "block_id",
+          "data_ref_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_in_ms": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ticket": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_in_ms"
+        ],
+        "type": "object"
+      }
+    },
+    "focus_history.reverse": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "not_session_id": {
+            "type": "string"
+          },
+          "not_window_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": "string"
+          },
+          "cursor": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reversed": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reversed"
+        ],
+        "type": "object"
+      }
+    },
+    "help.all": {
+      "input": null,
+      "output": null
+    },
+    "hosts.list": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "severity",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "hash": {
+            "type": "string"
+          },
+          "hosts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "added_from": {
+                  "type": "string"
+                },
+                "endpoints": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "host_id": {
+                  "type": "string"
+                },
+                "icon": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "endpoints"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "hosts",
+          "hash"
+        ],
+        "type": "object"
+      }
+    },
+    "hosts.put": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "additionalProperties": false,
+            "properties": {
+              "added_from": {
+                "type": "string"
+              },
+              "endpoints": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "host_id": {
+                "type": "string"
+              },
+              "icon": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "updated_at": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "endpoints"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "host": {
+            "additionalProperties": false,
+            "properties": {
+              "added_from": {
+                "type": "string"
+              },
+              "endpoints": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "host_id": {
+                "type": "string"
+              },
+              "icon": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "updated_at": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "endpoints"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "host",
+          "hash"
+        ],
+        "type": "object"
+      }
+    },
+    "hosts.remove": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "removed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "removed",
+          "hash"
+        ],
+        "type": "object"
+      }
+    },
+    "server.apple.grant_file_access": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "token": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "access": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "access"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "type": "object"
+      }
+    },
+    "server.apple.privacy_status": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "responsible_path": {
+            "type": "string"
+          },
+          "services": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "service": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "service",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "services"
+        ],
+        "type": "object"
+      }
+    },
+    "server.config_reload": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "severity",
+                "message"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "generation": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generation",
+          "diagnostics"
+        ],
+        "type": "object"
+      }
+    },
+    "server.status": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "api_min_revision": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "api_revision": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "config": {
+            "additionalProperties": false,
+            "properties": {
+              "generation": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "hash": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "generation",
+              "hash"
+            ],
+            "type": "object"
+          },
+          "exit_empty": {
+            "type": "boolean"
+          },
+          "host_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "listeners": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "addresses": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "admission": {
+                  "type": "string"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "primary": {
+                  "type": "boolean"
+                },
+                "transport": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "endpoint",
+                "transport"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "session_count": {
+            "type": "integer"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "tailscale": {
+            "additionalProperties": false,
+            "properties": {
+              "account": {
+                "additionalProperties": false,
+                "properties": {
+                  "login_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "login_name"
+                ],
+                "type": "object"
+              },
+              "allow_tailnet_members": {
+                "type": "boolean"
+              },
+              "auth_url": {
+                "type": "string"
+              },
+              "control_url": {
+                "type": "string"
+              },
+              "dns_name": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "https": {
+                "additionalProperties": false,
+                "properties": {
+                  "state": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state"
+                ],
+                "type": "object"
+              },
+              "state": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "tailnet_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "allow_tailnet_members"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "pid",
+          "instance_id",
+          "started_at",
+          "exit_empty",
+          "session_count",
+          "config"
+        ],
+        "type": "object"
+      }
+    },
+    "server.stop": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "if_idle": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "server.tailscale.disable": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "tailscale": {
+            "additionalProperties": false,
+            "properties": {
+              "account": {
+                "additionalProperties": false,
+                "properties": {
+                  "login_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "login_name"
+                ],
+                "type": "object"
+              },
+              "allow_tailnet_members": {
+                "type": "boolean"
+              },
+              "auth_url": {
+                "type": "string"
+              },
+              "control_url": {
+                "type": "string"
+              },
+              "dns_name": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "https": {
+                "additionalProperties": false,
+                "properties": {
+                  "state": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state"
+                ],
+                "type": "object"
+              },
+              "state": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "tailnet_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "allow_tailnet_members"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "tailscale"
+        ],
+        "type": "object"
+      }
+    },
+    "server.tailscale.enable": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "advertise_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "allow_tailnet_members": {
+            "type": "boolean"
+          },
+          "auth_key": {
+            "type": "string"
+          },
+          "control_url": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "allow_tailnet_members"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "tailscale": {
+            "additionalProperties": false,
+            "properties": {
+              "account": {
+                "additionalProperties": false,
+                "properties": {
+                  "login_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "login_name"
+                ],
+                "type": "object"
+              },
+              "allow_tailnet_members": {
+                "type": "boolean"
+              },
+              "auth_url": {
+                "type": "string"
+              },
+              "control_url": {
+                "type": "string"
+              },
+              "dns_name": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "https": {
+                "additionalProperties": false,
+                "properties": {
+                  "state": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state"
+                ],
+                "type": "object"
+              },
+              "state": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "tailnet_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "allow_tailnet_members"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "tailscale"
+        ],
+        "type": "object"
+      }
+    },
+    "server.tailscale.login": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "tailscale": {
+            "additionalProperties": false,
+            "properties": {
+              "account": {
+                "additionalProperties": false,
+                "properties": {
+                  "login_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "login_name"
+                ],
+                "type": "object"
+              },
+              "allow_tailnet_members": {
+                "type": "boolean"
+              },
+              "auth_url": {
+                "type": "string"
+              },
+              "control_url": {
+                "type": "string"
+              },
+              "dns_name": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "https": {
+                "additionalProperties": false,
+                "properties": {
+                  "state": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state"
+                ],
+                "type": "object"
+              },
+              "state": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "tailnet_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "allow_tailnet_members"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "tailscale"
+        ],
+        "type": "object"
+      }
+    },
+    "server.tailscale.logout": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "tailscale": {
+            "additionalProperties": false,
+            "properties": {
+              "account": {
+                "additionalProperties": false,
+                "properties": {
+                  "login_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "login_name"
+                ],
+                "type": "object"
+              },
+              "allow_tailnet_members": {
+                "type": "boolean"
+              },
+              "auth_url": {
+                "type": "string"
+              },
+              "control_url": {
+                "type": "string"
+              },
+              "dns_name": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "https": {
+                "additionalProperties": false,
+                "properties": {
+                  "state": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state"
+                ],
+                "type": "object"
+              },
+              "state": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "tailnet_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "allow_tailnet_members"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "tailscale"
+        ],
+        "type": "object"
+      }
+    },
+    "server.tailscale.rename": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "hostname": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hostname"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "tailscale": {
+            "additionalProperties": false,
+            "properties": {
+              "account": {
+                "additionalProperties": false,
+                "properties": {
+                  "login_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "login_name"
+                ],
+                "type": "object"
+              },
+              "allow_tailnet_members": {
+                "type": "boolean"
+              },
+              "auth_url": {
+                "type": "string"
+              },
+              "control_url": {
+                "type": "string"
+              },
+              "dns_name": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "https": {
+                "additionalProperties": false,
+                "properties": {
+                  "state": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state"
+                ],
+                "type": "object"
+              },
+              "state": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "tailnet_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "allow_tailnet_members"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "tailscale"
+        ],
+        "type": "object"
+      }
+    },
+    "server.version": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "api_min_revision": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "api_revision": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "built_at": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "commit": {
+            "type": "string"
+          },
+          "dirty": {
+            "type": "boolean"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "rex_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rex_version",
+          "platform",
+          "dirty"
+        ],
+        "type": "object"
+      }
+    },
+    "server.whoami": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "principal": {
+            "additionalProperties": false,
+            "properties": {
+              "display": {
+                "type": "string"
+              },
+              "gid": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "kind": {
+                "type": "string"
+              },
+              "login_name": {
+                "type": "string"
+              },
+              "node": {
+                "type": "string"
+              },
+              "path": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "pid": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "remote_addr": {
+                "type": "string"
+              },
+              "sid": {
+                "type": "string"
+              },
+              "tags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "transport": {
+                "type": "string"
+              },
+              "uid": {
+                "type": [
+                  "null",
+                  "integer"
+                ]
+              },
+              "user_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "transport",
+              "display"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "principal"
+        ],
+        "type": "object"
+      }
+    },
+    "session.attach": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "view": {
+            "additionalProperties": false,
+            "properties": {
+              "active_window_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "revision": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "session_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "windows": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "focused_block_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "layers": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "blocks": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "block_id": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "creator_name": {
+                                  "type": "string"
+                                },
+                                "flavor": {
+                                  "type": "string"
+                                },
+                                "host_id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "owner": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "block_id"
+                              ],
+                              "type": "object"
+                            },
+                            "type": [
+                              "null",
+                              "array"
+                            ]
+                          },
+                          "bounds": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "maxItems": 4,
+                            "minItems": 4,
+                            "type": "array"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "layer_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "layout": {
+                            "$anchor": "view-layout-node",
+                            "properties": {
+                              "block_id": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "rect": {
+                                "items": {
+                                  "type": "number"
+                                },
+                                "maxItems": 4,
+                                "minItems": 4,
+                                "type": "array"
+                              },
+                              "split": {
+                                "properties": {
+                                  "after": {
+                                    "$ref": "#view-layout-node"
+                                  },
+                                  "before": {
+                                    "$ref": "#view-layout-node"
+                                  },
+                                  "direction": {
+                                    "enum": [
+                                      "horizontal",
+                                      "vertical"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "ratio": {
+                                    "type": "number"
+                                  },
+                                  "split_id": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "split_id",
+                                  "direction",
+                                  "ratio",
+                                  "before",
+                                  "after"
+                                ],
+                                "type": [
+                                  "object",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "rect"
+                            ],
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          },
+                          "state": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "layer_id",
+                          "kind",
+                          "bounds",
+                          "layout",
+                          "blocks"
+                        ],
+                        "type": "object"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "window_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "zoomed_block_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "window_id",
+                    "layers"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "revision",
+              "session_id"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "client_id",
+          "view"
+        ],
+        "type": "object"
+      }
+    },
+    "session.attach_all": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "event_scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_scope"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "session_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "session_id",
+                "label"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "type": "object"
+      }
+    },
+    "session.bootstrap": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "attach_session_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "data_tickets": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "creator_name": {
+                  "type": "string"
+                },
+                "data_ref_id": {
+                  "type": "string"
+                },
+                "subprotocol": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "creator_name",
+                "data_ref_id"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "event_scope": {
+            "type": "string"
+          },
+          "preferred_session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_scope"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "attach_all": {
+            "additionalProperties": false,
+            "properties": {
+              "sessions": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "session_id",
+                    "label"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "sessions"
+            ],
+            "type": "object"
+          },
+          "attached_sessions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "session": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "session_id",
+                    "label"
+                  ],
+                  "type": "object"
+                },
+                "view": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "active_window_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "session_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "windows": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "focused_block_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "layers": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "blocks": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "block_id": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "creator_name": {
+                                        "type": "string"
+                                      },
+                                      "flavor": {
+                                        "type": "string"
+                                      },
+                                      "host_id": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": "string"
+                                      },
+                                      "owner": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "block_id"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": [
+                                    "null",
+                                    "array"
+                                  ]
+                                },
+                                "bounds": {
+                                  "items": {
+                                    "type": "number"
+                                  },
+                                  "maxItems": 4,
+                                  "minItems": 4,
+                                  "type": "array"
+                                },
+                                "kind": {
+                                  "type": "string"
+                                },
+                                "layer_id": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "layout": {
+                                  "$anchor": "view-layout-node",
+                                  "properties": {
+                                    "block_id": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    },
+                                    "rect": {
+                                      "items": {
+                                        "type": "number"
+                                      },
+                                      "maxItems": 4,
+                                      "minItems": 4,
+                                      "type": "array"
+                                    },
+                                    "split": {
+                                      "properties": {
+                                        "after": {
+                                          "$ref": "#view-layout-node"
+                                        },
+                                        "before": {
+                                          "$ref": "#view-layout-node"
+                                        },
+                                        "direction": {
+                                          "enum": [
+                                            "horizontal",
+                                            "vertical"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "ratio": {
+                                          "type": "number"
+                                        },
+                                        "split_id": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "split_id",
+                                        "direction",
+                                        "ratio",
+                                        "before",
+                                        "after"
+                                      ],
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "rect"
+                                  ],
+                                  "type": [
+                                    "object",
+                                    "null"
+                                  ]
+                                },
+                                "state": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "layer_id",
+                                "kind",
+                                "bounds",
+                                "layout",
+                                "blocks"
+                              ],
+                              "type": "object"
+                            },
+                            "type": [
+                              "null",
+                              "array"
+                            ]
+                          },
+                          "window_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "zoomed_block_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "window_id",
+                          "layers"
+                        ],
+                        "type": "object"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "session_id"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "session",
+                "view"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "data_tickets": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "block_id": {
+                  "type": "string"
+                },
+                "data_ref_id": {
+                  "type": "string"
+                },
+                "expires_in_ms": {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "session_id": {
+                  "type": "string"
+                },
+                "subprotocol": {
+                  "type": "string"
+                },
+                "ticket": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "session_id",
+                "block_id",
+                "data_ref_id",
+                "ticket",
+                "expires_in_ms"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "selected_session": {
+            "additionalProperties": false,
+            "properties": {
+              "session": {
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "type": "string"
+                  },
+                  "session_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "label"
+                ],
+                "type": "object"
+              },
+              "view": {
+                "additionalProperties": false,
+                "properties": {
+                  "active_window_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "session_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "windows": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "focused_block_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "layers": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "blocks": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "block_id": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    },
+                                    "creator_name": {
+                                      "type": "string"
+                                    },
+                                    "flavor": {
+                                      "type": "string"
+                                    },
+                                    "host_id": {
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "owner": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "block_id"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": [
+                                  "null",
+                                  "array"
+                                ]
+                              },
+                              "bounds": {
+                                "items": {
+                                  "type": "number"
+                                },
+                                "maxItems": 4,
+                                "minItems": 4,
+                                "type": "array"
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "layer_id": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "layout": {
+                                "$anchor": "view-layout-node",
+                                "properties": {
+                                  "block_id": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "rect": {
+                                    "items": {
+                                      "type": "number"
+                                    },
+                                    "maxItems": 4,
+                                    "minItems": 4,
+                                    "type": "array"
+                                  },
+                                  "split": {
+                                    "properties": {
+                                      "after": {
+                                        "$ref": "#view-layout-node"
+                                      },
+                                      "before": {
+                                        "$ref": "#view-layout-node"
+                                      },
+                                      "direction": {
+                                        "enum": [
+                                          "horizontal",
+                                          "vertical"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "ratio": {
+                                        "type": "number"
+                                      },
+                                      "split_id": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "split_id",
+                                      "direction",
+                                      "ratio",
+                                      "before",
+                                      "after"
+                                    ],
+                                    "type": [
+                                      "object",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "rect"
+                                ],
+                                "type": [
+                                  "object",
+                                  "null"
+                                ]
+                              },
+                              "state": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "layer_id",
+                              "kind",
+                              "bounds",
+                              "layout",
+                              "blocks"
+                            ],
+                            "type": "object"
+                          },
+                          "type": [
+                            "null",
+                            "array"
+                          ]
+                        },
+                        "window_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "zoomed_block_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "window_id",
+                        "layers"
+                      ],
+                      "type": "object"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "revision",
+                  "session_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "session",
+              "view"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "server_status": {
+            "additionalProperties": false,
+            "properties": {
+              "api_min_revision": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "api_revision": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "config": {
+                "additionalProperties": false,
+                "properties": {
+                  "generation": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "hash": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "generation",
+                  "hash"
+                ],
+                "type": "object"
+              },
+              "exit_empty": {
+                "type": "boolean"
+              },
+              "host_id": {
+                "type": "string"
+              },
+              "instance_id": {
+                "type": "string"
+              },
+              "listeners": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "addresses": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "admission": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "primary": {
+                      "type": "boolean"
+                    },
+                    "transport": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "endpoint",
+                    "transport"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "pid": {
+                "type": "integer"
+              },
+              "session_count": {
+                "type": "integer"
+              },
+              "started_at": {
+                "type": "string"
+              },
+              "tailscale": {
+                "additionalProperties": false,
+                "properties": {
+                  "account": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "login_name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "login_name"
+                    ],
+                    "type": "object"
+                  },
+                  "allow_tailnet_members": {
+                    "type": "boolean"
+                  },
+                  "auth_url": {
+                    "type": "string"
+                  },
+                  "control_url": {
+                    "type": "string"
+                  },
+                  "dns_name": {
+                    "type": "string"
+                  },
+                  "error": {
+                    "type": "string"
+                  },
+                  "https": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "state": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "state"
+                    ],
+                    "type": "object"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "tailnet_name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "allow_tailnet_members"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "pid",
+              "instance_id",
+              "started_at",
+              "exit_empty",
+              "session_count",
+              "config"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "client_id",
+          "server_status",
+          "attach_all",
+          "selected_session"
+        ],
+        "type": "object"
+      }
+    },
+    "session.close_layer": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "layer_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "layer_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.close_window": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.create": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "initial_windows": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "layout": {
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
+                "window_label": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "initial_windows": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "block_ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "revision": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "window_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "window_id",
+                "block_ids",
+                "revision"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      }
+    },
+    "session.describe_block": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "block_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "api": {
+            "additionalProperties": false,
+            "properties": {
+              "events": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "methods": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "actions": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "args": {},
+                          "category": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "keywords": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "repeats": {
+                            "type": "boolean"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "title"
+                        ],
+                        "type": "object"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "input_schema": {},
+                    "output_schema": {}
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "block": {
+            "additionalProperties": false,
+            "properties": {
+              "block_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "creator_name": {
+                "type": "string"
+              },
+              "flavor": {
+                "type": "string"
+              },
+              "host_id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "owner": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "placement": {
+                "type": "string"
+              },
+              "window_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "block_id",
+              "label",
+              "placement"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "block"
+        ],
+        "type": "object"
+      }
+    },
+    "session.destroy": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "session.detach": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "session.detach_block": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "block_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.disown_block": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_ids": {
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "block_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "owner": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "block_id"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "type": "object"
+      }
+    },
+    "session.float_block": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bounds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 4,
+                "minItems": 4,
+                "type": "array"
+              },
+              {
+                "properties": {
+                  "h": {
+                    "type": "number"
+                  },
+                  "w": {
+                    "type": "number"
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "block_id",
+          "bounds"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "layer_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "layer_id",
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.focus_block": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "block_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.focus_direction": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "left",
+              "right",
+              "up",
+              "down"
+            ],
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "wrap": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "session_id",
+          "direction"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.focus_next_pane": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "wrap": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.focus_next_window": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "wrap": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.focus_previous_pane": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "wrap": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.focus_previous_window": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "wrap": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.focus_window": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "window_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.help": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": null
+    },
+    "session.list": {
+      "input": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "session_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "session_id",
+                "label"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "type": "object"
+      }
+    },
+    "session.list_blocks": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "block_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "creator_name": {
+                  "type": "string"
+                },
+                "flavor": {
+                  "type": "string"
+                },
+                "host_id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "owner": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "placement": {
+                  "type": "string"
+                },
+                "window_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "block_id",
+                "label",
+                "placement"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "type": "object"
+      }
+    },
+    "session.list_clients": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "clients": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "client_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "connected_at": {
+                  "type": "string"
+                },
+                "connection_lost_at": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                },
+                "connection_state": {
+                  "type": "string"
+                },
+                "info": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "platform": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "principal": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "display": {
+                      "type": "string"
+                    },
+                    "gid": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "login_name": {
+                      "type": "string"
+                    },
+                    "node": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "pid": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "remote_addr": {
+                      "type": "string"
+                    },
+                    "sid": {
+                      "type": "string"
+                    },
+                    "tags": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "transport": {
+                      "type": "string"
+                    },
+                    "uid": {
+                      "type": [
+                        "null",
+                        "integer"
+                      ]
+                    },
+                    "user_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "transport",
+                    "display"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "client_id",
+                "principal",
+                "connected_at"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "clients"
+        ],
+        "type": "object"
+      }
+    },
+    "session.lower_layer": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "layer_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "relative_layer_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "layer_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.move": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "before_session_id": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "type": "object"
+      }
+    },
+    "session.move_block": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "direction": {
+            "enum": [
+              "horizontal",
+              "vertical"
+            ],
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "side": {
+            "enum": [
+              "before",
+              "after"
+            ],
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "block_id",
+          "anchor_block_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "created_split_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "removed_split_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created_split_id",
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.move_window": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "before_window_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "window_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.new_block": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "flavor": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "options": {},
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "flavor"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "block_id",
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.new_layer": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "bounds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 4,
+                "minItems": 4,
+                "type": "array"
+              },
+              {
+                "properties": {
+                  "h": {
+                    "type": "number"
+                  },
+                  "w": {
+                    "type": "number"
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "focus": {
+            "type": "boolean"
+          },
+          "layout": {
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "bounds",
+          "layout"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "block_ids": {
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "layer_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "layer_id",
+          "block_ids",
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.new_split": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "direction": {
+            "enum": [
+              "horizontal",
+              "vertical"
+            ],
+            "type": "string"
+          },
+          "focus": {
+            "type": "boolean"
+          },
+          "layout": {
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "side": {
+            "enum": [
+              "before",
+              "after"
+            ],
+            "type": "string"
+          },
+          "window_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "direction",
+          "side",
+          "layout"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "block_ids": {
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "split_ids": {
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "anchor_id",
+          "block_ids",
+          "split_ids",
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.new_window": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "focus": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "layout": {
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "window_label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "block_ids": {
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "window_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "window_id",
+          "block_ids",
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.own_block": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_ids": {
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "mode": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "block_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "owner": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "block_id"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "type": "object"
+      }
+    },
+    "session.raise_layer": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "layer_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "relative_layer_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "layer_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.resize_layer": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "bounds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "maxItems": 4,
+                "minItems": 4,
+                "type": "array"
+              },
+              {
+                "properties": {
+                  "h": {
+                    "type": "number"
+                  },
+                  "w": {
+                    "type": "number"
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "layer_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "layer_id",
+          "bounds"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.resize_pane": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "after_block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "before_block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "direction": {
+            "enum": [
+              "horizontal",
+              "vertical"
+            ],
+            "type": "string"
+          },
+          "ratio": {
+            "type": "number"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "direction",
+          "before_block_id",
+          "after_block_id",
+          "ratio"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.set_block_label": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.set_label": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.set_layer_state": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "focus": {
+            "type": "boolean"
+          },
+          "layer_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "layer_id",
+          "state"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.set_window_label": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "window_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.swap_blocks": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "other_block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "block_id",
+          "other_block_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "session.view": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "active_window_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "windows": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "focused_block_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "layers": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "blocks": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "block_id": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "creator_name": {
+                              "type": "string"
+                            },
+                            "flavor": {
+                              "type": "string"
+                            },
+                            "host_id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "owner": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "block_id"
+                          ],
+                          "type": "object"
+                        },
+                        "type": [
+                          "null",
+                          "array"
+                        ]
+                      },
+                      "bounds": {
+                        "items": {
+                          "type": "number"
+                        },
+                        "maxItems": 4,
+                        "minItems": 4,
+                        "type": "array"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "layer_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "layout": {
+                        "$anchor": "view-layout-node",
+                        "properties": {
+                          "block_id": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rect": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "maxItems": 4,
+                            "minItems": 4,
+                            "type": "array"
+                          },
+                          "split": {
+                            "properties": {
+                              "after": {
+                                "$ref": "#view-layout-node"
+                              },
+                              "before": {
+                                "$ref": "#view-layout-node"
+                              },
+                              "direction": {
+                                "enum": [
+                                  "horizontal",
+                                  "vertical"
+                                ],
+                                "type": "string"
+                              },
+                              "ratio": {
+                                "type": "number"
+                              },
+                              "split_id": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "split_id",
+                              "direction",
+                              "ratio",
+                              "before",
+                              "after"
+                            ],
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "rect"
+                        ],
+                        "type": [
+                          "object",
+                          "null"
+                        ]
+                      },
+                      "state": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "layer_id",
+                      "kind",
+                      "bounds",
+                      "layout",
+                      "blocks"
+                    ],
+                    "type": "object"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "window_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "zoomed_block_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "window_id",
+                "layers"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "revision",
+          "session_id"
+        ],
+        "type": "object"
+      }
+    },
+    "session.zoom_block": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "zoom": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "block_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "zoomed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "block_id",
+          "zoomed",
+          "revision"
+        ],
+        "type": "object"
+      }
+    },
+    "target.complete": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "additionalProperties": false,
+            "properties": {
+              "block_id": {
+                "type": "string"
+              },
+              "client_id": {
+                "type": "string"
+              },
+              "session_id": {
+                "type": "string"
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "scope": {
+            "additionalProperties": false,
+            "properties": {
+              "session": {
+                "type": "string"
+              },
+              "window": {
+                "type": "string"
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "required": [
+          "kinds",
+          "prefix"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "completions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "form": {
+                  "type": "string"
+                },
+                "target": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "block_id": {
+                      "type": "string"
+                    },
+                    "client_id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "ordinal": {
+                      "type": "integer"
+                    },
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "where": {
+                      "type": "string"
+                    },
+                    "window_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "label"
+                  ],
+                  "type": "object"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "form",
+                "target"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "completions"
+        ],
+        "type": "object"
+      }
+    },
+    "target.resolve": {
+      "input": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "additionalProperties": false,
+            "properties": {
+              "block_id": {
+                "type": "string"
+              },
+              "client_id": {
+                "type": "string"
+              },
+              "session_id": {
+                "type": "string"
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "queries": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "scope": {
+            "additionalProperties": false,
+            "properties": {
+              "session": {
+                "type": "string"
+              },
+              "window": {
+                "type": "string"
+              }
+            },
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "required": [
+          "kinds",
+          "queries"
+        ],
+        "type": "object"
+      },
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "results": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "candidates": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "block_id": {
+                        "type": "string"
+                      },
+                      "client_id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "ordinal": {
+                        "type": "integer"
+                      },
+                      "session_id": {
+                        "type": "string"
+                      },
+                      "where": {
+                        "type": "string"
+                      },
+                      "window_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "label"
+                    ],
+                    "type": "object"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "query": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "target": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "block_id": {
+                      "type": "string"
+                    },
+                    "client_id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "ordinal": {
+                      "type": "integer"
+                    },
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "where": {
+                      "type": "string"
+                    },
+                    "window_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "label"
+                  ],
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                }
+              },
+              "required": [
+                "query",
+                "status"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

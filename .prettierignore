@@ -19,3 +19,5 @@ packages/plugin-api/src/index.d.ts
 crates/lume-plugin-runtime/src/prelude.generated.js
 docs/plugins/api.md
 packages/ui/src/shell/places.generated.ts
+crates/lume-rex/api/
+crates/lume-rex/tests/fixtures/

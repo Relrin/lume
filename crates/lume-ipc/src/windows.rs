@@ -64,7 +64,7 @@ fn check(ok: windows_sys::core::BOOL) -> io::Result<()> {
 }
 
 /// The current user's security identifier in its textual form, `S-1-5-21-…`.
-fn user_sid() -> io::Result<&'static str> {
+pub(crate) fn user_sid() -> io::Result<&'static str> {
     static SID: OnceLock<String> = OnceLock::new();
     if let Some(sid) = SID.get() {
         return Ok(sid);

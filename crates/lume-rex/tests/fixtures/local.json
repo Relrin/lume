@@ -1,0 +1,807 @@
+{
+  "api_revision": 19,
+  "messages": [
+    {
+      "message": {
+        "api_min_revision": 19,
+        "api_revision": 19,
+        "client": {
+          "kind": "other",
+          "name": "lume-rex-record",
+          "version": "0"
+        },
+        "type": "hello"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "api_revision": 19,
+        "api_server_revision": 19,
+        "client": {
+          "id": "client:01a20561-13f9-73bc-8c9f-1251831619d1",
+          "reconnect_token": "TOKEN"
+        },
+        "limits": {
+          "max_message_bytes": 1048576
+        },
+        "protocol": "rex.control.v1",
+        "type": "welcome"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "1",
+        "method": "server.version",
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "id": "1",
+        "payload": {
+          "api_revision": 19,
+          "built_at": "2026-11-19T19:29:44Z",
+          "commit": "a086db17db8d464627c77e3bb0be6d462668b0ac",
+          "dirty": false,
+          "platform": "windows_amd64",
+          "rex_version": "0.1.0-preview.22"
+        },
+        "seq": 0,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "2",
+        "method": "session.attach_all",
+        "payload": {
+          "event_scope": "session"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "id": "2",
+        "payload": {
+          "sessions": []
+        },
+        "seq": 0,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "3",
+        "method": "session.create",
+        "payload": {
+          "initial_windows": [
+            {
+              "layout": {
+                "block": {
+                  "flavor": "com.superlogical.terminal.shell"
+                }
+              }
+            }
+          ],
+          "label": "lume-fixture"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "session": {
+              "label": "lume-fixture",
+              "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+            }
+          },
+          "type": "session_created"
+        },
+        "seq": 1,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "3",
+        "payload": {
+          "initial_windows": [
+            {
+              "block_ids": [
+                "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c"
+              ],
+              "revision": 1,
+              "window_id": "window:01a20561-1427-73ca-9613-b2e97eefec8d"
+            }
+          ],
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+        },
+        "seq": 0,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "4",
+        "method": "session.attach",
+        "payload": {
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "client_id": "client:01a20561-13f9-73bc-8c9f-1251831619d1",
+                "connected_at": "2026-11-22T23:29:38.3625309+01:00",
+                "principal": {
+                  "display": "S-1-5-21-0-0-0-1000",
+                  "kind": "windows_peer",
+                  "pid": 1000,
+                  "remote_addr": "\\\\.\\pipe\\rex-S-1-5-21-0-0-0-1000",
+                  "sid": "S-1-5-21-0-0-0-1000",
+                  "transport": "named_pipe"
+                }
+              },
+              "type": "client_connected"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 2,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "4",
+        "payload": {
+          "client_id": "client:01a20561-13f9-73bc-8c9f-1251831619d1",
+          "view": {
+            "active_window_id": "window:01a20561-1427-73ca-9613-b2e97eefec8d",
+            "label": "lume-fixture",
+            "revision": 1,
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade",
+            "windows": [
+              {
+                "focused_block_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+                "label": "Window 7eefec8d",
+                "layers": [
+                  {
+                    "blocks": [
+                      {
+                        "block_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+                        "creator_name": "com.superlogical.terminal",
+                        "flavor": "com.superlogical.terminal.shell",
+                        "host_id": "d8a4a754-f191-48c6-ba46-20bb03259307",
+                        "label": "shell"
+                      }
+                    ],
+                    "bounds": [
+                      0,
+                      0,
+                      1,
+                      1
+                    ],
+                    "kind": "tiled",
+                    "layer_id": "layer:01a20561-1427-73cb-9ac9-0e89c9c7e73a",
+                    "layout": {
+                      "block_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+                      "rect": [
+                        0,
+                        0,
+                        1,
+                        1
+                      ]
+                    }
+                  }
+                ],
+                "window_id": "window:01a20561-1427-73ca-9613-b2e97eefec8d"
+              }
+            ]
+          }
+        },
+        "seq": 1,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "5",
+        "method": "com.superlogical.terminal.size",
+        "payload": {
+          "block_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "id": "5",
+        "payload": {
+          "cell_height_px": 16,
+          "cell_width_px": 8,
+          "columns": 80,
+          "desired": [],
+          "owner": null,
+          "rows": 24
+        },
+        "seq": 2,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "6",
+        "method": "com.superlogical.terminal.process",
+        "payload": {
+          "block_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "id": "6",
+        "payload": {
+          "child": {
+            "cwd": "/home/user",
+            "name": "powershell.exe",
+            "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "pid": 1000,
+            "user": "MACHINE\\user",
+            "user_id": 1000
+          },
+          "foreground": {
+            "cwd": "/home/user",
+            "name": "powershell.exe",
+            "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            "pid": 1000,
+            "user": "MACHINE\\user",
+            "user_id": 1000
+          },
+          "home": "/home/user",
+          "last_exit": null
+        },
+        "seq": 2,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "7",
+        "method": "com.superlogical.terminal.title",
+        "payload": {
+          "block_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "id": "7",
+        "payload": {
+          "title": ""
+        },
+        "seq": 2,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "8",
+        "method": "session.new_split",
+        "payload": {
+          "anchor_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+          "direction": "horizontal",
+          "layout": {
+            "block": {
+              "flavor": "com.superlogical.terminal.shell"
+            }
+          },
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade",
+          "side": "after"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "block_id": "block:01a20561-20bf-7341-a9b1-5f1a050632e1"
+              },
+              "type": "block_created"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 3,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "block_id": "block:01a20561-20bf-7341-a9b1-5f1a050632e1",
+                "owner": "client:01a20561-13f9-73bc-8c9f-1251831619d1",
+                "reason": "create"
+              },
+              "type": "block_owner_changed"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 4,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "revision": 2
+              },
+              "type": "session_view_changed"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 5,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "block_id": "block:01a20561-20bf-7341-a9b1-5f1a050632e1",
+                "creator_name": "com.superlogical.terminal",
+                "name": "process_changed",
+                "payload": {
+                  "foreground": {
+                    "cwd": "/home/user",
+                    "name": "powershell.exe",
+                    "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                    "pid": 1000,
+                    "user": "MACHINE\\user",
+                    "user_id": 1000
+                  },
+                  "generation": 1
+                }
+              },
+              "type": "block_event"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 6,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "8",
+        "payload": {
+          "anchor_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+          "block_ids": [
+            "block:01a20561-20bf-7341-a9b1-5f1a050632e1"
+          ],
+          "revision": 2,
+          "split_ids": [
+            "split:01a20561-20ea-7c46-9500-cecdda8a3fa3"
+          ]
+        },
+        "seq": 2,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "9",
+        "method": "session.view",
+        "payload": {
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "id": "9",
+        "payload": {
+          "active_window_id": "window:01a20561-1427-73ca-9613-b2e97eefec8d",
+          "label": "lume-fixture",
+          "revision": 2,
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade",
+          "windows": [
+            {
+              "focused_block_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+              "label": "Window 7eefec8d",
+              "layers": [
+                {
+                  "blocks": [
+                    {
+                      "block_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+                      "creator_name": "com.superlogical.terminal",
+                      "flavor": "com.superlogical.terminal.shell",
+                      "host_id": "d8a4a754-f191-48c6-ba46-20bb03259307",
+                      "label": "shell"
+                    },
+                    {
+                      "block_id": "block:01a20561-20bf-7341-a9b1-5f1a050632e1",
+                      "creator_name": "com.superlogical.terminal",
+                      "flavor": "com.superlogical.terminal.shell",
+                      "host_id": "d8a4a754-f191-48c6-ba46-20bb03259307",
+                      "label": "shell",
+                      "owner": "client:01a20561-13f9-73bc-8c9f-1251831619d1"
+                    }
+                  ],
+                  "bounds": [
+                    0,
+                    0,
+                    1,
+                    1
+                  ],
+                  "kind": "tiled",
+                  "layer_id": "layer:01a20561-1427-73cb-9ac9-0e89c9c7e73a",
+                  "layout": {
+                    "rect": [
+                      0,
+                      0,
+                      1,
+                      1
+                    ],
+                    "split": {
+                      "after": {
+                        "block_id": "block:01a20561-20bf-7341-a9b1-5f1a050632e1",
+                        "rect": [
+                          0.5,
+                          0,
+                          0.5,
+                          1
+                        ]
+                      },
+                      "before": {
+                        "block_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c",
+                        "rect": [
+                          0,
+                          0,
+                          0.5,
+                          1
+                        ]
+                      },
+                      "direction": "horizontal",
+                      "ratio": 0.5,
+                      "split_id": "split:01a20561-20ea-7c46-9500-cecdda8a3fa3"
+                    }
+                  }
+                }
+              ],
+              "window_id": "window:01a20561-1427-73ca-9613-b2e97eefec8d"
+            }
+          ]
+        },
+        "seq": 6,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "10",
+        "method": "session.set_label",
+        "payload": {
+          "label": "lume-fixture-renamed",
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "label": "lume-fixture-renamed"
+              },
+              "type": "session_label_changed"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 7,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "revision": 3
+              },
+              "type": "session_view_changed"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 8,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "10",
+        "payload": {
+          "revision": 3
+        },
+        "seq": 6,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "11",
+        "method": "session.view",
+        "payload": {
+          "session_id": "session:00000000-0000-7000-8000-000000000000"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "error": {
+          "code": "session_not_found",
+          "message": "session session:00000000-0000-7000-8000-000000000000 not found",
+          "status": 404
+        },
+        "id": "11",
+        "seq": 8,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "12",
+        "method": "com.superlogical.terminal.size",
+        "payload": {
+          "block_id": "block:00000000-0000-7000-8000-000000000000",
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "error": {
+          "code": "not_found",
+          "message": "block not found: block:00000000-0000-7000-8000-000000000000",
+          "status": 404
+        },
+        "id": "12",
+        "seq": 8,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "13",
+        "method": "no.such_method",
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "error": {
+          "code": "method_not_found",
+          "message": "netapi: no handler for method \"no.such_method\"",
+          "status": 404
+        },
+        "id": "13",
+        "seq": 8,
+        "type": "response"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "14",
+        "method": "session.destroy",
+        "payload": {
+          "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+        },
+        "type": "request"
+      },
+      "way": "sent"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "client_id": "client:01a20561-13f9-73bc-8c9f-1251831619d1",
+                "principal": {
+                  "display": "S-1-5-21-0-0-0-1000",
+                  "kind": "windows_peer",
+                  "pid": 1000,
+                  "remote_addr": "\\\\.\\pipe\\rex-S-1-5-21-0-0-0-1000",
+                  "sid": "S-1-5-21-0-0-0-1000",
+                  "transport": "named_pipe"
+                }
+              },
+              "type": "client_disconnected"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 9,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "block_id": "block:01a20561-20bf-7341-a9b1-5f1a050632e1"
+              },
+              "type": "block_closed"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 10,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "revision": 4
+              },
+              "type": "session_view_changed"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 11,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "block_id": "block:01a20561-13fa-7b5c-a0d0-72bcc08f691c"
+              },
+              "type": "block_closed"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 12,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "event": {
+              "payload": {
+                "revision": 5
+              },
+              "type": "session_view_changed"
+            },
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_event"
+        },
+        "seq": 13,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "payload": {
+          "payload": {
+            "session_id": "session:01a20561-13fa-7b5b-9dda-f7d9812a7ade"
+          },
+          "type": "session_destroyed"
+        },
+        "seq": 14,
+        "type": "event"
+      },
+      "way": "received"
+    },
+    {
+      "message": {
+        "id": "14",
+        "payload": {},
+        "seq": 8,
+        "type": "response"
+      },
+      "way": "received"
+    }
+  ]
+}
