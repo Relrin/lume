@@ -526,6 +526,14 @@ impl World {
             "block.close" => {
                 view.map(|_| json!({ "block_id": asked.payload["block_id"], "revision": 9 }))
             }
+            "com.superlogical.terminal.pwd" => {
+                view.map(|_| json!({ "pwd": "file://recorded/home/someone" }))
+            }
+            "com.superlogical.terminal.program_status" => view.map(|_| {
+                json!({ "records": [
+                    { "state": "working", "app": "cargo", "updated_at": "2026-11-23T10:00:00Z" },
+                ] })
+            }),
             "data.connect" => view.map(|_| json!({ "ticket": TICKET, "expires_in_ms": 60_000 })),
             "com.superlogical.terminal.format" => view.map(|_| {
                 let mut reply = json!({ "content": self.screen[0] });

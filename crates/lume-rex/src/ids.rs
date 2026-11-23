@@ -47,6 +47,11 @@ impl Ids {
         id
     }
 
+    /// The number of a block that was given one.
+    pub(crate) fn known(&self, block_id: &str) -> Option<SessionId> {
+        self.by_block.get(block_id).copied()
+    }
+
     /// The block a number names, if it names one.
     pub(crate) fn block(&self, id: SessionId) -> Option<&BlockRef> {
         self.by_id.get(&id)

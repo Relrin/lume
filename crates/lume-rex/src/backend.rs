@@ -141,6 +141,17 @@ impl Shared {
         self.link.subscribe()
     }
 
+    /// Whether the server's terminals take lines back out of scrollback when they
+    /// grow taller, which a view's own terminal must then do as well. A server on
+    /// Windows runs its programs behind the system's console host, which redraws the
+    /// screen for itself, and its terminals leave the scrollback where it is.
+    pub(crate) fn resize_pulls_scrollback(&self) -> bool {
+        match &*self.link.borrow() {
+            Link::Connected(version) => !version.platform.starts_with("windows"),
+            _ => true,
+        }
+    }
+
     /// Notes that a terminal's feed is over, so that the terminal can be attached to
     /// anew.
     pub(crate) fn forget(&self, id: SessionId, serial: u64) {
@@ -633,6 +644,17 @@ fn apply(shared: &Shared, event: ServerEvent) -> Option<String> {
             let held = state.opened.get(&session_id)?;
             let stale = held.as_ref().is_none_or(|view| view.revision < revision);
             return stale.then_some(session_id);
+        }
+        // A terminal's reports go to the views of the terminal, where it has any.
+        ServerEvent::Block { block_id, events } => {
+            let feed = state
+                .ids
+                .known(&block_id)
+                .and_then(|id| state.feeds.get(&id));
+            if let Some(feed) = feed {
+                feed.report(events);
+            }
+            return None;
         }
         // What was dropped is read again by whoever follows the events.
         ServerEvent::Dropped { .. } | ServerEvent::Other => return None,

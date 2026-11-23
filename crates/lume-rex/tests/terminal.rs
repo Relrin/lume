@@ -10,7 +10,8 @@ use common::{
     DATA_TOKEN, DataSide, Listener, NONCE, SESSION, Served, Tell, World, client, serve, streams,
 };
 use lume_proto::{
-    CellPx, ClientFacts, ColorScheme, ErrorCode, ExitStatus, Palette, SessionId, TermSize,
+    CellPx, ClientFacts, ColorScheme, ErrorCode, ExitStatus, Palette, ProgramState, ProgramStatus,
+    SessionEvent, SessionId, TermSize,
 };
 use lume_rex::RexBackend;
 use lume_rex::tuning::PENDING_MAX_BYTES;
@@ -96,16 +97,35 @@ impl Setup {
     }
 }
 
-/// The next frame of an attachment, or `None` once it is over.
-async fn frame(attachment: &mut Attachment) -> Option<OutputFrame> {
+/// The next frame of an attachment, of whatever kind, or `None` once it is over.
+async fn any_frame(attachment: &mut Attachment) -> Option<OutputFrame> {
     tokio::time::timeout(Duration::from_secs(20), attachment.output.next())
         .await
         .expect("no frame came")
 }
 
-/// Whether nothing more comes of an attachment for a moment.
+/// The next frame of an attachment that is not a report of the terminal's, or `None`
+/// once it is over.
+async fn frame(attachment: &mut Attachment) -> Option<OutputFrame> {
+    loop {
+        match any_frame(attachment).await {
+            Some(OutputFrame::Event(_)) => {}
+            other => return other,
+        }
+    }
+}
+
+/// Whether nothing but reports comes of an attachment for a moment.
 async fn quiet(attachment: &mut Attachment) -> bool {
-    tokio::time::timeout(Duration::from_millis(150), attachment.output.next())
+    let waiting = async {
+        loop {
+            match attachment.output.next().await {
+                Some(OutputFrame::Event(_)) => {}
+                _ => return,
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_millis(150), waiting)
         .await
         .is_err()
 }
@@ -714,4 +734,169 @@ async fn a_backend_that_is_shut_down_ends_its_attachments() {
     setup.backend.shutdown();
     assert_eq!(frame(&mut attachment).await, None);
     assert_eq!(side.closed_by_client().await, Some(1000));
+}
+
+#[tokio::test]
+async fn what_a_terminal_reports_of_itself_reaches_its_views() {
+    let mut setup = setup().await;
+    let block = setup
+        .backend
+        .view(SESSION)
+        .unwrap()
+        .blocks()
+        .find(|block| block.is_terminal())
+        .and_then(|block| block.block_id.clone())
+        .unwrap();
+    let (mut first, side) = setup.attach("first").await;
+
+    // A view is told first what the terminal reported before it came.
+    let Some(OutputFrame::Event(SessionEvent::State { state })) = any_frame(&mut first).await
+    else {
+        panic!("no state");
+    };
+    assert_eq!(state.cwd.as_deref(), Some("file://recorded/home/someone"));
+    assert!(state.foreground.is_some());
+    assert_eq!(state.statuses.len(), 1);
+    assert_eq!(state.statuses[0].state, ProgramState::Working);
+    assert_eq!(state.statuses[0].app.as_deref(), Some("cargo"));
+
+    let closed = tokio::spawn(async move {
+        let mut side = side;
+        side.closed_by_client().await
+    });
+    let (mut second, _side) = setup.attach("second").await;
+    closed.await.unwrap();
+    assert!(matches!(
+        any_frame(&mut second).await,
+        Some(OutputFrame::Event(SessionEvent::State { .. }))
+    ));
+    assert!(matches!(
+        any_frame(&mut first).await,
+        Some(OutputFrame::Hydrate(_))
+    ));
+
+    let report = |block: &str, creator: &str, name: &str, payload: serde_json::Value| {
+        Tell::SessionEvent(
+            SESSION.to_owned(),
+            "block_event".to_owned(),
+            json!({ "block_id": block, "creator_name": creator, "name": name, "payload": payload }),
+        )
+    };
+    let terminal = "com.superlogical.terminal";
+    // Of another block, of a block that is no terminal, and of no use to anyone.
+    setup
+        .served
+        .tell(report("block:other", terminal, "bell", json!({})));
+    setup
+        .served
+        .tell(report(&block, "com.superlogical.tunnel", "bell", json!({})));
+    setup.served.tell(report(
+        &block,
+        terminal,
+        "clipboard_written",
+        json!({ "text": "secret" }),
+    ));
+    setup.served.tell(report(
+        &block,
+        terminal,
+        "title_changed",
+        json!({ "title": 7 }),
+    ));
+    // And what the views are told, in order.
+    setup.served.tell(report(
+        &block,
+        terminal,
+        "title_changed",
+        json!({ "title": "vim" }),
+    ));
+    setup
+        .served
+        .tell(report(&block, terminal, "bell", json!({})));
+    setup.served.tell(report(
+        &block,
+        terminal,
+        "program_status_removed",
+        json!({ "ids": [""], "reason": "exit" }),
+    ));
+    for view in [&mut first, &mut second] {
+        assert_eq!(
+            any_frame(view).await,
+            Some(OutputFrame::Event(SessionEvent::Title {
+                title: "vim".to_owned()
+            }))
+        );
+        assert_eq!(
+            any_frame(view).await,
+            Some(OutputFrame::Event(SessionEvent::Bell))
+        );
+        assert_eq!(
+            any_frame(view).await,
+            Some(OutputFrame::Event(SessionEvent::ProgramStatus(
+                ProgramStatus::new(ProgramState::Clear, None)
+            )))
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_reports_a_real_server_sent_are_read() {
+    let mut setup = setup().await;
+    let block = setup
+        .backend
+        .view(SESSION)
+        .unwrap()
+        .blocks()
+        .find(|block| block.is_terminal())
+        .and_then(|block| block.block_id.clone())
+        .unwrap();
+    let (mut view, _side) = setup.attach("first").await;
+    assert!(matches!(
+        any_frame(&mut view).await,
+        Some(OutputFrame::Event(SessionEvent::State { .. }))
+    ));
+
+    // Every report of a block that was recorded, as if it were of this terminal.
+    let recorded = common::Recorded::load();
+    let mut sent = 0;
+    for (name, payload) in recorded.events() {
+        if name != "session_event" || payload["event"]["type"] != "block_event" {
+            continue;
+        }
+        let mut report = payload["event"]["payload"].clone();
+        report["block_id"] = json!(block);
+        setup.served.tell(Tell::SessionEvent(
+            SESSION.to_owned(),
+            "block_event".to_owned(),
+            report,
+        ));
+        sent += 1;
+    }
+    assert!(sent >= 3, "{sent} reports were recorded");
+    setup.served.tell(Tell::SessionEvent(
+        SESSION.to_owned(),
+        "block_event".to_owned(),
+        json!({ "block_id": block, "creator_name": "com.superlogical.terminal", "name": "bell" }),
+    ));
+
+    // A shell that ran a line said what was in front and what its title was.
+    let mut heard = Vec::new();
+    loop {
+        match any_frame(&mut view).await {
+            Some(OutputFrame::Event(SessionEvent::Bell)) => break,
+            Some(OutputFrame::Event(event)) => heard.push(event),
+            other => panic!("{other:?}"),
+        }
+    }
+    assert!(
+        heard.iter().any(
+            |event| matches!(event, SessionEvent::Foreground(front) if front.name == "cmd.exe")
+        ),
+        "{heard:?}"
+    );
+    assert!(
+        heard.iter().any(
+            |event| matches!(event, SessionEvent::Title { title } if title.contains("echo  recorded"))
+        ),
+        "{heard:?}"
+    );
 }

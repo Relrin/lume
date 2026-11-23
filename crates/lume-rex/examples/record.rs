@@ -101,6 +101,9 @@ fn scrub(value: &mut Value, named: &[(String, &str)]) {
             for (key, field) in fields.iter_mut() {
                 if key == "reconnect_token" {
                     *field = json!("TOKEN");
+                } else if key == "ticket" && field.is_string() {
+                    // Sixteen bytes, as a ticket is. The one recorded was never used.
+                    *field = json!("AAECAwQFBgcICQoLDA0ODw");
                 } else if matches!(key.as_str(), "pid" | "user_id") && field.is_number() {
                     *field = json!(1000);
                 } else {
@@ -110,6 +113,20 @@ fn scrub(value: &mut Value, named: &[(String, &str)]) {
         }
         _ => {}
     }
+}
+
+/// A terminal whose shell has nothing of the user's in it: it reads no profile and
+/// keeps no history of what is typed.
+fn plain_shell() -> Value {
+    let command = if cfg!(windows) {
+        json!(["cmd.exe", "/d"])
+    } else {
+        json!(["/bin/sh"])
+    };
+    json!({
+        "flavor": "com.superlogical.terminal.shell",
+        "options": { "shell": "none", "command": command },
+    })
 }
 
 #[tokio::main]
@@ -149,9 +166,7 @@ async fn main() -> Result<(), Failure> {
             "session.create",
             json!({
                 "label": "lume-fixture",
-                "initial_windows": [
-                    {"layout": {"block": {"flavor": "com.superlogical.terminal.shell"}}}
-                ],
+                "initial_windows": [{"layout": {"block": plain_shell()}}],
             }),
         )
         .await?;
@@ -187,7 +202,7 @@ async fn main() -> Result<(), Failure> {
             json!({
                 "session_id": session, "anchor_id": block,
                 "direction": "horizontal", "side": "after",
-                "layout": {"block": {"flavor": "com.superlogical.terminal.shell"}},
+                "layout": {"block": plain_shell()},
             }),
         )
         .await?;
@@ -212,6 +227,89 @@ async fn main() -> Result<(), Failure> {
             json!({ "session_id": session, "block_id": "block:00000000-0000-7000-8000-000000000000" }),
         )
         .await?;
+
+    // What showing a terminal and typing into it takes.
+    let with = |args: Value| json!({ "session_id": session, "block_id": block, "args": args });
+    recorder.call("block_creator.list", Value::Null).await?;
+    recorder
+        .call(
+            "session.own_block",
+            json!({ "session_id": session, "block_ids": [block], "mode": "take" }),
+        )
+        .await?;
+    recorder
+        .call(
+            "block.event",
+            json!({
+                "session_id": session, "block_id": block,
+                "event": { "type": "focus", "payload": { "action": "in" } },
+            }),
+        )
+        .await?;
+    recorder
+        .call(
+            "com.superlogical.terminal.resize",
+            with(json!({ "columns": 100, "rows": 30, "cell_width_px": 8, "cell_height_px": 16 })),
+        )
+        .await?;
+    recorder
+        .call(
+            "com.superlogical.terminal.write",
+            with(json!({ "data": "echo recorded\r" })),
+        )
+        .await?;
+    // The shell runs the line and says so: a title, the program in front.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    recorder.settle().await?;
+    recorder
+        .call("com.superlogical.terminal.modes", of_block())
+        .await?;
+    recorder
+        .call("com.superlogical.terminal.pwd", of_block())
+        .await?;
+    recorder
+        .call("com.superlogical.terminal.program_status", of_block())
+        .await?;
+    recorder
+        .call(
+            "com.superlogical.terminal.format",
+            with(json!({ "format": "text", "trim": true })),
+        )
+        .await?;
+    // In parts, as a screen larger than a message is read.
+    let formatted = recorder
+        .call(
+            "com.superlogical.terminal.format",
+            with(json!({ "format": "vt", "max_bytes": 64, "extra_cursor": true, "extra_modes": true })),
+        )
+        .await?;
+    if let Some(id) = formatted["payload"]["id"].as_u64() {
+        let read = formatted["payload"]["content"].as_str().map_or(0, str::len);
+        recorder
+            .call(
+                "com.superlogical.terminal.blob_read",
+                with(json!({ "id": id, "offset": read, "max_bytes": 900_000 })),
+            )
+            .await?;
+    }
+    recorder
+        .call(
+            "data.connect",
+            json!({
+                "session_id": session, "block_id": block,
+                "data_ref_id": "terminal", "subprotocol": "rex.data.terminal.v1",
+            }),
+        )
+        .await?;
+    recorder
+        .call(
+            "session.disown_block",
+            json!({ "session_id": session, "block_ids": [block] }),
+        )
+        .await?;
+    recorder.call("block.close", of_block()).await?;
+    recorder.settle().await?;
+
     recorder.call("no.such_method", Value::Null).await?;
     recorder.call("session.destroy", of_session()).await?;
     recorder.settle().await?;

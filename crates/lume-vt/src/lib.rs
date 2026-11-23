@@ -499,6 +499,17 @@ impl Terminal {
         )
     }
 
+    /// Says whether a terminal that grows taller takes lines back out of its
+    /// scrollback to fill the new rows. It does unless told otherwise. A terminal that
+    /// shows what another one holds is told what that one does, so the two keep the
+    /// same lines on their screens.
+    pub fn set_resize_pulls_scrollback(&mut self, pulls: bool) -> Result<()> {
+        self.set(
+            sys::GHOSTTY_TERMINAL_OPT_RESIZE_PULL_SCROLLBACK,
+            (&raw const pulls).cast(),
+        )
+    }
+
     /// How many rows are in scrollback, above the active area.
     pub fn scrollback_rows(&self) -> Result<usize> {
         self.get::<usize>(sys::GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS)

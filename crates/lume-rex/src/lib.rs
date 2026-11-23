@@ -22,6 +22,7 @@ mod control;
 mod data;
 mod endpoint;
 mod error;
+mod events;
 mod ids;
 mod input;
 mod screen;

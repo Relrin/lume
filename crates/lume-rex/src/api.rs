@@ -8,7 +8,10 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use lume_proto::SessionEvent;
+
 use crate::error::RexError;
+use crate::events;
 use crate::tuning::{
     BLOCKS_MAX, CLIENT_TEXT_MAX_BYTES, LAYERS_MAX, SPLIT_DEPTH_MAX, TEXT_MAX_BYTES, WINDOWS_MAX,
 };
@@ -488,6 +491,12 @@ pub(crate) enum ServerEvent {
     Dropped {
         session_id: Option<String>,
     },
+    /// A terminal block reported something of itself.
+    Block {
+        block_id: String,
+        /// What it reported, as reports of a session.
+        events: Vec<SessionEvent>,
+    },
     /// An event this client does nothing with.
     Other,
 }
@@ -544,6 +553,23 @@ impl ServerEvent {
                         session_id,
                         revision: inner.payload.get("revision")?.as_u64()?,
                     },
+                    "block_event" => {
+                        let block = &inner.payload;
+                        if text(block, "creator_name")? != TERMINAL_CREATOR {
+                            return None;
+                        }
+                        let events = events::read(
+                            &text(block, "name")?,
+                            block.get("payload").unwrap_or(&serde_json::Value::Null),
+                        );
+                        if events.is_empty() {
+                            return None;
+                        }
+                        ServerEvent::Block {
+                            block_id: text(block, "block_id")?,
+                            events,
+                        }
+                    }
                     _ => ServerEvent::Other,
                 }
             }

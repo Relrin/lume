@@ -894,3 +894,297 @@ async fn two_views_of_a_terminal_of_a_real_server_share_its_stream() {
         .await;
     backend.shutdown();
 }
+
+/// A view's own terminal: what a view of this application holds, kept the way the
+/// page keeps it, in the same engine.
+struct Mirror {
+    attachment: Attachment,
+    terminal: lume_vt::Terminal,
+    /// Whether the terminal takes lines back out of scrollback when it grows, as the
+    /// attachment says a view's terminal should.
+    pulls: bool,
+    exit: Option<ExitStatus>,
+}
+
+impl Mirror {
+    async fn new(attachment: Attachment) -> Self {
+        attachment.input.credit(CREDIT_WINDOW).await.unwrap();
+        let pulls = attachment.resize_pulls_scrollback;
+        let terminal = Self::loaded(&attachment.hydrate, pulls);
+        Self {
+            attachment,
+            terminal,
+            pulls,
+            exit: None,
+        }
+    }
+
+    fn loaded(copy: &Hydrate, pulls: bool) -> lume_vt::Terminal {
+        match copy {
+            Hydrate::Snapshot { bytes, .. } => {
+                let mut terminal = lume_vt::Terminal::from_snapshot(bytes).unwrap();
+                terminal.set_resize_pulls_scrollback(pulls).unwrap();
+                terminal
+            }
+            other => panic!("not a copy this engine loads: {other:?}"),
+        }
+    }
+
+    /// Takes frames until none has come for a while.
+    async fn settle(&mut self) {
+        let quiet = Duration::from_millis(1500);
+        while let Ok(frame) = tokio::time::timeout(quiet, self.attachment.output.next()).await {
+            match frame {
+                Some(OutputFrame::Data(bytes)) => {
+                    let count = u32::try_from(bytes.len()).unwrap();
+                    self.terminal.write(&bytes);
+                    let _ = self.attachment.input.credit(count).await;
+                }
+                Some(OutputFrame::Resized(size)) => {
+                    self.terminal.resize(size.cols(), size.rows()).unwrap();
+                }
+                Some(OutputFrame::Hydrate(copy)) => {
+                    self.terminal = Self::loaded(&copy, self.pulls);
+                }
+                Some(OutputFrame::Exit(status)) => self.exit = Some(status),
+                Some(OutputFrame::Event(_)) => {}
+                None => return,
+            }
+        }
+    }
+
+    fn rows(&self) -> Vec<String> {
+        self.terminal.screen_text().unwrap()
+    }
+
+    /// Everything the terminal holds as text, scrollback first, as a server writes a
+    /// terminal out: blank lines at the end left off.
+    fn text(&self) -> String {
+        let text = self.terminal.format(lume_vt::Format::Plain).unwrap();
+        String::from_utf8_lossy(&text.bytes).trim_end().to_owned()
+    }
+}
+
+/// A terminal's screen and scrollback as the server writes them out as text: what
+/// `rex capture --trim` prints.
+async fn captured(control: &Control, session: &str, block: &str) -> String {
+    let formatted = control
+        .call(
+            "com.superlogical.terminal.format",
+            json!({
+                "session_id": session, "block_id": block,
+                "args": { "format": "text", "trim": true },
+            }),
+        )
+        .await
+        .unwrap();
+    formatted.payload["content"]
+        .as_str()
+        .unwrap()
+        .replace("\r\n", "\n")
+        .trim_end()
+        .to_owned()
+}
+
+/// The rows on a terminal's screen as the server itself holds them: read from the
+/// copy at the head of a stream that another client of the server opens.
+async fn server_rows(control: &Control, session: &str, block: &str) -> Vec<String> {
+    let ticket = ticket(control, session, block).await;
+    let io = dial(&Endpoint::Local).await.unwrap();
+    let mut conn = DataConn::open(io, "local", DataOpen::Start(&ticket))
+        .await
+        .unwrap();
+    let mut reading = Reading::new(conn.welcome().nonce);
+    reading
+        .until(&mut conn, "the server's copy", |reading| {
+            !reading.sizes.is_empty()
+        })
+        .await;
+    conn.close().await;
+    let copy = reading.snapshot.expect("a copy");
+    let terminal = lume_vt::Terminal::from_snapshot(&copy).unwrap();
+    terminal.screen_text().unwrap()
+}
+
+/// Lines as they are compared: blanks at their ends do not count.
+fn lines_of(text: &str) -> Vec<String> {
+    text.lines()
+        .map(|line| line.trim_end().to_owned())
+        .collect()
+}
+
+async fn session_with(control: &Control, label: &str, block: Value) -> (String, String) {
+    let created = control
+        .call(
+            "session.create",
+            json!({ "label": label, "initial_windows": [{"layout": {"block": block}}] }),
+        )
+        .await
+        .unwrap();
+    let session = created.payload["session_id"].as_str().unwrap().to_owned();
+    let block = created.payload["initial_windows"][0]["block_ids"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    control
+        .call("session.attach", json!({ "session_id": session }))
+        .await
+        .unwrap();
+    (session, block)
+}
+
+#[tokio::test]
+#[ignore = "needs a Rex server running on this machine, and vim"]
+async fn a_full_screen_program_is_shown_as_the_server_shows_it() {
+    let vim = if cfg!(windows) {
+        r"C:\Program Files\Git\usr\bin\vim.exe"
+    } else {
+        "vim"
+    };
+    let io = dial(&Endpoint::Local)
+        .await
+        .expect("is a Rex server running?");
+    let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
+    // An editor that reads and writes nothing of the user's.
+    let editor = json!({
+        "flavor": "com.superlogical.terminal.shell",
+        "options": { "shell": "none", "command": [vim, "-i", "NONE", "-u", "NONE"] },
+    });
+    let (session, block) = session_with(&other, "lume-live-screen", editor).await;
+
+    let backend = RexBackend::connect(Endpoint::Local, client());
+    backend.ready().await.unwrap();
+    backend.open_session(&session).await.unwrap();
+    let id = backend.list().await.unwrap()[0].id;
+
+    let mut wanted = facts();
+    wanted.size = TermSize::new(100, 30).unwrap();
+    let mut view = Mirror::new(backend.attach(id, wanted).await.unwrap()).await;
+    view.attachment
+        .input
+        .write(b"iten columns of text, and a long line: ")
+        .await
+        .unwrap();
+    view.attachment
+        .input
+        .write("wörter ".repeat(30).as_bytes())
+        .await
+        .unwrap();
+    view.attachment.input.write(b"\x1b").await.unwrap();
+    view.settle().await;
+
+    for size in [(100, 30), (120, 40), (60, 15)] {
+        if (view.terminal.cols(), view.terminal.rows()) != size {
+            view.attachment
+                .input
+                .resize(
+                    TermSize::new(size.0, size.1).unwrap(),
+                    CellPx { w: 8, h: 16 },
+                )
+                .await
+                .unwrap();
+            view.settle().await;
+        }
+        assert_eq!((view.terminal.cols(), view.terminal.rows()), size);
+        // The view's own terminal, the screen read without a view, and what the
+        // server writes out all show the same.
+        let screen = backend.screen(id).await.unwrap();
+        let server = captured(&other, &session, &block).await;
+        let shown = lines_of(&view.rows().join("\n"));
+        let shown: Vec<String> = shown
+            .into_iter()
+            .rev()
+            .skip_while(String::is_empty)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        assert!(view.terminal.alternate_screen().unwrap());
+        assert!(screen.alternate, "{size:?}");
+        assert_eq!((screen.size.cols(), screen.size.rows()), size);
+        assert_eq!(shown, lines_of(&server), "the view at {size:?}");
+        assert_eq!(view.rows(), screen.lines, "the screen read at {size:?}");
+        assert!(shown[0].starts_with("ten columns of text"), "{shown:?}");
+        let cursor = view.terminal.cursor().unwrap();
+        assert_eq!((cursor.x, cursor.y), (screen.cursor.col, screen.cursor.row));
+    }
+
+    view.attachment.input.write(b":q!\r").await.unwrap();
+    view.settle().await;
+    println!("the editor's end was told as {:?}", view.exit);
+    let _ = other
+        .call("session.destroy", json!({ "session_id": session }))
+        .await;
+    backend.shutdown();
+}
+
+#[tokio::test]
+#[ignore = "needs a Rex server running on this machine"]
+async fn a_shell_with_scrollback_is_shown_as_the_server_shows_it_at_every_size() {
+    let io = dial(&Endpoint::Local)
+        .await
+        .expect("is a Rex server running?");
+    let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
+    let (session, block) = session_with(&other, "lume-live-scroll", plain_shell()).await;
+
+    let backend = RexBackend::connect(Endpoint::Local, client());
+    backend.ready().await.unwrap();
+    backend.open_session(&session).await.unwrap();
+    let id = backend.list().await.unwrap()[0].id;
+
+    let mut view = Mirror::new(backend.attach(id, facts()).await.unwrap()).await;
+    // More lines than the screen has rows, some of them longer than it is wide.
+    let lines = if cfg!(windows) {
+        "for /L %i in (1,1,60) do @echo line %i of sixty, with enough after it to be longer than a narrow terminal is wide, so that it wraps\r"
+    } else {
+        "for i in $(seq 1 60); do echo line $i of sixty, with enough after it to be longer than a narrow terminal is wide, so that it wraps; done\r"
+    };
+    view.attachment.input.write(lines.as_bytes()).await.unwrap();
+    view.settle().await;
+
+    // Taller, shorter, wider, narrower: each time the view's own terminal holds what
+    // the server's does, scrollback and all.
+    let mut differing = Vec::new();
+    for size in [(80, 24), (80, 40), (80, 12), (140, 30), (50, 30), (80, 24)] {
+        if (view.terminal.cols(), view.terminal.rows()) != size {
+            view.attachment
+                .input
+                .resize(
+                    TermSize::new(size.0, size.1).unwrap(),
+                    CellPx { w: 8, h: 16 },
+                )
+                .await
+                .unwrap();
+            view.settle().await;
+        }
+        assert_eq!((view.terminal.cols(), view.terminal.rows()), size);
+        let screen = backend.screen(id).await.unwrap();
+        let server = lines_of(&captured(&other, &session, &block).await);
+        let shown = lines_of(&view.text());
+        let same_text = shown == server;
+        // The server's own terminal is what counts; the screen read without a view
+        // has to agree with it as well.
+        let held = server_rows(&other, &session, &block).await;
+        assert_eq!(screen.lines, held, "the screen read at {size:?}");
+        let same_screen = view.rows() == held;
+        println!(
+            "{size:?}: all the text {}, the screen {} ({} lines here, {} there)",
+            if same_text { "the same" } else { "DIFFERS" },
+            if same_screen { "the same" } else { "DIFFERS" },
+            shown.len(),
+            server.len(),
+        );
+        if !same_text || !same_screen {
+            differing.push((size, view.rows(), held));
+        }
+    }
+    for (size, here, there) in &differing {
+        println!("at {size:?}\n  the view:   {here:?}\n  the server: {there:?}");
+    }
+    assert!(differing.is_empty(), "{} sizes differ", differing.len());
+
+    let _ = other
+        .call("session.destroy", json!({ "session_id": session }))
+        .await;
+    backend.shutdown();
+}

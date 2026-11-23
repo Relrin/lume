@@ -322,3 +322,51 @@ fn the_recorded_events_are_the_ones_the_page_names() {
         assert!(response["seq"].as_u64().unwrap() <= numbers.len() as u64);
     }
 }
+
+/// The events of a terminal block that this client reads.
+const TERMINAL_EVENTS: [&str; 6] = [
+    "bell",
+    "process_changed",
+    "program_status_changed",
+    "program_status_removed",
+    "pwd_changed",
+    "title_changed",
+];
+
+#[test]
+fn the_recorded_reports_of_a_terminal_are_as_the_server_describes_them() {
+    let recorded = Recorded::load();
+    // A server describes the events of its blocks itself, creator by creator.
+    let creators = recorded.result("block_creator.list", 0);
+    let terminal = creators["creators"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|creator| creator["name"] == "com.superlogical.terminal")
+        .expect("the terminal's creator was not recorded");
+    let described = &terminal["api"]["events"];
+    for name in TERMINAL_EVENTS {
+        assert!(described[name].is_object(), "{name} is not described");
+    }
+
+    let mut read = Vec::new();
+    for (name, payload) in recorded.events() {
+        if name != "session_event" || payload["event"]["type"] != "block_event" {
+            continue;
+        }
+        let report = &payload["event"]["payload"];
+        assert!(report["block_id"].as_str().unwrap().starts_with("block:"));
+        assert_eq!(report["creator_name"], "com.superlogical.terminal");
+        let name = report["name"].as_str().unwrap();
+        if !TERMINAL_EVENTS.contains(&name) {
+            continue;
+        }
+        let fields = report.get("payload").cloned().unwrap_or(json!({}));
+        let wrong = wrong_with(&fields, &described[name], name);
+        assert!(wrong.is_empty(), "{name}: {wrong:?}");
+        read.push(name);
+    }
+    for expected in ["process_changed", "title_changed"] {
+        assert!(read.contains(&expected), "{expected} was not recorded");
+    }
+}

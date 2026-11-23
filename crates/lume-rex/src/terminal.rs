@@ -28,7 +28,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use lume_proto::tuning::{MAX_PAYLOAD, MAX_WINDOW};
-use lume_proto::{CellPx, ClientFacts, ExitStatus, SessionId, TermSize};
+use lume_proto::{
+    CellPx, ClientFacts, ExitStatus, SessionEvent, SessionId, SessionState, TermSize,
+};
 use lume_session::{Attachment, FrameStream, Hydrate, InputSink, OutputFrame, SessionError, Sink};
 use lume_vt::Terminal;
 use serde_json::json;
@@ -39,6 +41,7 @@ use crate::backend::{Link, Shared, backoff};
 use crate::control::Control;
 use crate::data::{DataConn, DataEnd, DataOpen, Reject, ResumeToken, Ticket};
 use crate::error::RexError;
+use crate::events;
 use crate::ids::BlockRef;
 use crate::input::{self, Input};
 use crate::stream::{Note, Opening, Piece, Splitter};
@@ -317,6 +320,8 @@ enum Command {
     /// A view is gone. The sender is let go of once nothing of the view is left: when
     /// it was the last, once the stream is closed.
     Detach(u64, oneshot::Sender<()>),
+    /// The terminal reported something of itself.
+    Report(Vec<SessionEvent>),
     /// The backend is going: every view ends.
     Close,
 }
@@ -491,9 +496,8 @@ impl Feed {
         };
         Attachment {
             size,
-            // The view's terminal is to change size exactly as the server's own does,
-            // which is as their common engine does it.
-            resize_pulls_scrollback: true,
+            // The view's terminal is to change size exactly as the server's own does.
+            resize_pulls_scrollback: self.shared.resize_pulls_scrollback(),
             hydrate,
             output: FrameStream::new(taken),
             input: InputSink::new(Arc::new(sink)),
@@ -658,7 +662,9 @@ impl Feed {
                 Ok(started) => {
                     let size = started.size;
                     let hydrate = self.begun(started, None);
-                    Ok(self.admit(id, size, hydrate))
+                    let attachment = self.admit(id, size, hydrate);
+                    self.greet(id).await;
+                    Ok(attachment)
                 }
                 Err(error) => {
                     self.input.leave(id);
@@ -671,7 +677,9 @@ impl Feed {
                 Again::Begun(hydrate) => {
                     // The stream says its size before anything else.
                     let size = self.size.unwrap_or(facts.size);
-                    Ok(self.admit(id, size, hydrate))
+                    let attachment = self.admit(id, size, hydrate);
+                    self.greet(id).await;
+                    Ok(attachment)
                 }
                 Again::Gone => {
                     self.input.leave(id);
@@ -684,6 +692,19 @@ impl Feed {
                     Err(RexError::Disconnected)
                 }
             }
+        }
+    }
+
+    /// Tells a new view what the terminal reported before the view came.
+    async fn greet(&mut self, id: u64) {
+        let Ok(control) = self.shared.control() else {
+            return;
+        };
+        let state = events::state_of(&control, &self.block).await;
+        if state != SessionState::default()
+            && let Some(view) = self.views.get_mut(&id)
+        {
+            view.frame(OutputFrame::Event(SessionEvent::State { state }));
         }
     }
 
@@ -747,6 +768,13 @@ impl Feed {
                 self.remove(id);
                 if self.views.is_empty() {
                     self.leaving.push(done);
+                }
+            }
+            Command::Report(events) => {
+                for view in self.views.values_mut() {
+                    for event in &events {
+                        view.frame(OutputFrame::Event(event.clone()));
+                    }
                 }
             }
             Command::Close => self.end_all(),
@@ -840,6 +868,11 @@ impl FeedRef {
         let (reply, joined) = oneshot::channel();
         self.tell.send(Command::Join { facts, reply }).ok()?;
         Some(joined)
+    }
+
+    /// Passes on what the terminal reported of itself, to every view.
+    pub(crate) fn report(&self, events: Vec<SessionEvent>) {
+        let _ = self.tell.send(Command::Report(events));
     }
 
     /// Ends every view of the feed, without waiting for it.

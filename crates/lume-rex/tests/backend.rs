@@ -179,7 +179,7 @@ async fn an_opened_sessions_terminals_are_listed_as_a_server_describes_them() {
     assert_eq!(listed.len(), 2);
     for info in &listed {
         assert_eq!((info.size.cols(), info.size.rows()), (80, 24));
-        assert_eq!(info.program, "powershell.exe");
+        assert_eq!(info.program, "cmd.exe");
         assert_eq!(info.pid, Some(1000));
         assert_eq!(info.cwd.as_deref(), Some("/home/user"));
         assert_eq!(info.exit, None);
