@@ -35,6 +35,7 @@ pub use daemon::Daemon;
 pub use local::{HostHello, HostStatus, LocalBackend};
 /// What an in-process host is built from, for [`LocalBackend::in_process`].
 pub use lume_host::HostConfig;
+pub use lume_host::ssh;
 pub use lume_proto::{
     BackendCaps, BackendId, CellPx, ClientFacts, ColorScheme, CommandState, DisconnectReason,
     Disconnected, ErrorCode, ExitStatus, Foreground, HydrateKinds, Launcher, Palette, ProgramState,

@@ -995,10 +995,16 @@ async fn captured(control: &Control, session: &str, block: &str) -> String {
 
 /// The rows on a terminal's screen as the server itself holds them: read from the
 /// copy at the head of a stream that another client of the server opens.
-async fn server_rows(control: &Control, session: &str, block: &str) -> Vec<String> {
+async fn server_rows(
+    reach: &lume_rex::Reach,
+    control: &Control,
+    session: &str,
+    block: &str,
+) -> Vec<String> {
     let ticket = ticket(control, session, block).await;
-    let io = dial(&Endpoint::Local).await.unwrap();
-    let mut conn = DataConn::open(io, "local", DataOpen::Start(&ticket))
+    let dialed = reach.dial().await.unwrap();
+    let how = DataOpen::Start(&ticket);
+    let mut conn = DataConn::open_at(dialed.io, "the server", &dialed.authority, how)
         .await
         .unwrap();
     let mut reading = Reading::new(conn.welcome().nonce);
@@ -1128,20 +1134,71 @@ async fn a_full_screen_program_is_shown_as_the_server_shows_it() {
 #[tokio::test]
 #[ignore = "needs a Rex server running on this machine"]
 async fn a_shell_with_scrollback_is_shown_as_the_server_shows_it_at_every_size() {
-    let io = dial(&Endpoint::Local)
-        .await
-        .expect("is a Rex server running?");
-    let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
-    let (session, block) = session_with(&other, "lume-live-scroll", plain_shell()).await;
+    scrollback_compared(Endpoint::Local, lume_rex::Options::new()).await;
+}
 
-    let backend = RexBackend::connect(BackendId("rex".to_owned()), Endpoint::Local, client());
-    backend.ready().await.unwrap();
+#[tokio::test]
+#[ignore = "needs a Rex server on a machine the SSH client logs in to, named in LUME_REX_LIVE_SSH"]
+async fn a_shell_with_scrollback_on_another_machine_is_shown_as_its_server_shows_it() {
+    let Ok(address) = std::env::var(LIVE_SSH) else {
+        eprintln!("skipped: {LIVE_SSH} is not set");
+        return;
+    };
+    let mut ssh = lume_rex::SshOptions::default();
+    if let Ok(config) = std::env::var(LIVE_SSH_CONFIG) {
+        ssh.args = vec!["-F".to_owned(), config];
+    }
+    let options = lume_rex::Options::new().ssh(ssh);
+    scrollback_compared(Endpoint::parse(&address).unwrap(), options).await;
+}
+
+/// Fills a terminal of the server at `endpoint` past its screen, and holds a view's own
+/// terminal against the server's at one size after another.
+async fn scrollback_compared(endpoint: Endpoint, options: lume_rex::Options) {
+    let backend = RexBackend::connect_with(
+        BackendId("rex".to_owned()),
+        endpoint.clone(),
+        client(),
+        options.clone(),
+    );
+    let version = tokio::time::timeout(Duration::from_secs(90), backend.ready())
+        .await
+        .expect("is a Rex server running?")
+        .unwrap();
+    let windows = version.platform.starts_with("windows");
+
+    let reach = lume_rex::Reach::new(endpoint.clone(), options);
+    let dialed = reach.dial().await.unwrap();
+    let name = endpoint.to_string();
+    let (other, _events) = Control::open_at(dialed.io, &name, &dialed.authority, &client(), None)
+        .await
+        .unwrap();
+    // A shell of the server's machine, with nothing of the user's in it.
+    let command = if windows {
+        json!(["cmd.exe", "/d"])
+    } else {
+        json!(["/bin/sh"])
+    };
+    let shell = json!({
+        "flavor": "com.superlogical.terminal.shell",
+        "options": { "shell": "none", "command": command },
+    });
+    let (session, block) = session_with(&other, "lume-live-scroll", shell).await;
+
+    until("the session is listed", || {
+        backend.sessions().iter().any(|listed| listed.id == session)
+    })
+    .await;
     backend.open_session(&session).await.unwrap();
     let id = backend.list().await.unwrap()[0].id;
 
     let mut view = Mirror::new(backend.attach(id, facts()).await.unwrap()).await;
+    println!(
+        "a server on {}; a view's terminal takes lines back out of scrollback when it grows: {}",
+        version.platform, view.pulls
+    );
     // More lines than the screen has rows, some of them longer than it is wide.
-    let lines = if cfg!(windows) {
+    let lines = if windows {
         "for /L %i in (1,1,60) do @echo line %i of sixty, with enough after it to be longer than a narrow terminal is wide, so that it wraps\r"
     } else {
         "for i in $(seq 1 60); do echo line $i of sixty, with enough after it to be longer than a narrow terminal is wide, so that it wraps; done\r"
@@ -1171,7 +1228,7 @@ async fn a_shell_with_scrollback_is_shown_as_the_server_shows_it_at_every_size()
         let same_text = shown == server;
         // The server's own terminal is what counts; the screen read without a view
         // has to agree with it as well.
-        let held = server_rows(&other, &session, &block).await;
+        let held = server_rows(&reach, &other, &session, &block).await;
         assert_eq!(screen.lines, held, "the screen read at {size:?}");
         let same_screen = view.rows() == held;
         println!(
@@ -2356,4 +2413,176 @@ async fn a_real_server_answers_this_clients_pings() {
         .call("session.destroy", json!({ "session_id": session }))
         .await
         .unwrap();
+}
+
+/// The address of a real server reached through the SSH client, for the test that does
+/// so: `LUME_REX_LIVE_SSH=ssh://USER@HOST`. The client must log in to it without
+/// asking anything.
+const LIVE_SSH: &str = "LUME_REX_LIVE_SSH";
+/// A configuration file for the SSH client in that test, when the user's own is not
+/// the one to read.
+const LIVE_SSH_CONFIG: &str = "LUME_REX_LIVE_SSH_CONFIG";
+/// A command that cuts the SSH connections to that machine from outside, to see the
+/// client started again. Run through this machine's shell.
+const LIVE_SSH_CUT: &str = "LUME_REX_LIVE_SSH_CUT";
+
+#[tokio::test]
+#[ignore = "needs a Rex server on a machine the SSH client logs in to, named in LUME_REX_LIVE_SSH"]
+async fn a_real_server_is_reached_through_the_ssh_client() {
+    use lume_rex::{Options, Reach, SshOptions};
+
+    let Ok(address) = std::env::var(LIVE_SSH) else {
+        eprintln!("skipped: {LIVE_SSH} is not set");
+        return;
+    };
+    let endpoint = Endpoint::parse(&address).unwrap();
+    assert!(matches!(endpoint, Endpoint::Ssh { .. }), "{endpoint}");
+    let mut ssh = SshOptions::default();
+    if let Ok(config) = std::env::var(LIVE_SSH_CONFIG) {
+        ssh.args = vec!["-F".to_owned(), config];
+    }
+    let options = Options::new().ssh(ssh);
+
+    // Everything goes through the SSH client: this machine has no other way there. One
+    // client carries the backend's connections, another this test's own.
+    let backend = RexBackend::connect_with(
+        BackendId("rex".to_owned()),
+        endpoint.clone(),
+        client(),
+        options.clone(),
+    );
+    let version = match tokio::time::timeout(Duration::from_secs(90), backend.ready()).await {
+        Ok(Ok(version)) => version,
+        Ok(Err(error)) => panic!("the server was not reached: {error}"),
+        // It is being tried again and again: how it stands says why.
+        Err(_) => panic!("the server was not reached: {:?}", *backend.link().borrow()),
+    };
+    println!(
+        "reached Rex {} on {} at API revision {}",
+        version.rex_version, version.platform, version.api_revision
+    );
+    let windows = version.platform.starts_with("windows");
+
+    let reach = Reach::new(endpoint, options);
+    let dialed = reach.dial().await.unwrap();
+    let (other, _events) =
+        Control::open_at(dialed.io, &address, &dialed.authority, &client(), None)
+            .await
+            .unwrap();
+    // A shell of the server's machine, with nothing of the user's in it.
+    let command = if windows {
+        json!(["cmd.exe", "/d"])
+    } else {
+        json!(["/bin/sh"])
+    };
+    let shell = json!({
+        "flavor": "com.superlogical.terminal.shell",
+        "options": { "shell": "none", "command": command },
+    });
+    let said = |tag: &str| {
+        if windows {
+            format!("echo lume-^{tag}\r")
+        } else {
+            format!("echo lume-''{tag}\r")
+        }
+    };
+    let (session, block) = session_with(&other, "lume-live-ssh", shell).await;
+    other
+        .call(
+            "com.superlogical.terminal.write",
+            json!({ "session_id": session, "block_id": block, "args": { "data": said("1-before") } }),
+        )
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    until("the session is listed", || {
+        backend.sessions().iter().any(|listed| listed.id == session)
+    })
+    .await;
+    backend.open_session(&session).await.unwrap();
+    let id = backend.list().await.unwrap()[0].id;
+
+    // The view starts from the server's copy of the terminal, which this engine loads.
+    let attachment = backend.attach(id, facts()).await.unwrap();
+    let rows = rows_of(&attachment.hydrate);
+    assert!(rows.iter().any(|row| row == "lume-1-before"), "{rows:?}");
+
+    // What is typed goes through the client and its output comes back through it.
+    let mut view = Viewing::new(attachment).await;
+    view.attachment
+        .input
+        .write(said("2-through").as_bytes())
+        .await
+        .unwrap();
+    view.until("the echo", |view| view.shows("lume-2-through"))
+        .await;
+    view.attachment
+        .input
+        .resize(TermSize::new(100, 30).unwrap(), CellPx { w: 8, h: 16 })
+        .await
+        .unwrap();
+    view.until("the new size", |view| view.sizes.contains(&(100, 30)))
+        .await;
+
+    // With a command that cuts the SSH connections from outside, the client that carried
+    // them ends: a new one is started, and the view goes on.
+    if let Ok(cut) = std::env::var(LIVE_SSH_CUT) {
+        let mut link = backend.link();
+        let (shell, flag) = if cfg!(windows) {
+            ("cmd.exe", "/c")
+        } else {
+            ("/bin/sh", "-c")
+        };
+        let ran = std::process::Command::new(shell)
+            .args([flag, &cut])
+            .status()
+            .unwrap();
+        println!("`{cut}` ended with {ran}");
+        tokio::time::timeout(
+            Duration::from_secs(90),
+            link.wait_for(|link| !matches!(link, Link::Connected(_))),
+        )
+        .await
+        .expect("the cut was never noticed")
+        .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(90),
+            link.wait_for(|link| matches!(link, Link::Connected(_))),
+        )
+        .await
+        .expect("the server was not reached again")
+        .unwrap();
+        view.attachment
+            .input
+            .write(said("3-again").as_bytes())
+            .await
+            .unwrap();
+        view.until("the echo after the cut", |view| {
+            view.shows("lume-3-again")
+                || view
+                    .copies
+                    .iter()
+                    .any(|copy| rows_of(copy).iter().any(|row| row == "lume-3-again"))
+        })
+        .await;
+        println!("the view went on after the cut");
+    }
+
+    view.attachment.input.detach().await.unwrap();
+    // This test's own client was cut too; a new one is started by asking again.
+    let dialed = reach.dial().await.unwrap();
+    let (other, _events) =
+        Control::open_at(dialed.io, &address, &dialed.authority, &client(), None)
+            .await
+            .unwrap();
+    other
+        .call("session.attach", json!({ "session_id": session }))
+        .await
+        .unwrap();
+    other
+        .call("session.destroy", json!({ "session_id": session }))
+        .await
+        .unwrap();
+    backend.shutdown();
 }

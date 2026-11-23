@@ -28,6 +28,22 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 pub const PING_EVERY: Duration = Duration::from_secs(30);
 /// How long after its ping a connection that still hears nothing is given up.
 pub const PING_WAIT: Duration = Duration::from_secs(20);
+/// How long the SSH client may take to reach another machine, in seconds, as the
+/// client is told.
+pub const SSH_CONNECT_SECONDS: u32 = 10;
+/// How long asking another machine where its server listens may take. A server that is
+/// not running is started by the asking.
+pub const SSH_ASK_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long the SSH client may take from its start to forwarding.
+pub const SSH_START_TIMEOUT: Duration = Duration::from_secs(30);
+/// How often a client that has been started is looked at until it forwards.
+pub const SSH_READY_POLL: Duration = Duration::from_millis(50);
+/// How much of what another machine prints about its server is read.
+pub const SSH_STATUS_MAX_BYTES: usize = 256 * 1024;
+/// The longest path of a socket on another machine that is forwarded to.
+pub const SSH_SOCKET_MAX_BYTES: usize = 1024;
+/// How many places on this machine are tried to forward from.
+pub const SSH_PORT_TRIES: u32 = 3;
 /// How long finding a host and opening a stream to it may take.
 pub const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long one way to a host may take to show whether a Rex server answers on it,

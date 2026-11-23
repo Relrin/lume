@@ -30,6 +30,7 @@ mod intents;
 pub mod layout;
 mod pulse;
 mod screen;
+mod ssh;
 mod stream;
 mod terminal;
 mod tls;
@@ -49,6 +50,7 @@ pub use data::{
 };
 pub use endpoint::Endpoint;
 pub use error::RexError;
+pub use ssh::SshOptions;
 pub use stream::{Note, Opened, Opening, Piece, Splitter, Theme};
 pub use tls::Trust;
 pub use transport::{Dialed, Io, LOCAL_AUTHORITY, Options, Reach, dial, dial_with};

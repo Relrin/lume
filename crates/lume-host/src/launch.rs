@@ -119,7 +119,7 @@ fn invalid(message: impl Into<String>) -> ProtoError {
 
 /// Refuses a word that names something to a tool if the tool would not take it as a
 /// name: nothing at all, an option, or something with control characters in it.
-fn check_word(what: &str, word: &str) -> Result<(), ProtoError> {
+pub(crate) fn check_word(what: &str, word: &str) -> Result<(), ProtoError> {
     if word.is_empty() {
         return Err(invalid(format!("the {what} is empty")));
     }
@@ -181,6 +181,24 @@ fn ssh_client(explicit: Option<&str>, machine: &Machine<'_>) -> Option<PathBuf> 
         return inbox.or_else(|| on_path(machine, "ssh.exe"));
     }
     on_path(machine, "ssh")
+}
+
+/// The OpenSSH client of this machine as it is, with none asked for.
+pub(crate) fn ssh_client_here() -> Option<PathBuf> {
+    let system_root = std::env::var_os("SystemRoot").map(PathBuf::from);
+    let path: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    ssh_client(
+        None,
+        &Machine {
+            os: Os::this(),
+            system_root: system_root.as_deref(),
+            path: &path,
+            is_file: &|candidate| candidate.is_file(),
+            var: &|name| std::env::var(name).ok(),
+        },
+    )
 }
 
 /// What to tell someone whose machine has no OpenSSH client.

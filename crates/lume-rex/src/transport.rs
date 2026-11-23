@@ -8,6 +8,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::endpoint::{Endpoint, HTTP_PORT, HTTPS_PORT, REX_PORT, authority};
 use crate::error::RexError;
+use crate::ssh::{SshOptions, Tunnel};
 use crate::tls::{self, Trust};
 use crate::tuning::{
     CONTROL_PATH, CONTROL_SUBPROTOCOL, MESSAGE_FLOOR_BYTES, PROBE_CLOSE_TIMEOUT, PROBE_TIMEOUT,
@@ -55,6 +56,8 @@ pub struct Options {
     pub plain_http_agreed: bool,
     /// Whose word is taken that a server behind TLS is the one its address names.
     pub trust: Trust,
+    /// How the SSH client is run for a server reached through it.
+    pub ssh: SshOptions,
 }
 
 impl Options {
@@ -76,6 +79,13 @@ impl Options {
         self.trust = trust;
         self
     }
+
+    /// The same, with how the SSH client is run.
+    #[must_use]
+    pub fn ssh(mut self, ssh: SshOptions) -> Self {
+        self.ssh = ssh;
+        self
+    }
 }
 
 fn unreachable(endpoint: &Endpoint, source: io::Error) -> RexError {
@@ -95,7 +105,16 @@ pub async fn dial(endpoint: &Endpoint) -> Result<Box<dyn Io>, RexError> {
 ///
 /// A server that would be reached with nothing encrypted is dialled only on this
 /// machine, on a tailnet when the address says so, or when the user agreed.
+///
+/// A server reached through the SSH client is not dialled this way: its streams last
+/// only as long as the client that carries them, which a [`Reach`] keeps.
 pub async fn dial_with(endpoint: &Endpoint, options: &Options) -> Result<Dialed, RexError> {
+    if let Endpoint::Ssh { .. } = endpoint {
+        return Err(RexError::Unsupported {
+            endpoint: endpoint.to_string(),
+            why: "a stream through the SSH client is opened by what keeps the client".to_owned(),
+        });
+    }
     Reach::new(endpoint.clone(), options.clone()).dial().await
 }
 
@@ -145,12 +164,32 @@ pub struct Reach {
     tls: OnceLock<Result<Arc<ClientConfig>, String>>,
     /// The way a host alone answered as a Rex server, until it stops doing so.
     proved: Mutex<Option<Way>>,
+    /// The SSH client that carries the streams, for an address that is reached so.
+    tunnel: Option<Tunnel>,
 }
 
 impl Reach {
     pub fn new(endpoint: Endpoint, options: Options) -> Self {
+        let name = endpoint.to_string();
+        let tunnel = match &endpoint {
+            Endpoint::Ssh {
+                user,
+                host,
+                port,
+                socket,
+            } => Some(Tunnel::new(
+                name.clone(),
+                user.clone(),
+                host.clone(),
+                *port,
+                socket.clone(),
+                options.ssh.clone(),
+            )),
+            _ => None,
+        };
         Self {
-            name: endpoint.to_string(),
+            tunnel,
+            name,
             endpoint,
             options,
             tls: OnceLock::new(),
@@ -169,10 +208,10 @@ impl Reach {
             Endpoint::Tailnet { host, port } => self.plain(host, *port, tcp::Plain::Tailnet).await,
             Endpoint::Https { host, port } => self.secure(host, *port).await,
             Endpoint::Host { host, port } => self.found(host, *port).await,
-            Endpoint::Ssh { .. } => Err(RexError::Unsupported {
-                endpoint: self.name.clone(),
-                why: "this kind of address is not reached yet".to_owned(),
-            }),
+            Endpoint::Ssh { .. } => match &self.tunnel {
+                Some(tunnel) => tunnel.dial().await,
+                None => Err(RexError::BadEndpoint(self.name.clone())),
+            },
         }
     }
 
@@ -600,7 +639,12 @@ mod platform {
         dirs
     }
 
-    /// The sockets in a directory, in the order of their names.
+    /// What a server calls its own socket. Others beside it are for other things, such
+    /// as a login server.
+    const SERVER_SOCKET: &str = "server.sock";
+
+    /// The sockets in a directory: the one a server calls its own first, then the rest
+    /// in the order of their names.
     fn sockets_in(dir: &Path) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return Vec::new();
@@ -610,12 +654,15 @@ mod platform {
             .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_socket()))
             .map(|entry| entry.path())
             .collect();
-        found.sort();
+        found.sort_by_key(|socket| {
+            let own = socket.file_name().is_some_and(|name| name == SERVER_SOCKET);
+            (!own, socket.clone())
+        });
         found
     }
 
-    /// The socket of the user's own server. A server does not say what its socket is
-    /// called, only which directory it is in, so each socket there is tried in turn.
+    /// The socket of the user's own server, in the first of its directories that has
+    /// one a server answers on.
     pub(super) async fn local(endpoint: &Endpoint) -> Result<Box<dyn Io>, RexError> {
         let mut last = io::Error::new(
             io::ErrorKind::NotFound,

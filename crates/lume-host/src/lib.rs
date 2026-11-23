@@ -21,6 +21,7 @@ mod pending;
 mod scan;
 mod screen;
 mod session;
+pub mod ssh;
 mod ssh_exit;
 pub mod tuning;
 

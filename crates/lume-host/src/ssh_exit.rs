@@ -19,17 +19,17 @@ const CLIENT_CLOSED: u32 = u32::MAX;
 
 /// The end of a session's output, kept as it goes by.
 #[derive(Debug, Default)]
-pub(crate) struct Tail {
+pub struct Tail {
     bytes: Vec<u8>,
 }
 
 impl Tail {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
     /// Takes the next bytes of the output.
-    pub(crate) fn push(&mut self, bytes: &[u8]) {
+    pub fn push(&mut self, bytes: &[u8]) {
         if bytes.len() >= SSH_TAIL_BYTES {
             self.bytes.clear();
             self.bytes
@@ -143,7 +143,7 @@ fn is_farewell(line: &str) -> bool {
 
 /// Tells how an SSH session ended from the client's exit status and the end of what
 /// it printed.
-pub(crate) fn classify(status: ExitStatus, tail: &Tail) -> Disconnected {
+pub fn classify(status: ExitStatus, tail: &Tail) -> Disconnected {
     let lines = tail.lines();
     let detail = lines
         .first()

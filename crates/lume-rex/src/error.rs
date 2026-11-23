@@ -25,6 +25,13 @@ pub enum RexError {
     /// The server's certificate does not show that it is the server its address names.
     #[error("the Rex server at {endpoint} could not be shown to be that server: {reason}")]
     Untrusted { endpoint: String, reason: String },
+    /// The SSH client could not log in to the server's machine without asking the user
+    /// something: who they are, or whether the machine is the one they mean.
+    #[error(
+        "the Rex server at {endpoint} could not be reached over SSH: {reason}. Connecting to \
+         the machine once with `ssh` in a terminal settles what it asks"
+    )]
+    Ssh { endpoint: String, reason: String },
     /// No server answered at the address.
     #[error("no Rex server could be reached at {endpoint}: {source}")]
     Unreachable {
@@ -73,6 +80,7 @@ impl RexError {
             RexError::Unsupported { .. } => "unsupported",
             RexError::Unconfirmed { .. } => "confirmation_required",
             RexError::Untrusted { .. } => "untrusted",
+            RexError::Ssh { .. } => "ssh",
             RexError::Unreachable { .. } => "unreachable",
             RexError::Refused { .. } => "forbidden",
             RexError::Revision(_) => "version_mismatch",
@@ -106,7 +114,8 @@ impl From<RexError> for SessionError {
             RexError::Refused { .. }
             | RexError::Unsupported { .. }
             | RexError::Unconfirmed { .. }
-            | RexError::Untrusted { .. } => ErrorCode::Unsupported,
+            | RexError::Untrusted { .. }
+            | RexError::Ssh { .. } => ErrorCode::Unsupported,
             RexError::Revision(_) => ErrorCode::VersionMismatch,
             RexError::Timeout(_) => ErrorCode::Timeout,
             RexError::Rejected(reason) => match reason {
