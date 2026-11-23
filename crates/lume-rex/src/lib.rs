@@ -5,8 +5,8 @@
 //! client, written from what a server says of itself: the page it serves at
 //! `/llms.txt` and the method descriptions at `/api/help`.
 //!
-//! - [`Endpoint`] and [`dial`] reach a server: over its named pipe on Windows, or a
-//!   Unix socket elsewhere.
+//! - [`Endpoint`] and [`dial`] reach a server: over its named pipe on Windows or a
+//!   Unix socket elsewhere when it is on this machine, over a network when it is not.
 //! - [`Control`] is the control connection: one WebSocket that carries every method
 //!   call and every event.
 //! - [`DataConn`] is a data connection: one WebSocket that carries what one terminal
@@ -48,7 +48,7 @@ pub use data::{
 pub use endpoint::Endpoint;
 pub use error::RexError;
 pub use stream::{Note, Opened, Opening, Piece, Splitter, Theme};
-pub use transport::{Io, dial};
+pub use transport::{Dialed, Io, LOCAL_AUTHORITY, Options, dial, dial_with};
 
 /// The result of something asked of a Rex server.
 pub type Result<T> = std::result::Result<T, RexError>;

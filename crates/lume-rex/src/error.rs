@@ -13,6 +13,15 @@ pub enum RexError {
     /// The address is not one this client can reach.
     #[error("`{0}` is not an address of a Rex server this application can reach")]
     BadEndpoint(String),
+    /// The address is one this client does not reach, though it is an address.
+    #[error("the Rex server at {endpoint} is not reached by this application: {why}")]
+    Unsupported { endpoint: String, why: String },
+    /// Reaching the server would send everything unencrypted over a network, and the
+    /// user has not agreed to that for this connection.
+    #[error(
+        "the connection to the Rex server at {endpoint} would not be encrypted, and was not agreed to"
+    )]
+    Unconfirmed { endpoint: String },
     /// No server answered at the address.
     #[error("no Rex server could be reached at {endpoint}: {source}")]
     Unreachable {
@@ -58,6 +67,8 @@ impl RexError {
     pub fn code(&self) -> &str {
         match self {
             RexError::BadEndpoint(_) => "bad_request",
+            RexError::Unsupported { .. } => "unsupported",
+            RexError::Unconfirmed { .. } => "confirmation_required",
             RexError::Unreachable { .. } => "unreachable",
             RexError::Refused { .. } => "forbidden",
             RexError::Revision(_) => "version_mismatch",
@@ -88,7 +99,9 @@ impl From<RexError> for SessionError {
             RexError::Closed { .. } | RexError::Disconnected => return SessionError::Disconnected,
             RexError::Protocol(_) => return SessionError::Protocol(error.to_string()),
             RexError::BadEndpoint(_) => ErrorCode::BadRequest,
-            RexError::Refused { .. } => ErrorCode::Unsupported,
+            RexError::Refused { .. }
+            | RexError::Unsupported { .. }
+            | RexError::Unconfirmed { .. } => ErrorCode::Unsupported,
             RexError::Revision(_) => ErrorCode::VersionMismatch,
             RexError::Timeout(_) => ErrorCode::Timeout,
             RexError::Rejected(reason) => match reason {

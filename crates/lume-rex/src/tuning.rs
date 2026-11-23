@@ -22,7 +22,9 @@ pub const CLIENT_TEXT_MAX_BYTES: usize = 64;
 pub const WELCOME_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a request waits for its response.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long opening a connection may take, the WebSocket handshake included.
+/// How long finding a host and opening a stream to it may take.
+pub const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long the WebSocket handshake of a connection may take.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The largest message taken from a server, whatever limit it names. A server names

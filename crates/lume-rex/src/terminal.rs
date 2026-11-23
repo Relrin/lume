@@ -196,8 +196,9 @@ async fn start(shared: &Shared, block: &BlockRef) -> Result<Started, RexError> {
         )
         .await?;
     let ticket = Ticket::read(&ticketed.ticket)?;
-    let io = shared.dial().await?;
-    let mut conn = DataConn::open(io, &shared.name, DataOpen::Start(&ticket)).await?;
+    let dialed = shared.dial().await?;
+    let how = DataOpen::Start(&ticket);
+    let mut conn = DataConn::open_at(dialed.io, &shared.name, &dialed.authority, how).await?;
     let nonce = conn.welcome().nonce;
     let mut splitter = Splitter::new(nonce);
     let mut received = 0u64;
@@ -279,12 +280,12 @@ async fn start(shared: &Shared, block: &BlockRef) -> Result<Started, RexError> {
 
 /// Continues a stream whose connection was lost, on a new connection.
 async fn resume(shared: &Shared, lost: Live) -> Result<Live, RexError> {
-    let io = shared.dial().await?;
+    let dialed = shared.dial().await?;
     let how = DataOpen::Resume {
         token: &lost.token,
         received: lost.received,
     };
-    let conn = DataConn::open(io, &shared.name, how).await?;
+    let conn = DataConn::open_at(dialed.io, &shared.name, &dialed.authority, how).await?;
     let token = conn.welcome().token.clone();
     Ok(Live {
         conn,

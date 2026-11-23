@@ -4,13 +4,63 @@ use std::io;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::endpoint::Endpoint;
+use crate::endpoint::{Endpoint, HTTP_PORT, authority};
 use crate::error::RexError;
 
 /// A stream of bytes to a server and back.
 pub trait Io: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Io for T {}
+
+/// What a server is called in a request when its stream is not found by a name: a pipe
+/// or a socket on this machine. A server takes any name there.
+pub const LOCAL_AUTHORITY: &str = "localhost";
+
+/// A stream to a server, with nothing said on it yet.
+pub struct Dialed {
+    pub io: Box<dyn Io>,
+    /// The host, and the port where it is not the usual one, that the server is asked
+    /// for by in requests on this stream.
+    pub authority: String,
+}
+
+impl Dialed {
+    /// A stream to a server on this machine.
+    pub fn local(io: impl Io) -> Self {
+        Self::here(Box::new(io))
+    }
+
+    fn here(io: Box<dyn Io>) -> Self {
+        Self {
+            io,
+            authority: LOCAL_AUTHORITY.to_owned(),
+        }
+    }
+}
+
+/// What the user has said of how a server may be reached.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct Options {
+    /// The user agreed, for this connection, to reach a server with nothing encrypted
+    /// over a network. Without it such a server is not dialled. It is asked of the user
+    /// each time and kept nowhere.
+    pub plain_http_agreed: bool,
+}
+
+impl Options {
+    /// What holds when the user has been asked nothing.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The same, with the user's answer about an unencrypted connection.
+    #[must_use]
+    pub fn plain_http_agreed(mut self, agreed: bool) -> Self {
+        self.plain_http_agreed = agreed;
+        self
+    }
+}
 
 fn unreachable(endpoint: &Endpoint, source: io::Error) -> RexError {
     RexError::Unreachable {
@@ -19,12 +69,248 @@ fn unreachable(endpoint: &Endpoint, source: io::Error) -> RexError {
     }
 }
 
-/// Opens a stream to the server at an endpoint. Nothing is said on it yet.
+/// Opens a stream to the server at an endpoint, with the user having been asked
+/// nothing. Nothing is said on it yet.
 pub async fn dial(endpoint: &Endpoint) -> Result<Box<dyn Io>, RexError> {
+    Ok(dial_with(endpoint, &Options::default()).await?.io)
+}
+
+/// Opens a stream to the server at an endpoint. Nothing is said on it yet.
+///
+/// A server that would be reached with nothing encrypted is dialled only on this
+/// machine, on a tailnet when the address says so, or when the user agreed.
+pub async fn dial_with(endpoint: &Endpoint, options: &Options) -> Result<Dialed, RexError> {
     match endpoint {
-        Endpoint::Local => platform::local(endpoint).await,
-        Endpoint::Pipe(name) => platform::pipe(endpoint, name).await,
-        Endpoint::Unix(path) => platform::unix(endpoint, path).await,
+        Endpoint::Local => platform::local(endpoint).await.map(Dialed::here),
+        Endpoint::Pipe(name) => platform::pipe(endpoint, name).await.map(Dialed::here),
+        Endpoint::Unix(path) => platform::unix(endpoint, path).await.map(Dialed::here),
+        Endpoint::Http { host, port } => {
+            let rule = tcp::Plain::Asked {
+                agreed: options.plain_http_agreed,
+            };
+            let io = tcp::plain(endpoint, host, *port, rule).await?;
+            Ok(Dialed {
+                io: Box::new(io),
+                authority: authority(host, *port, HTTP_PORT),
+            })
+        }
+        Endpoint::Tailnet { host, port } => {
+            let io = tcp::plain(endpoint, host, *port, tcp::Plain::Tailnet).await?;
+            Ok(Dialed {
+                io: Box::new(io),
+                authority: authority(host, *port, HTTP_PORT),
+            })
+        }
+        Endpoint::Https { .. } | Endpoint::Host { .. } | Endpoint::Ssh { .. } => {
+            Err(RexError::Unsupported {
+                endpoint: endpoint.to_string(),
+                why: "this kind of address is not reached yet".to_owned(),
+            })
+        }
+    }
+}
+
+/// Streams over a network.
+mod tcp {
+    use std::io;
+    use std::net::{IpAddr, SocketAddr};
+
+    use tokio::net::TcpStream;
+
+    use super::unreachable;
+    use crate::endpoint::Endpoint;
+    use crate::error::RexError;
+    use crate::tuning::DIAL_TIMEOUT;
+
+    /// When a stream with nothing encrypted on it may be opened.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) enum Plain {
+        /// On this machine always; elsewhere only if the user agreed.
+        Asked { agreed: bool },
+        /// Only to an address of a tailnet, which encrypts what passes.
+        Tailnet,
+    }
+
+    /// Whether an address is this machine's own.
+    fn is_loopback(address: IpAddr) -> bool {
+        address.to_canonical().is_loopback()
+    }
+
+    /// Whether an address is one Tailscale gives the machines of a tailnet:
+    /// `100.64.0.0/10` or `fd7a:115c:a1e0::/48`.
+    fn is_tailnet(address: IpAddr) -> bool {
+        match address.to_canonical() {
+            IpAddr::V4(address) => {
+                let [first, second, ..] = address.octets();
+                first == 100 && second & 0xc0 == 64
+            }
+            IpAddr::V6(address) => address.segments()[..3] == [0xfd7a, 0x115c, 0xa1e0],
+        }
+    }
+
+    /// Whether a stream with nothing encrypted on it may be opened to these addresses.
+    /// Every one of them has to pass: which is used is not this client's to choose.
+    pub(super) fn check(
+        endpoint: &Endpoint,
+        rule: Plain,
+        addresses: &[SocketAddr],
+    ) -> Result<(), RexError> {
+        let all = |passes: fn(IpAddr) -> bool| addresses.iter().all(|at| passes(at.ip()));
+        match rule {
+            Plain::Asked { agreed } if agreed || all(is_loopback) => Ok(()),
+            Plain::Asked { .. } => Err(RexError::Unconfirmed {
+                endpoint: endpoint.to_string(),
+            }),
+            Plain::Tailnet if all(is_tailnet) => Ok(()),
+            Plain::Tailnet => Err(RexError::Unsupported {
+                endpoint: endpoint.to_string(),
+                why: "the host is not at an address of a tailnet, so nothing would encrypt the \
+                      connection"
+                    .to_owned(),
+            }),
+        }
+    }
+
+    /// The addresses of a host, looked up once: what is checked is what is dialled.
+    pub(super) async fn resolve(
+        endpoint: &Endpoint,
+        host: &str,
+        port: u16,
+    ) -> Result<Vec<SocketAddr>, RexError> {
+        if let Ok(address) = host.parse::<IpAddr>() {
+            return Ok(vec![SocketAddr::new(address, port)]);
+        }
+        let found = tokio::time::timeout(DIAL_TIMEOUT, tokio::net::lookup_host((host, port)))
+            .await
+            .map_err(|_| unreachable(endpoint, io::ErrorKind::TimedOut.into()))?
+            .map_err(|error| unreachable(endpoint, error))?;
+        let addresses: Vec<SocketAddr> = found.collect();
+        if addresses.is_empty() {
+            return Err(unreachable(
+                endpoint,
+                io::Error::new(io::ErrorKind::NotFound, "the host has no address"),
+            ));
+        }
+        Ok(addresses)
+    }
+
+    /// A stream to the first of the addresses that takes one.
+    pub(super) async fn connect(
+        endpoint: &Endpoint,
+        addresses: &[SocketAddr],
+    ) -> Result<TcpStream, RexError> {
+        let each = async {
+            let mut last = io::Error::from(io::ErrorKind::NotFound);
+            for address in addresses {
+                match TcpStream::connect(address).await {
+                    Ok(stream) => return Ok(stream),
+                    Err(error) => last = error,
+                }
+            }
+            Err(last)
+        };
+        let stream = tokio::time::timeout(DIAL_TIMEOUT, each)
+            .await
+            .map_err(|_| unreachable(endpoint, io::ErrorKind::TimedOut.into()))?
+            .map_err(|error| unreachable(endpoint, error))?;
+        // What is typed is sent as it is typed, not held back for more.
+        let _ = stream.set_nodelay(true);
+        Ok(stream)
+    }
+
+    /// A stream with nothing encrypted on it, where the rule lets one be opened.
+    pub(super) async fn plain(
+        endpoint: &Endpoint,
+        host: &str,
+        port: u16,
+        rule: Plain,
+    ) -> Result<TcpStream, RexError> {
+        let addresses = resolve(endpoint, host, port).await?;
+        check(endpoint, rule, &addresses)?;
+        connect(endpoint, &addresses).await
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn at(addresses: &[&str]) -> Vec<SocketAddr> {
+            addresses
+                .iter()
+                .map(|address| SocketAddr::new(address.parse().unwrap(), 7297))
+                .collect()
+        }
+
+        fn code(rule: Plain, addresses: &[&str]) -> String {
+            let endpoint = Endpoint::parse("http://rex.example:7297").unwrap();
+            match check(&endpoint, rule, &at(addresses)) {
+                Ok(()) => "ok".to_owned(),
+                Err(error) => error.code().to_owned(),
+            }
+        }
+
+        #[test]
+        fn nothing_unencrypted_leaves_this_machine_unless_the_user_agreed() {
+            let asked = Plain::Asked { agreed: false };
+            assert_eq!(code(asked, &["127.0.0.1"]), "ok");
+            assert_eq!(code(asked, &["127.8.9.10", "::1"]), "ok");
+            assert_eq!(code(asked, &["::ffff:127.0.0.1"]), "ok");
+            for elsewhere in [
+                "10.0.0.5",
+                "192.168.1.20",
+                "100.100.1.2",
+                "8.8.8.8",
+                "0.0.0.0",
+                "::",
+                "fe80::1",
+                "fd7a:115c:a1e0::1",
+                "::ffff:10.0.0.5",
+            ] {
+                assert_eq!(
+                    code(asked, &[elsewhere]),
+                    "confirmation_required",
+                    "{elsewhere}"
+                );
+            }
+            // One address elsewhere among this machine's own is enough to ask.
+            assert_eq!(
+                code(asked, &["127.0.0.1", "10.0.0.5"]),
+                "confirmation_required"
+            );
+
+            let agreed = Plain::Asked { agreed: true };
+            assert_eq!(code(agreed, &["10.0.0.5"]), "ok");
+        }
+
+        #[test]
+        fn a_tailnet_address_is_only_one_a_tailnet_gives() {
+            for inside in [
+                "100.64.0.1",
+                "100.100.1.2",
+                "100.127.255.254",
+                "fd7a:115c:a1e0::1",
+                "fd7a:115c:a1e0:ab12:4843:cd96:6263:1",
+                "::ffff:100.64.0.1",
+            ] {
+                assert_eq!(code(Plain::Tailnet, &[inside]), "ok", "{inside}");
+            }
+            for outside in [
+                "100.63.255.255",
+                "100.128.0.1",
+                "127.0.0.1",
+                "10.0.0.5",
+                "8.8.8.8",
+                "fd7a:115c:a1e1::1",
+                "fd00::1",
+                "::1",
+            ] {
+                assert_eq!(code(Plain::Tailnet, &[outside]), "unsupported", "{outside}");
+            }
+            assert_eq!(
+                code(Plain::Tailnet, &["100.64.0.1", "10.0.0.5"]),
+                "unsupported"
+            );
+        }
     }
 }
 

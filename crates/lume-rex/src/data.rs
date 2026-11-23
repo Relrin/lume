@@ -22,7 +22,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::api::cut;
 use crate::error::RexError;
-use crate::transport::Io;
+use crate::transport::{Io, LOCAL_AUTHORITY};
 use crate::tuning::{
     DATA_ANSWER_TIMEOUT, DATA_CLOSE_TIMEOUT, DATA_MESSAGE_MAX_BYTES, DATA_PATH,
     TERMINAL_SUBPROTOCOL, TEXT_MAX_BYTES,
@@ -282,10 +282,22 @@ impl DataConn {
     ///
     /// A ticket is used up by this, whether or not the server takes it.
     pub async fn open(io: impl Io, endpoint: &str, how: DataOpen<'_>) -> Result<Self, RexError> {
+        Self::open_at(io, endpoint, LOCAL_AUTHORITY, how).await
+    }
+
+    /// Opens a data connection as [`open`](Self::open) does, to a server that is asked
+    /// for by `authority`: its host, and its port where that is not the usual one.
+    pub async fn open_at(
+        io: impl Io,
+        endpoint: &str,
+        authority: &str,
+        how: DataOpen<'_>,
+    ) -> Result<Self, RexError> {
         let io: Box<dyn Io> = Box::new(io);
         let mut socket = ws::open(
             io,
             endpoint,
+            authority,
             DATA_PATH,
             TERMINAL_SUBPROTOCOL,
             DATA_MESSAGE_MAX_BYTES,

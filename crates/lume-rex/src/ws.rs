@@ -15,18 +15,21 @@ use crate::transport::Io;
 use crate::tuning::{CONNECT_TIMEOUT, TEXT_MAX_BYTES};
 
 /// Shakes hands for a WebSocket at `path` over a stream to a server. `endpoint` names
-/// the server in what is said of failures. No message larger than `max_message_bytes`
-/// is taken from the server afterwards.
+/// the server in what is said of failures, and `authority` is what the server is asked
+/// for by: its host, and its port where that is not the usual one. No message larger
+/// than `max_message_bytes` is taken from the server afterwards.
 pub(crate) async fn open<S: Io>(
     io: S,
     endpoint: &str,
+    authority: &str,
     path: &str,
     subprotocol: &str,
     max_message_bytes: usize,
 ) -> Result<WebSocketStream<S>, RexError> {
     let protocol = |what: String| RexError::Protocol(what);
-    // Whatever the stream is, the server is not found by this name.
-    let mut request = format!("ws://localhost{path}")
+    // The stream is open already, and encrypted where it is to be: the address only
+    // says which server is asked for.
+    let mut request = format!("ws://{authority}{path}")
         .into_client_request()
         .map_err(|error| protocol(error.to_string()))?;
     request.headers_mut().insert(

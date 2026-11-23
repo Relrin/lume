@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
-use lume_rex::{ClientInfo, Dialer, Io, RexError};
+use lume_rex::{ClientInfo, Dialed, Dialer, RexError};
 use serde_json::{Value, json};
 use tokio::io::DuplexStream;
 use tokio::sync::mpsc;
@@ -143,7 +143,7 @@ pub fn streams() -> (Streams, Listener) {
 
 #[async_trait]
 impl Dialer for Streams {
-    async fn dial(&self) -> Result<Box<dyn Io>, RexError> {
+    async fn dial(&self) -> Result<Dialed, RexError> {
         self.dialled.fetch_add(1, Ordering::Relaxed);
         if *self.down.lock().unwrap() {
             return Err(RexError::Unreachable {
@@ -153,7 +153,7 @@ impl Dialer for Streams {
         }
         let (client, server) = tokio::io::duplex(STREAM_BYTES);
         let _ = self.servers.send(server);
-        Ok(Box::new(client))
+        Ok(Dialed::local(client))
     }
 }
 
@@ -173,6 +173,32 @@ impl Listener {
     }
 }
 
+/// What a request says in one of its headers.
+fn header(request: &Request, name: &str) -> Option<String> {
+    let value = request.headers().get(name)?;
+    value.to_str().ok().map(str::to_owned)
+}
+
+/// A pretend server's door on this machine's own network: every connection made to the
+/// address is one more stream of the listener, as if it had been dialled in memory.
+pub async fn door() -> (std::net::SocketAddr, Listener) {
+    let door = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = door.local_addr().unwrap();
+    let (servers, taken) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = door.accept().await {
+            let (mut near, far) = tokio::io::duplex(STREAM_BYTES);
+            if servers.send(far).is_err() {
+                return;
+            }
+            tokio::spawn(async move {
+                let _ = tokio::io::copy_bidirectional(&mut stream, &mut near).await;
+            });
+        }
+    });
+    (address, Listener { servers: taken })
+}
+
 /// A stream to a pretend server and the server's side of it.
 pub fn pair() -> (DuplexStream, DuplexStream) {
     tokio::io::duplex(STREAM_BYTES)
@@ -185,6 +211,8 @@ pub struct Conn {
     pub hello: Value,
     /// The subprotocol the client asked for.
     pub asked: Option<String>,
+    /// The host the client asked for the server by.
+    pub host: Option<String>,
     /// The number of the last event sent.
     pub seq: u64,
 }
@@ -203,10 +231,13 @@ impl Conn {
     pub async fn shake(stream: DuplexStream) -> Self {
         let asked = Arc::new(Mutex::new(None));
         let noted = Arc::clone(&asked);
+        let host = Arc::new(Mutex::new(None));
+        let named = Arc::clone(&host);
         let socket = accept_hdr_async(
             stream,
             move |request: &Request, mut response: Response| -> Result<Response, ErrorResponse> {
                 assert_eq!(request.uri().path(), "/api/control");
+                *named.lock().unwrap() = header(request, "Host");
                 let protocol = request.headers().get("Sec-WebSocket-Protocol").cloned();
                 if let Some(protocol) = protocol {
                     *noted.lock().unwrap() = protocol.to_str().ok().map(str::to_owned);
@@ -223,6 +254,7 @@ impl Conn {
             socket,
             hello: Value::Null,
             asked: asked.lock().unwrap().clone(),
+            host: host.lock().unwrap().clone(),
             seq: 0,
         };
         conn.hello = conn.text().await.expect("no hello");
@@ -327,6 +359,8 @@ pub struct DataSide {
     pub first: Vec<u8>,
     /// The subprotocol the client asked for.
     pub asked: Option<String>,
+    /// The host the client asked for the server by.
+    pub host: Option<String>,
     /// How many bytes of the stream were sent.
     pub sent: u64,
 }
@@ -349,10 +383,13 @@ impl DataSide {
     pub async fn shake(stream: DuplexStream) -> Self {
         let asked = Arc::new(Mutex::new(None));
         let noted = Arc::clone(&asked);
+        let host = Arc::new(Mutex::new(None));
+        let named = Arc::clone(&host);
         let socket = accept_hdr_async(
             stream,
             move |request: &Request, mut response: Response| -> Result<Response, ErrorResponse> {
                 assert_eq!(request.uri().path(), "/api/data");
+                *named.lock().unwrap() = header(request, "Host");
                 let protocol = request.headers().get("Sec-WebSocket-Protocol").cloned();
                 if let Some(protocol) = protocol {
                     *noted.lock().unwrap() = protocol.to_str().ok().map(str::to_owned);
@@ -369,6 +406,7 @@ impl DataSide {
             socket,
             first: Vec::new(),
             asked: asked.lock().unwrap().clone(),
+            host: host.lock().unwrap().clone(),
             sent: 0,
         };
         side.first = match side.socket.next().await {

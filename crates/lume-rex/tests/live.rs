@@ -2250,3 +2250,64 @@ fn seen_floating(view: &Value) -> Vec<String> {
         .map(|layer| layer["blocks"][0]["block_id"].as_str().unwrap().to_owned())
         .collect()
 }
+
+/// The address of a real server's port on this machine, for the test that reaches one
+/// over a network: `LUME_REX_LIVE_HTTP=http://127.0.0.1:PORT`, for a server started
+/// with `--extra-listen 127.0.0.1:PORT --allow-anonymous`.
+const LIVE_HTTP: &str = "LUME_REX_LIVE_HTTP";
+
+#[tokio::test]
+#[ignore = "needs a Rex server listening on a port of this machine, named in LUME_REX_LIVE_HTTP"]
+async fn a_real_server_is_reached_over_a_port_of_this_machine() {
+    let Ok(address) = std::env::var(LIVE_HTTP) else {
+        eprintln!("skipped: {LIVE_HTTP} is not set");
+        return;
+    };
+    let endpoint = Endpoint::parse(&address).unwrap();
+    assert!(matches!(endpoint, Endpoint::Http { .. }), "{endpoint}");
+
+    // The session is made over the pipe, by this user; it is shown over the port, where
+    // the server cannot tell who is calling.
+    let io = dial(&Endpoint::Local)
+        .await
+        .expect("is a Rex server running?");
+    let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
+    let (session, block) = session_with(&other, "lume-live-http", plain_shell()).await;
+    let of_block = |args: Value| json!({ "session_id": session, "block_id": block, "args": args });
+    let typed = |tag: &str| {
+        other.call(
+            "com.superlogical.terminal.write",
+            of_block(json!({ "data": echo(tag) })),
+        )
+    };
+
+    let backend = RexBackend::connect(BackendId("rex".to_owned()), endpoint, client());
+    let version = backend.ready().await.unwrap();
+    assert_eq!(version.api_revision, 19);
+    assert!(backend.sessions().iter().any(|listed| listed.id == session));
+    backend.open_session(&session).await.unwrap();
+    let id = backend.list().await.unwrap()[0].id;
+
+    typed("1-before").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let attachment = backend.attach(id, facts()).await.unwrap();
+    let rows = rows_of(&attachment.hydrate);
+    assert!(rows.iter().any(|row| row == "lume-1-before"), "{rows:?}");
+
+    // What is typed through the port is typed, and its output comes back through it.
+    let mut view = Viewing::new(attachment).await;
+    view.attachment
+        .input
+        .write(echo("2-through").as_bytes())
+        .await
+        .unwrap();
+    view.until("the echo", |view| view.shows("lume-2-through\r\n"))
+        .await;
+
+    view.attachment.input.detach().await.unwrap();
+    backend.shutdown();
+    other
+        .call("session.destroy", json!({ "session_id": session }))
+        .await
+        .unwrap();
+}

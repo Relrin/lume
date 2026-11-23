@@ -36,7 +36,7 @@ use crate::ids::{BlockRef, Ids};
 use crate::input::type_text;
 use crate::screen;
 use crate::terminal::FeedRef;
-use crate::transport::{Io, dial};
+use crate::transport::{Dialed, Options, dial_with};
 use crate::tuning::{
     ATTACH_RETRY, ATTACH_TIMEOUT, RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, SCREEN_POLL,
     SESSIONS_MAX,
@@ -80,15 +80,19 @@ pub struct RexSession {
 /// Makes the streams a backend's connections run over.
 #[async_trait]
 pub trait Dialer: Send + Sync + 'static {
-    async fn dial(&self) -> Result<Box<dyn Io>, RexError>;
+    async fn dial(&self) -> Result<Dialed, RexError>;
 }
 
-struct EndpointDialer(Endpoint);
+/// Dials an endpoint, as the user said it may be reached.
+struct EndpointDialer {
+    endpoint: Endpoint,
+    options: Options,
+}
 
 #[async_trait]
 impl Dialer for EndpointDialer {
-    async fn dial(&self) -> Result<Box<dyn Io>, RexError> {
-        dial(&self.0).await
+    async fn dial(&self) -> Result<Dialed, RexError> {
+        dial_with(&self.endpoint, &self.options).await
     }
 }
 
@@ -192,7 +196,7 @@ impl Shared {
     }
 
     /// A new stream to the server, for a connection of its own.
-    pub(crate) async fn dial(&self) -> Result<Box<dyn Io>, RexError> {
+    pub(crate) async fn dial(&self) -> Result<Dialed, RexError> {
         self.dialer.dial().await
     }
 
@@ -267,7 +271,19 @@ impl RexBackend {
     /// connects in the background, at once, and says how that goes through
     /// [`link`](Self::link). Must be called inside a Tokio runtime.
     pub fn connect(id: BackendId, endpoint: Endpoint, client: ClientInfo) -> Arc<Self> {
-        Self::over(id, endpoint.to_string(), EndpointDialer(endpoint), client)
+        Self::connect_with(id, endpoint, client, Options::default())
+    }
+
+    /// A backend as [`connect`](Self::connect) makes one, with what the user said of
+    /// how the server may be reached. What was said holds for this backend only.
+    pub fn connect_with(
+        id: BackendId,
+        endpoint: Endpoint,
+        client: ClientInfo,
+        options: Options,
+    ) -> Arc<Self> {
+        let name = endpoint.to_string();
+        Self::over(id, name, EndpointDialer { endpoint, options }, client)
     }
 
     /// A backend whose connections run over streams made by `dialer`. `name` is the
@@ -657,9 +673,15 @@ async fn open(shared: &Shared) -> Result<Opened, RexError> {
             .filter(|(_, lost)| lost.elapsed() < RESUME_WINDOW)
             .map(|(token, _)| token)
     };
-    let io = shared.dialer.dial().await?;
-    let (control, events) =
-        Control::open(io, &shared.name, &shared.client, token.as_deref()).await?;
+    let dialed = shared.dialer.dial().await?;
+    let (control, events) = Control::open_at(
+        dialed.io,
+        &shared.name,
+        &dialed.authority,
+        &shared.client,
+        token.as_deref(),
+    )
+    .await?;
     let control = Arc::new(control);
     let (version, _) = control
         .call_as::<ServerVersion>("server.version", Value::Null)

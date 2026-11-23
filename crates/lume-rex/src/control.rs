@@ -26,7 +26,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::api::{ApiRevisions, ClientInfo, Hello, Secret, Welcome, WireWelcome, cut};
 use crate::error::RexError;
-use crate::transport::Io;
+use crate::transport::{Io, LOCAL_AUTHORITY};
 use crate::tuning::{
     API_MIN_REVISION, API_REVISION, CALL_TIMEOUT, CONTROL_PATH, CONTROL_SUBPROTOCOL, EVENT_BACKLOG,
     HELLO_MAX_BYTES, MESSAGE_FLOOR_BYTES, MESSAGE_MAX_BYTES, REQUEST_BACKLOG, TEXT_MAX_BYTES,
@@ -194,10 +194,24 @@ impl Control {
         client: &ClientInfo,
         token: Option<&str>,
     ) -> Result<(Self, Events), RexError> {
+        Self::open_at(io, endpoint, LOCAL_AUTHORITY, client, token).await
+    }
+
+    /// Opens a control connection as [`open`](Self::open) does, to a server that is
+    /// asked for by `authority`: its host, and its port where that is not the usual
+    /// one.
+    pub async fn open_at(
+        io: impl Io,
+        endpoint: &str,
+        authority: &str,
+        client: &ClientInfo,
+        token: Option<&str>,
+    ) -> Result<(Self, Events), RexError> {
         let hello = hello_text(client, token)?;
         let mut socket = ws::open(
             io,
             endpoint,
+            authority,
             CONTROL_PATH,
             CONTROL_SUBPROTOCOL,
             MESSAGE_MAX_BYTES,
