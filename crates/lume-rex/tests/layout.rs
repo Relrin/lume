@@ -7,6 +7,7 @@ mod common;
 use std::collections::HashMap;
 
 use common::Recorded;
+use common::views::{across, down, layer, leaf, leaf_at, split, tiled, view, window};
 use lume_layout::tuning::{
     FLOATING_MAX, SHARE_MIN, SPLIT_CHILDREN_MAX, TAB_PANES_MAX, TABS_MAX, TREE_DEPTH_MAX,
 };
@@ -19,8 +20,6 @@ use lume_rex::layout::{Joint, LayoutIds, Shown, WINDOW, translate};
 use lume_rex::tuning::SPLIT_DEPTH_MAX;
 use lume_rex::{RexError, View};
 use serde_json::{Value, json};
-
-const TERMINAL: &str = "com.superlogical.terminal";
 
 fn backend() -> BackendId {
     BackendId("rex".to_owned())
@@ -78,71 +77,6 @@ fn refused(view: &Value) -> String {
     assert_eq!(shower.ids.next(), before, "a refused view kept numbers");
     assert!(matches!(error, RexError::Protocol(_)), "{error:?}");
     error.to_string()
-}
-
-fn leaf(block: &str) -> Value {
-    json!({"rect": [0, 0, 1, 1], "block_id": block})
-}
-
-fn leaf_at(block: &str, rect: [f64; 4]) -> Value {
-    json!({"rect": rect, "block_id": block})
-}
-
-fn split(id: &str, direction: &str, ratio: f64, before: Value, after: Value) -> Value {
-    json!({"rect": [0, 0, 1, 1], "split": {
-        "split_id": id, "direction": direction, "ratio": ratio, "before": before, "after": after,
-    }})
-}
-
-fn across(id: &str, ratio: f64, before: Value, after: Value) -> Value {
-    split(id, "horizontal", ratio, before, after)
-}
-
-fn down(id: &str, ratio: f64, before: Value, after: Value) -> Value {
-    split(id, "vertical", ratio, before, after)
-}
-
-/// The blocks a layout names, in the order they are laid out.
-fn blocks_in(node: &Value, found: &mut Vec<String>) {
-    if let Some(block) = node["block_id"].as_str() {
-        found.push(block.to_owned());
-    }
-    if node["split"].is_object() {
-        blocks_in(&node["split"]["before"], found);
-        blocks_in(&node["split"]["after"], found);
-    }
-}
-
-fn terminal(block: &str) -> Value {
-    json!({
-        "block_id": block, "label": "shell", "creator_name": TERMINAL,
-        "flavor": "com.superlogical.terminal.shell",
-    })
-}
-
-/// A layer whose blocks are all terminals.
-fn layer(id: &str, kind: &str, layout: Value) -> Value {
-    let mut blocks = Vec::new();
-    blocks_in(&layout, &mut blocks);
-    let blocks: Vec<Value> = blocks.iter().map(|block| terminal(block)).collect();
-    json!({"layer_id": id, "kind": kind, "bounds": [0, 0, 1, 1], "layout": layout, "blocks": blocks})
-}
-
-fn window(id: &str, layers: Vec<Value>) -> Value {
-    json!({"window_id": id, "label": "", "layers": layers})
-}
-
-/// A window with a layout and nothing floating.
-fn tiled(id: &str, layout: Value) -> Value {
-    window(id, vec![layer(&format!("layer:{id}"), "tiled", layout)])
-}
-
-fn view(windows: Vec<Value>) -> Value {
-    let active = windows.first().map(|window| window["window_id"].clone());
-    json!({
-        "revision": 1, "session_id": "session:s", "label": "work",
-        "active_window_id": active, "windows": windows,
-    })
 }
 
 fn only_window(workspace: &Workspace) -> &Window {
@@ -784,4 +718,31 @@ fn the_application_takes_the_workspace_as_a_copy_of_a_servers() {
     assert_eq!(copy.backend, Some(backend()));
     assert_eq!(copy.windows[0].id, own.windows[0].id);
     assert_eq!(copy.windows[0].centre, shown.workspace.windows[0].centre);
+}
+
+#[test]
+fn every_view_that_was_recorded_is_shown() {
+    let recorded = Recorded::load();
+    let mut shower = Shower::default();
+    let mut views = 0;
+    for (request, response) in recorded.calls() {
+        let payload = &response["payload"];
+        let view = match request["method"].as_str() {
+            Some("session.attach") => &payload["view"],
+            Some("session.view") => payload,
+            _ => continue,
+        };
+        // A view of a session that is not there is no view.
+        if view["windows"].is_null() {
+            continue;
+        }
+        let shown = shower.sound(view);
+        assert_eq!(
+            shown.workspace.sessions().len(),
+            shown.names.panes.len(),
+            "every recorded block is a terminal"
+        );
+        views += 1;
+    }
+    assert!(views >= 4, "only {views} views were recorded");
 }

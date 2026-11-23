@@ -197,6 +197,64 @@ fn requests() -> Vec<(&'static str, Value)> {
             }),
         ),
         ("block.close", of_block),
+        (
+            "session.new_split",
+            json!({
+                "session_id": "session:1", "anchor_id": "block:1",
+                "direction": "vertical", "side": "after", "ratio": 0.75, "focus": true,
+                "layout": {"block": {
+                    "flavor": "com.superlogical.terminal.shell",
+                    "options": {
+                        "shell": "none", "command": ["htop"], "login": false,
+                        "cwd": "/src", "size": {"columns": 100, "rows": 30},
+                    },
+                }},
+            }),
+        ),
+        (
+            "session.resize_pane",
+            json!({
+                "session_id": "session:1", "direction": "horizontal",
+                "before_block_id": "block:1", "after_block_id": "block:2", "ratio": 0.375,
+            }),
+        ),
+        (
+            "session.focus_block",
+            json!({ "session_id": "session:1", "block_id": "block:1" }),
+        ),
+        (
+            "session.focus_next_pane",
+            json!({ "session_id": "session:1", "wrap": true }),
+        ),
+        (
+            "session.focus_previous_pane",
+            json!({ "session_id": "session:1", "wrap": true }),
+        ),
+        (
+            "session.focus_direction",
+            json!({ "session_id": "session:1", "direction": "up" }),
+        ),
+        (
+            "session.swap_blocks",
+            json!({
+                "session_id": "session:1", "block_id": "block:1", "other_block_id": "block:2",
+            }),
+        ),
+        (
+            "session.move_block",
+            json!({
+                "session_id": "session:1", "block_id": "block:1", "anchor_block_id": "block:2",
+                "direction": "vertical", "side": "before",
+            }),
+        ),
+        (
+            "session.zoom_block",
+            json!({ "session_id": "session:1", "block_id": "block:1", "zoom": true }),
+        ),
+        (
+            "session.set_block_label",
+            json!({ "session_id": "session:1", "block_id": "block:1", "label": "logs" }),
+        ),
     ]
 }
 

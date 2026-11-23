@@ -26,6 +26,7 @@ mod error;
 mod events;
 mod ids;
 mod input;
+mod intents;
 pub mod layout;
 mod screen;
 mod stream;

@@ -44,6 +44,9 @@ pub const SESSIONS_MAX: usize = 1024;
 pub const WINDOWS_MAX: usize = 256;
 pub const LAYERS_MAX: usize = 256;
 pub const BLOCKS_MAX: usize = 4096;
+/// How long a change asked of a server's layout waits to be told of the view it made,
+/// before the view is read without being told.
+pub const APPLY_SETTLE: Duration = Duration::from_secs(1);
 /// How deep a layout's splits may nest.
 pub const SPLIT_DEPTH_MAX: usize = 64;
 /// The longest id or label taken from a server, in bytes. Longer ones are cut.

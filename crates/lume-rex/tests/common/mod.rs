@@ -8,7 +8,9 @@
 
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+pub mod views;
+
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -458,7 +460,45 @@ pub struct World {
     pub screen: Vec<String>,
     /// Whether a terminal shows its alternate screen.
     pub alternate: bool,
+    /// Whether calls that change a session's layout are answered: the session's view
+    /// moves on a revision, the change is announced, and then the call is answered.
+    pub layout: bool,
+    /// The views such calls leave, one for each call in turn. A call that finds none
+    /// leaves the view as it was but for its revision.
+    pub then: VecDeque<Value>,
+    /// What such a call answers beside the revision, by method.
+    pub extra: HashMap<String, Value>,
+    /// Whether a change is left unannounced.
+    pub quiet: bool,
+    /// What such calls are refused with, instead: a code, a status and a message.
+    pub refuse: Option<(String, u16, String)>,
 }
+
+/// The calls that change a session's layout.
+const LAYOUT_CALLS: [&str; 22] = [
+    "block.close",
+    "session.new_split",
+    "session.resize_pane",
+    "session.focus_block",
+    "session.focus_next_pane",
+    "session.focus_previous_pane",
+    "session.focus_direction",
+    "session.swap_blocks",
+    "session.move_block",
+    "session.zoom_block",
+    "session.set_block_label",
+    "session.new_window",
+    "session.close_window",
+    "session.focus_window",
+    "session.move_window",
+    "session.set_window_label",
+    "session.float_block",
+    "session.resize_layer",
+    "session.set_layer_state",
+    "session.close_layer",
+    "session.raise_layer",
+    "session.detach_block",
+];
 
 /// The session and the block that were recorded.
 pub const SESSION: &str = "session:recorded";
@@ -474,7 +514,61 @@ impl World {
             views: HashMap::from([(SESSION.to_owned(), view)]),
             screen: vec![String::new()],
             alternate: false,
+            layout: false,
+            then: VecDeque::new(),
+            extra: HashMap::new(),
+            quiet: false,
+            refuse: None,
         }
+    }
+
+    /// The same server, answering the calls that change a layout.
+    pub fn changing(mut self) -> Self {
+        self.layout = true;
+        self
+    }
+
+    /// Answers a call that changes a session's layout. Says whether it was one.
+    async fn change(&mut self, conn: &mut Conn, asked: &Asked) -> bool {
+        if !self.layout || !LAYOUT_CALLS.contains(&asked.method.as_str()) {
+            return false;
+        }
+        let session = asked.payload["session_id"].as_str().unwrap_or_default();
+        if let Some((code, status, message)) = &self.refuse {
+            conn.fail(&asked.id, code, *status, message).await;
+            return true;
+        }
+        let Some(view) = self.views.get_mut(session) else {
+            conn.fail(&asked.id, "session_not_found", 404, "session not found")
+                .await;
+            return true;
+        };
+        let revision = view["revision"].as_u64().unwrap() + 1;
+        if let Some(next) = self.then.pop_front() {
+            *view = next;
+            view["session_id"] = json!(session);
+        }
+        view["revision"] = json!(revision);
+        // A server says that the view changed before it answers what changed it.
+        if !self.quiet {
+            conn.session_event(
+                session,
+                "session_view_changed",
+                json!({ "revision": revision }),
+            )
+            .await;
+        }
+        let mut reply = self
+            .extra
+            .get(&asked.method)
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        reply["revision"] = json!(revision);
+        if asked.method == "block.close" {
+            reply["block_id"] = asked.payload["block_id"].clone();
+        }
+        conn.respond(&asked.id, reply).await;
+        true
     }
 
     fn listed(&self) -> Value {
@@ -487,7 +581,10 @@ impl World {
     }
 
     /// Answers one request as a server holding this would.
-    pub async fn answer(&self, conn: &mut Conn, asked: &Asked) {
+    pub async fn answer(&mut self, conn: &mut Conn, asked: &Asked) {
+        if self.change(conn, asked).await {
+            return;
+        }
         let recorded = Recorded::load();
         let session = asked.payload.get("session_id").and_then(Value::as_str);
         let view = session.and_then(|session| self.views.get(session));

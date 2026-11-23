@@ -307,6 +307,79 @@ async fn main() -> Result<(), Failure> {
             json!({ "session_id": session, "block_ids": [block] }),
         )
         .await?;
+
+    // What changing a layout's panes from here takes: a third block, and each call
+    // once.
+    let view = recorder.call("session.view", of_session()).await?;
+    let second = view["payload"]["windows"][0]["layers"][0]["blocks"][1]["block_id"]
+        .as_str()
+        .ok_or("no second block")?
+        .to_owned();
+    let of = |args: Value| {
+        let mut args = args;
+        args["session_id"] = json!(session);
+        args
+    };
+    let split = recorder
+        .call(
+            "session.new_split",
+            of(json!({
+                "anchor_id": second, "direction": "vertical", "side": "after",
+                "ratio": 0.75, "focus": true, "layout": {"block": plain_shell()},
+            })),
+        )
+        .await?;
+    let third = split["payload"]["block_ids"][0]
+        .as_str()
+        .ok_or("no third block")?
+        .to_owned();
+    recorder.settle().await?;
+    let changes = [
+        ("session.focus_block", json!({ "block_id": block })),
+        ("session.focus_next_pane", json!({ "wrap": true })),
+        ("session.focus_previous_pane", json!({ "wrap": true })),
+        ("session.focus_direction", json!({ "direction": "right" })),
+        (
+            "session.swap_blocks",
+            json!({ "block_id": block, "other_block_id": third }),
+        ),
+        (
+            "session.resize_pane",
+            json!({
+                "direction": "horizontal", "before_block_id": third,
+                "after_block_id": second, "ratio": 0.3,
+            }),
+        ),
+        (
+            "session.move_block",
+            json!({
+                "block_id": third, "anchor_block_id": block,
+                "direction": "vertical", "side": "after",
+            }),
+        ),
+        (
+            "session.zoom_block",
+            json!({ "block_id": block, "zoom": true }),
+        ),
+        (
+            "session.zoom_block",
+            json!({ "block_id": block, "zoom": false }),
+        ),
+        (
+            "session.set_block_label",
+            json!({ "block_id": third, "label": "logs" }),
+        ),
+    ];
+    for (method, args) in changes {
+        recorder.call(method, of(args)).await?;
+        recorder.settle().await?;
+    }
+    recorder.call("session.view", of_session()).await?;
+    recorder
+        .call("block.close", of(json!({ "block_id": third })))
+        .await?;
+    recorder.settle().await?;
+
     recorder.call("block.close", of_block()).await?;
     recorder.settle().await?;
 

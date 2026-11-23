@@ -115,6 +115,14 @@ pub enum LayoutError {
     /// Whoever owns the layout has no way to do what was asked.
     #[error("{0}")]
     Unsupported(String),
+    /// Whoever owns the layout refused what was asked, for a reason of its own. The
+    /// layout is as its owner left it.
+    #[error("{message}")]
+    Refused {
+        /// A short, stable name for the kind of refusal, as the owner names kinds.
+        code: String,
+        message: String,
+    },
 }
 
 impl LayoutError {
@@ -125,6 +133,7 @@ impl LayoutError {
             LayoutError::Spawn(failure) => &failure.code,
             LayoutError::Closed => "disconnected",
             LayoutError::Unsupported(_) => "unsupported",
+            LayoutError::Refused { code, .. } => code,
         }
     }
 }

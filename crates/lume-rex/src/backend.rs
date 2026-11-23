@@ -151,6 +151,36 @@ impl Shared {
         }
     }
 
+    /// The revision of the view held of a session, if one is held.
+    pub(crate) fn revision_of(&self, session_id: &str) -> Option<u64> {
+        let state = self.state();
+        Some(state.opened.get(session_id)?.as_ref()?.revision)
+    }
+
+    /// Reads a session's view and keeps it, if the session is still opened and nothing
+    /// newer was read meanwhile.
+    pub(crate) async fn read_view(
+        &self,
+        control: &Control,
+        session_id: &str,
+    ) -> Result<(), RexError> {
+        let (view, _) = control
+            .call_as::<View>("session.view", json!({ "session_id": session_id }))
+            .await?;
+        let view = view.check()?;
+        let mut state = self.state();
+        if let Some(held) = state.opened.get_mut(session_id)
+            && held
+                .as_ref()
+                .is_none_or(|held| held.revision < view.revision)
+        {
+            *held = Some(view);
+            drop(state);
+            self.touch();
+        }
+        Ok(())
+    }
+
     /// The number the application knows a block's terminal by.
     pub(crate) fn session_number(&self, session_id: &str, block_id: &str) -> SessionId {
         self.state().ids.of(session_id, block_id)
@@ -802,27 +832,8 @@ async fn follow(shared: &Shared, opened: Opened) -> RexError {
                 None => continue,
             },
         };
-        let read = control
-            .call_as::<View>("session.view", json!({ "session_id": session_id }))
-            .await
-            .and_then(|(view, _)| view.check());
-        match read {
-            Ok(view) => {
-                let mut state = shared.state();
-                // Only if it is still opened, and nothing newer was read meanwhile.
-                if let Some(held) = state.opened.get_mut(&session_id)
-                    && held
-                        .as_ref()
-                        .is_none_or(|held| held.revision < view.revision)
-                {
-                    *held = Some(view);
-                    drop(state);
-                    shared.touch();
-                }
-            }
-            Err(error) => {
-                tracing::debug!(server = %shared.name, %error, "a session's view could not be read");
-            }
+        if let Err(error) = shared.read_view(&control, &session_id).await {
+            tracing::debug!(server = %shared.name, %error, "a session's view could not be read");
         }
     }
     control.until_ended().await

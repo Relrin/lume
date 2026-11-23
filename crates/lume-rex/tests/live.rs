@@ -11,10 +11,13 @@ use std::time::Duration;
 
 use common::{client, until};
 use lume_layout::{
-    Axis, LayoutAuthority, LayoutEvent, Minimised, Node, UNITS, Workspace, is_normalised, validate,
+    Axis, Dir, FocusTarget, Intent, LayoutAuthority, LayoutError, LayoutEvent, Minimised,
+    NewContent, Node, Place, SpawnRequest, UNITS, WindowId, Workspace, is_normalised, validate,
 };
 use lume_proto::tuning::CREDIT_WINDOW;
-use lume_proto::{BackendId, CellPx, ClientFacts, ColorScheme, ExitStatus, Palette, TermSize};
+use lume_proto::{
+    BackendId, CellPx, ClientFacts, ColorScheme, ExitStatus, Launcher, Palette, TermSize,
+};
 use lume_rex::tuning::{TERMINAL_DATA_REF, TERMINAL_SUBPROTOCOL};
 use lume_rex::{
     Control, DataConn, DataEnd, DataOpen, Endpoint, Link, Note, Opening, Piece, Reject, RexBackend,
@@ -1531,5 +1534,350 @@ async fn the_layout_of_a_real_session_follows_what_another_client_does() {
         tokio::time::timeout(Duration::from_secs(20), changes.next()).await,
         Ok(Some(LayoutEvent::Reset(_)))
     ));
+    backend.shutdown();
+}
+
+/// A session's view as another client reads it.
+async fn seen(other: &Control, session: &str) -> Value {
+    other
+        .call("session.view", json!({ "session_id": session }))
+        .await
+        .unwrap()
+        .payload
+}
+
+/// The blocks of the first window's layout as another client sees them, in the order
+/// they are laid out.
+async fn seen_blocks(other: &Control, session: &str) -> Vec<String> {
+    let view = seen(other, session).await;
+    let mut blocks = Vec::new();
+    common::views::blocks_in(&view["windows"][0]["layers"][0]["layout"], &mut blocks);
+    blocks
+}
+
+/// A new terminal pane that runs a plain shell of the server's machine.
+fn plain_pane() -> NewContent {
+    let (program, args) = if cfg!(windows) {
+        ("cmd.exe", vec!["/d".to_owned()])
+    } else {
+        ("/bin/sh", Vec::new())
+    };
+    NewContent::Terminal(SpawnRequest {
+        launcher: Some(Launcher::Shell {
+            program: program.to_owned(),
+            args,
+            login: false,
+        }),
+        ..SpawnRequest::default()
+    })
+}
+
+fn close_to(value: &Value, wanted: f64) -> bool {
+    (value.as_f64().unwrap() - wanted).abs() < 1e-4
+}
+
+#[tokio::test]
+#[ignore = "needs a Rex server running on this machine"]
+async fn what_is_asked_of_a_real_sessions_layout_is_seen_by_another_client() {
+    let io = dial(&Endpoint::Local)
+        .await
+        .expect("is a Rex server running?");
+    let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
+    let (session, first_block) = session_with(&other, "lume-live-apply", plain_shell()).await;
+
+    let backend = RexBackend::connect(BackendId("rex".to_owned()), Endpoint::Local, client());
+    backend.ready().await.unwrap();
+    until("the session is known", || {
+        backend.sessions().iter().any(|known| known.id == session)
+    })
+    .await;
+    backend.show_session(&session).await.unwrap();
+    let layout = backend.layout().unwrap();
+    let window = WindowId::new(1);
+    // The layout as it is the moment an answer came: nothing is waited for.
+    let now = || async { layout.view().await.unwrap().workspace };
+    let panes = || async { now().await.windows[0].centre.tabs[0].pane_ids() };
+    let first = panes().await[0];
+
+    // A split: the new pane is in the layout when the answer comes, and has the
+    // quarter it was to have.
+    let applied = layout
+        .apply(Intent::Split {
+            pane: first,
+            dir: Dir::Right,
+            ratio: UNITS / 4,
+            content: plain_pane(),
+        })
+        .await
+        .unwrap();
+    let second = applied.created.pane.expect("the new pane");
+    assert_eq!(panes().await, [first, second]);
+    let shown = layout.view().await.unwrap();
+    assert_eq!(applied.revision, shown.revision);
+    let view = seen(&other, &session).await;
+    let split = &view["windows"][0]["layers"][0]["layout"]["split"];
+    assert_eq!(split["direction"], "horizontal");
+    assert!(close_to(&split["ratio"], 0.75), "{split}");
+    assert_eq!(split["before"]["block_id"], first_block.as_str());
+    let blocks = seen_blocks(&other, &session).await;
+    let second_block = blocks[1].clone();
+    // A split takes the keyboard to the new pane.
+    assert_eq!(
+        view["windows"][0]["focused_block_id"],
+        second_block.as_str()
+    );
+    assert_eq!(shown.workspace.windows[0].focus, Some(second));
+    // The new pane is a terminal that can be attached to.
+    let listed = backend.list().await.unwrap();
+    assert_eq!(listed.len(), 2);
+
+    // A second split to the right of the second pane: one row of three here.
+    let applied = layout
+        .apply(Intent::Split {
+            pane: second,
+            dir: Dir::Right,
+            ratio: UNITS / 2,
+            content: plain_pane(),
+        })
+        .await
+        .unwrap();
+    let third = applied.created.pane.unwrap();
+    assert_eq!(panes().await, [first, second, third]);
+    let Node::Split(row) = now().await.windows[0].centre.tabs[0].root.clone() else {
+        panic!("a row");
+    };
+    assert_eq!(row.children.len(), 3);
+    let third_block = seen_blocks(&other, &session).await[2].clone();
+
+    // The row is resized: both of the server's splits move.
+    let tenth = UNITS / 10;
+    layout
+        .apply(Intent::Resize {
+            split: row.id,
+            ratios: vec![2 * tenth, 3 * tenth, 5 * tenth],
+        })
+        .await
+        .unwrap();
+    let view = seen(&other, &session).await;
+    let outer = &view["windows"][0]["layers"][0]["layout"]["split"];
+    assert!(close_to(&outer["ratio"], 0.2), "{outer}");
+    assert!(
+        close_to(&outer["after"]["split"]["ratio"], 0.375),
+        "{outer}"
+    );
+    let Node::Split(row) = now().await.windows[0].centre.tabs[0].root.clone() else {
+        panic!("a row");
+    };
+    for (share, wanted) in row.ratios.iter().zip([2 * tenth, 3 * tenth, 5 * tenth]) {
+        assert!(share.abs_diff(wanted) <= 2, "{:?}", row.ratios);
+    }
+    // Only the inner border: the outer split is left as it is.
+    layout
+        .apply(Intent::Resize {
+            split: row.id,
+            ratios: vec![2 * tenth, 4 * tenth, 4 * tenth],
+        })
+        .await
+        .unwrap();
+    let view = seen(&other, &session).await;
+    let outer = &view["windows"][0]["layers"][0]["layout"]["split"];
+    assert!(close_to(&outer["ratio"], 0.2), "{outer}");
+    assert!(close_to(&outer["after"]["split"]["ratio"], 0.5), "{outer}");
+
+    // Focus: a pane, a direction, the next and the one before.
+    let focused = || async {
+        seen(&other, &session).await["windows"][0]["focused_block_id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    layout
+        .apply(Intent::Focus {
+            target: FocusTarget::Pane { pane: first },
+        })
+        .await
+        .unwrap();
+    assert_eq!(focused().await, first_block);
+    assert_eq!(now().await.windows[0].focus, Some(first));
+    layout
+        .apply(Intent::FocusDir {
+            window,
+            dir: Dir::Right,
+        })
+        .await
+        .unwrap();
+    assert_eq!(focused().await, second_block);
+    layout
+        .apply(Intent::Focus {
+            target: FocusTarget::Next { window },
+        })
+        .await
+        .unwrap();
+    assert_eq!(focused().await, third_block);
+    layout
+        .apply(Intent::Focus {
+            target: FocusTarget::Next { window },
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        focused().await,
+        first_block,
+        "the next after the last is the first"
+    );
+    layout
+        .apply(Intent::Focus {
+            target: FocusTarget::Previous { window },
+        })
+        .await
+        .unwrap();
+    assert_eq!(focused().await, third_block);
+    assert_eq!(now().await.windows[0].focus, Some(third));
+
+    // Zoom, on and off.
+    layout
+        .apply(Intent::Zoom {
+            pane: second,
+            on: true,
+        })
+        .await
+        .unwrap();
+    let view = seen(&other, &session).await;
+    assert_eq!(view["windows"][0]["zoomed_block_id"], second_block.as_str());
+    assert_eq!(now().await.windows[0].centre.tabs[0].zoomed, Some(second));
+    layout
+        .apply(Intent::Zoom {
+            pane: second,
+            on: false,
+        })
+        .await
+        .unwrap();
+    let view = seen(&other, &session).await;
+    assert!(view["windows"][0]["zoomed_block_id"].is_null(), "{view}");
+    assert_eq!(now().await.windows[0].centre.tabs[0].zoomed, None);
+
+    // A name, and no name.
+    let label_of = |view: &Value, block: &str| {
+        view["windows"][0]["layers"][0]["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|listed| listed["block_id"] == block)
+            .unwrap()["label"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    layout
+        .apply(Intent::PaneRename {
+            pane: second,
+            title: Some("logs".to_owned()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        label_of(&seen(&other, &session).await, &second_block),
+        "logs"
+    );
+    assert_eq!(
+        now().await.pane(second).unwrap().title.as_deref(),
+        Some("logs")
+    );
+    layout
+        .apply(Intent::PaneRename {
+            pane: second,
+            title: None,
+        })
+        .await
+        .unwrap();
+    let label = label_of(&seen(&other, &session).await, &second_block);
+    println!("a block whose name is taken away is called {label:?} by the server");
+    assert_eq!(now().await.pane(second).unwrap().title, None, "{label}");
+
+    // Two panes change places; everything else stays.
+    layout
+        .apply(Intent::Swap { a: first, b: third })
+        .await
+        .unwrap();
+    assert_eq!(
+        seen_blocks(&other, &session).await,
+        [
+            third_block.clone(),
+            second_block.clone(),
+            first_block.clone()
+        ]
+    );
+    assert_eq!(panes().await, [third, second, first]);
+
+    // A pane is moved below another.
+    layout
+        .apply(Intent::Move {
+            pane: third,
+            to: Place::Beside {
+                pane: first,
+                edge: Dir::Down,
+            },
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        seen_blocks(&other, &session).await,
+        [
+            second_block.clone(),
+            first_block.clone(),
+            third_block.clone()
+        ]
+    );
+    let shown = now().await;
+    validate(&shown).unwrap();
+    assert!(is_normalised(&shown));
+    let Node::Split(row) = &shown.windows[0].centre.tabs[0].root else {
+        panic!("a row");
+    };
+    let Node::Split(column) = &row.children[1] else {
+        panic!("the moved pane is below the other: {row:#?}");
+    };
+    assert_eq!(column.axis, Axis::Column);
+    assert_eq!(column.children[1].pane_ids(), [third]);
+
+    // What the server will not do is said as it says it, and nothing is changed: a
+    // program that is not there is not run.
+    let before = layout.view().await.unwrap();
+    let refused = layout
+        .apply(Intent::Split {
+            pane: first,
+            dir: Dir::Right,
+            ratio: UNITS / 2,
+            content: NewContent::Terminal(SpawnRequest {
+                launcher: Some(Launcher::Shell {
+                    program: "lume-live-no-such-program".to_owned(),
+                    args: Vec::new(),
+                    login: false,
+                }),
+                ..SpawnRequest::default()
+            }),
+        })
+        .await
+        .unwrap_err();
+    println!("a split that runs a program that is not there: {refused}");
+    assert!(
+        matches!(refused, LayoutError::Refused { .. }),
+        "{refused:?}"
+    );
+    assert!(refused.to_string().contains("lume-live-no-such-program"));
+    assert_eq!(layout.view().await.unwrap(), before);
+
+    // A pane is closed: its block is gone for everyone.
+    let before = seen_blocks(&other, &session).await;
+    layout.apply(Intent::Close { pane: third }).await.unwrap();
+    let after = seen_blocks(&other, &session).await;
+    assert_eq!(after.len(), before.len() - 1);
+    assert!(!after.contains(&third_block));
+    assert!(!panes().await.contains(&third));
+
+    other
+        .call("session.destroy", json!({ "session_id": session }))
+        .await
+        .unwrap();
     backend.shutdown();
 }

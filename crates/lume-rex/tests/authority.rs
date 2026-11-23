@@ -428,13 +428,20 @@ async fn a_view_that_cannot_be_shown_changes_nothing() {
 }
 
 #[tokio::test]
-async fn nothing_is_changed_from_here_yet_and_the_layout_ends_with_its_backend() {
+async fn the_layout_ends_with_its_backend() {
     let (backend, _served, _listener) = connected(World::recorded()).await;
     let layout = backend.layout().unwrap();
     backend.show_session(SESSION).await.unwrap();
     let shown = layout.view().await.unwrap();
     let pane = shown.workspace.windows[0].centre.tabs[0].first_pane();
 
+    let mut changes = layout.changes();
+    backend.shutdown();
+    assert_eq!(next(&mut changes).await, None);
+    assert_eq!(layout.view().await.unwrap_err(), LayoutError::Closed);
+    // Whoever asks to follow it now is told at once that there is nothing to follow.
+    assert_eq!(next(&mut layout.changes()).await, None);
+    // And nothing is asked of a server on its behalf.
     let refused = layout
         .apply(Intent::Split {
             pane,
@@ -444,13 +451,5 @@ async fn nothing_is_changed_from_here_yet_and_the_layout_ends_with_its_backend()
         })
         .await
         .unwrap_err();
-    assert_eq!(refused.code(), "unsupported");
-    assert_eq!(layout.view().await.unwrap(), shown);
-
-    let mut changes = layout.changes();
-    backend.shutdown();
-    assert_eq!(next(&mut changes).await, None);
-    assert_eq!(layout.view().await.unwrap_err(), LayoutError::Closed);
-    // Whoever asks to follow it now is told at once that there is nothing to follow.
-    assert_eq!(next(&mut layout.changes()).await, None);
+    assert_eq!(refused, LayoutError::Closed);
 }

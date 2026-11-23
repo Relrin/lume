@@ -17,15 +17,19 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use lume_layout::{
-    Applied, ChangeSource, ChangeStream, Intent, LayoutAuthority, LayoutError, LayoutEvent,
-    LayoutSnapshot, LocalLayout, SpawnFailure, SpawnRequest, Spawner, Started, validate,
+    Applied, ChangeSource, ChangeStream, Created, Intent, LayoutAuthority, LayoutError,
+    LayoutEvent, LayoutSnapshot, LocalLayout, PaneId, SpawnFailure, SpawnRequest, Spawner, Started,
+    validate,
 };
 use lume_proto::BackendId;
 
 use crate::api::View;
 use crate::backend::{Link, Seen, Shared};
+use crate::control::Control;
 use crate::error::RexError;
+use crate::intents::{Makes, plan};
 use crate::layout::{LayoutIds, Names, translate};
+use crate::tuning::APPLY_SETTLE;
 
 /// The first of the layouts a backend gives. Each other session put on show is the
 /// next.
@@ -231,10 +235,59 @@ impl LayoutAuthority for RexLayout {
         }
     }
 
-    async fn apply(&self, _intent: Intent) -> Result<Applied, LayoutError> {
-        Err(LayoutError::Unsupported(
-            "a Rex server's layout cannot be changed from here yet".to_owned(),
-        ))
+    /// Asks the server for what the intent means, and answers once the copy shows what
+    /// the server made of it.
+    async fn apply(&self, intent: Intent) -> Result<Applied, LayoutError> {
+        let (session, plan) = {
+            let mut held = self.held();
+            self.publish(&mut held);
+            let Some(layout) = &held.layout else {
+                return Err(LayoutError::Closed);
+            };
+            let Some(session) = held.current.clone() else {
+                return Err(LayoutError::Unsupported(
+                    "no session of the Rex server is on show".to_owned(),
+                ));
+            };
+            let plan = plan(&intent, &layout.workspace(), &held.names)?;
+            (session, plan)
+        };
+        let control = self.shared.control().map_err(refusal)?;
+
+        let mut revision = 0;
+        let mut made = None;
+        for call in plan.calls {
+            let answer = control
+                .call(call.method, call.args)
+                .await
+                .map_err(refusal)?;
+            let reached = answer.payload["revision"].as_u64().unwrap_or(0);
+            revision = revision.max(reached);
+            if plan.makes == Makes::Pane {
+                made = answer.payload["block_ids"][0].as_str().map(str::to_owned);
+            }
+        }
+        self.settle(&control, &session, revision).await;
+
+        let mut held = self.held();
+        self.publish(&mut held);
+        let Some(layout) = &held.layout else {
+            return Err(LayoutError::Closed);
+        };
+        let snapshot = layout.snapshot();
+        let created = Created {
+            // The pane of the block the server made, as the copy now numbers it.
+            pane: made
+                .and_then(|block| held.ids.known(&block))
+                .map(PaneId::new)
+                .filter(|pane| held.names.panes.contains_key(pane)),
+            ..Created::default()
+        };
+        Ok(Applied {
+            epoch: snapshot.epoch,
+            revision: snapshot.revision,
+            created,
+        })
     }
 
     fn changes(&self) -> ChangeStream {
@@ -242,6 +295,46 @@ impl LayoutAuthority for RexLayout {
             Some(layout) => layout.changes(),
             None => ChangeStream::new(Ended),
         }
+    }
+}
+
+impl RexLayout {
+    /// Waits until the backend holds a view of the session at `revision` or later:
+    /// what a call changed is then in the copy. The server says that a view changed
+    /// before it answers the call that changed it, and the backend reads the view when
+    /// it is told; if that does not happen, the view is read here.
+    async fn settle(&self, control: &Control, session: &str, revision: u64) {
+        let mut changed = self.shared.changed();
+        // A session that is no longer opened has no view to wait for.
+        let reached = || {
+            self.shared
+                .revision_of(session)
+                .is_none_or(|held| held >= revision)
+        };
+        let told = async {
+            while !reached() {
+                if changed.changed().await.is_err() {
+                    break;
+                }
+            }
+        };
+        if tokio::time::timeout(APPLY_SETTLE, told).await.is_err()
+            && let Err(error) = self.shared.read_view(control, session).await
+        {
+            tracing::debug!(server = %self.shared.name, %error, "a session's view could not be read");
+        }
+    }
+}
+
+/// Why a server did not do what it was asked, as a layout's owner says it.
+fn refusal(error: RexError) -> LayoutError {
+    match error {
+        RexError::Disconnected | RexError::Closed { .. } => LayoutError::Closed,
+        RexError::Call { code, message, .. } => LayoutError::Refused { code, message },
+        other => LayoutError::Refused {
+            code: other.code().to_owned(),
+            message: other.to_string(),
+        },
     }
 }
 
