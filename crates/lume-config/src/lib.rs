@@ -32,6 +32,7 @@ pub mod keys;
 pub mod layers;
 pub mod paths;
 pub mod profiles;
+pub mod rex;
 pub mod schema;
 pub mod settings;
 pub mod source;
@@ -59,6 +60,7 @@ pub use paths::{Dirs, Platform, check_workspace_name, host_log_file, log_file};
 pub use profiles::{
     LauncherKind, Profile, ProfileEntry, ProfileOrigin, ShellIntegration, merge_profiles,
 };
+pub use rex::{RexConfig, RexHostEntry};
 pub use schema::{
     CloseOnExit, Config, ProgramIcon, TileColor, WindowCorners, WorkspaceSettings, config_schema,
     default_config_text,

@@ -139,7 +139,7 @@ pub async fn about_info(state: App<'_>) -> Result<AboutInfo, CommandError> {
         engine_version: tauri::webview_version().ok(),
         proto: lume_proto::PROTO_VERSION,
         host,
-        rex_version: crate::rex::version().await,
+        rex_version: crate::rex::installed::version().await,
     })
 }
 

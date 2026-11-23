@@ -617,6 +617,7 @@ mod tests {
             Arc::clone(&config),
         );
         let services = Arc::new(Services {
+            rex: crate::rex::Hosts::new(&config, &state, &panes),
             state,
             panes,
             config,

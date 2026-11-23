@@ -624,6 +624,23 @@ impl World {
         json!({ "sessions": sessions })
     }
 
+    /// Makes a session with a copy of the recorded view, and says so before answering.
+    async fn create(&mut self, conn: &mut Conn, asked: &Asked) {
+        let id = format!("session:made-{}", self.sessions.len());
+        let label = asked.payload["label"].as_str().unwrap_or("unnamed");
+        let mut view = Recorded::load().result("session.view", 0);
+        view["session_id"] = json!(id);
+        view["label"] = json!(label);
+        self.views.insert(id.clone(), view);
+        self.sessions.push((id.clone(), label.to_owned()));
+        conn.event(
+            "session_created",
+            json!({ "session": { "session_id": id, "label": label } }),
+        )
+        .await;
+        conn.respond(&asked.id, json!({ "session_id": id })).await;
+    }
+
     /// Answers one request as a server holding this would.
     pub async fn answer(&mut self, conn: &mut Conn, asked: &Asked) {
         if self.change(conn, asked).await {
@@ -636,6 +653,10 @@ impl World {
         if asked.payload.get("args").is_some_and(Value::is_null) {
             conn.fail(&asked.id, "bad_request", 400, "validating input: type null")
                 .await;
+            return;
+        }
+        if asked.method == "session.create" {
+            self.create(conn, asked).await;
             return;
         }
         let reply = match asked.method.as_str() {

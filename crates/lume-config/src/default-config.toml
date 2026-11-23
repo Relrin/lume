@@ -173,6 +173,18 @@
 # ControlPersist takes it: "10m", "yes", "no".
 # control-persist = "10m"
 
+[rex]
+# Look for the Rex server of your account on this computer, where servers are listed.
+# One that runs is listed; none is ever started.
+# local = true
+# Rex servers elsewhere are [[rex.host]] tables. An address is "https://HOST[:PORT]",
+# "http://HOST[:PORT]", "tailnet://HOST:PORT", "ssh://[USER@]HOST[:PORT]" or a host
+# alone, which is tried the safest way first:
+#
+#   [[rex.host]]
+#   label = "build"
+#   address = "ssh://me@build.example"
+
 [keybindings]
 # A key is a chord such as "ctrl+shift+t", or several chords separated by spaces. Its
 # value is a command's id, or a table that also says where the key holds:

@@ -178,6 +178,12 @@ fn new_block(request: &SpawnRequest) -> Result<Value, LayoutError> {
     Ok(json!({ "block": block }))
 }
 
+/// The layout of the first window of a new session: one terminal that runs the shell
+/// the server starts when it is told nothing else.
+pub(crate) fn shell_layout() -> Value {
+    json!({ "block": { "flavor": SHELL_FLAVOR } })
+}
+
 /// The layout for the content of a new pane.
 pub(crate) fn new_layout(content: &NewContent) -> Result<Value, LayoutError> {
     match content {

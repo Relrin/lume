@@ -53,7 +53,7 @@ pub use error::RexError;
 pub use ssh::SshOptions;
 pub use stream::{Note, Opened, Opening, Piece, Splitter, Theme};
 pub use tls::Trust;
-pub use transport::{Dialed, Io, LOCAL_AUTHORITY, Options, Reach, dial, dial_with};
+pub use transport::{Dialed, Io, LOCAL_AUTHORITY, Options, Reach, dial, dial_with, listens};
 
 /// The result of something asked of a Rex server.
 pub type Result<T> = std::result::Result<T, RexError>;

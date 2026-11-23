@@ -71,6 +71,9 @@ pub fn remember_workspace(dirs: &Dirs, name: &str) {
     }
 }
 
+/// What the configuration calls the workspace that was last on show.
+pub const LAST: &str = "last";
+
 /// The workspace a start shows: the one asked for on the command line, else the one
 /// the configuration names, else the one that was last on show, else the usual one.
 /// `configured` is the setting: a workspace's name, or `last`.
@@ -79,7 +82,7 @@ pub fn start_workspace(asked: Option<&str>, configured: &str, last: Option<Strin
         return name.to_owned();
     }
     let configured = configured.trim();
-    if configured != "last" && valid_name(configured) {
+    if configured != LAST && valid_name(configured) {
         return configured.to_owned();
     }
     last.unwrap_or_else(|| WORKSPACE_NAME.to_owned())

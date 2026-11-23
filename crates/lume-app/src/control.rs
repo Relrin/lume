@@ -1120,6 +1120,14 @@ impl Control {
                     AppReplyBody::Profiles { profiles },
                 )
             }
+            AppRequestBody::Rex {} => {
+                let rex = self.services.rex.look().await;
+                let count = rex["hosts"].as_array().map_or(0, Vec::len);
+                reply(
+                    format!("listed {count} Rex servers"),
+                    AppReplyBody::Rex { rex },
+                )
+            }
             // Answered before it gets here, since its answer is not the end of it.
             AppRequestBody::Events { .. }
             | AppRequestBody::Attach { .. }
@@ -1699,6 +1707,7 @@ mod tests {
             Arc::clone(&config),
         );
         let services = Arc::new(Services {
+            rex: crate::rex::Hosts::new(&config, &state, &panes),
             state,
             panes,
             config,

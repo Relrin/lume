@@ -4,8 +4,12 @@
 //! text, and a block belongs to a session of the server's. A block is given a number the
 //! first time it is seen and keeps it for as long as its backend lives, so a view that
 //! holds the number finds the same block after a reconnect.
+//!
+//! The numbers of two backends are not the same ones: whoever is given a number finds
+//! one terminal by it, whichever server runs it.
 
 use std::collections::HashMap;
+use std::hash::{BuildHasher, RandomState};
 
 use lume_proto::SessionId;
 
@@ -16,11 +20,26 @@ pub(crate) struct BlockRef {
     pub block_id: String,
 }
 
-#[derive(Default)]
+/// How many bits of a number count a backend's blocks. The bits above them are the
+/// backend's own.
+const COUNT_BITS: u32 = 32;
+
 pub(crate) struct Ids {
     by_block: HashMap<String, SessionId>,
     by_id: HashMap<SessionId, BlockRef>,
     last: u64,
+}
+
+impl Default for Ids {
+    fn default() -> Self {
+        // The keys of a hasher are the one thing at random the standard library gives.
+        let own = RandomState::new().hash_one(0_u8);
+        Self {
+            by_block: HashMap::new(),
+            by_id: HashMap::new(),
+            last: (own >> COUNT_BITS) << COUNT_BITS,
+        }
+    }
 }
 
 impl Ids {
@@ -31,8 +50,8 @@ impl Ids {
             Some(id) => *id,
             None => {
                 self.last += 1;
-                // Counting from one never reaches zero.
-                let id = SessionId::new(self.last).expect("a count from one is not zero");
+                // Counting up from a number never reaches zero.
+                let id = SessionId::new(self.last).expect("a count upwards is not zero");
                 self.by_block.insert(block_id.to_owned(), id);
                 id
             }
@@ -61,6 +80,13 @@ impl Ids {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn two_backends_give_numbers_of_their_own() {
+        let first = Ids::default().of("session:1", "block:a");
+        let second = Ids::default().of("session:1", "block:a");
+        assert_ne!(first, second);
+    }
 
     #[test]
     fn a_block_keeps_its_number_and_is_found_by_it() {

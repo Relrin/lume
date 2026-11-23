@@ -523,11 +523,33 @@ impl AppState {
         self.list_all().await
     }
 
-    /// Every session of every backend.
+    /// Whether a backend is of this machine, and not a server's that may be out of reach.
+    fn is_local(&self, backend: &BackendId) -> bool {
+        *backend == Router::local_id()
+            || self
+                .locals
+                .iter()
+                .any(|local| self.backend_id_of(local) == *backend)
+    }
+
+    /// Every session of every backend. A server that cannot be asked just now has none
+    /// that could be used.
     pub async fn list_all(&self) -> Result<Vec<Listed>, CommandError> {
         let mut listed = Vec::new();
         for backend in self.router.ids() {
-            for info in self.router.get(&backend)?.list().await? {
+            // Gone since its id was listed.
+            let Ok(asked) = self.router.get(&backend) else {
+                continue;
+            };
+            let sessions = match asked.list().await {
+                Ok(sessions) => sessions,
+                Err(error) if self.is_local(&backend) => return Err(error.into()),
+                Err(error) => {
+                    tracing::debug!(%backend, %error, "a server's sessions are left out of a list");
+                    continue;
+                }
+            };
+            for info in sessions {
                 listed.push(Listed {
                     backend: backend.clone(),
                     info,
@@ -652,13 +674,13 @@ impl AppState {
             if let Some(status) = lock(&self.exits).of(key) {
                 return Ok(status);
             }
-            let listed = self.list_all().await?;
-            match listed
-                .iter()
-                .find(|entry| entry.backend == key.backend && entry.info.id == key.session)
-            {
-                Some(entry) => {
-                    if let Some(status) = entry.info.exit {
+            let listed = match self.router.get(&key.backend) {
+                Ok(backend) => backend.list().await.map_err(CommandError::from)?,
+                Err(_) => Vec::new(),
+            };
+            match listed.iter().find(|info| info.id == key.session) {
+                Some(info) => {
+                    if let Some(status) = info.exit {
                         return Ok(status);
                     }
                 }

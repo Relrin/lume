@@ -95,6 +95,16 @@ pub const PROFILE_ID_MAX_CHARS: usize = 128;
 /// How many profiles one file may define. More than this is not a list a person keeps.
 pub const PROFILES_MAX: usize = 512;
 
+/// How many Rex servers the configuration may name.
+pub const REX_HOSTS_MAX: usize = 64;
+
+/// The longest label a Rex server may have, in characters.
+pub const REX_LABEL_MAX_CHARS: usize = 64;
+
+/// The longest address of a Rex server, in characters. A host name of the greatest
+/// length there is, with a path to a socket, is well inside it.
+pub const REX_ADDRESS_MAX_CHARS: usize = 1024;
+
 /// The largest configuration or theme file that is read. A larger one is not a file
 /// anybody wrote by hand.
 pub const FILE_MAX_BYTES: u64 = 4 * 1024 * 1024;

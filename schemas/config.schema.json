@@ -2154,6 +2154,43 @@
       },
       "type": "object"
     },
+    "rex": {
+      "default": {
+        "local": true
+      },
+      "description": "Rex servers, whose sessions can be shown.",
+      "properties": {
+        "host": {
+          "description": "Rex servers. Each is a `[[rex.host]]` table with a `label` and an `address`.",
+          "items": {
+            "additionalProperties": false,
+            "description": "One `[[rex.host]]` table.",
+            "properties": {
+              "address": {
+                "description": "Where the server is reached: `https://HOST[:PORT]`, `http://HOST[:PORT]`,\n`tailnet://HOST:PORT`, `ssh://[USER@]HOST[:PORT][/SOCKET]`, or a host alone,\nwhich is tried the safest way first.",
+                "type": "string"
+              },
+              "label": {
+                "description": "What the server is called in lists. No two servers have the same label, whatever\nthe case of its letters.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "address"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "local": {
+          "default": true,
+          "description": "Look for the Rex server of this account on this machine, when the places that\nlist servers are on show. One that runs is listed; none is ever started.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "ssh": {
       "default": {
         "connection-sharing": true,

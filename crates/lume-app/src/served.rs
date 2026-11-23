@@ -17,6 +17,7 @@ use tokio::task::JoinHandle;
 
 use crate::error::CommandError;
 use crate::panes::Panes;
+use crate::workspaces::{self, Find};
 
 /// The server whose layout is on show.
 pub(crate) struct Served {
@@ -44,6 +45,33 @@ impl Panes {
         lock(&self.served)
             .as_ref()
             .map(|served| served.backend.clone())
+    }
+
+    /// Whether the layout on show is the one this authority gives, and is followed.
+    pub(crate) fn follows(
+        &self,
+        backend: &BackendId,
+        authority: &Arc<dyn LayoutAuthority>,
+    ) -> bool {
+        lock(&self.served).as_ref().is_some_and(|served| {
+            served.backend == *backend
+                && std::ptr::addr_eq(Arc::as_ptr(&served.authority), Arc::as_ptr(authority))
+                && !served.follower.is_finished()
+        })
+    }
+
+    /// Shows the application's own workspace again that was last on show, when a
+    /// server's layout is.
+    pub async fn back_to_own(&self) -> Result<(), CommandError> {
+        if self.served_by().is_none() {
+            return Ok(());
+        }
+        let name = workspaces::start_workspace(
+            None,
+            workspaces::LAST,
+            workspaces::last_workspace(self.config.dirs()),
+        );
+        self.switch(&name, Find::Either).await
     }
 
     /// The authority an intent is to be asked of, when that is not the application: a
@@ -215,12 +243,9 @@ impl Panes {
                 None => complained = false,
             }
         }
-        if self.served_by().as_ref() == Some(&backend) {
-            self.notice(
-                "warning",
-                "The connection to the server that keeps this layout has ended.",
-            );
-        }
+        // The copy stays on show as it was. Whoever keeps the connection to the server
+        // says why it ended, and what can be done.
+        tracing::info!(%backend, "a server's layout is not followed any more");
     }
 }
 

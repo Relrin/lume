@@ -44,6 +44,8 @@
     "allow-window-state",
     "allow-workspaces-list",
     "allow-folders-list",
+    "allow-rex-hosts",
+    "allow-rex-hosts-look",
     "dialog:allow-open"
   ]
 }

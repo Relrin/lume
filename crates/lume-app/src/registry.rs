@@ -24,7 +24,7 @@ const ID_MAX_LEN: usize = 96;
 const OWN_PREFIX: &str = "lume";
 
 /// The areas the application's own commands are in.
-pub const AREAS: [&str; 17] = [
+pub const AREAS: [&str; 18] = [
     "app",
     "host",
     "session",
@@ -42,6 +42,7 @@ pub const AREAS: [&str; 17] = [
     "connect",
     "search",
     "settings",
+    "rex",
 ];
 
 /// Where a command is carried out.
@@ -103,7 +104,11 @@ const STARTS_SESSIONS: [&str; 7] = [
 
 /// Whether a plugin may run the application's command `id`.
 pub fn plugin_access(id: &str) -> PluginAccess {
-    if USER_ONLY.contains(&id) || id.starts_with("lume.session.") || id.starts_with("lume.host.") {
+    if USER_ONLY.contains(&id)
+        || id.starts_with("lume.session.")
+        || id.starts_with("lume.host.")
+        || id.starts_with("lume.rex.")
+    {
         return PluginAccess::UserOnly;
     }
     if STARTS_SESSIONS.contains(&id)

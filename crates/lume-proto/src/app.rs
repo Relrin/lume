@@ -303,6 +303,9 @@ pub enum AppRequestBody {
     Workspaces {},
     /// Lists the profiles there are: the ways to start a terminal.
     Profiles {},
+    /// Lists the Rex servers there are and how the connections to them stand. The server
+    /// of this machine is looked for.
+    Rex {},
     /// Follows what sessions report: titles, directories, commands that start and
     /// end, the program that has the terminal, a program's status, and how each
     /// session ends. Of one pane or session if one is named, else of all.
@@ -650,6 +653,10 @@ pub enum AppReplyBody {
     Profiles {
         profiles: serde_json::Value,
     },
+    /// The Rex servers and their sessions.
+    Rex {
+        rex: serde_json::Value,
+    },
     Commands {
         commands: serde_json::Value,
     },
@@ -894,6 +901,7 @@ mod tests {
                 r#"{"type":"verb","words":["review"],"cwd":"/work","stdin":"a\nb"}"#,
             ),
             (AppRequestBody::Profiles {}, r#"{"type":"profiles"}"#),
+            (AppRequestBody::Rex {}, r#"{"type":"rex"}"#),
             (
                 AppRequestBody::Spawn {
                     spec: OpenSpec {

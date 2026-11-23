@@ -48,6 +48,8 @@ Commands of lume ctl, which drive the running application:
   workspaces                     list the workspaces, and say which is on show
   profiles                       list the profiles: the shells, WSL distributions and
                                  SSH hosts a terminal can be started in
+  rex                            list the Rex servers, how each is connected, and the
+                                 sessions of those that are
   attach [<target>] [--raw | --text]
                                  show the session in this console: --raw (the
                                  default) makes it the session's terminal, with its
@@ -612,6 +614,10 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
         "profiles" => {
             nothing_more(words, "profiles")?;
             AppRequestBody::Profiles {}
+        }
+        "rex" => {
+            nothing_more(words, "rex")?;
+            AppRequestBody::Rex {}
         }
         "attach" => {
             let mut target = Target::default();

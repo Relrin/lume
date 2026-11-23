@@ -182,6 +182,22 @@ pub const PLANNED_CHROME_HEIGHT_PX: f64 = 72.0;
 /// terminal font and most others have.
 pub const PLANNED_CELL_WIDTH_EM: f64 = 0.6;
 
+/// How long a Rex server is waited for when the user asked to connect to it. Reaching
+/// one over SSH may take two logins.
+pub const REX_CONNECT_WAIT: Duration = Duration::from_secs(90);
+
+/// How long something that lists Rex servers is taken to be on show after it last said
+/// so, and how often it is to say so again.
+pub const REX_LEASE: Duration = Duration::from_secs(30);
+
+/// How often a connection to a Rex server is looked at when nothing about it changes:
+/// whether it is still wanted.
+pub const REX_LOOK_EVERY: Duration = if cfg!(test) {
+    Duration::from_millis(100)
+} else {
+    Duration::from_secs(5)
+};
+
 /// How long measuring a host over SSH waits for its name to be looked up, and then for
 /// the connection to open. A host slower than this is said not to answer in time.
 pub const HOST_PROBE_TIMEOUT: Duration = Duration::from_secs(3);

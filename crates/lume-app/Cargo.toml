@@ -27,6 +27,7 @@ lume-plugin-runtime.workspace = true
 lume-services.workspace = true
 lume-proto.workspace = true
 lume-pty.workspace = true
+lume-rex.workspace = true
 lume-session.workspace = true
 notify.workspace = true
 serde.workspace = true
@@ -55,6 +56,15 @@ windows-sys = { workspace = true, features = [
 
 [build-dependencies]
 tauri-build.workspace = true
+
+# What the pretend Rex server of `lume-rex` is made of, which the tests run against.
+[dev-dependencies]
+data-encoding.workspace = true
+futures-util.workspace = true
+rcgen.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
 
 [lints]
 workspace = true

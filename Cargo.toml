@@ -22,6 +22,7 @@ lume-plugin-api = { path = "crates/lume-plugin-api" }
 lume-plugin-runtime = { path = "crates/lume-plugin-runtime" }
 lume-services = { path = "crates/lume-services" }
 lume-pty = { path = "crates/lume-pty" }
+lume-rex = { path = "crates/lume-rex" }
 lume-session = { path = "crates/lume-session" }
 lume-vt = { path = "crates/lume-vt" }
 lume-vt-sys = { path = "crates/lume-vt-sys" }

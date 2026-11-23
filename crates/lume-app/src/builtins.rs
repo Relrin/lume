@@ -54,6 +54,34 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.rex.open",
+        "Open a Session of a Rex Server",
+        "Rex",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.rex.new-session",
+        "New Session on a Rex Server",
+        "Rex",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.rex.connect",
+        "Connect to a Rex Server",
+        "Rex",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.rex.disconnect",
+        "Disconnect a Rex Server",
+        "Rex",
+        Runs::Core,
+        false,
+    ),
+    (
         "lume.session.detached",
         "Detached Sessions…",
         "Session",
@@ -699,6 +727,14 @@ fn arguments(id: &str) -> Option<Value> {
         "type": "string",
         "description": "A group's id; the group of the tab on show if left out.",
     });
+    let rex_host = json!({
+        "type": "string",
+        "description": "The server's label, address or id",
+    });
+    let confirmed_plain = json!({
+        "type": "boolean",
+        "description": "The user agreed to a connection that is not encrypted",
+    });
     let colors = json!([
         "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"
     ]);
@@ -984,6 +1020,30 @@ fn arguments(id: &str) -> Option<Value> {
             } }),
             &[],
         )),
+        "lume.rex.open" => Some(object(
+            json!({
+                "host": rex_host,
+                "session": {
+                    "type": "string",
+                    "description": "The session's id or label; the one last shown, else the first, if left out",
+                },
+                "confirmed": confirmed_plain,
+            }),
+            &["host"],
+        )),
+        "lume.rex.new-session" => Some(object(
+            json!({
+                "host": rex_host,
+                "label": { "type": "string", "description": "What the session is called" },
+                "confirmed": confirmed_plain,
+            }),
+            &["host"],
+        )),
+        "lume.rex.connect" => Some(object(
+            json!({ "host": rex_host, "confirmed": confirmed_plain }),
+            &["host"],
+        )),
+        "lume.rex.disconnect" => Some(object(json!({ "host": rex_host }), &["host"])),
         "lume.session.reattach" => Some(object(
             json!({
                 "session": { "type": "string", "description": "The session's id" },

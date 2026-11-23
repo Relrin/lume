@@ -142,6 +142,15 @@ fn requests() -> Vec<(&'static str, Value)> {
     vec![
         ("server.version", Value::Null),
         ("session.attach_all", json!({ "event_scope": "session" })),
+        (
+            "session.create",
+            json!({
+                "label": "work",
+                "initial_windows": [{
+                    "layout": {"block": {"flavor": "com.superlogical.terminal.shell"}},
+                }],
+            }),
+        ),
         ("session.attach", of_session.clone()),
         ("session.view", of_session.clone()),
         ("session.detach", of_session),

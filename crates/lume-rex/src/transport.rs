@@ -101,6 +101,12 @@ pub async fn dial(endpoint: &Endpoint) -> Result<Box<dyn Io>, RexError> {
     Ok(dial_with(endpoint, &Options::default()).await?.io)
 }
 
+/// Whether anything listens where a server on this machine does. Nothing is started,
+/// and nothing is said to what answers.
+pub async fn listens(endpoint: &Endpoint) -> bool {
+    endpoint.is_on_this_machine() && dial(endpoint).await.is_ok()
+}
+
 /// Opens a stream to the server at an endpoint. Nothing is said on it yet.
 ///
 /// A server that would be reached with nothing encrypted is dialled only on this

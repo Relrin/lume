@@ -130,7 +130,7 @@ impl Endpoint {
     ///
     /// - `local` or nothing: the user's own server on this machine.
     /// - `unix://PATH`, or a path alone: a Unix socket.
-    /// - `npipe://./pipe/NAME`, or a name that begins `\\.\pipe\`: a named pipe.
+    /// - `npipe:////./pipe/NAME`, or a name that begins `\\.\pipe\`: a named pipe.
     /// - `https://HOST[:PORT]` and `http://HOST[:PORT]`.
     /// - `tailnet://HOST:PORT`: a server on its machine's tailnet address.
     /// - `ssh://[USER@]HOST[:PORT][/SOCKET]`.
@@ -250,7 +250,7 @@ impl fmt::Display for Endpoint {
             Endpoint::Local => f.write_str("local"),
             Endpoint::Pipe(name) => {
                 let name = name.strip_prefix(r"\\.\pipe\").unwrap_or(name);
-                write!(f, "npipe://./pipe/{name}")
+                write!(f, "npipe:////./pipe/{name}")
             }
             Endpoint::Unix(path) => write!(f, "unix://{}", path.display()),
             Endpoint::Https { host, port } => {
@@ -404,7 +404,7 @@ mod tests {
         for address in [
             "local",
             "unix:///run/rex/server.sock",
-            "npipe://./pipe/rex-S-1-5-21-1",
+            "npipe:////./pipe/rex-S-1-5-21-1",
             "https://build.example.ts.net",
             "https://build.example.ts.net:7297",
             "http://10.0.0.5:7297",

@@ -25,8 +25,8 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::api::{
-    Attached, ClientInfo, ServerEvent, ServerVersion, SessionList, SessionSummary, TerminalProcess,
-    TerminalSize, TerminalTitle, View,
+    Attached, ClientInfo, ServerEvent, ServerVersion, SessionCreated, SessionList, SessionSummary,
+    TerminalProcess, TerminalSize, TerminalTitle, View,
 };
 use crate::authority::{self, RexLayout};
 use crate::control::{Control, Events};
@@ -34,6 +34,7 @@ use crate::endpoint::Endpoint;
 use crate::error::RexError;
 use crate::ids::{BlockRef, Ids};
 use crate::input::type_text;
+use crate::intents::shell_layout;
 use crate::screen;
 use crate::terminal::FeedRef;
 use crate::transport::{Dialed, Options, Reach};
@@ -354,6 +355,29 @@ impl RexBackend {
                 opened: state.opened.contains_key(&session.session_id),
             })
             .collect()
+    }
+
+    /// Makes a session of one window with one shell in it, called `label`, or what the
+    /// server calls it when that is left out. Returns its id. It is not opened here.
+    pub async fn create_session(&self, label: Option<&str>) -> Result<String, RexError> {
+        let control = self.shared.control()?;
+        let mut asked = json!({ "initial_windows": [{ "layout": shell_layout() }] });
+        if let Some(label) = label.map(str::trim).filter(|label| !label.is_empty()) {
+            asked["label"] = json!(label);
+        }
+        let (created, _) = control
+            .call_as::<SessionCreated>("session.create", asked)
+            .await?;
+        Ok(created.session_id)
+    }
+
+    /// How long the server takes to answer, measured by asking it something it answers
+    /// at once.
+    pub async fn round_trip(&self) -> Result<Duration, RexError> {
+        let control = self.shared.control()?;
+        let asked = Instant::now();
+        control.call("server.version", Value::Null).await?;
+        Ok(asked.elapsed())
     }
 
     /// Opens a session: attaches the connection to it and reads its view. Its terminal

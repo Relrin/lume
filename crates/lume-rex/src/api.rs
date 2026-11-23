@@ -203,6 +203,12 @@ pub(crate) struct SessionList {
     pub sessions: Vec<SessionSummary>,
 }
 
+/// What `session.create` returns, as far as it is read.
+#[derive(Deserialize)]
+pub(crate) struct SessionCreated {
+    pub session_id: String,
+}
+
 /// What `session.attach` returns.
 #[derive(Deserialize)]
 pub(crate) struct Attached {

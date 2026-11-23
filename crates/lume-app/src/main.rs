@@ -482,6 +482,8 @@ fn main() -> ExitCode {
         commands_window::window_state,
         commands_window::workspaces_list,
         commands_folders::folders_list,
+        rex::commands::rex_hosts,
+        rex::commands::rex_hosts_look,
         commands_plugins::ui_contributions,
         commands_plugins::ui_visible,
         commands_plugins::ui_assets,
@@ -559,6 +561,7 @@ fn main() -> ExitCode {
                 Arc::clone(&config),
             );
             let services = Arc::new(Services {
+                rex: rex::Hosts::new(&config, &serving, &panes),
                 state: Arc::clone(&serving),
                 panes,
                 config,
@@ -593,6 +596,7 @@ fn main() -> ExitCode {
                     return;
                 };
                 services.panes.profiles.config_changed();
+                services.rex.config_changed();
                 services.plugins.config_changed();
                 frames.follow(&services.config, services.shell.as_ref());
                 let panes = Arc::clone(&services.panes);
@@ -802,6 +806,8 @@ fn main() -> ExitCode {
             // Plugins' code hears that it is stopping.
             if let Some(services) = app.try_state::<Arc<Services>>() {
                 services.plugins.shutdown();
+                // Its servers go on running; only the connections to them end.
+                services.rex.shutdown();
             }
             // A program in a terminal can outlive a process that exits without closing
             // the terminal, so a host in this process ends its sessions before the

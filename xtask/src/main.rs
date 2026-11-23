@@ -11,6 +11,7 @@ mod generate;
 mod latency;
 mod paths;
 mod rex;
+mod rex_e2e;
 mod run;
 mod smoke;
 mod suites;
@@ -35,6 +36,9 @@ Commands:
   e2e          Build, then run the suites that need the application's window: the
                corpus and the renderer snapshots inside its webview, and real shells
                driven through `lume ctl`
+  rex-e2e [<test>]
+               Build, then drive the application against real Rex servers started for
+               the tests (needs Rex on this machine; no build machine has it)
   smoke        Build, then start the application under WebDriver, type through its
                window and see the text arrive (needs tauri-driver; Windows and Linux)
   bench [--profile <name>]
@@ -93,6 +97,10 @@ fn main() -> Result<()> {
         ["e2e"] => {
             build()?;
             suites::end_to_end()
+        }
+        ["rex-e2e", only @ ..] if only.len() <= 1 => {
+            build()?;
+            rex_e2e::run(only.first().copied())
         }
         ["smoke"] => {
             build()?;

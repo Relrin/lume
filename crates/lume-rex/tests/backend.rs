@@ -54,6 +54,33 @@ async fn a_backend_connects_and_knows_the_servers_sessions() {
 }
 
 #[tokio::test]
+async fn a_session_is_made_and_can_be_opened() {
+    let (dialer, mut listener) = streams();
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
+    assert!(backend.create_session(None).await.is_err(), "not connected");
+    let served = serve(listener.accept().await, World::recorded());
+    backend.ready().await.unwrap();
+
+    let made = backend.create_session(Some(" work ")).await.unwrap();
+    until("the new session is listed", || names(&backend).len() == 2).await;
+    assert_eq!(names(&backend), ["lume-fixture", "work"]);
+    assert_eq!(served.asked("session.create")[0]["label"], "work");
+    assert!(
+        backend
+            .open_session(&made)
+            .await
+            .unwrap()
+            .blocks()
+            .any(|block| block.is_terminal())
+    );
+
+    // What it is called may be left to the server.
+    backend.create_session(Some("  ")).await.unwrap();
+    assert_eq!(served.asked("session.create")[1].get("label"), None);
+    assert!(backend.round_trip().await.unwrap() < Duration::from_secs(20));
+}
+
+#[tokio::test]
 async fn the_sessions_follow_the_servers_events() {
     let (dialer, mut listener) = streams();
     let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());

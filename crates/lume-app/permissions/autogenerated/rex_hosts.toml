@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rex-hosts"
+description = "Enables the rex_hosts command without any pre-configured scope."
+commands.allow = ["rex_hosts"]
+
+[[permission]]
+identifier = "deny-rex-hosts"
+description = "Denies the rex_hosts command without any pre-configured scope."
+commands.deny = ["rex_hosts"]

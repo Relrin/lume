@@ -19,13 +19,14 @@ use toml::de::{DeTable, DeValue};
 
 use crate::accent::{ACCENT_FORMAT, FORMAT_KEY, check_accent};
 use crate::profiles::ProfileEntry;
+use crate::rex::RexHostEntry;
 use crate::schema::{
-    Config, NOT_IN_A_WORKSPACE, PROFILES_KEY, WORKSPACE_PROFILE_KEY, WORKSPACE_ROOT_KEY,
-    WorkspaceSettings, config_schema,
+    Config, NOT_IN_A_WORKSPACE, PROFILES_KEY, REX_HOSTS_KEY, REX_KEY, WORKSPACE_PROFILE_KEY,
+    WORKSPACE_ROOT_KEY, WorkspaceSettings, config_schema,
 };
 use crate::source::{Position, Problem, ProblemKind, Source, join_path};
 use crate::suggest::nearest;
-use crate::tuning::PROFILES_MAX;
+use crate::tuning::{PROFILES_MAX, REX_HOSTS_MAX};
 
 /// Which layer a file is.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -701,6 +702,85 @@ fn take_profiles(tree: &mut Map<String, Value>, checking: &mut Checking<'_>) -> 
     (kept, ids)
 }
 
+/// Takes out of a file's tree the Rex servers that cannot be used, and leaves the
+/// others where they are. What is wrong with each is reported at the line it is written
+/// on.
+fn check_rex_hosts(tree: &mut Map<String, Value>, checking: &mut Checking<'_>) {
+    let Some(Value::Object(section)) = tree.get_mut(REX_KEY) else {
+        return;
+    };
+    let list = || vec![REX_KEY.to_owned(), REX_HOSTS_KEY.to_owned()];
+    let name = format!("{REX_KEY}.{REX_HOSTS_KEY}");
+    let items = match section.remove(REX_HOSTS_KEY) {
+        None => return,
+        Some(Value::Array(items)) => items,
+        Some(other) => {
+            let message = format!(
+                "`{name}` is a list of tables, each begun with `[[{name}]]`, not {}",
+                kind_of(&other)
+            );
+            checking.problem(ProblemKind::InvalidValue, &list(), message);
+            return;
+        }
+    };
+    let schema = config_schema()
+        .pointer(&format!(
+            "/properties/{REX_KEY}/properties/{REX_HOSTS_KEY}/items"
+        ))
+        .unwrap_or(&Value::Bool(true));
+
+    let mut kept = Vec::new();
+    let mut seen: Vec<RexHostEntry> = Vec::new();
+    for (index, item) in items.into_iter().enumerate() {
+        // The line of the server's label if it has one, else of where it begins.
+        let mut own = list();
+        own.push(index.to_string());
+        let mut at = own.clone();
+        at.push("label".to_owned());
+        for coarser in [own, list()] {
+            if !checking.positions.contains_key(&join_path(&at)) {
+                at = coarser;
+            }
+        }
+        if index >= REX_HOSTS_MAX {
+            let message = format!("only the first {REX_HOSTS_MAX} Rex servers are read");
+            checking.problem(ProblemKind::InvalidValue, &at, message);
+            break;
+        }
+        let named = item.get("label").and_then(Value::as_str).map_or_else(
+            || format!("Rex server {}", index + 1),
+            |label| format!("Rex server `{label}`"),
+        );
+        let entry = check(&item, schema)
+            .and_then(|()| {
+                serde_json::from_value::<RexHostEntry>(item.clone())
+                    .map_err(|error| error.to_string())
+            })
+            .and_then(|entry| entry.check().map(|()| entry));
+        let wrong = match entry {
+            Ok(entry) if seen.iter().any(|other| other.same_label(&entry.label)) => {
+                Some("there is already a server with that label".to_owned())
+            }
+            Ok(entry) if seen.iter().any(|other| other.address == entry.address) => {
+                Some("there is already a server with that address".to_owned())
+            }
+            Ok(entry) => {
+                seen.push(entry);
+                kept.push(item);
+                None
+            }
+            Err(message) => Some(message),
+        };
+        if let Some(message) = wrong {
+            let message = format!("{named}: {message}");
+            checking.problem(ProblemKind::InvalidValue, &at, message);
+        }
+    }
+    if !kept.is_empty() {
+        section.insert(REX_HOSTS_KEY.to_owned(), Value::Array(kept));
+    }
+}
+
 /// Takes out of the merged profiles the ones that are not complete: a profile of the
 /// user's own that, with every file laid over the others, still does not say what to
 /// run. Each is reported at the line it was last written on.
@@ -790,6 +870,7 @@ fn read(input: &LayerInput) -> Result<Read, Problem> {
     // Profiles are checked one by one, so that one that is wrong does not take the
     // others with it.
     let (profiles, profile_lines) = take_profiles(&mut tree, &mut checking);
+    check_rex_hosts(&mut tree, &mut checking);
     checking.prune(&mut tree, config_schema(), &mut Vec::new());
     if !profiles.is_empty() {
         let line = checking.position(PROFILES_KEY).line;
@@ -1173,6 +1254,61 @@ mod tests {
     }
 
     #[test]
+    fn a_rex_server_that_is_wrong_is_left_out_and_the_others_stay() {
+        let layered = resolve_layers(&[user(
+            "[rex]\nlocal = false\n\
+             [[rex.host]]\nlabel = \"build\"\naddress = \"https://build\"\n\
+             [[rex.host]]\nlabel = \"BUILD\"\naddress = \"https://other\"\n\
+             [[rex.host]]\nlabel = \"same\"\naddress = \"https://build\"\n\
+             [[rex.host]]\nlabel = \"\"\naddress = \"https://empty\"\n\
+             [[rex.host]]\nlabel = \"short\"\n\
+             [[rex.host]]\nlabel = \"more\"\naddress = \"https://more\"\nport = 1\n\
+             [[rex.host]]\nlabel = \"nas\"\naddress = \"ssh://nas\"\n",
+        )]);
+        assert!(!layered.config.rex.local);
+        let labels: Vec<&str> = layered
+            .config
+            .rex
+            .hosts
+            .iter()
+            .map(|host| host.label.as_str())
+            .collect();
+        assert_eq!(labels, ["build", "nas"]);
+        let lines: Vec<u32> = layered
+            .problems
+            .iter()
+            .map(|problem| problem.line)
+            .collect();
+        assert_eq!(lines, [7, 10, 13, 16, 18], "{:?}", layered.problems);
+        // Left out, the server of this machine is looked for and there are no others.
+        let plain = resolve_layers(&[user("")]);
+        assert!(plain.config.rex.local);
+        assert!(plain.config.rex.hosts.is_empty());
+    }
+
+    #[test]
+    fn a_table_called_rex_host_is_not_a_list_of_servers() {
+        let layered = resolve_layers(&[user("[rex.host]\nlabel = \"a\"\n")]);
+        assert!(layered.config.rex.hosts.is_empty());
+        assert_eq!(layered.problems.len(), 1, "{:?}", layered.problems);
+        assert!(layered.problems[0].message.contains("[[rex.host]]"));
+    }
+
+    #[test]
+    fn a_workspace_names_no_rex_servers() {
+        let workspace = LayerInput {
+            kind: LayerKind::Workspace {
+                name: "web".to_owned(),
+            },
+            file: PathBuf::from("web.toml"),
+            text: "[[rex.host]]\nlabel = \"a\"\naddress = \"https://a\"\n".to_owned(),
+        };
+        let layered = resolve_layers(&[user(""), workspace]);
+        assert!(layered.config.rex.hosts.is_empty());
+        assert_eq!(layered.problems.len(), 1, "{:?}", layered.problems);
+    }
+
+    #[test]
     fn a_table_called_profile_is_not_a_list_of_profiles() {
         let layered = resolve_layers(&[user("[profile]\nid = \"a\"\nlauncher = \"shell\"\n")]);
         assert!(layered.config.profiles.is_empty());
@@ -1366,6 +1502,11 @@ mod tests {
             let body = &text[start..];
             let body = &body[..body[1..].find("\n[").map_or(body.len(), |at| at + 1)];
             for key in keys.keys().filter(|key| *key != "tokens") {
+                // A list of tables is shown as an example of one.
+                if section == REX_KEY && key == REX_HOSTS_KEY {
+                    assert!(body.contains("[[rex.host]]"), "{body}");
+                    continue;
+                }
                 let shown = body.lines().any(|line| {
                     line.trim_start_matches('#')
                         .trim_start()

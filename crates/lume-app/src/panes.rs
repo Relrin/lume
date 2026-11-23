@@ -1060,7 +1060,9 @@ impl Panes {
                 backend: self.backend_of(terminal),
                 session,
             };
-            if self.alive(&key).await {
+            // A server's layout says what runs in its panes, and only the server starts
+            // anything in them.
+            if self.served_by().is_some() || self.alive(&key).await {
                 return Ok(key);
             }
             // What the program that ended said about itself is not true of the next.

@@ -20,6 +20,7 @@ use crate::error::CommandError;
 use crate::panes::Panes;
 use crate::plugins::Plugins;
 use crate::registry::{Registry, Runs};
+use crate::rex;
 use crate::state::AppState;
 use crate::tuning::PAGE_ANSWER_TIMEOUT;
 use crate::window::label_of;
@@ -42,6 +43,8 @@ pub struct Services {
     pub registry: Arc<Registry>,
     pub shell: Arc<dyn Shell>,
     pub plugins: Arc<Plugins>,
+    /// The Rex servers whose sessions can be shown.
+    pub rex: Arc<rex::Hosts>,
 }
 
 /// The session of a pane that runs `exec`: a program and its arguments.
@@ -161,6 +164,9 @@ impl Services {
                 })
                 .unwrap_or_default();
             return self.plugins.expand(panel, path).await;
+        }
+        if id.starts_with(rex::commands::PREFIX) {
+            return rex::commands::run(self, window, id, args, asker).await;
         }
         if matches!(id, "lume.panel.show" | "lume.panel.close") {
             return self

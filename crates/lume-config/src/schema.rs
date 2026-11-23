@@ -18,6 +18,7 @@ use serde_json::Value;
 
 use crate::paths::Platform;
 use crate::profiles::ProfileEntry;
+use crate::rex::RexConfig;
 use crate::settings::{PAGES_KEY, Shown, pages};
 use crate::tuning::{
     ACCENT_PRESETS, BACKGROUND_BLUR_MAX, CURSOR_EFFECT_LENGTH_MAX, CURSOR_EFFECT_LENGTH_MIN,
@@ -64,6 +65,8 @@ pub struct Config {
     pub plugins: BTreeMap<String, Value>,
     /// Terminals on other machines.
     pub ssh: SshConfig,
+    /// Rex servers, whose sessions can be shown.
+    pub rex: RexConfig,
     /// The profile new terminals use, by its id. Empty, new terminals run the shell of
     /// `terminal.shell`.
     #[schemars(extend("x-lume-settings" = Shown::select("terminal", "New terminals", 10, "Default terminal")
@@ -1305,7 +1308,7 @@ pub const UNBOUND: &str = "unbound";
 
 /// The sections a workspace's file may not set: they are about the application, not
 /// about one workspace.
-pub const NOT_IN_A_WORKSPACE: [&str; 2] = ["app", "workspace"];
+pub const NOT_IN_A_WORKSPACE: [&str; 3] = ["app", "workspace", "rex"];
 
 /// What a workspace's file says besides settings.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -1322,6 +1325,10 @@ pub const WORKSPACE_PROFILE_KEY: &str = "default-profile";
 
 /// The key profiles are written under, in any file.
 pub const PROFILES_KEY: &str = "profile";
+
+/// Where the Rex servers are written: `[[rex.host]]` in `config.toml`.
+pub const REX_KEY: &str = "rex";
+pub const REX_HOSTS_KEY: &str = "host";
 
 fn generate() -> Value {
     let settings = SchemaSettings::draft2020_12().with(|settings| {

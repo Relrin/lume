@@ -49,6 +49,8 @@ const COMMANDS: &[&str] = &[
     "window_state",
     "workspaces_list",
     "folders_list",
+    "rex_hosts",
+    "rex_hosts_look",
     "ui_contributions",
     "ui_visible",
     "ui_assets",
