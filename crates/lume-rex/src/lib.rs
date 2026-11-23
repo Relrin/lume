@@ -25,6 +25,7 @@ mod error;
 mod events;
 mod ids;
 mod input;
+pub mod layout;
 mod screen;
 mod stream;
 mod terminal;

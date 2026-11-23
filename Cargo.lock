@@ -2649,6 +2649,7 @@ dependencies = [
  "data-encoding",
  "futures-util",
  "lume-ipc",
+ "lume-layout",
  "lume-proto",
  "lume-session",
  "lume-vt",
