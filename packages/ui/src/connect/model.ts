@@ -1,27 +1,29 @@
 /**
- * What the Connect palette lists, worked out from the profiles there are and what was
- * typed: groups of profiles by where their terminal is, the sessions that run with no
- * pane to show them, the actions after them, and what is said of the row that is
- * marked.
+ * What the Connect palette lists, worked out from the profiles and the Rex servers there
+ * are and what was typed: the servers, groups of profiles by where their terminal is,
+ * the sessions that run with no pane to show them, the actions after them, and what is
+ * said of the row that is marked.
  *
  * Nothing here touches the page, so all of it is tested with plain objects.
  */
 
-import type { DetachedSession, Profile, ProfileList } from "../core/types.ts";
+import type { DetachedSession, Profile, ProfileList, RexHost, RexHosts } from "../core/types.ts";
 import { rank } from "../palette/fuzzy.ts";
+import { nearness, sessionName, standing } from "../rex/model.ts";
 import type { Launcher } from "../transport/types.ts";
 import { CONNECT_GROUP_MAX } from "./tuning.ts";
 
 /** Where a profile's terminal is. */
 export type ConnectKind = "local" | "wsl" | "ssh";
 
-/** Which kinds of profile the palette lists, or the detached sessions alone. */
-export type ConnectFilter = "all" | ConnectKind | "detached";
+/** Which kinds of profile the palette lists, or the Rex servers, or the detached sessions. */
+export type ConnectFilter = "all" | "rex" | ConnectKind | "detached";
 
 /** The filters, in the order the palette offers them, with what each is called. */
 export const CONNECT_FILTERS: readonly { readonly value: ConnectFilter; readonly label: string }[] =
   [
     { value: "all", label: "All" },
+    { value: "rex", label: "Rex" },
     { value: "ssh", label: "SSH" },
     { value: "wsl", label: "WSL" },
     { value: "local", label: "Local" },
@@ -59,6 +61,22 @@ export interface ConnectEntry {
   readonly indices: readonly number[];
   /** The line under the name: where the terminal goes, or what it runs. */
   readonly line: string;
+  /** Whether the user pinned it, so it is listed first. */
+  readonly pinned: boolean;
+}
+
+/** The heading of the group of Rex servers. */
+export const REX_LABEL = "Rex servers";
+
+/** One Rex server as the palette lists it. */
+export interface HostEntry {
+  readonly host: RexHost;
+  /** Which characters of the server's name the query matched. */
+  readonly indices: readonly number[];
+  /** The line after the name: how many sessions it has, or why they are not known. */
+  readonly line: string;
+  /** How near it is, at the row's end. */
+  readonly meta: string;
   /** Whether the user pinned it, so it is listed first. */
   readonly pinned: boolean;
 }
@@ -112,6 +130,7 @@ export interface DetachedEntry {
 
 /** One row of the list the keyboard moves through. */
 export type ConnectRow =
+  | { readonly type: "host"; readonly entry: HostEntry }
   | { readonly type: "profile"; readonly entry: ConnectEntry }
   | { readonly type: "session"; readonly entry: DetachedEntry }
   | { readonly type: "action"; readonly action: ConnectAction };
@@ -329,20 +348,104 @@ export function detachedEntries(
 }
 
 /**
- * The rows the keyboard moves through: every profile listed, then the detached
- * sessions, then the actions.
+ * The Rex servers to list. Without a query, in the order they are given; with one,
+ * those whose name matches, best first, then those that match by their address or by
+ * what a session of theirs is called. None under a filter of another kind.
  */
+export function hostEntries(
+  list: Pick<RexHosts, "hosts"> | null,
+  query: string,
+  filter: ConnectFilter,
+  pinned: ReadonlySet<string> = new Set(),
+): HostEntry[] {
+  if (!list || (filter !== "all" && filter !== "rex")) return [];
+  const entry = (host: RexHost, indices: readonly number[]): HostEntry => ({
+    host,
+    indices,
+    line: standing(host),
+    meta: nearness(host),
+    pinned: pinned.has(host.id),
+  });
+  let entries: HostEntry[];
+  if (query.trim() === "") {
+    entries = list.hosts.map((host) => entry(host, []));
+  } else {
+    const byName = rank(list.hosts, query, (host) => host.label);
+    const named = new Set(byName.map((match) => match.item));
+    const byOther = rank(
+      list.hosts.filter((host) => !named.has(host)),
+      query,
+      (host) => [host.address, ...host.sessions.map(sessionName)].join(" "),
+    );
+    entries = [
+      ...byName.map((match) => entry(match.item, match.indices)),
+      ...byOther.map((match) => entry(match.item, [])),
+    ];
+  }
+  return entries.slice(0, CONNECT_GROUP_MAX);
+}
+
+/** Rows that stand under one heading. */
+export interface ConnectSection {
+  readonly key: string;
+  readonly label: string;
+  readonly rows: readonly ConnectRow[];
+}
+
+/**
+ * The list as it stands on the page: what is pinned, the Rex servers, the profiles by
+ * kind, the detached sessions, and the actions.
+ */
+export function connectSections(
+  groups: readonly ConnectGroup[],
+  detached: readonly DetachedEntry[] = [],
+  hosts: readonly HostEntry[] = [],
+): ConnectSection[] {
+  const hostRow = (entry: HostEntry): ConnectRow => ({ type: "host", entry });
+  const profileRow = (entry: ConnectEntry): ConnectRow => ({ type: "profile", entry });
+  const isPinned = (group: ConnectGroup) => group.kind === "pinned";
+  const sections: ConnectSection[] = [
+    {
+      key: "pinned",
+      label: "Pinned",
+      rows: [
+        ...hosts.filter((entry) => entry.pinned).map(hostRow),
+        ...groups.filter(isPinned).flatMap((group) => group.entries.map(profileRow)),
+      ],
+    },
+    {
+      key: "rex",
+      label: REX_LABEL,
+      rows: hosts.filter((entry) => !entry.pinned).map(hostRow),
+    },
+    ...groups
+      .filter((group) => !isPinned(group))
+      .map((group) => ({
+        key: group.kind,
+        label: group.label,
+        rows: group.entries.map(profileRow),
+      })),
+    {
+      key: "detached",
+      label: DETACHED_LABEL,
+      rows: detached.map((entry): ConnectRow => ({ type: "session", entry })),
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      rows: CONNECT_ACTIONS.map((action): ConnectRow => ({ type: "action", action })),
+    },
+  ];
+  return sections.filter((section) => section.rows.length > 0);
+}
+
+/** The rows the keyboard moves through, in the order they stand on the page. */
 export function connectRows(
   groups: readonly ConnectGroup[],
   detached: readonly DetachedEntry[] = [],
+  hosts: readonly HostEntry[] = [],
 ): ConnectRow[] {
-  return [
-    ...groups.flatMap((group) =>
-      group.entries.map((entry): ConnectRow => ({ type: "profile", entry })),
-    ),
-    ...detached.map((entry): ConnectRow => ({ type: "session", entry })),
-    ...CONNECT_ACTIONS.map((action): ConnectRow => ({ type: "action", action })),
-  ];
+  return connectSections(groups, detached, hosts).flatMap((section) => section.rows);
 }
 
 /**

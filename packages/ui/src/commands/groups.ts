@@ -28,6 +28,7 @@ const GROUP_OF_AREA: Readonly<Record<string, CommandGroup>> = {
   terminal: "Pane",
   search: "Pane",
   host: "Host",
+  rex: "Host",
   profile: "Host",
   view: "View",
   panel: "View",

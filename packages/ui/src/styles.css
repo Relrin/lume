@@ -189,6 +189,21 @@
     flex: 1;
   }
 
+  /* Whose layout is on show, while it is a server's. */
+  .status-served {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .status-served-text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
   .status-bar .status-slot {
     gap: 16px;
   }
@@ -347,7 +362,7 @@
     }
   }
 
-  /* The workspace's name, and the menu under it. */
+  /* What the window shows, and the selector under it. */
 
   .switcher {
     position: relative;
@@ -359,7 +374,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    max-width: 220px;
+    max-width: 340px;
     height: 30px;
     padding: 0 10px;
     border: var(--lume-size-border) solid var(--lume-color-border);
@@ -391,12 +406,57 @@
     background: var(--lume-color-text-muted);
   }
 
+  /* A connection that is being made: a ring that turns, in the place of the dot. */
+  .switcher-dot[data-link="busy"],
+  .connect-dot[data-link="busy"],
+  .palette-row-link[data-link="busy"] {
+    box-sizing: border-box;
+    width: 10px;
+    height: 10px;
+    margin: 0 -1.5px;
+    border: 1.5px solid var(--lume-color-status-warning);
+    border-right-color: transparent;
+    background: none;
+    animation: link-turn 800ms linear infinite;
+  }
+
+  @keyframes link-turn {
+    to {
+      rotate: 360deg;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .switcher-dot[data-link="busy"],
+    .connect-dot[data-link="busy"],
+    .palette-row-link[data-link="busy"] {
+      animation-duration: 1.6s;
+    }
+  }
+
+  .switcher-host,
   .switcher-name {
     min-width: 0;
     overflow: hidden;
-    font-weight: 600;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+
+  .switcher-host {
+    flex-shrink: 2;
+    font-weight: 600;
+  }
+
+  .switcher-slash {
+    @apply text-ink-muted;
+  }
+
+  .switcher-meta {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    margin-left: 2px;
+    font-family: var(--font-mono);
+    font-size: 11px;
   }
 
   .switcher-chevron {
@@ -405,9 +465,387 @@
     flex-shrink: 0;
   }
 
+  /* A narrow window names what is on show, and not where it is. */
+  @media (max-width: 900px) {
+    .switcher-host,
+    .switcher-slash,
+    .switcher-meta {
+      display: none;
+    }
+  }
+
   @media (max-width: 640px) {
     .switcher-button {
       max-width: 132px;
+    }
+  }
+
+  /* The selector: a field, the hosts, and what the one looked at holds. */
+  .selector {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    width: min(620px, calc(100vw - 24px));
+    max-height: calc(100vh - var(--lume-size-topbar) - 16px);
+    padding: 6px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-control) + min(var(--lume-radius-control), 4px));
+    background: var(--lume-color-popover);
+    box-shadow: var(--lume-shadow-popover);
+    transform-origin: 60px 0;
+    cursor: default;
+  }
+
+  .selector[data-animate] {
+    animation: selector-in 200ms var(--lume-motion-easing-standard);
+  }
+
+  @keyframes selector-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.97);
+    }
+  }
+
+  .selector-field {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
+    height: 36px;
+    margin-bottom: 4px;
+    padding: 0 10px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: min(8px, var(--lume-radius-control));
+    background: var(--lume-color-surface);
+  }
+
+  .selector-input {
+    @apply text-ink;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    background: transparent;
+    outline: none;
+    user-select: text;
+  }
+
+  .selector-input::placeholder {
+    color: var(--lume-color-text-muted);
+  }
+
+  .selector-columns {
+    display: flex;
+    min-height: 0;
+    gap: 6px;
+  }
+
+  .selector-hosts {
+    display: flex;
+    flex: 0 0 236px;
+    flex-direction: column;
+    box-sizing: border-box;
+    min-height: 120px;
+    gap: 1px;
+    padding-right: 6px;
+    overflow-y: auto;
+    border-right: var(--lume-size-border) solid var(--lume-color-border);
+    scrollbar-width: thin;
+  }
+
+  .selector-host {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 10px;
+    border-radius: min(7px, var(--lume-radius-control));
+  }
+
+  .selector-host[aria-selected="true"],
+  .selector-row[data-marked],
+  .selector-row[data-renaming],
+  .selector-act[data-marked] {
+    @apply bg-control-hover;
+  }
+
+  /* Which column the arrow keys move in. */
+  .selector-host[data-marked] {
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 40%, transparent);
+  }
+
+  .selector-host[data-off] > * {
+    opacity: 0.6;
+  }
+
+  .selector-tile {
+    --selector-tone: var(--lume-color-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: min(7px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--selector-tone) 14%, transparent);
+    color: var(--selector-tone);
+  }
+
+  .selector-tile[data-link="busy"] {
+    --selector-tone: var(--lume-color-status-warning);
+  }
+
+  .selector-tile[data-link="down"] {
+    --selector-tone: var(--lume-color-text-muted);
+  }
+
+  .selector-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.3;
+  }
+
+  .selector-name,
+  .selector-line {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .selector-text > .selector-name {
+    font-weight: 500;
+  }
+
+  .selector-line {
+    @apply text-ink-muted;
+    font-size: 11.5px;
+  }
+
+  .selector-side {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .selector-heading {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    padding: 7px 10px;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 16px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .selector-note,
+  .selector-why {
+    @apply text-ink-muted;
+    padding: 6px 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .selector-why {
+    user-select: text;
+  }
+
+  .selector-why[data-problem] {
+    color: var(--lume-color-status-danger);
+  }
+
+  .selector-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .selector-place {
+    position: relative;
+  }
+
+  .selector-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: min(7px, var(--lume-radius-control));
+  }
+
+  .selector-row[data-on] .selector-name {
+    font-weight: 600;
+  }
+
+  .selector-row > .selector-name {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .selector-mark {
+    @apply text-accent;
+    display: flex;
+    flex-shrink: 0;
+    width: 13px;
+  }
+
+  .selector-right {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* What can be done with a row, in the place of what it says at its end. */
+  .selector-tools {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .selector-place:hover .selector-tools,
+  .selector-row[data-marked] ~ .selector-tools {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .selector-place:hover .selector-right,
+  .selector-row[data-marked]:has(~ .selector-tools) .selector-right {
+    visibility: hidden;
+  }
+
+  .selector-tools button {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: min(6px, var(--lume-radius-control));
+    background: var(--lume-color-control-active);
+    cursor: pointer;
+  }
+
+  .selector-tools button:hover {
+    @apply text-ink;
+  }
+
+  .selector-tools button[data-danger]:hover {
+    background: color-mix(in srgb, var(--lume-color-status-danger) 14%, transparent);
+    color: var(--lume-color-status-danger);
+  }
+
+  .selector-rename {
+    @apply text-ink;
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    padding: 0 8px;
+    border-radius: min(6px, var(--lume-radius-control));
+    background: var(--lume-color-surface);
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 45%, transparent);
+    outline: none;
+    user-select: text;
+  }
+
+  .selector-rename[aria-invalid="true"] {
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-status-danger) 60%, transparent);
+  }
+
+  .selector-separator {
+    height: var(--lume-size-border);
+    margin: 5px 4px;
+    background: var(--lume-color-border);
+  }
+
+  .selector-act {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: min(7px, var(--lume-radius-control));
+  }
+
+  .selector-act-icon {
+    @apply text-accent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: min(6px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-accent) 12%, transparent);
+  }
+
+  .selector-act[data-act="command"] .selector-act-icon,
+  .selector-act[data-act="disconnect"] .selector-act-icon {
+    @apply text-ink-muted;
+    background: transparent;
+  }
+
+  .selector-act-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* A narrow window lists the hosts above what they hold. */
+  @media (max-width: 560px) {
+    .selector {
+      position: fixed;
+      top: calc(var(--lume-size-topbar) + 4px);
+      left: 12px;
+    }
+
+    .selector-columns {
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .selector-hosts {
+      flex: none;
+      min-height: 0;
+      padding-right: 0;
+      border-right: none;
+      border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+    }
+
+    .selector-side {
+      overflow: visible;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .selector[data-animate] {
+      animation: fade-in 150ms ease-out;
     }
   }
 
@@ -5097,6 +5535,22 @@
     background: var(--lume-color-status-danger);
   }
 
+  /* Whether a Rex server can be used. */
+  .palette-row-link {
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+
+  .palette-row-link[data-link="up"] {
+    background: var(--lume-color-accent);
+  }
+
+  .palette-row-link[data-link="down"] {
+    background: color-mix(in srgb, var(--lume-color-text-muted) 60%, transparent);
+  }
+
   .palette-row-meta {
     @apply text-ink-muted;
     flex-shrink: 0;
@@ -7259,6 +7713,19 @@
     border: 1.5px solid var(--lume-color-text-muted);
   }
 
+  /* Whether a Rex server can be used: it can, it is being connected to, or it cannot. */
+  .connect-dot[data-link] {
+    flex-shrink: 0;
+  }
+
+  .connect-dot[data-link="up"] {
+    background: var(--lume-color-accent);
+  }
+
+  .connect-dot[data-link="down"] {
+    background: color-mix(in srgb, var(--lume-color-text-muted) 60%, transparent);
+  }
+
   .connect-action-icon {
     display: flex;
     flex-shrink: 0;
@@ -7378,6 +7845,10 @@
     gap: 6px;
   }
 
+  .connect-stats[data-count="2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .connect-stats > div {
     min-width: 0;
     padding: 7px 10px;
@@ -7430,6 +7901,77 @@
   /* Where a profile comes from is said in words, not as something to type. */
   .connect-fact dd[data-prose] {
     font-family: var(--font-ui);
+  }
+
+  /* Why a server's sessions are not listed, or what went wrong with it. */
+  .connect-call {
+    @apply text-ink-muted;
+    padding: 10px 12px;
+    border-radius: min(9px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-text) 3%, transparent);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+
+  .connect-call[data-problem] {
+    @apply text-ink;
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-status-danger) 45%, transparent);
+  }
+
+  /* A server's sessions, the marked one ringed while the arrow keys move among them. */
+  .connect-sessions {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 84px;
+    gap: 4px;
+  }
+
+  .connect-sessions-list {
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .connect-sessions-title {
+    @apply text-ink-muted;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .connect-session {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: min(8px, var(--lume-radius-control));
+    cursor: default;
+  }
+
+  .connect-session[aria-selected="true"] {
+    @apply bg-control-hover;
+  }
+
+  .connect-sessions[data-inside] .connect-session[aria-selected="true"] {
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 40%, transparent);
+  }
+
+  .connect-session-name,
+  .connect-act-label {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connect-session-name {
+    flex: 1;
   }
 
   .connect-detail-spacer {
@@ -7550,6 +8092,10 @@
     font-family: var(--font-mono);
     font-size: 10px;
     font-weight: 500;
+  }
+
+  .connect-footer > span[data-off] {
+    opacity: 0.45;
   }
 
   .connect-footer-spacer {

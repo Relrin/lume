@@ -16,7 +16,7 @@
           },
           {
             "role": "button",
-            "name": "fixture",
+            "name": "This PC, fixture",
             "state": {
               "expanded": "false"
             }

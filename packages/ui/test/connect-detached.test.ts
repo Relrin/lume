@@ -107,7 +107,9 @@ describe("the detached sessions of the Connect palette", () => {
           ? row.entry.profile.id
           : row.type === "session"
             ? row.entry.session.session
-            : row.action.id,
+            : row.type === "action"
+              ? row.action.id
+              : row.entry.host.id,
       ),
     ).toEqual([
       "auto.pwsh",
@@ -121,7 +123,7 @@ describe("the detached sessions of the Connect palette", () => {
     const values = (hasDetached: boolean, current: Parameters<typeof connectFilters>[1]) =>
       connectFilters(hasDetached, current).map((choice) => choice.value);
     expect(values(true, "all")).toEqual(CONNECT_FILTERS.map((choice) => choice.value));
-    expect(values(false, "all")).toEqual(["all", "ssh", "wsl", "local"]);
+    expect(values(false, "all")).toEqual(["all", "rex", "ssh", "wsl", "local"]);
     expect(values(false, "detached")).toContain("detached");
     // Stepping through the filters offered passes over the one that is not.
     expect(stepFilter("local", 1, connectFilters(false, "local"))).toBe("all");

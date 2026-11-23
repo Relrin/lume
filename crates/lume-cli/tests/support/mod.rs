@@ -479,6 +479,24 @@ impl Pages {
         serde_json::from_slice(&output.stdout).ok()
     }
 
+    /// Presses keys in the page whose address holds `part`, one after another, as a
+    /// keyboard does. What a key may be is said in `keys.mjs`.
+    pub fn press(&self, part: &str, keys: &[&str]) {
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/keys.mjs");
+        let output = Command::new("node")
+            .arg(script)
+            .args([&self.port.to_string(), part])
+            .args(keys)
+            .stdin(Stdio::null())
+            .output()
+            .expect("node runs: the tests that look into a view need it");
+        assert!(
+            output.status.success(),
+            "pressing {keys:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     /// Waits until the text of the page whose address holds `part` holds every one of
     /// `wanted`, and gives the text back.
     pub fn until_text(&self, part: &str, wanted: &[&str]) -> String {

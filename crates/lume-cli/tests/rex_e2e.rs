@@ -352,6 +352,13 @@ fn application_with_pages(server: &Server) -> (App, Option<Pages>) {
     if !cfg!(windows) {
         return (application_of(server), None);
     }
+    let (app, pages) = application_to_drive(&settings(server));
+    (app, Some(pages))
+}
+
+/// Starts the application, with more of a configuration, so that its page can be looked
+/// into and driven.
+fn application_to_drive(more: &str) -> (App, Pages) {
     let number = NEXT.fetch_add(1, Ordering::Relaxed);
     let endpoint = format!("e2e-{}-{number}", std::process::id());
     let home = std::env::temp_dir().join(format!("lume-{endpoint}"));
@@ -359,7 +366,7 @@ fn application_with_pages(server: &Server) -> (App, Option<Pages>) {
     std::fs::create_dir_all(home.join("config")).unwrap();
     std::fs::write(
         home.join("config").join("config.toml"),
-        configuration() + IN_PROCESS_HOST + &settings(server),
+        configuration() + IN_PROCESS_HOST + more,
     )
     .unwrap();
     let pages = Pages { port: free_port() };
@@ -379,11 +386,164 @@ fn application_with_pages(server: &Server) -> (App, Option<Pages>) {
         ],
     );
     app.status_with_session();
-    (app, Some(pages))
+    (app, pages)
 }
 
 /// The address of a window's page, as far as it tells it from others.
 const WINDOW_PAGE: &str = "tauri.localhost";
+
+/// What `expression` gives in the window's page.
+fn page(pages: &Pages, expression: &str) -> Value {
+    pages
+        .evaluate(WINDOW_PAGE, expression)
+        .unwrap_or(Value::Null)
+}
+
+/// Waits until `expression` holds in the window's page.
+fn until_page(pages: &Pages, what: &str, expression: &str) {
+    until(what, || (page(pages, expression) == true).then_some(()));
+}
+
+/// The text of everything in the window's page that `selector` finds.
+fn texts(pages: &Pages, selector: &str) -> Vec<String> {
+    let found = page(
+        pages,
+        &format!(
+            "[...document.querySelectorAll({})].map((one) => one.textContent)",
+            json!(selector)
+        ),
+    );
+    serde_json::from_value(found).unwrap_or_default()
+}
+
+fn until_texts(pages: &Pages, selector: &str, wanted: &[&str]) {
+    let deadline = Instant::now() + SOON;
+    loop {
+        let found = texts(pages, selector);
+        if found == wanted {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{selector} says {found:?}, not {wanted:?}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn press(pages: &Pages, keys: &[&str]) {
+    pages.press(WINDOW_PAGE, keys);
+}
+
+/// Opens the Connect palette on the Rex servers, with the keyboard in it, and marks the
+/// one called `label`.
+fn connect_palette(app: &App, pages: &Pages, label: &str) {
+    app.ctl(&["command", "lume.connect.open"]).ok("palette");
+    until_page(
+        pages,
+        "the palette to have the keyboard",
+        "document.activeElement?.className === 'connect-input'",
+    );
+    press(pages, &["Alt+ArrowRight"]);
+    until_page(
+        pages,
+        "the Rex servers to be listed",
+        "document.querySelector('.connect-chip[data-filter=rex]')?.ariaPressed === 'true'",
+    );
+    let marked = format!(
+        "document.querySelector('.connect-row[aria-selected=true] .connect-row-name')\
+         ?.textContent === {}",
+        json!(label)
+    );
+    until("the server to be marked", || {
+        if page(pages, &marked) == true {
+            return Some(());
+        }
+        press(pages, &["ArrowDown"]);
+        None
+    });
+}
+
+/// Opens the selector under the workspace's name, with the keyboard in it.
+fn selector(pages: &Pages) {
+    page(
+        pages,
+        "(() => { document.querySelector('.switcher-button').click(); return true; })()",
+    );
+    until_page(
+        pages,
+        "the selector to have the keyboard",
+        "document.activeElement?.className === 'selector-input'",
+    );
+}
+
+/// Looks at a host of the selector from the keyboard, and goes into what it holds.
+fn look_at(pages: &Pages, label: &str) {
+    press(pages, &["Tab"]);
+    let looked = format!(
+        "document.querySelector('.selector-host[data-marked] .selector-name')?.textContent === {}",
+        json!(label)
+    );
+    until("the host to be looked at", || {
+        if page(pages, &looked) == true {
+            return Some(());
+        }
+        press(pages, &["ArrowDown"]);
+        None
+    });
+    press(pages, &["Tab"]);
+    until_page(
+        pages,
+        "what the host holds to have the arrows",
+        "document.querySelector('.selector-host[data-marked]') === null",
+    );
+}
+
+/// Marks something of the selector's right column by what it says.
+fn mark(pages: &Pages, text: &str) {
+    let marked = format!(
+        "document.querySelector('.selector-row[data-marked] .selector-name, \
+         .selector-act[data-marked] .selector-act-label')?.textContent === {}",
+        json!(text)
+    );
+    until(&format!("{text} to be marked"), || {
+        if page(pages, &marked) == true {
+            return Some(());
+        }
+        press(pages, &["ArrowDown"]);
+        None
+    });
+}
+
+/// Waits until the button of the top bar names a host and what of it is on show.
+fn until_button(pages: &Pages, host: &str, name: &str) {
+    until_page(
+        pages,
+        &format!("the button to name {name} on {host}"),
+        &format!(
+            "document.querySelector('.switcher-button')?.ariaLabel === {}",
+            json!(format!("{host}, {name}"))
+        ),
+    );
+}
+
+fn until_on_show(app: &App, name: &str) {
+    until(&format!("{name} to be on show"), || {
+        let layout = app.layout();
+        (layout["workspace"]["name"] == name && layout["workspace"]["backend"].is_string())
+            .then_some(())
+    });
+}
+
+/// The labels of the server's sessions, in its order.
+fn labels(server: &Server) -> Vec<String> {
+    let listed = server.rex_json(&["ls", "--json"]);
+    let sessions = listed["sessions"].as_array().cloned().unwrap_or_default();
+    sessions
+        .iter()
+        .map(|session| session["label"].as_str().unwrap_or_default().to_owned())
+        .collect()
+}
 
 #[test]
 #[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
@@ -850,5 +1010,425 @@ fn a_server_that_does_not_run_is_said_not_to_be_there_and_is_not_started() {
     server.run();
     command(&app, "lume.rex.connect", json!({ "host": HOST })).ok("connect");
     assert_eq!(host(&app)["state"]["kind"], "connected");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn the_connect_palette_connects_a_server_and_attaches_to_its_sessions() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    server.session("alpha");
+    server.session("beta");
+    let (app, pages) = application_to_drive(&settings(&server));
+    connect_palette(&app, &pages, HOST);
+    until_texts(&pages, ".connect-row-line", &["Not connected"]);
+
+    // It stays to list the sessions of the server it connects.
+    press(&pages, &["Enter"]);
+    until_texts(&pages, ".connect-session-name", &["alpha", "beta"]);
+    until_texts(&pages, ".connect-row-line", &["2 sessions"]);
+    until_texts(
+        &pages,
+        ".connect-primary .connect-act-label",
+        &["Attach to alpha"],
+    );
+    // The server is on this machine: how near it is is not said.
+    until_texts(&pages, ".connect-stats dt", &["Server", "API rev"]);
+    assert_eq!(texts(&pages, ".connect-stats dd")[1], "19");
+    until_texts(&pages, ".connect-row .connect-meta", &[]);
+    assert!(own_workspace_on_show(&app));
+
+    press(&pages, &["Enter"]);
+    until_on_show(&app, "alpha");
+    until_button(&pages, HOST, "alpha");
+    // The palette is gone, and what is typed goes to the terminal.
+    until_page(
+        &pages,
+        "the palette to be gone",
+        "document.querySelector('.connect') === null",
+    );
+    until_page(
+        &pages,
+        "the terminal to have the keyboard",
+        "document.activeElement?.classList.contains('terminal-input') === true",
+    );
+
+    // Tab goes into the sessions, where the arrows mark another.
+    connect_palette(&app, &pages, HOST);
+    until_texts(&pages, ".connect-session .connect-meta", &["Attached"]);
+    press(&pages, &["Tab", "ArrowDown"]);
+    until_texts(
+        &pages,
+        ".connect-primary .connect-act-label",
+        &["Attach to beta"],
+    );
+    press(&pages, &["Enter"]);
+    until_on_show(&app, "beta");
+    until_button(&pages, HOST, "beta");
+    until_texts(
+        &pages,
+        ".status-served-text",
+        &[&format!("{HOST} · session beta · 1 pane")],
+    );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn the_connect_palette_makes_sessions_and_says_why_a_server_is_not_there() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let mut server = Server::start();
+    server.session("alpha");
+    let (app, pages) = application_to_drive(&settings(&server));
+    connect_palette(&app, &pages, HOST);
+    press(&pages, &["Enter"]);
+    until_texts(&pages, ".connect-session-name", &["alpha"]);
+    press(&pages, &["Ctrl+n"]);
+    until("the session to be made", || {
+        (labels(&server).len() == 2).then_some(())
+    });
+    let made = labels(&server)
+        .into_iter()
+        .find(|label| label != "alpha")
+        .unwrap();
+    until_on_show(&app, &made);
+
+    // Disconnected by its button, the own workspace is back.
+    connect_palette(&app, &pages, HOST);
+    let button = |label: &str| {
+        format!(
+            "(() => {{ const found = [...document.querySelectorAll('.connect-acts button')] \
+             .find((one) => one.textContent.startsWith({})); \
+             found?.click(); return found !== undefined; }})()",
+            json!(label)
+        )
+    };
+    until_page(&pages, "the button that disconnects", &button("Disconnect"));
+    until("the own workspace to be on show", || {
+        own_workspace_on_show(&app).then_some(())
+    });
+    app.ctl(&["command", "lume.connect.open"]).ok("put away");
+
+    // With the server gone, why it cannot be reached is said, and it is tried again.
+    server.stop();
+    connect_palette(&app, &pages, HOST);
+    press(&pages, &["Enter"]);
+    until_texts(&pages, ".connect-row-line", &["Unreachable"]);
+    until_texts(&pages, ".connect-primary .connect-act-label", &["Retry"]);
+    let why = texts(&pages, ".connect-call");
+    assert!(why[0].starts_with("Unreachable. "), "{why:?}");
+    server.run();
+    press(&pages, &["Enter"]);
+    until_page(
+        &pages,
+        "the sessions to be listed again",
+        "document.querySelectorAll('.connect-session').length === 2",
+    );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn a_connection_without_encryption_is_made_only_by_keys_of_its_own() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    // An address kept for documentation: nothing is there.
+    let plain = "\n[[rex.host]]\nlabel = 'Plain'\naddress = 'http://192.0.2.1:7297'\n";
+    let (app, pages) = application_to_drive(plain);
+    connect_palette(&app, &pages, "Plain");
+    press(&pages, &["Enter"]);
+    until_texts(&pages, ".connect-row-line", &["Not encrypted"]);
+    let why = texts(&pages, ".connect-call");
+    assert!(why[0].contains("would not be encrypted"), "{why:?}");
+    // Nothing else asks, and Enter does not agree.
+    press(&pages, &["Enter", "Enter"]);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(host(&app)["state"]["code"], "confirmation_required");
+    assert_eq!(
+        page(&pages, "document.querySelector('.prompt') === null"),
+        true
+    );
+
+    press(&pages, &["Ctrl+Enter"]);
+    until("the connection to be tried", || {
+        let state = host(&app)["state"].clone();
+        (state["kind"] == "connecting" || state["code"] == "unreachable").then_some(())
+    });
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn the_command_palette_finds_a_session_and_opens_it() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    server.session("alpha");
+    server.session("needle");
+    let (app, pages) = application_to_drive(&settings(&server));
+    command(&app, "lume.rex.connect", json!({ "host": HOST })).ok("connect");
+    app.ctl(&["command", "lume.palette.open"]).ok("palette");
+    until_page(
+        &pages,
+        "the palette to have the keyboard",
+        "document.activeElement?.className === 'palette-input'",
+    );
+    press(&pages, &["text:#", "text:needle"]);
+    until_texts(&pages, ".palette-row-text", &["needle"]);
+    until_texts(&pages, ".palette-row-sub", &[HOST]);
+    press(&pages, &["Enter"]);
+    until_on_show(&app, "needle");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn the_selector_opens_a_session_and_goes_back_to_a_workspace_of_its_name() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    let (app, pages) = application_to_drive(&settings(&server));
+    let own = app.layout()["workspace"]["name"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    server.session(&own);
+    until_button(&pages, "This PC", &own);
+
+    selector(&pages);
+    until_texts(&pages, ".selector-host .selector-name", &["This PC", HOST]);
+    until_texts(&pages, ".selector-row[data-on] .selector-name", &[&own]);
+    look_at(&pages, HOST);
+    mark(&pages, "Connect");
+    press(&pages, &["Enter"]);
+    until_texts(&pages, ".selector-row .selector-name", &[&own]);
+    mark(&pages, &own);
+    press(&pages, &["Enter"]);
+    until_on_show(&app, &own);
+    until_button(&pages, HOST, &own);
+
+    // The workspace of the same name is not the one on show, and can be gone back to.
+    selector(&pages);
+    until_texts(
+        &pages,
+        ".selector-row[data-on] .selector-right",
+        &["Attached"],
+    );
+    press(&pages, &["Tab", "ArrowUp"]);
+    until_page(
+        &pages,
+        "this machine to be looked at",
+        "document.querySelector('.selector-host[data-marked]')?.dataset.host === 'pc'",
+    );
+    press(&pages, &["Tab"]);
+    until_texts(&pages, ".selector-row .selector-name", &[&own]);
+    until_texts(&pages, ".selector-row[data-on] .selector-name", &[]);
+    mark(&pages, &own);
+    press(&pages, &["Enter"]);
+    until("the own workspace to be on show", || {
+        own_workspace_on_show(&app).then_some(())
+    });
+    until_button(&pages, "This PC", &own);
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn the_selector_makes_renames_and_ends_sessions() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    server.session("alpha");
+    let (app, pages) = application_to_drive(&settings(&server));
+    open(&app, "alpha");
+    until_button(&pages, HOST, "alpha");
+
+    // What is typed and not there can be made.
+    selector(&pages);
+    press(&pages, &["text:nightly"]);
+    mark(&pages, &format!("Create “nightly” on {HOST}"));
+    press(&pages, &["Enter"]);
+    until_on_show(&app, "nightly");
+    assert_eq!(labels(&server), ["alpha", "nightly"]);
+
+    // Renamed in place, the server has the name, and so has the button.
+    selector(&pages);
+    mark(&pages, "nightly");
+    press(&pages, &["F2"]);
+    until_page(
+        &pages,
+        "the name to be typed over",
+        "document.activeElement?.className === 'selector-rename'",
+    );
+    press(&pages, &["text:weekly", "Enter"]);
+    until("the server to have the name", || {
+        (labels(&server) == ["alpha", "weekly"]).then_some(())
+    });
+    until_texts(&pages, ".selector-row .selector-name", &["alpha", "weekly"]);
+    until_button(&pages, HOST, "weekly");
+
+    // A name that is taken is not sent.
+    until_page(
+        &pages,
+        "the keyboard to be back",
+        "document.activeElement?.className === 'selector-input'",
+    );
+    mark(&pages, "weekly");
+    press(&pages, &["F2", "text:alpha", "Enter"]);
+    until_page(
+        &pages,
+        "the name to be refused",
+        "document.querySelector('.selector-rename')?.ariaInvalid === 'true'",
+    );
+    press(&pages, &["Escape"]);
+    assert_eq!(labels(&server), ["alpha", "weekly"]);
+
+    // Ending it asks, and a no leaves it as it was.
+    let asked = "document.querySelector('.prompt')?.ariaLabel === 'End “weekly”?'";
+    until_page(
+        &pages,
+        "the keyboard to be back",
+        "document.activeElement?.className === 'selector-input'",
+    );
+    mark(&pages, "weekly");
+    press(&pages, &["Ctrl+Delete"]);
+    until_page(&pages, "the question", asked);
+    press(&pages, &["Enter"]);
+    until_page(
+        &pages,
+        "the question to go",
+        "document.querySelector('.prompt') === null",
+    );
+    assert_eq!(labels(&server), ["alpha", "weekly"]);
+    until_on_show(&app, "weekly");
+
+    selector(&pages);
+    mark(&pages, "weekly");
+    press(&pages, &["Ctrl+Delete"]);
+    until_page(&pages, "the question", asked);
+    page(
+        &pages,
+        "(() => { document.querySelector('.prompt-proceed').click(); return true; })()",
+    );
+    until("the session to be ended", || {
+        (labels(&server) == ["alpha"]).then_some(())
+    });
+    until("the own workspace to be on show", || {
+        own_workspace_on_show(&app).then_some(())
+    });
+    assert_eq!(host(&app)["state"]["kind"], "connected");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn the_page_follows_what_another_client_does_and_a_server_that_goes_and_comes() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let mut server = Server::start();
+    server.session("alpha");
+    server.session("beta");
+    let (app, pages) = application_to_drive(&settings(&server));
+    open(&app, "alpha");
+    until_button(&pages, HOST, "alpha");
+    selector(&pages);
+    let names = ".selector-row .selector-name";
+    until_texts(&pages, names, &["alpha", "beta"]);
+
+    // While the selector is open, another client renames one, makes one and ends one.
+    server.rex(&["session", "rename", "alpha", "gamma"]);
+    until_texts(&pages, names, &["gamma", "beta"]);
+    until_button(&pages, HOST, "gamma");
+    server.session("delta");
+    until_texts(&pages, names, &["gamma", "beta", "delta"]);
+    server.rex(&["kill", "beta"]);
+    until_texts(&pages, names, &["gamma", "delta"]);
+    until_texts(
+        &pages,
+        ".status-served-text",
+        &[&format!("{HOST} · session gamma · 1 pane")],
+    );
+    press(&pages, &["Escape"]);
+    until_page(
+        &pages,
+        "the selector to go",
+        "document.querySelector('.selector') === null",
+    );
+
+    server.stop();
+    // Shown by a ring that turns in the place of the dot, in the bar and below.
+    until_page(
+        &pages,
+        "the connection to be shown as being made again",
+        "document.querySelectorAll('.switcher-dot[data-link=busy]').length === 2",
+    );
+    until_texts(
+        &pages,
+        ".status-served-text",
+        &[&format!("{HOST} · session gamma · 1 pane")],
+    );
+    server.run();
+    until_page(
+        &pages,
+        "the button to say it is connected",
+        "document.querySelector('.switcher-dot')?.dataset.link === 'up'",
+    );
+    until_button(&pages, HOST, "gamma");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn an_empty_session_is_shown_and_a_tab_can_be_made_in_it() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    let block = server.session("hollow");
+    server.rex(&["block", "close", &block]);
+    let (app, pages) = application_to_drive(&settings(&server));
+    command(
+        &app,
+        "lume.rex.open",
+        json!({ "host": HOST, "session": "hollow" }),
+    )
+    .ok("open");
+    until_on_show(&app, "hollow");
+    until_button(&pages, HOST, "hollow");
+    until_texts(
+        &pages,
+        ".status-served-text",
+        &[&format!("{HOST} · session hollow · 0 panes")],
+    );
+    until_page(
+        &pages,
+        "the window to offer a tab",
+        "document.querySelector('.empty-action') !== null",
+    );
+    page(
+        &pages,
+        "(() => { document.querySelector('.empty-action').click(); return true; })()",
+    );
+    until_panes(&app, &[1]);
+    assert_eq!(server.blocks("hollow").len(), 1);
+    app.status_with_session();
     app.quit();
 }

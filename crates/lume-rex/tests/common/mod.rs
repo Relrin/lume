@@ -641,6 +641,29 @@ impl World {
         conn.respond(&asked.id, json!({ "session_id": id })).await;
     }
 
+    /// Calls a session something else, or ends it, and says so before answering.
+    async fn rename_or_end(&mut self, conn: &mut Conn, asked: &Asked) {
+        let session = asked.payload["session_id"].as_str().unwrap_or_default();
+        let Some(at) = self.sessions.iter().position(|(id, _)| id == session) else {
+            conn.fail(&asked.id, "not_found", 404, "no such session")
+                .await;
+            return;
+        };
+        if asked.method == "session.destroy" {
+            let (id, _) = self.sessions.remove(at);
+            self.views.remove(&id);
+            conn.event("session_destroyed", json!({ "session_id": id }))
+                .await;
+            conn.respond(&asked.id, json!({})).await;
+            return;
+        }
+        let label = asked.payload["label"].clone();
+        label.as_str().unwrap().clone_into(&mut self.sessions[at].1);
+        conn.session_event(session, "session_label_changed", json!({ "label": label }))
+            .await;
+        conn.respond(&asked.id, json!({ "revision": 9 })).await;
+    }
+
     /// Answers one request as a server holding this would.
     pub async fn answer(&mut self, conn: &mut Conn, asked: &Asked) {
         if self.change(conn, asked).await {
@@ -657,6 +680,10 @@ impl World {
         }
         if asked.method == "session.create" {
             self.create(conn, asked).await;
+            return;
+        }
+        if ["session.set_label", "session.destroy"].contains(&asked.method.as_str()) {
+            self.rename_or_end(conn, asked).await;
             return;
         }
         let reply = match asked.method.as_str() {

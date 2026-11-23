@@ -1,8 +1,15 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { createStore } from "zustand/vanilla";
 
-import type { ConfigView, MenuNodeData, MotionDef, UiContributions } from "../src/core/types.ts";
+import type {
+  ConfigView,
+  MenuNodeData,
+  MotionDef,
+  RexHosts,
+  UiContributions,
+} from "../src/core/types.ts";
 import { tabStyle, tabStyleName } from "../src/motion/tab.ts";
 import { Assets, assets } from "../src/plugins/assets.ts";
 import { pluginStatusItems } from "../src/plugins/status.ts";
@@ -17,6 +24,7 @@ import { menuRows, nodesOf, type MenuParts } from "../src/shell/menus.ts";
 import { StatusBar } from "../src/shell/StatusBar.tsx";
 import { createStatusStore } from "../src/status/registry.ts";
 import { cursorFxSettings, cursorFxShaders } from "../src/terminal/cursor-fx.ts";
+import { DEVBOX, rexList } from "./rex-fixtures.ts";
 
 const EMPTY: UiContributions = {
   revision: 1,
@@ -336,14 +344,27 @@ describe("the status bar", () => {
     const status = createStatusStore();
     // Drawn on its own, a store is read as it first was: here, as it is now.
     const now = { ...status, getInitialState: () => status.getState() };
-    const app = {
-      status: now,
-      plugins: createPluginsStore(),
-      views: { focus: () => undefined },
-    } as unknown as ShellApp;
-    const draw = () =>
-      renderToStaticMarkup(createElement(ShellContext, { value: app }, createElement(StatusBar)));
+    const app = (backend: string | null, rex: RexHosts | null = null) =>
+      ({
+        status: now,
+        plugins: createPluginsStore(),
+        views: { focus: () => undefined },
+        layout: createStore(() => ({
+          backend,
+          name: "acme",
+          window: "w1",
+          windows: { w1: { active: "t1", floating: ["p3"] } },
+          tabs: { t1: { root: { type: "pane", id: "p1" } } },
+        })),
+        rex: createStore(() => ({ list: rex })),
+      }) as unknown as ShellApp;
+    const draw = (shell = app(null)) =>
+      renderToStaticMarkup(createElement(ShellContext, { value: shell }, createElement(StatusBar)));
     expect(draw()).toBe("");
+    // A server's layout on show is something to say, with no item at all.
+    expect(draw(app(DEVBOX.id, rexList(DEVBOX)))).toContain("devbox · session acme · 2 panes<");
+    const lost = { ...DEVBOX, state: { kind: "waiting", error: "x" } as const };
+    expect(draw(app(DEVBOX.id, rexList(lost)))).toMatch(/data-link="busy".*2 panes</);
     status
       .getState()
       .register({ id: "a.load", slot: "statusbar.right", kind: "text", text: "1.2" });

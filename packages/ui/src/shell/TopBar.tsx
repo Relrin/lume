@@ -2,8 +2,8 @@
  * The bar along the top of the window.
  *
  * It has three places for status items: at its left, in its middle and at its right.
- * Around them stand the bar's own parts: the application's menu and the workspace's
- * name at the left end, the window's tabs in the middle unless they are listed in a panel at the window's side,
+ * Around them stand the bar's own parts: the application's menu and what the window
+ * shows, by its host and its name, at the left end, the window's tabs in the middle unless they are listed in a panel at the window's side,
  * and at the right end the Activity list, the command palette and a new tab, then the
  * window's buttons when the page draws the title bar.
  *
@@ -30,10 +30,10 @@ import { WindowControls } from "./WindowControls.tsx";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.tsx";
 
 /** The parts of the bar a press is meant for, and so does not move the window. */
-const CONTROLS = "button, input, textarea, select, a, [role=menu], .tab";
+const CONTROLS = "button, input, textarea, select, a, [role=menu], [role=dialog], .tab";
 
 /** The parts of the bar that put Escape to a use of their own. */
-const KEEPS_ESCAPE = "[role=menu], input, textarea";
+const KEEPS_ESCAPE = "[role=menu], [role=dialog], input, textarea";
 
 /** The top bar. */
 export function TopBar() {

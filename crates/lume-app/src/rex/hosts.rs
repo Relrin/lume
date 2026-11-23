@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use lume_config::Config;
 use lume_proto::BackendId;
-use lume_rex::{ClientInfo, Endpoint, Link, Options, RexBackend, RexError};
+use lume_rex::{ClientInfo, Endpoint, Link, Options, RexBackend, RexError, RexSession};
 use lume_session::SessionBackend as _;
 use serde_json::{Value, json};
 use tokio::sync::watch;
@@ -37,7 +37,7 @@ use crate::tuning::{REX_CONNECT_WAIT, REX_LEASE, REX_LOOK_EVERY};
 
 /// What the server of this machine is called, where the user has not called it
 /// anything.
-const LOCAL_LABEL: &str = "This computer";
+const LOCAL_LABEL: &str = "Local Rex";
 /// What the ids of these backends begin with.
 const ID_PREFIX: &str = "rex:";
 
@@ -654,16 +654,7 @@ impl Hosts {
         let backend = self.connected(&host, agreed, !host.is_local()).await?;
         let sessions = backend.sessions();
         let chosen = match session.map(str::trim).filter(|session| !session.is_empty()) {
-            Some(wanted) => sessions
-                .iter()
-                .find(|session| session.id == wanted)
-                .or_else(|| sessions.iter().find(|session| session.label == wanted))
-                .ok_or_else(|| {
-                    CommandError::not_found(format!(
-                        "{} has no session called `{wanted}`",
-                        host.label
-                    ))
-                })?,
+            Some(wanted) => session_of(&host, &sessions, wanted)?,
             None => {
                 let last = self.inner().last.get(&host.id).cloned();
                 sessions
@@ -696,6 +687,90 @@ impl Hosts {
             .await
             .map_err(|error| command_error(&error))?;
         self.show(&host, &backend, &made).await
+    }
+
+    /// The connection to a server, as it is now: none is made.
+    fn held(&self, host: &Host) -> Result<Arc<RexBackend>, CommandError> {
+        self.inner()
+            .connections
+            .get(&host.id)
+            .filter(|connection| matches!(&*connection.backend.link().borrow(), Link::Connected(_)))
+            .map(|connection| Arc::clone(&connection.backend))
+            .ok_or_else(|| {
+                CommandError::new("disconnected", format!("{} is not connected", host.label))
+            })
+    }
+
+    /// What a server is called, which somebody means by its id, label or address.
+    pub fn label_of(&self, host: &str) -> Option<String> {
+        self.find(host).ok().map(|host| host.label)
+    }
+
+    /// What a session of a connected server is called.
+    pub fn session_label(&self, host: &str, session: &str) -> Result<String, CommandError> {
+        let host = self.find(host)?;
+        let sessions = self.held(&host)?.sessions();
+        session_of(&host, &sessions, session.trim()).map(|session| session.label.clone())
+    }
+
+    /// Calls a session of a connected server something else.
+    pub async fn rename_session(
+        &self,
+        host: &str,
+        session: &str,
+        label: &str,
+    ) -> Result<(), CommandError> {
+        let host = self.find(host)?;
+        let backend = self.held(&host)?;
+        let sessions = backend.sessions();
+        let session = session_of(&host, &sessions, session.trim())?;
+        backend
+            .rename_session(&session.id, label)
+            .await
+            .map_err(|error| command_error(&error))
+    }
+
+    /// Ends a session of a connected server, with what runs in it. If it is on show, the
+    /// application's own workspace is shown again.
+    pub async fn end_session(
+        self: &Arc<Self>,
+        host: &str,
+        session: &str,
+    ) -> Result<(), CommandError> {
+        let host = self.find(host)?;
+        // Held to the end: the watcher of the connection would say that the session on
+        // show has ended, which the user just asked for.
+        let _one_at_a_time = self.opening.lock().await;
+        let backend = self.held(&host)?;
+        let sessions = backend.sessions();
+        let session = session_of(&host, &sessions, session.trim())?;
+        backend
+            .end_session(&session.id)
+            .await
+            .map_err(|error| command_error(&error))?;
+        let shown = {
+            let mut inner = self.inner();
+            if inner.last.get(&host.id) == Some(&session.id) {
+                inner.last.remove(&host.id);
+            }
+            inner
+                .connections
+                .get_mut(&host.id)
+                .is_some_and(|connection| {
+                    connection
+                        .showing
+                        .take_if(|showing| *showing == session.id)
+                        .is_some()
+                })
+        };
+        if shown {
+            if self.served_by().as_ref() == Some(&host.id) {
+                self.back_to_own().await;
+            }
+            backend.show_nothing();
+        }
+        self.touch();
+        Ok(())
     }
 
     /// Puts a session on show. The caller holds `opening`.
@@ -913,6 +988,21 @@ impl Hosts {
     }
 }
 
+/// The session of a server somebody means by its id or its label.
+fn session_of<'a>(
+    host: &Host,
+    sessions: &'a [RexSession],
+    wanted: &str,
+) -> Result<&'a RexSession, CommandError> {
+    sessions
+        .iter()
+        .find(|session| session.id == wanted)
+        .or_else(|| sessions.iter().find(|session| session.label == wanted))
+        .ok_or_else(|| {
+            CommandError::not_found(format!("{} has no session called `{wanted}`", host.label))
+        })
+}
+
 /// Follows a connection until it ends.
 async fn watch(hosts: Weak<Hosts>, id: BackendId, backend: Arc<RexBackend>) {
     let mut link = backend.link();
@@ -982,7 +1072,7 @@ mod naming {
         assert_eq!(
             listed,
             [
-                ("rex:local", "This computer"),
+                ("rex:local", "Local Rex"),
                 ("rex:https://build.example", "build"),
             ]
         );

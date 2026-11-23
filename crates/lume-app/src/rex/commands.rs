@@ -39,12 +39,19 @@ fn text<'a>(args: &'a Value, name: &str) -> Result<Option<&'a str>, CommandError
     }
 }
 
+fn needed<'a>(args: &'a Value, name: &str, what: &str) -> Result<&'a str, CommandError> {
+    text(args, name)?
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| CommandError::bad_request(format!("{what}: `{name}`")))
+}
+
 /// Runs a command about Rex servers.
 ///
-/// A connection that would not be encrypted is made only when the user agreed to it. A
-/// window asks them and runs the command again with their agreement; whoever asks from
-/// outside a window has to say that it is given. The agreement is for the connection
-/// being made, and is kept nowhere.
+/// A connection that would not be encrypted is made only when the user agreed to it, and
+/// a session is ended only when they did. A window asks them and runs the command again
+/// with their agreement; whoever asks from outside a window has to say that it is given.
+/// A window that says it is not given asks the user itself, and is told what there is to
+/// agree to. The agreement is for this once, and is kept nowhere.
 pub async fn run(
     services: &Services,
     window: WindowId,
@@ -52,16 +59,32 @@ pub async fn run(
     args: &Value,
     asker: Asker,
 ) -> Result<(), CommandError> {
-    let host = text(args, "host")?
-        .filter(|host| !host.trim().is_empty())
-        .ok_or_else(|| CommandError::bad_request("which server: `host`"))?;
-    let agreed = args.get("confirmed").and_then(Value::as_bool) == Some(true);
+    let host = needed(args, "host", "which server")?;
+    let confirmed = args.get("confirmed").and_then(Value::as_bool);
+    let agreed = confirmed == Some(true);
     let rex = &services.rex;
     let done = match id {
         "lume.rex.open" => rex.open(host, text(args, "session")?, agreed).await,
         "lume.rex.new-session" => rex.new_session(host, text(args, "label")?, agreed).await,
         "lume.rex.connect" => rex.connect(host, agreed).await,
         "lume.rex.disconnect" => rex.disconnect(host).await,
+        "lume.rex.rename-session" => {
+            let session = needed(args, "session", "which session")?;
+            let label = needed(args, "label", "what it is to be called")?;
+            rex.rename_session(host, session, label).await
+        }
+        "lume.rex.end-session" => {
+            let session = needed(args, "session", "which session")?;
+            let label = rex.session_label(host, session)?;
+            if agreed {
+                rex.end_session(host, session).await
+            } else {
+                Err(CommandError::new(
+                    "confirmation_required",
+                    format!("ending `{label}` ends what runs in it"),
+                ))
+            }
+        }
         _ => {
             return Err(CommandError::not_found(format!(
                 "the application has no command called `{id}`"
@@ -69,21 +92,35 @@ pub async fn run(
         }
     };
     match done {
-        Err(error) if error.code == "confirmation_required" && asker == Asker::Page => ask_first(
-            &services.state,
-            window,
-            id,
-            args,
-            Question {
-                title: "Connect without encryption?".to_owned(),
-                message: format!(
-                    "The connection to {host} would not be encrypted. Whoever is on the \
-                     network between could read what its terminals show and what you type, \
-                     and change it."
-                ),
-                confirm: "Connect anyway".to_owned(),
-            },
-        ),
+        Err(error)
+            if error.code == "confirmation_required"
+                && asker == Asker::Page
+                && confirmed.is_none() =>
+        {
+            let name = rex.label_of(host).unwrap_or_else(|| host.to_owned());
+            let question = if id == "lume.rex.end-session" {
+                let session = rex.session_label(host, needed(args, "session", "which session")?)?;
+                Question {
+                    title: format!("End “{session}”?"),
+                    message: format!(
+                        "The session is ended on {name}, with every program in it, for \
+                         everyone who is connected to it."
+                    ),
+                    confirm: "End session".to_owned(),
+                }
+            } else {
+                Question {
+                    title: "Connect without encryption?".to_owned(),
+                    message: format!(
+                        "The connection to {name} would not be encrypted. Whoever is on the \
+                         network between could read what its terminals show and what you type, \
+                         and change it."
+                    ),
+                    confirm: "Connect anyway".to_owned(),
+                }
+            };
+            ask_first(&services.state, window, id, args, question)
+        }
         done => done,
     }
 }

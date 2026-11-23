@@ -16,7 +16,7 @@
           },
           {
             "role": "button",
-            "name": "fixture",
+            "name": "This PC, fixture",
             "state": {
               "expanded": "false"
             }
@@ -214,6 +214,13 @@
                 "name": "All, 6",
                 "state": {
                   "pressed": "true"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Rex, 0",
+                "state": {
+                  "pressed": "false"
                 }
               },
               {

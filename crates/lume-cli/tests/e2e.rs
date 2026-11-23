@@ -1523,6 +1523,33 @@ fn full_screen_editor() -> Option<(String, &'static [&'static str])> {
     }
 }
 
+/// What the editor's last line says while it takes what is typed into its text.
+const INSERTING: &str = "-- INSERT";
+
+/// The keys that make the editor wait for a command, Ctrl+\ and Ctrl+N. An Escape does it
+/// too, but the Windows console loses one that a report of the window's focus follows.
+const TO_COMMANDS: &str = r"\x1c\x0e";
+
+/// The editor's screen once it is drawn and the editor waits for a command: it has the
+/// text, stays the same for a while, and does not say that text is being typed.
+fn until_drawn(app: &App, pane: &str) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut last = Value::Null;
+    loop {
+        std::thread::sleep(Duration::from_millis(300));
+        let captured = app.ctl(&["capture", "--pane", pane]).ok("capture");
+        let inserting = captured["lines"].to_string().contains(INSERTING);
+        if !inserting && captured["lines"] == last {
+            return captured;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the editor never waited for a command: {captured}"
+        );
+        last = captured["lines"].clone();
+    }
+}
+
 #[test]
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn a_full_screen_program_comes_back_after_a_crash_and_takes_input() {
@@ -1544,31 +1571,14 @@ fn a_full_screen_program_comes_back_after_a_crash_and_takes_input() {
 
     let app = App::start_on(home.clone(), true, endpoint.clone());
     app.status_with_session();
+    // The editor puts its first line up by itself: an editor that has just started may
+    // throw away what was typed before it was ready.
     let mut spawn = vec!["spawn", "--tab", "--", editor.as_str()];
     spawn.extend_from_slice(args);
+    spawn.extend_from_slice(&["-c", "call setline(1, 'fu11-k7q-before')"]);
     let pane = pane_of(&app.ctl(&spawn).ok("starting the editor"));
-    app.ctl(&["send", "--pane", &pane, "--escapes", "ifu11-k7q-before\\e"])
-        .ok("typing into the editor");
     app.wait_text_in(&pane, "fu11-k7q-before");
-    // The text is on the screen before the editor has taken the Escape after it: its
-    // last line says it is still inserting until then, and would not say so afterwards.
-    let deadline = Instant::now() + Duration::from_secs(15);
-    let before = loop {
-        let captured = app.ctl(&["capture", "--pane", &pane]).ok("capture");
-        let inserting = captured["lines"].as_array().is_some_and(|lines| {
-            lines
-                .iter()
-                .any(|line| line.to_string().contains("-- INSERT"))
-        });
-        if !inserting {
-            break captured;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the editor never left its insert mode: {captured}"
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    };
+    let before = until_drawn(&app, &pane);
     assert_eq!(
         before["alternate"], true,
         "the editor is not full screen: {before}"
@@ -1590,9 +1600,15 @@ fn a_full_screen_program_comes_back_after_a_crash_and_takes_input() {
         after["lines"], before["lines"],
         "the screen came back otherwise"
     );
-    app.ctl(&["send", "--pane", &pane, "--escapes", "ofu11-k7q-after\\e"])
-        .ok("typing into the editor again");
+    app.ctl(&["send", "--pane", &pane, "--", "o"])
+        .ok("beginning a line in the editor");
+    app.wait_text_in(&pane, INSERTING);
+    let typed = format!("fu11-k7q-after{TO_COMMANDS}");
+    app.ctl(&["send", "--pane", &pane, "--escapes", &typed])
+        .ok("typing into the editor");
     app.wait_text_in(&pane, "fu11-k7q-after");
+    // Until the keys after the text are taken, what is typed would go into it.
+    until_drawn(&app, &pane);
     app.ctl(&["send", "--pane", &pane, "--escapes", ":q!\\r"])
         .ok("leaving the editor");
     until_gone(pid, Duration::from_secs(15), "the editor did not end");

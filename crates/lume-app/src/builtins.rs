@@ -82,6 +82,20 @@ const COMMANDS: &[Row] = &[
         false,
     ),
     (
+        "lume.rex.rename-session",
+        "Rename a Session of a Rex Server",
+        "Rex",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.rex.end-session",
+        "End a Session of a Rex Server",
+        "Rex",
+        Runs::Core,
+        false,
+    ),
+    (
         "lume.session.detached",
         "Detached Sessions…",
         "Session",
@@ -1044,6 +1058,25 @@ fn arguments(id: &str) -> Option<Value> {
             &["host"],
         )),
         "lume.rex.disconnect" => Some(object(json!({ "host": rex_host }), &["host"])),
+        "lume.rex.rename-session" => Some(object(
+            json!({
+                "host": rex_host,
+                "session": { "type": "string", "description": "The session's id or label" },
+                "label": { "type": "string", "description": "What the session is to be called" },
+            }),
+            &["host", "session", "label"],
+        )),
+        "lume.rex.end-session" => Some(object(
+            json!({
+                "host": rex_host,
+                "session": { "type": "string", "description": "The session's id or label" },
+                "confirmed": {
+                    "type": "boolean",
+                    "description": "The user has agreed; asked from a window, the window asks first otherwise",
+                },
+            }),
+            &["host", "session"],
+        )),
         "lume.session.reattach" => Some(object(
             json!({
                 "session": { "type": "string", "description": "The session's id" },

@@ -70,6 +70,26 @@ export const FIXTURE_BINDINGS: readonly KeyBinding[] = [
   },
 ];
 
+/** The commands about workspaces and about the sessions of Rex servers. */
+export const HOST_COMMANDS: readonly CommandSpec[] = [
+  ...["switch", "new", "rename", "delete", "open-folder", "set-root"].map((verb) => ({
+    id: `lume.workspace.${verb}`,
+    title: `Workspace ${verb}`,
+    category: "Workspace",
+    runs: verb === "open-folder" ? ("page" as const) : ("core" as const),
+    palette: true,
+  })),
+  ...["open", "new-session", "connect", "disconnect", "rename-session", "end-session"].map(
+    (verb) => ({
+      id: `lume.rex.${verb}`,
+      title: `Rex ${verb}`,
+      category: "Rex",
+      runs: "core" as const,
+      palette: false,
+    }),
+  ),
+];
+
 /**
  * The commands about sessions that run with no pane to show them, about a session shown
  * in a second place, and about the session host.

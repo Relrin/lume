@@ -19,6 +19,7 @@ import {
 
 import type { ConfigPlatform, FolderList } from "../core/types.ts";
 import { useShell } from "./context.ts";
+import { THIS_PC_NAME } from "./host-selector.ts";
 import { FolderIcon } from "./icons.tsx";
 import { Glyph } from "../icons/Glyph.tsx";
 import {
@@ -35,7 +36,7 @@ import {
 } from "./open-folder.ts";
 
 /** What this machine is called in the dialog, and what it runs. */
-const HOST = "This PC";
+const HOST = THIS_PC_NAME;
 const SYSTEMS: Readonly<Record<ConfigPlatform, string>> = {
   windows: "Windows",
   macos: "macOS",

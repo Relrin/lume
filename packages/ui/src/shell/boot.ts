@@ -57,6 +57,7 @@ import { followPluginStatus } from "../plugins/status.ts";
 import { createPluginsStore, type PluginsStore } from "../plugins/store.ts";
 import { VisibleItems } from "../plugins/visible.ts";
 import { createProfilesStore, findProfile, type ProfilesStore } from "../profiles/store.ts";
+import { createRexStore, type RexStore } from "../rex/store.ts";
 import { SearchController } from "../search/controller.ts";
 import { createStatusStore, type StatusStore } from "../status/registry.ts";
 import { assets } from "../plugins/assets.ts";
@@ -105,6 +106,8 @@ export interface ShellApp {
   readonly connect: ConnectStore;
   /** The ways there are to start a terminal. */
   readonly profiles: ProfilesStore;
+  /** The Rex servers there are, and how each stands. */
+  readonly rex: RexStore;
   /** What the page knows of the machine it runs on. */
   readonly machine: Machine;
   /** The status items the window's bars show. */
@@ -223,6 +226,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   const palette = createPaletteStore();
   const connect = createConnectStore();
   const profiles = createProfilesStore();
+  const rex = createRexStore();
   const status = createStatusStore();
   const plugins = createPluginsStore();
   const windowState = createWindowStateStore();
@@ -319,6 +323,11 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       if (profiles.getState().set(list)) made.views?.restyle();
     },
     (error: unknown) => notices.push("error", `The profiles could not be read: ${reason(error)}`),
+  );
+  client.rexHosts().then(
+    (list) => void rex.getState().set(list),
+    (error: unknown) =>
+      notices.push("error", `The Rex servers could not be read: ${reason(error)}`),
   );
 
   const appearance = (): Appearance => {
@@ -611,6 +620,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
         // A profile's look may be another now.
         if (profiles.getState().set(notice)) views.restyle();
         break;
+      case "rex_hosts_changed":
+        rex.getState().set(notice);
+        break;
       case "notice":
         notices.push(notice.level, notice.message, notice.action);
         break;
@@ -860,6 +872,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     palette,
     connect,
     profiles,
+    rex,
     machine,
     status,
     plugins,

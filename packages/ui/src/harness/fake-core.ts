@@ -25,10 +25,12 @@ import type {
   PanelRowData,
   Scheme,
   ProfileList,
+  RexHosts,
   ShellEntry,
   ThemeEntry,
   TitleBar,
   UiContributions,
+  WorkspaceList,
 } from "../core/types.ts";
 import type { ExitStatus, Launcher, SessionEvent } from "../transport/types.ts";
 import type {
@@ -112,7 +114,12 @@ export interface FixturePane {
 export const FIXTURE_MACHINE: Machine = { name: "FIXTURE", home: "C:\\Users\\fixture" };
 
 /** A terminal pane that shows the session called `session`. */
-function terminal(id: PaneId, session: string, setup: FixturePane = {}): PaneNode {
+function terminal(
+  id: PaneId,
+  session: string,
+  setup: FixturePane = {},
+  backend = "local",
+): PaneNode {
   const saved = setup.saved === true;
   return {
     type: "pane" as const,
@@ -120,7 +127,7 @@ function terminal(id: PaneId, session: string, setup: FixturePane = {}): PaneNod
     title: null,
     content: {
       type: "terminal" as const,
-      backend: "local",
+      backend,
       session,
       profile: saved ? (setup.profile ?? null) : null,
       launcher: saved ? (setup.launcher ?? null) : null,
@@ -209,6 +216,18 @@ export interface FakeCoreOptions {
   readonly panes?: Readonly<Record<PaneId, FixturePane>>;
   /** The profiles there are. Left out, a shell, a distribution and a host. */
   readonly profiles?: ProfileList;
+  /** The Rex servers there are, and how each stands. Left out, none. */
+  readonly rexHosts?: Omit<RexHosts, "revision">;
+  /** The workspaces there are, and the one on show. Left out, the fixture's alone. */
+  readonly workspaces?: WorkspaceList;
+  /** The server that keeps the layout, and what its session is called. Left out, none. */
+  readonly served?: { readonly backend: string; readonly name: string };
+  /** One of the fixture's panes that holds something of a server's that cannot be shown. */
+  readonly placeholder?: {
+    readonly pane: PaneId;
+    readonly label: string;
+    readonly kind: string;
+  };
   /** The sessions no pane shows. Left out, none. */
   readonly detached?: readonly DetachedSession[];
   /** Settings of the page's own to lay over the fixture's, by section. */
@@ -304,9 +323,11 @@ function arrange(options: FakeCoreOptions): Arrangement {
   const pane = (): PaneNode => {
     panes += 1;
     const id = `p${panes}`;
-    // A pane that shows a plugin's view has no session.
-    if (options.pluginPane?.pane !== id) sessions.set(id, sessionOfNumber(panes));
-    return terminal(id, sessionOfNumber(panes), options.panes?.[id]);
+    // A pane that shows a plugin's view has no session, nor has a placeholder.
+    if (options.pluginPane?.pane !== id && options.placeholder?.pane !== id) {
+      sessions.set(id, sessionOfNumber(panes));
+    }
+    return terminal(id, sessionOfNumber(panes), options.panes?.[id], options.served?.backend);
   };
   const split = (): SplitId => {
     splits += 1;
@@ -468,6 +489,7 @@ export class FakeCore implements Carrier {
   #receive: (frames: Uint8Array) => void = () => undefined;
   #revision = 1;
   #profiles: ProfileList;
+  #rex: RexHosts;
   /** The sessions no pane shows, less those a command has attached to or ended. */
   #detached: DetachedSession[];
   /** The panes whose program has ended. */
@@ -493,6 +515,7 @@ export class FakeCore implements Carrier {
     this.#scheme = options.scheme ?? "dark";
     this.#profiles = options.profiles ?? PROFILES;
     this.#detached = [...(options.detached ?? [])];
+    this.#rex = { revision: 1, ...(options.rexHosts ?? { hosts: [], local: true }) };
     this.#order = this.#fixture.tabs.map((tab) => tab.id);
     for (const tab of this.#order) {
       const look = options.tabLooks?.[tab];
@@ -585,13 +608,18 @@ export class FakeCore implements Carrier {
   /** A tab's tree, with the pane that shows a plugin's view showing it. */
   #withView(node: Node): Node {
     const shown = this.#options.pluginPane;
+    const held = this.#options.placeholder;
     const icons = this.#options.paneIcons;
-    if (!shown && !icons) return node;
+    if (!shown && !held && !icons) return node;
     if (node.type === "split") {
       return { ...node, children: node.children.map((child) => this.#withView(child)) };
     }
     const icon = icons?.[node.id];
     const known = icon === undefined ? node : { ...node, icon };
+    if (held && node.id === held.pane) {
+      const { label, kind } = held;
+      return { ...known, content: { type: "placeholder" as const, label, kind } };
+    }
     if (node.id !== shown?.pane) return known;
     return {
       ...known,
@@ -629,7 +657,12 @@ export class FakeCore implements Carrier {
     const float = (pane: PaneId | null, minimised: Floating["minimised"]): void => {
       if (pane === null) return;
       floats.push({
-        pane: terminal(pane, this.#fixture.sessions.get(pane) ?? "", this.#options.panes?.[pane]),
+        pane: terminal(
+          pane,
+          this.#fixture.sessions.get(pane) ?? "",
+          this.#options.panes?.[pane],
+          this.#options.served?.backend,
+        ),
         rect: FLOAT_RECT,
         minimised,
       });
@@ -638,7 +671,8 @@ export class FakeCore implements Carrier {
     float(this.#fixture.floating, null);
     return {
       id: "00000000000000aa",
-      name: "fixture",
+      name: this.#options.served?.name ?? "fixture",
+      ...(this.#options.served ? { backend: this.#options.served.backend } : {}),
       windows: [
         {
           id: WINDOW,
@@ -749,7 +783,12 @@ export class FakeCore implements Carrier {
       case "window_state":
         return answer({ maximised: false, fullscreen: false, focused: true });
       case "workspaces_list":
-        return answer({ active: "fixture", workspaces: [{ name: "fixture", root: null }] });
+        return answer(
+          this.#options.workspaces ?? {
+            active: "fixture",
+            workspaces: [{ name: "fixture", root: null }],
+          },
+        );
       case "session_attach": {
         const session = String(args["session"]);
         this.#streams.set(session, Number(args["stream"]));
@@ -850,6 +889,9 @@ export class FakeCore implements Carrier {
         return answer(SHELLS);
       case "profiles_list":
         return answer(this.#profiles);
+      case "rex_hosts":
+      case "rex_hosts_look":
+        return answer(this.#rex);
       case "sessions_detached":
         return answer({ sessions: [...this.#detached] });
       // Every host is near, and the one called "far" does not answer.
@@ -1179,6 +1221,12 @@ export class FakeCore implements Carrier {
   profilesChanged(list: Omit<ProfileList, "revision">): void {
     this.#profiles = { ...list, revision: this.#profiles.revision + 1 };
     this.#notify({ type: "profiles_changed", ...this.#profiles });
+  }
+
+  /** Changes how the Rex servers stand, as the core does when one of them changes. */
+  rexHostsChanged(hosts: RexHosts["hosts"]): void {
+    this.#rex = { ...this.#rex, hosts, revision: this.#rex.revision + 1 };
+    this.#notify({ type: "rex_hosts_changed", ...this.#rex });
   }
 
   #notify(notice: Notice): void {

@@ -337,6 +337,93 @@ async fn a_session_is_made_and_shown_and_the_one_before_it_is_let_go_of() {
 }
 
 #[tokio::test]
+async fn a_session_is_called_something_else_wherever_it_is_named() {
+    let server = Server::start(World::recorded()).await;
+    let app = Running::with("rex-renamed", &server.url()).await;
+    let args = json!({ "host": HOST, "session": "lume-fixture", "label": "play" });
+    // Nothing is connected to for it.
+    let error = app
+        .outside("lume.rex.rename-session", args.clone())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "disconnected");
+    assert_eq!(server.connections(), 0);
+
+    app.outside("lume.rex.connect", json!({ "host": HOST }))
+        .await
+        .unwrap();
+    app.outside("lume.rex.rename-session", args.clone())
+        .await
+        .unwrap();
+    until("the new name is listed", || {
+        app.host()["sessions"][0]["label"] == "play"
+    })
+    .await;
+    let error = app
+        .outside("lume.rex.rename-session", args)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "not_found");
+    let nameless = json!({ "host": HOST, "session": "play", "label": "  " });
+    let error = app
+        .outside("lume.rex.rename-session", nameless)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "bad_request");
+    app.stop().await;
+}
+
+#[tokio::test]
+async fn a_session_is_ended_when_the_user_agrees_and_the_own_workspace_is_shown() {
+    let server = Server::start(World::recorded()).await;
+    let app = Running::with("rex-end", &server.url()).await;
+    app.outside("lume.rex.open", json!({ "host": HOST }))
+        .await
+        .unwrap();
+    let args = json!({ "host": app.host()["id"], "session": common::SESSION });
+    let refused = app
+        .outside("lume.rex.end-session", args.clone())
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, "confirmation_required");
+    // A window that asks by itself is told the same, and nobody is asked twice.
+    let mut asked_itself = args.clone();
+    asked_itself["confirmed"] = json!(false);
+    let refused = app
+        .command("lume.rex.end-session", asked_itself, Asker::Page)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, "confirmation_required");
+    assert_eq!(app.told("confirm_requested"), Vec::<Value>::new());
+
+    app.command("lume.rex.end-session", args, Asker::Page)
+        .await
+        .unwrap();
+    until("the window asks", || {
+        !app.told("confirm_requested").is_empty()
+    })
+    .await;
+    let asked = app.told("confirm_requested")[0].clone();
+    assert_eq!(asked["title"], "End “lume-fixture”?");
+    assert!(asked["message"].as_str().unwrap().contains(HOST));
+    assert_eq!(app.host()["on_show"], common::SESSION);
+
+    app.command("lume.rex.end-session", asked["args"].clone(), Asker::Page)
+        .await
+        .unwrap();
+    assert!(app.own_on_show());
+    until("it is listed no more", || {
+        app.host()["sessions"] == json!([])
+    })
+    .await;
+    sleep(REX_LOOK_EVERY * 3).await;
+    // The user is not told what they did.
+    assert_eq!(app.told("notice"), Vec::<Value>::new());
+    assert_eq!(app.kind(), "connected");
+    app.stop().await;
+}
+
+#[tokio::test]
 async fn a_session_that_ends_on_its_server_gives_way_to_the_workspace_before_it() {
     let server = Server::start(World::recorded()).await;
     let app = Running::with("rex-ended", &server.url()).await;
@@ -576,7 +663,19 @@ async fn a_connection_that_is_not_encrypted_is_made_only_when_the_user_agrees() 
     assert_eq!(app.host()["state"]["code"], "confirmation_required");
     assert_eq!(app.told("confirm_requested"), Vec::<Value>::new());
 
-    // A window asks, and would run the same command again with the user's yes.
+    // A window that asks the user itself is told why.
+    let refused = app
+        .command(
+            "lume.rex.connect",
+            json!({ "host": HOST, "confirmed": false }),
+            Asker::Page,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, "confirmation_required");
+    assert_eq!(app.told("confirm_requested"), Vec::<Value>::new());
+
+    // Any other asks, and would run the same command again with the user's yes.
     app.command("lume.rex.connect", args, Asker::Page)
         .await
         .unwrap();

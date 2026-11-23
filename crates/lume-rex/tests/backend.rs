@@ -81,6 +81,28 @@ async fn a_session_is_made_and_can_be_opened() {
 }
 
 #[tokio::test]
+async fn a_session_is_called_something_else_and_ended() {
+    let (dialer, mut listener) = streams();
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
+    assert!(backend.rename_session(SESSION, "x").await.is_err());
+    assert!(backend.end_session(SESSION).await.is_err(), "not connected");
+    let served = serve(listener.accept().await, World::recorded());
+    backend.ready().await.unwrap();
+
+    backend.rename_session(SESSION, " play ").await.unwrap();
+    until("the new name is known", || names(&backend) == ["play"]).await;
+    assert_eq!(
+        served.asked("session.set_label"),
+        [json!({ "session_id": SESSION, "label": "play" })]
+    );
+    backend.end_session(SESSION).await.unwrap();
+    until("the session is gone", || names(&backend).is_empty()).await;
+    // One that is not there is refused, by the server.
+    assert!(backend.end_session(SESSION).await.is_err());
+    assert!(backend.rename_session(SESSION, "x").await.is_err());
+}
+
+#[tokio::test]
 async fn the_sessions_follow_the_servers_events() {
     let (dialer, mut listener) = streams();
     let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());

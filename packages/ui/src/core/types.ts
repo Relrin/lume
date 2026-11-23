@@ -472,6 +472,55 @@ export interface ProfileList {
   readonly looks?: Readonly<Record<string, ProfileLook>>;
 }
 
+/** A session of a Rex server. */
+export interface RexSession {
+  readonly id: string;
+  readonly label: string;
+}
+
+/** How a Rex server stands. */
+export type RexHostState =
+  /** The server of this machine: Rex is installed, and no server runs. */
+  | { readonly kind: "absent" }
+  | { readonly kind: "idle" }
+  | { readonly kind: "connecting" }
+  | {
+      readonly kind: "connected";
+      readonly version: string;
+      readonly platform: string;
+      readonly api_revision: number;
+    }
+  /** The connection was lost and is being made again. */
+  | { readonly kind: "waiting"; readonly error: string }
+  /** It could not be connected, and is not tried again until the user asks. */
+  | { readonly kind: "failed"; readonly code: string; readonly error: string };
+
+/** A Rex server: one of the user's configuration, or the one of this machine. */
+export interface RexHost {
+  /** What commands call it, and what names it as the backend of its layout. */
+  readonly id: string;
+  readonly label: string;
+  /** The address as the user wrote it. */
+  readonly address: string;
+  /** Whether it is the one of this machine. */
+  readonly local: boolean;
+  readonly state: RexHostState;
+  /** Its sessions, while there is a connection to it. */
+  readonly sessions: readonly RexSession[];
+  /** The session of it that was put on show, by id. */
+  readonly on_show: string | null;
+  /** How long it took to answer, once that has been measured. */
+  readonly latency_ms: number | null;
+}
+
+/** The Rex servers there are, as `rex_hosts` returns them. */
+export interface RexHosts {
+  readonly revision: number;
+  readonly hosts: readonly RexHost[];
+  /** Whether the server of this machine is looked for. */
+  readonly local: boolean;
+}
+
 /**
  * A session the session host runs that no pane of any workspace shows, as
  * `sessions_detached` describes it.
@@ -636,6 +685,8 @@ export type Notice =
     }
   /** The profiles changed: what was found on the machine, or what the user wrote. */
   | ({ readonly type: "profiles_changed" } & ProfileList)
+  /** Something about the Rex servers changed. */
+  | ({ readonly type: "rex_hosts_changed" } & RexHosts)
   /** Commands were added or taken away, as plugins come and go. */
   | { readonly type: "commands_changed" }
   /** The plugins that are installed changed. */

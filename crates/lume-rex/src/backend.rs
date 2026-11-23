@@ -371,6 +371,28 @@ impl RexBackend {
         Ok(created.session_id)
     }
 
+    /// Calls a session something else. The server tells every client of it, this one
+    /// too.
+    pub async fn rename_session(&self, session_id: &str, label: &str) -> Result<(), RexError> {
+        let control = self.shared.control()?;
+        control
+            .call(
+                "session.set_label",
+                json!({ "session_id": session_id, "label": label.trim() }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Ends a session, with what runs in it, for every client of the server.
+    pub async fn end_session(&self, session_id: &str) -> Result<(), RexError> {
+        let control = self.shared.control()?;
+        control
+            .call("session.destroy", json!({ "session_id": session_id }))
+            .await?;
+        Ok(())
+    }
+
     /// How long the server takes to answer, measured by asking it something it answers
     /// at once.
     pub async fn round_trip(&self) -> Result<Duration, RexError> {

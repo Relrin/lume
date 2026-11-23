@@ -188,7 +188,8 @@ describe("what the Connect palette lists", () => {
   });
 
   it("steps through the filters in the order they are shown, round and round", () => {
-    expect(stepFilter("all", 1)).toBe("ssh");
+    expect(stepFilter("all", 1)).toBe("rex");
+    expect(stepFilter("rex", 1)).toBe("ssh");
     expect(stepFilter("ssh", 1)).toBe("wsl");
     expect(stepFilter("local", 1)).toBe("detached");
     expect(stepFilter("detached", 1)).toBe("all");

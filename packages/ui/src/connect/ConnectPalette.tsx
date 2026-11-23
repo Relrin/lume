@@ -1,6 +1,6 @@
 /**
- * The palette that opens a terminal from a profile: a local shell, a Linux distribution,
- * another machine over SSH.
+ * The palette that opens a terminal from a profile, a local shell, a Linux distribution
+ * or another machine over SSH, and a session of a Rex server.
  *
  * It opens over the window with the keyboard in its field. Typing narrows the list, the
  * filters along the field show one kind of profile, the arrow keys move through the
@@ -17,6 +17,12 @@
  * Sessions that still run in the session host with no pane to show them are listed
  * after the profiles, and are shown again in a tab of their own, or beside the pane
  * that has the keyboard, the same way.
+ *
+ * A Rex server is connected when it is chosen, and the palette stays to list its
+ * sessions in the column. Choosing it then puts the marked session on show in place of
+ * the workspace. Tab goes into the sessions, where the arrow keys move among them, and
+ * back. A connection that would not be encrypted is said to be so in the column, and is
+ * made only by the button there or by its keys.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -25,19 +31,23 @@ import { useStore } from "zustand";
 import type { DetachedSession, HostProbe } from "../core/types.ts";
 import { Glyph } from "../icons/Glyph.tsx";
 import { homeShortened } from "../events/where.ts";
+import { LinkDot } from "../rex/LinkDot.tsx";
+import { useRexActions, useRexLook } from "../rex/look.ts";
+import { connected, firstMarked, linkOf, next } from "../rex/model.ts";
 import { useShell } from "../shell/context.ts";
 import { FileIcon, RefreshIcon, SearchIcon } from "../shell/icons.tsx";
 import { sentence } from "../shell/notices.ts";
 import { Cap, KeyCaps } from "../palette/KeyCaps.tsx";
+import { HostDetail, sessionOptionId, type HostActs } from "./HostDetail.tsx";
 import { KindIcon } from "./icons.tsx";
 import { readPins, togglePin } from "./pins.ts";
 import {
-  DETACHED_LABEL,
   connectFilters,
   connectGroups,
-  connectRows,
+  connectSections,
   describeRun,
   detachedEntries,
+  hostEntries,
   openCommand,
   reattachCommand,
   sourceOf,
@@ -47,12 +57,27 @@ import {
   type ConnectFilter,
   type ConnectRow,
   type DetachedEntry,
+  type HostEntry,
 } from "./model.ts";
 
 const LIST_ID = "connect-list";
 
 function optionId(index: number): string {
   return `connect-option-${index}`;
+}
+
+/** Tells one row from the others, whatever else the list holds. */
+function keyOf(row: ConnectRow): string {
+  switch (row.type) {
+    case "host":
+      return `host:${row.entry.host.id}`;
+    case "profile":
+      return `profile:${row.entry.profile.id}`;
+    case "session":
+      return `session:${row.entry.session.backend}:${row.entry.session.session}`;
+    case "action":
+      return `action:${row.action.id}`;
+  }
 }
 
 /** A profile's name with the characters the query matched marked. */
@@ -86,6 +111,15 @@ function SessionDot({ session }: { session: DetachedSession }) {
   return (
     <span className="connect-row-icon">
       <span className="connect-dot" data-state={session.exited ? "ended" : "running"} />
+    </span>
+  );
+}
+
+/** The mark of a row that is pinned and listed where its kind is. */
+function PinnedMark() {
+  return (
+    <span className="connect-row-pin" title="Pinned">
+      <Glyph name="pin" size={11} />
     </span>
   );
 }
@@ -150,19 +184,20 @@ function SessionDetail({
   );
 }
 
-/** The column that says what the marked profile, session or action is. */
 /** What a host's measurement says, as the column and the row show it. */
 function latencyOf(probe: HostProbe | "pending" | undefined): string {
   if (probe === undefined || probe === "pending") return "…";
   return probe.ms === null ? "—" : `${probe.ms} ms`;
 }
 
+/** The column that says what the marked row is. */
 function Detail({
   row,
   splitKey,
   open,
   act,
   session,
+  host,
   pin,
   probe,
   running,
@@ -172,6 +207,7 @@ function Detail({
   open: (entry: ConnectEntry, how: "tab" | "split") => void;
   act: (action: ConnectAction) => void;
   session: (entry: DetachedEntry) => ReactNode;
+  host: (entry: HostEntry) => ReactNode;
   /** Pins the profile, or takes its pin away. */
   pin: (entry: ConnectEntry) => void;
   /** What measuring a host found, by profile id. */
@@ -187,6 +223,7 @@ function Detail({
     );
   }
   if (row.type === "session") return session(row.entry);
+  if (row.type === "host") return host(row.entry);
   if (row.type === "action") {
     return (
       <section className="connect-detail" aria-label="Selection">
@@ -304,7 +341,9 @@ function ConnectDialog() {
   const results = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ConnectFilter>(opened);
-  const [selected, setSelected] = useState(0);
+  // The marked row, by what it is: servers come and go while the palette is open, and
+  // the mark stays on what it was on. Nothing means the first row.
+  const [selected, setSelected] = useState<string | null>(null);
   // The sessions no pane shows: `null` until the core has said, and if it could not.
   const [detached, setDetached] = useState<readonly DetachedSession[] | null>(null);
   const [detachedProblem, setDetachedProblem] = useState<string | null>(null);
@@ -315,6 +354,14 @@ function ConnectDialog() {
   const [probes, setProbes] = useState<ReadonlyMap<string, HostProbe | "pending">>(() => new Map());
   // When the list was read, which is what the sessions' ages are counted from.
   const [now, setNow] = useState(() => Date.now());
+  const servers = useStore(app.rex, (state) => state.list);
+  const backend = useStore(app.layout, (state) => state.backend);
+  useRexLook();
+  const rex = useRexActions();
+  // Which session of the marked server is marked, once the user has marked one, and
+  // whether the arrow keys move among them.
+  const [session, setSession] = useState<{ host: string; id: string } | null>(null);
+  const [inside, setInside] = useState(false);
 
   useEffect(() => {
     field.current?.focus();
@@ -354,7 +401,15 @@ function ConnectDialog() {
     () => detachedEntries(detached, query, filter, now, place),
     [detached, query, filter, now, place],
   );
-  const rows = useMemo(() => connectRows(groups, sessions), [groups, sessions]);
+  const hosts = useMemo(
+    () => hostEntries(servers, query, filter, pinned),
+    [servers, query, filter, pinned],
+  );
+  const sections = useMemo(
+    () => connectSections(groups, sessions, hosts),
+    [groups, sessions, hosts],
+  );
+  const rows = useMemo(() => sections.flatMap((section) => section.rows), [sections]);
   // How many of each kind match what is typed, for the chips.
   const counts = useMemo(() => {
     const every = connectGroups(list, query, "all");
@@ -363,10 +418,33 @@ function ConnectDialog() {
         .filter((group) => kind === "all" || group.kind === kind)
         .reduce((sum, group) => sum + group.entries.length, 0);
     const loose = detachedEntries(detached, query, "detached", now, place).length;
-    return (filter: ConnectFilter) =>
-      filter === "detached" ? loose : filter === "all" ? of("all") + loose : of(filter);
-  }, [list, query, detached, now, place]);
-  const marked = Math.min(selected, Math.max(0, rows.length - 1));
+    const served = hostEntries(servers, query, "rex").length;
+    return (filter: ConnectFilter) => {
+      switch (filter) {
+        case "detached":
+          return loose;
+        case "rex":
+          return served;
+        case "all":
+          return of("all") + loose + served;
+        default:
+          return of(filter);
+      }
+    };
+  }, [list, query, detached, now, place, servers]);
+  const marked = Math.max(
+    0,
+    rows.findIndex((row) => keyOf(row) === selected),
+  );
+  const mark = (index: number) => {
+    const row = rows[index];
+    if (row) setSelected(keyOf(row));
+  };
+  const first = rows[0];
+  useEffect(() => {
+    // Once the list is known its first row is the one marked, whatever comes before it.
+    if (selected === null && first && list !== null && servers !== null) setSelected(keyOf(first));
+  }, [selected, first, list, servers]);
   const splitKey = platform === "macos" ? "⌘↵" : "Ctrl+↵";
 
   useEffect(() => {
@@ -375,6 +453,7 @@ function ConnectDialog() {
 
   // A host is measured when it is first marked, and once only.
   const markedRow = rows[marked];
+  const markedHostRow = markedRow?.type === "host" ? markedRow.entry : null;
   const markedHost =
     markedRow?.type === "profile" && markedRow.entry.profile.launcher.type === "ssh"
       ? markedRow.entry.profile.id
@@ -402,7 +481,28 @@ function ConnectDialog() {
       (pane) => pane?.content.type === "terminal" && pane.content.profile === profile,
     ).length;
   };
-  const pin = (entry: ConnectEntry) => setPins(togglePin(entry.profile.id));
+  const pinRow = (row: ConnectRow | undefined) => {
+    if (row?.type === "profile") setPins(togglePin(row.entry.profile.id));
+    if (row?.type === "host") setPins(togglePin(row.entry.host.id));
+  };
+  const pin = (entry: ConnectEntry) => pinRow({ type: "profile", entry });
+  /** Which of a server's sessions is marked. */
+  const markedSession = (entry: HostEntry): number => {
+    const at =
+      session?.host === entry.host.id
+        ? entry.host.sessions.findIndex((found) => found.id === session.id)
+        : -1;
+    return at >= 0 ? at : firstMarked(entry.host, backend);
+  };
+  const markSession = (entry: HostEntry, index: number) => {
+    const found = entry.host.sessions[index];
+    if (found) setSession({ host: entry.host.id, id: found.id });
+  };
+  const canEnter =
+    markedHostRow !== null &&
+    connected(markedHostRow.host) &&
+    markedHostRow.host.sessions.length > 0;
+  const moving = inside && canEnter;
 
   // Putting the palette away gives the keyboard back to where the user was working.
   const close = () => app.connect.getState().close();
@@ -431,34 +531,73 @@ function ConnectDialog() {
       },
     );
   };
+  // Putting a session on show takes the place of what the window shows, and the keyboard
+  // with it: the palette is put away first.
+  const onHost: HostActs = {
+    attach: (entry, id) => {
+      close();
+      app.commands.run("lume.rex.open", { host: entry.host.id, session: id });
+    },
+    newSession: (entry) => {
+      close();
+      app.commands.run("lume.rex.new-session", { host: entry.host.id });
+    },
+    connect: (entry, agreed) => rex.connect(entry.host, agreed),
+    disconnect: (entry) => rex.disconnect(entry.host),
+    copy: (entry) => {
+      app.client
+        .clipboardWrite(entry.host.address)
+        .catch((error: unknown) =>
+          app.notices.push(
+            "error",
+            sentence(error instanceof Error ? error.message : String(error)),
+          ),
+        );
+    },
+    pin: (entry) => pinRow({ type: "host", entry }),
+  };
+  /** What choosing a server does: attaches, makes a session, or connects. */
+  const acceptHost = (entry: HostEntry, agreed: boolean) => {
+    const { host } = entry;
+    if (connected(host)) {
+      const chosen = host.sessions[markedSession(entry)];
+      if (chosen) onHost.attach(entry, chosen.id);
+      else onHost.newSession(entry);
+      return;
+    }
+    const step = next(host);
+    // Agreeing has keys of its own: those that connect are pressed without reading.
+    if (step && (step.kind === "connect" || agreed)) {
+      onHost.connect(entry, step.kind === "agree");
+    }
+  };
   const accept = (index: number, how: "tab" | "split") => {
     const row = rows[index];
     if (!row) return;
     if (row.type === "profile") open(row.entry, how);
     else if (row.type === "session") attach(row.entry, how);
+    else if (row.type === "host") acceptHost(row.entry, how === "split");
     else act(row.action);
   };
   const move = (to: number) => {
+    if (moving && markedHostRow) {
+      const count = markedHostRow.host.sessions.length;
+      const by = to - marked;
+      markSession(markedHostRow, (markedSession(markedHostRow) + by + count) % count);
+      return;
+    }
     if (rows.length === 0) return;
-    setSelected(((to % rows.length) + rows.length) % rows.length);
+    mark(((to % rows.length) + rows.length) % rows.length);
   };
   const filterBy = (next: ConnectFilter) => {
     setFilter(next);
-    setSelected(0);
+    setSelected(null);
+    setInside(false);
   };
+  const stepBy = (by: 1 | -1) => filterBy(stepFilter(filter, by, filters));
 
   const profileCount = rows.filter((row) => row.type === "profile").length;
   let index = 0;
-  const keyOf = (row: ConnectRow): string => {
-    switch (row.type) {
-      case "profile":
-        return `profile:${row.entry.profile.id}`;
-      case "session":
-        return `session:${row.entry.session.backend}:${row.entry.session.session}`;
-      case "action":
-        return `action:${row.action.id}`;
-    }
-  };
   const option = (row: ConnectRow, children: ReactNode, className: string) => {
     const at = index++;
     return (
@@ -469,7 +608,9 @@ function ConnectDialog() {
         role="option"
         aria-selected={at === marked}
         onPointerMove={() => {
-          if (at !== marked) setSelected(at);
+          if (at === marked) return;
+          mark(at);
+          setInside(false);
         }}
         onClick={(event) => accept(at, event.ctrlKey || event.metaKey ? "split" : "tab")}
       >
@@ -477,6 +618,90 @@ function ConnectDialog() {
       </div>
     );
   };
+  /** One row of the list, as its kind is drawn. */
+  const draw = (row: ConnectRow, section: string) => {
+    switch (row.type) {
+      case "host": {
+        const { entry } = row;
+        return option(
+          row,
+          <>
+            <span className="connect-row-icon" data-kind="rex">
+              <Glyph name="server" size={15} />
+            </span>
+            <span className="connect-row-name">
+              <MarkedName text={entry.host.label} indices={entry.indices} />
+            </span>
+            <LinkDot link={linkOf(entry.host)} className="connect-dot" />
+            {entry.pinned && section !== "pinned" && <PinnedMark />}
+            <span className="connect-row-line">{entry.line}</span>
+            {entry.meta !== "" && <span className="connect-meta">{entry.meta}</span>}
+          </>,
+          "connect-row",
+        );
+      }
+      case "profile": {
+        const { entry } = row;
+        return option(
+          row,
+          <>
+            <span className="connect-row-icon" data-kind={entry.kind}>
+              <KindIcon kind={entry.kind} />
+            </span>
+            <span className="connect-row-name">
+              <MarkedName text={entry.profile.name} indices={entry.indices} />
+            </span>
+            {entry.pinned && section !== "pinned" && <PinnedMark />}
+            <span className="connect-row-line" data-kind={entry.kind}>
+              {entry.line}
+            </span>
+            {entry.isDefault && <span className="connect-meta">default</span>}
+            {typeof probes.get(entry.profile.id) === "object" && (
+              <span className="connect-meta">{latencyOf(probes.get(entry.profile.id))}</span>
+            )}
+          </>,
+          "connect-row",
+        );
+      }
+      case "session": {
+        const { entry } = row;
+        return option(
+          row,
+          <>
+            <SessionDot session={entry.session} />
+            <span className="connect-row-name">
+              <MarkedName text={entry.name} indices={entry.indices} />
+            </span>
+            <span className="connect-row-line">{entry.line}</span>
+            {markedRow === row && <span className="connect-meta">↵ attach</span>}
+          </>,
+          "connect-row",
+        );
+      }
+      case "action":
+        return option(
+          row,
+          <>
+            <span className="connect-action-icon">
+              {row.action.id === "config" ? <FileIcon /> : <RefreshIcon />}
+            </span>
+            <span className="connect-action-label">{row.action.label}</span>
+          </>,
+          "connect-action",
+        );
+    }
+  };
+  // What Enter does now, for the line of keys.
+  const enterDoes =
+    markedHostRow === null
+      ? "Open in new tab"
+      : connected(markedHostRow.host)
+        ? markedHostRow.host.sessions.length > 0
+          ? "Attach"
+          : "New session"
+        : "Connect";
+
+  const agrees = markedHostRow !== null && next(markedHostRow.host)?.kind === "agree";
 
   return (
     <div className="connect-backdrop" onPointerDown={close}>
@@ -500,7 +725,13 @@ function ConnectDialog() {
             aria-expanded={rows.length > 0}
             aria-controls={LIST_ID}
             aria-autocomplete="list"
-            aria-activedescendant={rows.length > 0 ? optionId(marked) : undefined}
+            aria-activedescendant={
+              moving && markedHostRow
+                ? sessionOptionId(markedSession(markedHostRow))
+                : rows.length > 0
+                  ? optionId(marked)
+                  : undefined
+            }
             placeholder="Search shells, distributions and hosts"
             spellCheck={false}
             autoComplete="off"
@@ -509,14 +740,35 @@ function ConnectDialog() {
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
-              setSelected(0);
+              setSelected(null);
+              setInside(false);
             }}
             onKeyDown={(event) => {
-              if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "d") {
-                const row = rows[marked];
-                if (row?.type === "profile") pin(row.entry);
+              const taken = () => {
                 event.preventDefault();
                 event.stopPropagation();
+              };
+              if (event.ctrlKey || event.metaKey) {
+                const key = event.key.toLowerCase();
+                if (key === "d" && !event.shiftKey) {
+                  pinRow(markedRow);
+                  taken();
+                  return;
+                }
+                if (markedHostRow && key === "n" && !event.shiftKey) {
+                  if (connected(markedHostRow.host)) onHost.newSession(markedHostRow);
+                  taken();
+                  return;
+                }
+                if (markedHostRow && key === "c" && event.shiftKey) {
+                  onHost.copy(markedHostRow);
+                  taken();
+                  return;
+                }
+              }
+              if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+                stepBy(event.key === "ArrowLeft" ? -1 : 1);
+                taken();
                 return;
               }
               switch (event.key) {
@@ -527,27 +779,39 @@ function ConnectDialog() {
                   move(marked - 1);
                   break;
                 case "Home":
-                  move(0);
+                  setInside(false);
+                  mark(0);
                   break;
                 case "End":
-                  move(rows.length - 1);
+                  setInside(false);
+                  mark(rows.length - 1);
                   break;
                 case "Tab":
-                  filterBy(stepFilter(filter, event.shiftKey ? -1 : 1, filters));
+                  // Into the sessions of a server that has some, and back.
+                  if (canEnter) setInside(!inside);
+                  else stepBy(event.shiftKey ? -1 : 1);
                   break;
                 case "Enter":
                   accept(marked, event.ctrlKey || event.metaKey ? "split" : "tab");
                   break;
+                case "Backspace":
+                  // An empty field goes back to listing every kind.
+                  if (query !== "" || filter === "all") {
+                    event.stopPropagation();
+                    return;
+                  }
+                  filterBy("all");
+                  break;
                 case "Escape":
-                  close();
+                  if (moving) setInside(false);
+                  else close();
                   break;
                 default:
                   // What is typed here is the query, not a key for a terminal.
                   event.stopPropagation();
                   return;
               }
-              event.preventDefault();
-              event.stopPropagation();
+              taken();
             }}
           />
         </div>
@@ -566,6 +830,8 @@ function ConnectDialog() {
             >
               {choice.value === "local" || choice.value === "wsl" || choice.value === "ssh" ? (
                 <KindIcon kind={choice.value} size={12} />
+              ) : choice.value === "rex" ? (
+                <Glyph name="server" size={12} />
               ) : null}
               {choice.label}
               <span className="connect-chip-count" aria-hidden="true">
@@ -577,88 +843,19 @@ function ConnectDialog() {
         <div className="connect-body">
           <div ref={results} className="connect-results">
             <div id={LIST_ID} className="connect-list" role="listbox" aria-label="Profiles">
-              {groups.map((group) => (
+              {sections.map((section) => (
                 <div
-                  key={group.kind}
+                  key={section.key}
                   className="connect-group"
                   role="group"
-                  aria-label={group.label}
+                  aria-label={section.label}
                 >
                   <div className="connect-heading" aria-hidden="true">
-                    {group.label}
+                    {section.label}
                   </div>
-                  {group.entries.map((entry) =>
-                    option(
-                      { type: "profile", entry },
-                      <>
-                        <span className="connect-row-icon" data-kind={entry.kind}>
-                          <KindIcon kind={entry.kind} />
-                        </span>
-                        <span className="connect-row-name">
-                          <MarkedName text={entry.profile.name} indices={entry.indices} />
-                        </span>
-                        {entry.pinned && group.kind !== "pinned" && (
-                          <span className="connect-row-pin" title="Pinned">
-                            <Glyph name="pin" size={11} />
-                          </span>
-                        )}
-                        <span className="connect-row-line" data-kind={entry.kind}>
-                          {entry.line}
-                        </span>
-                        {entry.isDefault && <span className="connect-meta">default</span>}
-                        {typeof probes.get(entry.profile.id) === "object" && (
-                          <span className="connect-meta">
-                            {latencyOf(probes.get(entry.profile.id))}
-                          </span>
-                        )}
-                      </>,
-                      "connect-row",
-                    ),
-                  )}
+                  {section.rows.map((row) => draw(row, section.key))}
                 </div>
               ))}
-              {sessions.length > 0 && (
-                <div className="connect-group" role="group" aria-label={DETACHED_LABEL}>
-                  <div className="connect-heading" aria-hidden="true">
-                    {DETACHED_LABEL}
-                  </div>
-                  {sessions.map((entry) => {
-                    const isMarked =
-                      rows[marked]?.type === "session" && rows[marked].entry === entry;
-                    return option(
-                      { type: "session", entry },
-                      <>
-                        <SessionDot session={entry.session} />
-                        <span className="connect-row-name">
-                          <MarkedName text={entry.name} indices={entry.indices} />
-                        </span>
-                        <span className="connect-row-line">{entry.line}</span>
-                        {isMarked && <span className="connect-meta">↵ attach</span>}
-                      </>,
-                      "connect-row",
-                    );
-                  })}
-                </div>
-              )}
-              <div className="connect-group" role="group" aria-label="Actions">
-                <div className="connect-heading" aria-hidden="true">
-                  Actions
-                </div>
-                {rows
-                  .filter((row) => row.type === "action")
-                  .map((row) =>
-                    option(
-                      row,
-                      <>
-                        <span className="connect-action-icon">
-                          {row.action.id === "config" ? <FileIcon /> : <RefreshIcon />}
-                        </span>
-                        <span className="connect-action-label">{row.action.label}</span>
-                      </>,
-                      "connect-action",
-                    ),
-                  )}
-              </div>
             </div>
             {filter === "detached"
               ? sessions.length === 0 && (
@@ -670,14 +867,23 @@ function ConnectDialog() {
                         : "No session runs without a pane to show it."}
                   </p>
                 )
-              : profileCount === 0 &&
-                sessions.length === 0 && (
-                  <p className="connect-note">
-                    {list === null
-                      ? "Looking for shells, distributions and hosts…"
-                      : "No profile matches."}
-                  </p>
-                )}
+              : filter === "rex"
+                ? hosts.length === 0 && (
+                    <p className="connect-note">
+                      {query.trim() !== "" && servers !== null && servers.hosts.length > 0
+                        ? "No server matches."
+                        : "No Rex server is known. One is written as a [[rex.host]] table in config.toml."}
+                    </p>
+                  )
+                : profileCount === 0 &&
+                  sessions.length === 0 &&
+                  hosts.length === 0 && (
+                    <p className="connect-note">
+                      {list === null
+                        ? "Looking for shells, distributions and hosts…"
+                        : "No profile matches."}
+                    </p>
+                  )}
             {list !== null && !list.looked && (
               <p className="connect-note">Still looking for shells, distributions and hosts…</p>
             )}
@@ -698,24 +904,48 @@ function ConnectDialog() {
             session={(entry) => (
               <SessionDetail entry={entry} place={place} attach={attach} end={end} />
             )}
+            host={(entry) => (
+              <HostDetail
+                key={entry.host.id}
+                entry={entry}
+                backend={backend}
+                marked={markedSession(entry)}
+                inside={moving}
+                problem={rex.problem(entry.host)}
+                agreeKey={splitKey}
+                mac={platform === "macos"}
+                acts={onHost}
+                mark={(index) => markSession(entry, index)}
+              />
+            )}
           />
         </div>
         <div className="connect-footer">
           <span>
-            <Cap>↵</Cap>
-            Open in new tab
+            {agrees ? <KeyCaps label={splitKey} className="connect-footer-keys" /> : <Cap>↵</Cap>}
+            {enterDoes}
           </span>
-          <span>
-            <KeyCaps label={splitKey} className="connect-footer-keys" />
-            Split right
-          </span>
+          {markedHostRow === null ? (
+            <span>
+              <KeyCaps label={splitKey} className="connect-footer-keys" />
+              Split right
+            </span>
+          ) : (
+            <span data-off={!canEnter || undefined}>
+              <Cap>Tab</Cap>
+              {moving ? "Back to hosts" : "Sessions"}
+            </span>
+          )}
           <span>
             <Cap>↑</Cap>
             <Cap>↓</Cap>
             Move
           </span>
           <span>
-            <Cap>Tab</Cap>
+            <KeyCaps
+              label={platform === "macos" ? "⌥←→" : "Alt+←→"}
+              className="connect-footer-keys"
+            />
             Kind
           </span>
           <span>

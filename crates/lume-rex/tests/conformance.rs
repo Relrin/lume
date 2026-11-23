@@ -151,6 +151,11 @@ fn requests() -> Vec<(&'static str, Value)> {
                 }],
             }),
         ),
+        (
+            "session.set_label",
+            json!({ "session_id": "session:1", "label": "play" }),
+        ),
+        ("session.destroy", of_session.clone()),
         ("session.attach", of_session.clone()),
         ("session.view", of_session.clone()),
         ("session.detach", of_session),

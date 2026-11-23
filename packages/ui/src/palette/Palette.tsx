@@ -7,8 +7,8 @@
  * palette away. A command that needs to be told something first, such as a name, has
  * the palette ask for it in the same field before it is run.
  *
- * Besides commands it finds the window's tabs and the profiles a terminal is opened
- * from, which it calls hosts. Chips under the field choose what is searched, as do Tab
+ * Besides commands it finds the window's tabs, and what it calls hosts: the profiles a
+ * terminal is opened from, the Rex servers and their sessions. Chips under the field choose what is searched, as do Tab
  * and Shift+Tab, or a sign at the start of what is typed: `>` commands, `@` tabs, `#`
  * hosts. Each chip counts what matches.
  *
@@ -26,6 +26,9 @@ import { kindOf, lineOf, openCommand } from "../connect/model.ts";
 import type { CommandSpec, Profile } from "../core/types.ts";
 import { Glyph } from "../icons/Glyph.tsx";
 import type { LineGlyphName } from "../icons/glyphs.generated.ts";
+import { LinkDot } from "../rex/LinkDot.tsx";
+import { useRexLook } from "../rex/look.ts";
+import type { RexLink } from "../rex/model.ts";
 import { useSlotMotion } from "../motion/slots.ts";
 import { selectTabOrder, selectTitlePane } from "../layout/selectors.ts";
 import type { ShellApp } from "../shell/boot.ts";
@@ -38,6 +41,7 @@ import { promptsFor, readArg, type ArgPrompt, type Choice } from "./args.ts";
 import { profileChoices, workspaceChoices } from "./choices.ts";
 import { rank } from "./fuzzy.ts";
 import { Cap, KeyCaps } from "./KeyCaps.tsx";
+import { rexTargets, type RexTarget } from "./rex.ts";
 import { PER_KIND_MAX, readSign, SCOPES, stepScope, type Scope } from "./scopes.ts";
 import { pageStorage, readRecents, rememberRecent } from "./store.ts";
 
@@ -77,6 +81,8 @@ interface Row {
   readonly sub?: string;
   /** How the work in a tab stands, as a coloured dot and a word. */
   readonly state?: WorkState;
+  /** Whether a Rex server can be used, as a coloured dot. */
+  readonly link?: RexLink;
   /** A word at the row's end. */
   readonly meta?: string;
   /** What choosing a tab or a host does. */
@@ -207,6 +213,8 @@ interface Sources {
   readonly defaultHost: string | null;
   readonly showTab: (tab: string) => void;
   readonly openHost: (profile: string) => void;
+  readonly rex: readonly RexTarget[];
+  readonly openRex: (target: RexTarget) => void;
 }
 
 /** The commands that match, as rows, best first. */
@@ -248,8 +256,31 @@ function tabMatches(sources: Sources, query: string): Row[] {
   }));
 }
 
-/** The hosts that match, as rows, best first. */
-function hostMatches(sources: Sources, query: string): Row[] {
+/** The Rex servers and sessions that match, as rows, best first. */
+function rexMatches(sources: Sources, query: string): Row[] {
+  return rank(sources.rex, query, (target) => target.text).map((match) => ({
+    key: match.item.key,
+    prefix: "",
+    text: match.item.text,
+    indices: match.indices,
+    keys: undefined,
+    command: undefined,
+    section: "Hosts",
+    score: match.score,
+    icon: (
+      <span className="palette-host-icon" data-kind="rex">
+        <Glyph name={match.item.kind === "host" ? "server" : "terminal"} size={15} />
+      </span>
+    ),
+    sub: match.item.sub,
+    link: match.item.link,
+    ...(match.item.meta === "" ? {} : { meta: match.item.meta }),
+    run: () => sources.openRex(match.item),
+  }));
+}
+
+/** The profiles that match, as rows, best first. */
+function profileMatches(sources: Sources, query: string): Row[] {
   return rank(sources.hosts, query, (profile) => profile.name).map((match) => ({
     key: `host:${match.item.id}`,
     prefix: "",
@@ -268,6 +299,15 @@ function hostMatches(sources: Sources, query: string): Row[] {
     ...(match.item.id === sources.defaultHost ? { meta: "default" } : {}),
     run: () => sources.openHost(match.item.id),
   }));
+}
+
+/**
+ * The hosts that match: the Rex servers with their sessions, then the profiles, and with
+ * something typed the best of both first.
+ */
+function hostMatches(sources: Sources, query: string): Row[] {
+  const rows = [...rexMatches(sources, query), ...profileMatches(sources, query)];
+  return query.trim() === "" ? rows : rows.sort((a, b) => b.score - a.score);
 }
 
 /** Rows under another heading. */
@@ -317,7 +357,9 @@ function scopedRows(sources: Sources, scope: Scope, query: string): Row[] {
 function scopeCounts(sources: Sources, query: string): Readonly<Record<Scope, number>> {
   const commands = commandMatches(sources, query).length;
   const tabs = rank(sources.tabs, query, (entry) => entry.label).length;
-  const hosts = rank(sources.hosts, query, (profile) => profile.name).length;
+  const hosts =
+    rank(sources.hosts, query, (profile) => profile.name).length +
+    rank(sources.rex, query, (target) => target.text).length;
   return { all: commands + tabs + hosts, commands, tabs, hosts };
 }
 
@@ -342,6 +384,9 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   const commands = useStore(app.commandStore, (state) => state.commands);
   const view = useStore(app.config, (state) => state.view);
   const profiles = useStore(app.profiles, (state) => state.list);
+  const servers = useStore(app.rex, (state) => state.list);
+  const backend = useStore(app.layout, (state) => state.backend);
+  useRexLook();
   const field = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -356,7 +401,9 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   );
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<Scope>("all");
-  const [selected, setSelected] = useState(0);
+  // The marked row, by its key: servers come and go while the palette is open, and the
+  // mark stays on what it was on. Nothing means the first row.
+  const [selected, setSelected] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   /** The workspaces a prompt's value is chosen from, once they have been fetched. */
   const [workspaces, setWorkspaces] = useState<readonly Choice[] | null>(null);
@@ -433,8 +480,10 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
         const command = openCommand(profile, "tab", app.views.focused() !== undefined);
         app.commands.run(command.id, command.args);
       },
+      rex: rexTargets(servers, backend),
+      openRex: (target) => app.commands.run(target.command, target.args),
     };
-  }, [app, commands, recents, view, tabs, profiles]);
+  }, [app, commands, recents, view, tabs, profiles, servers, backend]);
   const rows = useMemo(() => {
     if (stage.kind === "commands") return scopedRows(sources, scope, query);
     return choices ? choiceRows(choices, query) : [];
@@ -442,9 +491,17 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   const counts = useMemo(() => scopeCounts(sources, query), [sources, query]);
   const pickScope = (next: Scope) => {
     setScope(next);
-    setSelected(0);
+    setSelected(null);
   };
-  const marked = Math.min(selected, Math.max(0, rows.length - 1));
+  const marked = Math.max(
+    0,
+    rows.findIndex((row) => row.key === selected),
+  );
+  const firstKey = rows[0]?.key;
+  useEffect(() => {
+    // Once the list is known its first row is the one marked, whatever comes before it.
+    if (selected === null && firstKey !== undefined && servers !== null) setSelected(firstKey);
+  }, [selected, firstKey, servers]);
 
   useEffect(() => {
     list.current?.querySelector(`#${optionId(marked)}`)?.scrollIntoView({ block: "nearest" });
@@ -458,7 +515,7 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
     }
     setStage({ kind: "args", command, prompts, at: 0, values: {} });
     setQuery("");
-    setSelected(0);
+    setSelected(null);
     setProblem(null);
   };
 
@@ -476,7 +533,7 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
     }
     setStage({ ...stage, at: stage.at + 1, values });
     setQuery("");
-    setSelected(0);
+    setSelected(null);
     setProblem(null);
   };
 
@@ -496,8 +553,8 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
   };
 
   const move = (to: number) => {
-    if (rows.length === 0) return;
-    setSelected(((to % rows.length) + rows.length) % rows.length);
+    const row = rows[((to % rows.length) + rows.length) % rows.length];
+    if (row) setSelected(row.key);
   };
 
   const placeholder =
@@ -543,7 +600,7 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
               const sign = stage.kind === "commands" && scope === "all" ? readSign(typed) : null;
               if (sign) setScope(sign.scope);
               setQuery(sign ? sign.rest : typed);
-              setSelected(0);
+              setSelected(null);
               setProblem(null);
             }}
             onKeyDown={(event) => {
@@ -633,7 +690,7 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
                   role="option"
                   aria-selected={index === marked}
                   onPointerMove={() => {
-                    if (index !== marked) setSelected(index);
+                    if (index !== marked) setSelected(row.key);
                   }}
                   onClick={() => accept(index)}
                 >
@@ -647,6 +704,9 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
                   <span className="palette-row-text">
                     <Marked text={row.text} indices={row.indices} offset={[...row.prefix].length} />
                   </span>
+                  {row.link !== undefined && (
+                    <LinkDot link={row.link} className="palette-row-link" />
+                  )}
                   {row.state !== undefined && (
                     <i className="palette-row-state" data-state={row.state} />
                   )}

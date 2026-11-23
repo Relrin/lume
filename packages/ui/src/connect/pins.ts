@@ -1,8 +1,8 @@
 /**
- * The profiles the user pinned in the connect palette, which it lists first.
+ * The profiles and Rex servers the user pinned in the connect palette, which it lists
+ * first.
  *
- * Pins are kept in the page's own storage, by profile id, between runs of the
- * application. A page that has no storage keeps them only while it is open.
+ * Pins are kept in the page's own storage, by id, between runs of the application. A page that has no storage keeps them only while it is open.
  */
 
 import { pageStorage, type RecentStorage } from "../palette/store.ts";
@@ -10,10 +10,10 @@ import { pageStorage, type RecentStorage } from "../palette/store.ts";
 /** The name the pins are kept under. */
 const PINS_KEY = "lume.connect.pins";
 
-/** The most profiles kept pinned: more than any list needs at its top. */
+/** The most that is kept pinned: more than any list needs at its top. */
 export const PINS_MAX = 32;
 
-/** The pinned profiles' ids, in the order they were pinned. */
+/** The ids of what is pinned, in the order it was pinned. */
 export function readPins(storage: RecentStorage | undefined = pageStorage()): string[] {
   try {
     const kept: unknown = JSON.parse(storage?.getItem(PINS_KEY) ?? "[]");
@@ -25,7 +25,7 @@ export function readPins(storage: RecentStorage | undefined = pageStorage()): st
   }
 }
 
-/** Pins a profile, or takes its pin away. Returns the pins as they now stand. */
+/** Pins something, or takes its pin away. Returns the pins as they now stand. */
 export function togglePin(
   id: string,
   storage: RecentStorage | undefined = pageStorage(),

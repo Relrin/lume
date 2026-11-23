@@ -23,6 +23,7 @@ import type {
   Notice,
   PaneStart,
   ProfileList,
+  RexHosts,
   SessionsStarted,
   ShellEntry,
   ThemeEntry,
@@ -152,6 +153,19 @@ export class CoreClient {
   /** The ways there are to start a terminal. */
   profilesList(): Promise<ProfileList> {
     return this.transport.command("profiles_list");
+  }
+
+  /** The Rex servers there are, and how each stands. */
+  rexHosts(): Promise<RexHosts> {
+    return this.transport.command("rex_hosts");
+  }
+
+  /**
+   * The same, for something that lists them and is on show: the core looks whether a
+   * server runs on this machine, and how near those are that are connected.
+   */
+  rexHostsLook(): Promise<RexHosts> {
+    return this.transport.command("rex_hosts_look");
   }
 
   /** The fixed-width fonts installed on this machine. */

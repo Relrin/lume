@@ -16,7 +16,7 @@
           },
           {
             "role": "button",
-            "name": "fixture",
+            "name": "This PC, fixture",
             "state": {
               "expanded": "false"
             }
@@ -91,6 +91,13 @@
                 "name": "Close tab"
               }
             ]
+          },
+          {
+            "role": "button",
+            "name": "All 5 tabs",
+            "state": {
+              "expanded": "false"
+            }
           },
           {
             "role": "button",
