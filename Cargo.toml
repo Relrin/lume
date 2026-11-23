@@ -43,7 +43,10 @@ libc = "0.2"
 notify = "8"
 portable-pty = "0.9"
 proptest = "1"
+rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
 rquickjs = "0.14"
+rustls = { version = "=0.23.46", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-platform-verifier = "=0.7.1"
 schemars = "1"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
@@ -57,6 +60,7 @@ tauri-plugin-dialog = "=2.8.4"
 tauri-plugin-notification = "=2.8.1"
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
 toml = "1"
 toml_edit = "0.25"

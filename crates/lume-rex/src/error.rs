@@ -22,6 +22,9 @@ pub enum RexError {
         "the connection to the Rex server at {endpoint} would not be encrypted, and was not agreed to"
     )]
     Unconfirmed { endpoint: String },
+    /// The server's certificate does not show that it is the server its address names.
+    #[error("the Rex server at {endpoint} could not be shown to be that server: {reason}")]
+    Untrusted { endpoint: String, reason: String },
     /// No server answered at the address.
     #[error("no Rex server could be reached at {endpoint}: {source}")]
     Unreachable {
@@ -69,6 +72,7 @@ impl RexError {
             RexError::BadEndpoint(_) => "bad_request",
             RexError::Unsupported { .. } => "unsupported",
             RexError::Unconfirmed { .. } => "confirmation_required",
+            RexError::Untrusted { .. } => "untrusted",
             RexError::Unreachable { .. } => "unreachable",
             RexError::Refused { .. } => "forbidden",
             RexError::Revision(_) => "version_mismatch",
@@ -101,7 +105,8 @@ impl From<RexError> for SessionError {
             RexError::BadEndpoint(_) => ErrorCode::BadRequest,
             RexError::Refused { .. }
             | RexError::Unsupported { .. }
-            | RexError::Unconfirmed { .. } => ErrorCode::Unsupported,
+            | RexError::Unconfirmed { .. }
+            | RexError::Untrusted { .. } => ErrorCode::Unsupported,
             RexError::Revision(_) => ErrorCode::VersionMismatch,
             RexError::Timeout(_) => ErrorCode::Timeout,
             RexError::Rejected(reason) => match reason {

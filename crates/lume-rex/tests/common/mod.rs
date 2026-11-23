@@ -8,6 +8,7 @@
 
 #![allow(dead_code)]
 
+pub mod secure;
 pub mod views;
 
 use std::collections::{HashMap, VecDeque};
@@ -27,7 +28,7 @@ use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::{WebSocketStream, accept_hdr_async};
 
 /// Room in a stream for more than any test sends before the other side reads.
-const STREAM_BYTES: usize = 8 * 1024 * 1024;
+pub const STREAM_BYTES: usize = 8 * 1024 * 1024;
 
 /// What the application knows the backend under test as.
 pub fn backend_id() -> lume_proto::BackendId {
@@ -187,12 +188,17 @@ pub async fn door() -> (std::net::SocketAddr, Listener) {
     let (servers, taken) = mpsc::unbounded_channel();
     tokio::spawn(async move {
         while let Ok((mut stream, _)) = door.accept().await {
-            let (mut near, far) = tokio::io::duplex(STREAM_BYTES);
-            if servers.send(far).is_err() {
-                return;
-            }
+            let servers = servers.clone();
             tokio::spawn(async move {
-                let _ = tokio::io::copy_bidirectional(&mut stream, &mut near).await;
+                // A client that begins TLS is not answered: nothing here speaks it.
+                let mut first = [0];
+                if !matches!(stream.peek(&mut first).await, Ok(1)) || first[0] == 0x16 {
+                    return;
+                }
+                let (mut near, far) = tokio::io::duplex(STREAM_BYTES);
+                if servers.send(far).is_ok() {
+                    let _ = tokio::io::copy_bidirectional(&mut stream, &mut near).await;
+                }
             });
         }
     });

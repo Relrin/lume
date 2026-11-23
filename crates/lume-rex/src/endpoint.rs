@@ -10,6 +10,8 @@ use crate::error::RexError;
 pub const HTTPS_PORT: u16 = 443;
 /// The port an `http://` address means when it names none.
 pub const HTTP_PORT: u16 = 80;
+/// The port a Rex server is usually told to listen on.
+pub const REX_PORT: u16 = 7297;
 
 /// The longest name a host has.
 const HOST_MAX_BYTES: usize = 253;

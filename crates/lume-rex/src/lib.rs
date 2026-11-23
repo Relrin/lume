@@ -31,6 +31,7 @@ pub mod layout;
 mod screen;
 mod stream;
 mod terminal;
+mod tls;
 mod transport;
 pub mod tuning;
 mod ws;
@@ -48,7 +49,8 @@ pub use data::{
 pub use endpoint::Endpoint;
 pub use error::RexError;
 pub use stream::{Note, Opened, Opening, Piece, Splitter, Theme};
-pub use transport::{Dialed, Io, LOCAL_AUTHORITY, Options, dial, dial_with};
+pub use tls::Trust;
+pub use transport::{Dialed, Io, LOCAL_AUTHORITY, Options, Reach, dial, dial_with};
 
 /// The result of something asked of a Rex server.
 pub type Result<T> = std::result::Result<T, RexError>;

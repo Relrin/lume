@@ -1,11 +1,18 @@
 //! Reaching a server: the stream of bytes a connection is made over.
 
 use std::io;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
+use rustls::ClientConfig;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::endpoint::{Endpoint, HTTP_PORT, authority};
+use crate::endpoint::{Endpoint, HTTP_PORT, HTTPS_PORT, REX_PORT, authority};
 use crate::error::RexError;
+use crate::tls::{self, Trust};
+use crate::tuning::{
+    CONTROL_PATH, CONTROL_SUBPROTOCOL, MESSAGE_FLOOR_BYTES, PROBE_CLOSE_TIMEOUT, PROBE_TIMEOUT,
+};
+use crate::ws;
 
 /// A stream of bytes to a server and back.
 pub trait Io: AsyncRead + AsyncWrite + Unpin + Send + 'static {}
@@ -46,6 +53,8 @@ pub struct Options {
     /// over a network. Without it such a server is not dialled. It is asked of the user
     /// each time and kept nowhere.
     pub plain_http_agreed: bool,
+    /// Whose word is taken that a server behind TLS is the one its address names.
+    pub trust: Trust,
 }
 
 impl Options {
@@ -58,6 +67,13 @@ impl Options {
     #[must_use]
     pub fn plain_http_agreed(mut self, agreed: bool) -> Self {
         self.plain_http_agreed = agreed;
+        self
+    }
+
+    /// The same, with whose word is taken for a server behind TLS.
+    #[must_use]
+    pub fn trust(mut self, trust: Trust) -> Self {
+        self.trust = trust;
         self
     }
 }
@@ -80,32 +96,219 @@ pub async fn dial(endpoint: &Endpoint) -> Result<Box<dyn Io>, RexError> {
 /// A server that would be reached with nothing encrypted is dialled only on this
 /// machine, on a tailnet when the address says so, or when the user agreed.
 pub async fn dial_with(endpoint: &Endpoint, options: &Options) -> Result<Dialed, RexError> {
-    match endpoint {
-        Endpoint::Local => platform::local(endpoint).await.map(Dialed::here),
-        Endpoint::Pipe(name) => platform::pipe(endpoint, name).await.map(Dialed::here),
-        Endpoint::Unix(path) => platform::unix(endpoint, path).await.map(Dialed::here),
-        Endpoint::Http { host, port } => {
-            let rule = tcp::Plain::Asked {
-                agreed: options.plain_http_agreed,
-            };
-            let io = tcp::plain(endpoint, host, *port, rule).await?;
-            Ok(Dialed {
-                io: Box::new(io),
-                authority: authority(host, *port, HTTP_PORT),
-            })
+    Reach::new(endpoint.clone(), options.clone()).dial().await
+}
+
+/// One of the ways a host is reached when its address does not say which.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Way {
+    /// Behind TLS, on this port.
+    Tls(u16),
+    /// With nothing encrypted, on this port.
+    Plain(u16),
+}
+
+/// The ways a host alone is tried, in order: behind TLS first, and on the port its
+/// address names when it names one.
+fn ways(port: Option<u16>) -> Vec<Way> {
+    match port {
+        Some(port) => vec![Way::Tls(port), Way::Plain(port)],
+        None => vec![
+            Way::Tls(HTTPS_PORT),
+            Way::Tls(REX_PORT),
+            Way::Plain(REX_PORT),
+        ],
+    }
+}
+
+/// Whether what went wrong on one way to a host says that the others are not to be
+/// tried: a certificate that is not believed is never answered by doing without one,
+/// and a server that was found and refuses is the server.
+fn settles(error: &RexError) -> bool {
+    matches!(
+        error,
+        RexError::Untrusted { .. }
+            | RexError::Unconfirmed { .. }
+            | RexError::Refused { .. }
+            | RexError::Unsupported { .. }
+            | RexError::BadEndpoint(_)
+    )
+}
+
+/// How one server is reached, for every stream opened to it: what the user said, what
+/// encryption is set up with, and which way a host alone was found by.
+pub struct Reach {
+    endpoint: Endpoint,
+    /// The endpoint as it is written, for what is said of failures.
+    name: String,
+    options: Options,
+    tls: OnceLock<Result<Arc<ClientConfig>, String>>,
+    /// The way a host alone answered as a Rex server, until it stops doing so.
+    proved: Mutex<Option<Way>>,
+}
+
+impl Reach {
+    pub fn new(endpoint: Endpoint, options: Options) -> Self {
+        Self {
+            name: endpoint.to_string(),
+            endpoint,
+            options,
+            tls: OnceLock::new(),
+            proved: Mutex::new(None),
         }
-        Endpoint::Tailnet { host, port } => {
-            let io = tcp::plain(endpoint, host, *port, tcp::Plain::Tailnet).await?;
-            Ok(Dialed {
-                io: Box::new(io),
-                authority: authority(host, *port, HTTP_PORT),
-            })
-        }
-        Endpoint::Https { .. } | Endpoint::Host { .. } | Endpoint::Ssh { .. } => {
-            Err(RexError::Unsupported {
-                endpoint: endpoint.to_string(),
+    }
+
+    /// Opens a stream to the server. Nothing is said on it yet.
+    pub async fn dial(&self) -> Result<Dialed, RexError> {
+        let endpoint = &self.endpoint;
+        match endpoint {
+            Endpoint::Local => platform::local(endpoint).await.map(Dialed::here),
+            Endpoint::Pipe(name) => platform::pipe(endpoint, name).await.map(Dialed::here),
+            Endpoint::Unix(path) => platform::unix(endpoint, path).await.map(Dialed::here),
+            Endpoint::Http { host, port } => self.plain(host, *port, self.asked()).await,
+            Endpoint::Tailnet { host, port } => self.plain(host, *port, tcp::Plain::Tailnet).await,
+            Endpoint::Https { host, port } => self.secure(host, *port).await,
+            Endpoint::Host { host, port } => self.found(host, *port).await,
+            Endpoint::Ssh { .. } => Err(RexError::Unsupported {
+                endpoint: self.name.clone(),
                 why: "this kind of address is not reached yet".to_owned(),
-            })
+            }),
+        }
+    }
+
+    /// The rule for a stream with nothing encrypted on it, as the user answered.
+    fn asked(&self) -> tcp::Plain {
+        tcp::Plain::Asked {
+            agreed: self.options.plain_http_agreed,
+        }
+    }
+
+    /// What TLS is set up with, made once.
+    fn tls(&self) -> Result<&Arc<ClientConfig>, RexError> {
+        let made = self
+            .tls
+            .get_or_init(|| tls::config(&self.options.trust).map_err(|error| error.to_string()));
+        made.as_ref().map_err(|error| RexError::Unsupported {
+            endpoint: self.name.clone(),
+            why: format!("encryption could not be set up: {error}"),
+        })
+    }
+
+    async fn plain(&self, host: &str, port: u16, rule: tcp::Plain) -> Result<Dialed, RexError> {
+        let io = tcp::plain(&self.endpoint, host, port, rule).await?;
+        Ok(Dialed {
+            io: Box::new(io),
+            authority: authority(host, port, HTTP_PORT),
+        })
+    }
+
+    async fn secure(&self, host: &str, port: u16) -> Result<Dialed, RexError> {
+        let config = self.tls()?;
+        let addresses = tcp::resolve(&self.endpoint, host, port).await?;
+        let stream = tcp::connect(&self.endpoint, &addresses).await?;
+        let io = tls::begin(&self.name, config, host, stream).await?;
+        Ok(Dialed {
+            io: Box::new(io),
+            authority: authority(host, port, HTTPS_PORT),
+        })
+    }
+
+    async fn by(&self, host: &str, way: Way) -> Result<Dialed, RexError> {
+        match way {
+            Way::Tls(port) => self.secure(host, port).await,
+            Way::Plain(port) => self.plain(host, port, self.asked()).await,
+        }
+    }
+
+    fn proved(&self) -> MutexGuard<'_, Option<Way>> {
+        self.proved.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// A stream to a host whose address does not say how it is reached. The first time,
+    /// and again after the way that was found fails, each way is tried in turn until a
+    /// Rex server answers on one.
+    async fn found(&self, host: &str, port: Option<u16>) -> Result<Dialed, RexError> {
+        let known = *self.proved();
+        if let Some(way) = known {
+            let dialed = self.by(host, way).await;
+            if dialed.is_err() {
+                *self.proved() = None;
+            }
+            return dialed;
+        }
+        let mut last = None;
+        for way in ways(port) {
+            let proof = tokio::time::timeout(PROBE_TIMEOUT, self.prove(host, way)).await;
+            match proof {
+                Ok(Ok(())) => {
+                    tracing::debug!(server = %self.name, ?way, "a host was found to be a Rex server");
+                    *self.proved() = Some(way);
+                    return self.by(host, way).await;
+                }
+                Ok(Err(error)) if settles(&error) => return Err(error),
+                Ok(Err(error)) => last = Some(error),
+                Err(_) => last = Some(unreachable(&self.endpoint, io::ErrorKind::TimedOut.into())),
+            }
+        }
+        Err(last.unwrap_or_else(|| RexError::BadEndpoint(self.name.clone())))
+    }
+
+    /// Whether a Rex server answers on one way to a host: it does when it agrees to a
+    /// control connection there. Nothing more is said on that connection.
+    async fn prove(&self, host: &str, way: Way) -> Result<(), RexError> {
+        let dialed = self.by(host, way).await?;
+        let mut socket = ws::open(
+            dialed.io,
+            &self.name,
+            &dialed.authority,
+            CONTROL_PATH,
+            CONTROL_SUBPROTOCOL,
+            MESSAGE_FLOOR_BYTES,
+        )
+        .await?;
+        let _ = tokio::time::timeout(PROBE_CLOSE_TIMEOUT, socket.close(None)).await;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_host_alone_is_tried_behind_tls_first() {
+        assert_eq!(
+            ways(None),
+            [Way::Tls(443), Way::Tls(7297), Way::Plain(7297)]
+        );
+        assert_eq!(ways(Some(8443)), [Way::Tls(8443), Way::Plain(8443)]);
+    }
+
+    #[test]
+    fn what_settles_a_host_is_not_passed_over() {
+        let endpoint = || "rex.example".to_owned();
+        let reason = || "why".to_owned();
+        for settled in [
+            RexError::Untrusted {
+                endpoint: endpoint(),
+                reason: reason(),
+            },
+            RexError::Unconfirmed {
+                endpoint: endpoint(),
+            },
+            RexError::Refused {
+                endpoint: endpoint(),
+                reason: reason(),
+            },
+        ] {
+            assert!(settles(&settled), "{settled}");
+        }
+        for passed in [
+            unreachable(&Endpoint::Local, io::ErrorKind::ConnectionRefused.into()),
+            RexError::Protocol(reason()),
+            RexError::Timeout(reason()),
+        ] {
+            assert!(!settles(&passed), "{passed}");
         }
     }
 }

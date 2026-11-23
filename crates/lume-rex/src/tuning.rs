@@ -24,6 +24,11 @@ pub const WELCOME_TIMEOUT: Duration = Duration::from_secs(10);
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long finding a host and opening a stream to it may take.
 pub const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long one way to a host may take to show whether a Rex server answers on it,
+/// when the host's address does not say how it is reached.
+pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the connection that showed it is given to close.
+pub const PROBE_CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long the WebSocket handshake of a connection may take.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 

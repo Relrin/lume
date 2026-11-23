@@ -36,7 +36,7 @@ use crate::ids::{BlockRef, Ids};
 use crate::input::type_text;
 use crate::screen;
 use crate::terminal::FeedRef;
-use crate::transport::{Dialed, Options, dial_with};
+use crate::transport::{Dialed, Options, Reach};
 use crate::tuning::{
     ATTACH_RETRY, ATTACH_TIMEOUT, RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, SCREEN_POLL,
     SESSIONS_MAX,
@@ -83,16 +83,10 @@ pub trait Dialer: Send + Sync + 'static {
     async fn dial(&self) -> Result<Dialed, RexError>;
 }
 
-/// Dials an endpoint, as the user said it may be reached.
-struct EndpointDialer {
-    endpoint: Endpoint,
-    options: Options,
-}
-
 #[async_trait]
-impl Dialer for EndpointDialer {
+impl Dialer for Reach {
     async fn dial(&self) -> Result<Dialed, RexError> {
-        dial_with(&self.endpoint, &self.options).await
+        Reach::dial(self).await
     }
 }
 
@@ -283,7 +277,7 @@ impl RexBackend {
         options: Options,
     ) -> Arc<Self> {
         let name = endpoint.to_string();
-        Self::over(id, name, EndpointDialer { endpoint, options }, client)
+        Self::over(id, name, Reach::new(endpoint, options), client)
     }
 
     /// A backend whose connections run over streams made by `dialer`. `name` is the
