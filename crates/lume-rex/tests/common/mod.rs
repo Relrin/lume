@@ -734,6 +734,9 @@ pub enum Tell {
     Close(u16, String),
     /// Lets the connection drop without a word.
     Drop,
+    /// Goes on holding the connection and neither reads nor says anything more, as a
+    /// server does that a network no longer reaches.
+    Stall,
 }
 
 /// A server that answers on one connection until told to stop or the client goes.
@@ -809,6 +812,7 @@ pub fn serve(mut conn: Conn, mut world: World) -> Served {
                         conn.close(code, &reason).await;
                         return;
                     }
+                    Some(Tell::Stall) => std::future::pending::<()>().await,
                     Some(Tell::Drop) | None => return,
                 },
             }

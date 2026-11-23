@@ -583,9 +583,14 @@ mod platform {
     use crate::endpoint::Endpoint;
     use crate::error::RexError;
 
-    /// The directories a user's own server keeps its socket in, the likeliest first.
+    /// The directories a user's own server keeps its socket in, the likeliest first:
+    /// the one the user named for it, the user's runtime directory, and the place a
+    /// server falls back to where there is none.
     fn runtime_dirs() -> Vec<PathBuf> {
         let mut dirs = Vec::new();
+        if let Some(dir) = std::env::var_os("REX_RUNTIME_DIR").filter(|dir| !dir.is_empty()) {
+            dirs.push(PathBuf::from(dir));
+        }
         if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR").filter(|dir| !dir.is_empty()) {
             dirs.push(PathBuf::from(dir).join("rex"));
         }

@@ -22,6 +22,12 @@ pub const CLIENT_TEXT_MAX_BYTES: usize = 64;
 pub const WELCOME_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a request waits for its response.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a connection hears nothing from its server before it sends a ping. A
+/// server pings every two minutes itself; a client that waited as long would show a
+/// terminal as live for minutes after its server had gone.
+pub const PING_EVERY: Duration = Duration::from_secs(30);
+/// How long after its ping a connection that still hears nothing is given up.
+pub const PING_WAIT: Duration = Duration::from_secs(20);
 /// How long finding a host and opening a stream to it may take.
 pub const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long one way to a host may take to show whether a Rex server answers on it,

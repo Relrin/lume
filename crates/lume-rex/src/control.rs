@@ -26,6 +26,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::api::{ApiRevisions, ClientInfo, Hello, Secret, Welcome, WireWelcome, cut};
 use crate::error::RexError;
+use crate::pulse::{Beat, Pulse};
 use crate::transport::{Io, LOCAL_AUTHORITY};
 use crate::tuning::{
     API_MIN_REVISION, API_REVISION, CALL_TIMEOUT, CONTROL_PATH, CONTROL_SUBPROTOCOL, EVENT_BACKLOG,
@@ -524,6 +525,7 @@ async fn run<S: Io>(
         last_seq: 0,
         events,
     };
+    let mut pulse = Pulse::new();
     let why = loop {
         tokio::select! {
             asked = requests.recv() => {
@@ -558,8 +560,19 @@ async fn run<S: Io>(
                 let _ = socket.close(None).await;
                 break Ended::Lost;
             }
+            // Nothing has arrived for a while: the server is asked whether it is there,
+            // and given up when that brings nothing either.
+            () = pulse.due() => match pulse.beat() {
+                Beat::Ping => {
+                    if let Err(error) = socket.send(Message::Ping(Vec::new().into())).await {
+                        break ended_by(&error);
+                    }
+                }
+                Beat::Lost => break Ended::Lost,
+            },
             message = socket.next() => match message {
                 Some(Ok(Message::Text(text))) => {
+                    pulse.heard();
                     if let Err(why) = running.take(&text) {
                         let _ = socket.close(None).await;
                         break why;
@@ -569,9 +582,10 @@ async fn run<S: Io>(
                     Some(frame) => closed(frame.code, &frame.reason),
                     None => Ended::Lost,
                 },
-                // Pings are answered by the socket itself. A server sends nothing else
-                // that is not text.
-                Some(Ok(_)) => {}
+                // Pings are answered by the socket itself, and the answer to this side's
+                // own is all that is wanted of it. A server sends nothing else that is not
+                // text.
+                Some(Ok(_)) => pulse.heard(),
                 Some(Err(error)) => break ended_by(&error),
                 None => break Ended::Lost,
             },

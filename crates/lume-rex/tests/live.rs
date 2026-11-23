@@ -2311,3 +2311,49 @@ async fn a_real_server_is_reached_over_a_port_of_this_machine() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+#[ignore = "needs a Rex server running on this machine, and takes over a minute"]
+async fn a_real_server_answers_this_clients_pings() {
+    use lume_rex::tuning::PING_EVERY;
+
+    let io = dial(&Endpoint::Local)
+        .await
+        .expect("is a Rex server running?");
+    let (control, _events) = Control::open(io, "local", &client(), None).await.unwrap();
+    let (session, block) = session_with(&control, "lume-live-pings", plain_shell()).await;
+    let ticket = ticket(&control, &session, &block).await;
+    let io = dial(&Endpoint::Local).await.unwrap();
+    let mut conn = DataConn::open(io, "local", DataOpen::Start(&ticket))
+        .await
+        .unwrap();
+    let mut reading = Reading::new(conn.welcome().nonce);
+    reading.settle(&mut conn).await;
+
+    // Long enough for each connection to ask twice, with nothing said meanwhile. A
+    // server that did not answer would have been given up on by then.
+    let quiet = PING_EVERY * 2 + Duration::from_secs(5);
+    let silence = tokio::time::timeout(quiet, conn.next()).await;
+    assert!(silence.is_err(), "the stream was not quiet: {silence:?}");
+    assert!(control.ended().is_none());
+
+    // Both connections still carry what is asked of them.
+    control
+        .call(
+            "com.superlogical.terminal.write",
+            json!({ "session_id": session, "block_id": block, "args": { "data": echo("pinged") } }),
+        )
+        .await
+        .unwrap();
+    reading
+        .until(&mut conn, "the echo", |reading| {
+            String::from_utf8_lossy(&reading.output).contains("lume-pinged")
+        })
+        .await;
+
+    conn.close().await;
+    control
+        .call("session.destroy", json!({ "session_id": session }))
+        .await
+        .unwrap();
+}

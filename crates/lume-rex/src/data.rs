@@ -22,6 +22,7 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::api::cut;
 use crate::error::RexError;
+use crate::pulse::{Beat, Pulse};
 use crate::transport::{Io, LOCAL_AUTHORITY};
 use crate::tuning::{
     DATA_ANSWER_TIMEOUT, DATA_CLOSE_TIMEOUT, DATA_MESSAGE_MAX_BYTES, DATA_PATH,
@@ -236,6 +237,7 @@ pub enum DataEnd {
 pub struct DataConn {
     socket: WebSocketStream<Box<dyn Io>>,
     welcome: DataWelcome,
+    pulse: Pulse,
 }
 
 /// What a close frame, or the lack of one, means for the stream.
@@ -339,7 +341,11 @@ impl DataConn {
         .await
         .map_err(|_| RexError::Timeout("the data connection".to_owned()))??;
         match answer {
-            Answer::Welcome(welcome) => Ok(Self { socket, welcome }),
+            Answer::Welcome(welcome) => Ok(Self {
+                socket,
+                welcome,
+                pulse: Pulse::new(),
+            }),
             Answer::Reject(reason) => Err(RexError::Rejected(reason)),
         }
     }
@@ -352,9 +358,31 @@ impl DataConn {
     /// The next piece of the stream. Where one piece ends and the next begins means
     /// nothing. Every byte returned counts towards what a later
     /// [`DataOpen::Resume`] says was received.
+    ///
+    /// A server that sends nothing for a while is asked whether it is there, and the
+    /// stream is [`Dropped`](DataEnd::Dropped) when that brings nothing either. The
+    /// connection has to be read for that to be noticed.
     pub async fn next(&mut self) -> Result<Vec<u8>, DataEnd> {
         loop {
-            match self.socket.next().await {
+            let message = tokio::select! {
+                message = self.socket.next() => message,
+                () = self.pulse.due() => {
+                    match self.pulse.beat() {
+                        Beat::Ping => {
+                            let ping = Message::Ping(Vec::new().into());
+                            if let Err(error) = self.socket.send(ping).await {
+                                return Err(end_of_error(&error));
+                            }
+                        }
+                        Beat::Lost => return Err(DataEnd::Dropped),
+                    }
+                    continue;
+                }
+            };
+            if matches!(message, Some(Ok(_))) {
+                self.pulse.heard();
+            }
+            match message {
                 // A piece that holds nothing says nothing.
                 Some(Ok(Message::Binary(piece))) if piece.is_empty() => {}
                 Some(Ok(Message::Binary(piece))) => return Ok(Vec::from(piece)),

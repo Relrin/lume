@@ -28,6 +28,7 @@ mod ids;
 mod input;
 mod intents;
 pub mod layout;
+mod pulse;
 mod screen;
 mod stream;
 mod terminal;
