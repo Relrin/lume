@@ -17,6 +17,7 @@
 //! before it is used, and nothing it sends can do more than be shown.
 
 mod api;
+mod authority;
 mod backend;
 mod control;
 mod data;

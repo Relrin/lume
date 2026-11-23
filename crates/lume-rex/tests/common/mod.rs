@@ -27,6 +27,11 @@ use tokio_tungstenite::{WebSocketStream, accept_hdr_async};
 /// Room in a stream for more than any test sends before the other side reads.
 const STREAM_BYTES: usize = 8 * 1024 * 1024;
 
+/// What the application knows the backend under test as.
+pub fn backend_id() -> lume_proto::BackendId {
+    lume_proto::BackendId("rex".to_owned())
+}
+
 pub fn client() -> ClientInfo {
     ClientInfo::app("lume-test", "0.0.0")
 }

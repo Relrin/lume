@@ -14,9 +14,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use lume_layout::LayoutAuthority;
 use lume_proto::{
-    BackendCaps, ClientFacts, ErrorCode, ExitStatus, HydrateKinds, ProtoError, Responder,
-    SessionId, SessionInfo, SessionStats, SpawnSpec, TermSize,
+    BackendCaps, BackendId, ClientFacts, ErrorCode, ExitStatus, HydrateKinds, ProtoError,
+    Responder, SessionId, SessionInfo, SessionStats, SpawnSpec, TermSize,
 };
 use lume_session::{Attachment, ScreenText, SessionBackend, SessionError, TextFound};
 use serde_json::{Value, json};
@@ -27,6 +28,7 @@ use crate::api::{
     Attached, ClientInfo, ServerEvent, ServerVersion, SessionList, SessionSummary, TerminalProcess,
     TerminalSize, TerminalTitle, View,
 };
+use crate::authority::{self, RexLayout};
 use crate::control::{Control, Events};
 use crate::endpoint::Endpoint;
 use crate::error::RexError;
@@ -105,6 +107,15 @@ struct State {
     serial: u64,
 }
 
+/// What a backend holds of a session's view.
+pub(crate) enum Seen {
+    /// The session is not opened here: it never was, was let go of, or is gone.
+    Gone,
+    /// It is opened and its view has not been read yet.
+    Unread,
+    Read(View),
+}
+
 pub(crate) struct Shared {
     /// The server, in what is said of failures.
     pub(crate) name: String,
@@ -124,6 +135,25 @@ impl Shared {
     fn touch(&self) {
         self.changed
             .send_modify(|count| *count = count.wrapping_add(1));
+    }
+
+    /// A number that goes up whenever the sessions or a view change.
+    pub(crate) fn changed(&self) -> watch::Receiver<u64> {
+        self.changed.subscribe()
+    }
+
+    /// The view held of a session.
+    pub(crate) fn seen(&self, session_id: &str) -> Seen {
+        match self.state().opened.get(session_id) {
+            None => Seen::Gone,
+            Some(None) => Seen::Unread,
+            Some(Some(view)) => Seen::Read(view.clone()),
+        }
+    }
+
+    /// The number the application knows a block's terminal by.
+    pub(crate) fn session_number(&self, session_id: &str, block_id: &str) -> SessionId {
+        self.state().ids.of(session_id, block_id)
     }
 
     /// The control connection, while there is one.
@@ -175,13 +205,19 @@ impl Shared {
 
 /// A Rex server as a place sessions run.
 pub struct RexBackend {
+    id: BackendId,
     shared: Arc<Shared>,
     keeper: JoinHandle<()>,
+    /// The layout of the session on show, and what keeps it level with the server.
+    layout: Arc<RexLayout>,
+    layout_keeper: JoinHandle<()>,
 }
 
 impl Drop for RexBackend {
     fn drop(&mut self) {
         self.keeper.abort();
+        self.layout_keeper.abort();
+        self.layout.close();
         self.shared.end_attachments();
         if let Some(control) = self.shared.state().control.take() {
             control.close();
@@ -197,16 +233,16 @@ pub(crate) fn unsupported(what: &str) -> SessionError {
 }
 
 impl RexBackend {
-    /// A backend for the server at `endpoint`. It connects in the background, at once,
-    /// and says how that goes through [`link`](Self::link). Must be called inside a
-    /// Tokio runtime.
-    pub fn connect(endpoint: Endpoint, client: ClientInfo) -> Arc<Self> {
-        Self::over(endpoint.to_string(), EndpointDialer(endpoint), client)
+    /// A backend for the server at `endpoint`, which the application knows as `id`. It
+    /// connects in the background, at once, and says how that goes through
+    /// [`link`](Self::link). Must be called inside a Tokio runtime.
+    pub fn connect(id: BackendId, endpoint: Endpoint, client: ClientInfo) -> Arc<Self> {
+        Self::over(id, endpoint.to_string(), EndpointDialer(endpoint), client)
     }
 
     /// A backend whose connections run over streams made by `dialer`. `name` is the
     /// server in what is said of failures.
-    pub fn over(name: String, dialer: impl Dialer, client: ClientInfo) -> Arc<Self> {
+    pub fn over(id: BackendId, name: String, dialer: impl Dialer, client: ClientInfo) -> Arc<Self> {
         let (link, _) = watch::channel(Link::Connecting);
         let (changed, _) = watch::channel(0);
         let shared = Arc::new(Shared {
@@ -218,7 +254,20 @@ impl RexBackend {
             changed,
         });
         let keeper = tokio::spawn(keep(Arc::clone(&shared)));
-        Arc::new(Self { shared, keeper })
+        let layout = RexLayout::new(Arc::clone(&shared), id.clone());
+        let layout_keeper = tokio::spawn(authority::follow(Arc::clone(&layout)));
+        Arc::new(Self {
+            id,
+            shared,
+            keeper,
+            layout,
+            layout_keeper,
+        })
+    }
+
+    /// What the application knows this backend as.
+    pub fn id(&self) -> &BackendId {
+        &self.id
     }
 
     /// How the backend stands with its server, now and as it changes.
@@ -299,9 +348,35 @@ impl RexBackend {
         self.shared.state().opened.get(session_id)?.clone()
     }
 
+    /// Puts a session on show: its layout is the one [`layout`](SessionBackend::layout)
+    /// gives from now on, and whoever follows that layout is given it whole. The
+    /// session is opened if it was not. A backend has one session on show at a time.
+    ///
+    /// A session whose layout cannot be shown is refused, and what was on show stays.
+    pub async fn show_session(&self, session_id: &str) -> Result<(), RexError> {
+        if !self.shared.state().opened.contains_key(session_id) {
+            self.open_session(session_id).await?;
+        }
+        self.layout.show(Some(session_id))
+    }
+
+    /// Takes the session on show off it. The layout is an empty window until another
+    /// is put on show. The session stays opened.
+    pub fn show_nothing(&self) {
+        // Nothing is always shown.
+        let _ = self.layout.show(None);
+    }
+
+    /// The session on show.
+    pub fn shown_session(&self) -> Option<String> {
+        self.layout.on_show()
+    }
+
     /// Ends the backend: its connection is closed and not made again.
     pub fn shutdown(&self) {
         self.keeper.abort();
+        self.layout_keeper.abort();
+        self.layout.close();
         self.shared.end_attachments();
         if let Some(control) = self.shared.state().control.take() {
             control.close();
@@ -438,6 +513,11 @@ impl SessionBackend for RexBackend {
         }
         listed.sort_by_key(|info| info.id);
         Ok(listed)
+    }
+
+    /// The layout of the session on show.
+    fn layout(&self) -> Option<Arc<dyn LayoutAuthority>> {
+        Some(Arc::clone(&self.layout) as Arc<dyn LayoutAuthority>)
     }
 
     async fn spawn(&self, _spec: SpawnSpec) -> lume_session::Result<SessionId> {

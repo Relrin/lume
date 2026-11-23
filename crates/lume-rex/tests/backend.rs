@@ -24,7 +24,7 @@ fn names(backend: &RexBackend) -> Vec<String> {
 #[tokio::test]
 async fn a_backend_connects_and_knows_the_servers_sessions() {
     let (dialer, mut listener) = streams();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     assert_eq!(*backend.link().borrow(), Link::Connecting);
     let served = serve(listener.accept().await, World::recorded());
 
@@ -56,7 +56,7 @@ async fn a_backend_connects_and_knows_the_servers_sessions() {
 #[tokio::test]
 async fn the_sessions_follow_the_servers_events() {
     let (dialer, mut listener) = streams();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let served = serve(listener.accept().await, World::recorded());
     backend.ready().await.unwrap();
     let mut changed = backend.changed();
@@ -120,7 +120,7 @@ async fn the_sessions_follow_the_servers_events() {
 #[tokio::test]
 async fn events_the_list_already_holds_are_not_applied_again() {
     let (dialer, mut listener) = streams();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let mut conn = listener.accept().await;
     let recorded = Recorded::load();
 
@@ -159,7 +159,7 @@ async fn events_the_list_already_holds_are_not_applied_again() {
 #[tokio::test]
 async fn an_opened_sessions_terminals_are_listed_as_a_server_describes_them() {
     let (dialer, mut listener) = streams();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let mut world = World::recorded();
     // Something that is not a terminal, beside the two that are.
     let blocks = world.views.get_mut(SESSION).unwrap()["windows"][0]["layers"][0]["blocks"]
@@ -203,7 +203,7 @@ async fn an_opened_sessions_terminals_are_listed_as_a_server_describes_them() {
 #[tokio::test]
 async fn a_view_is_read_again_when_the_server_says_it_changed_and_only_then() {
     let (dialer, mut listener) = streams();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let world = World::recorded();
     let served = serve(listener.accept().await, world.clone());
     backend.ready().await.unwrap();
@@ -260,7 +260,7 @@ async fn a_view_is_read_again_when_the_server_says_it_changed_and_only_then() {
 #[tokio::test]
 async fn what_an_event_too_large_to_send_would_have_changed_is_read_again() {
     let (dialer, mut listener) = streams();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let world = World::recorded();
     let served = serve(listener.accept().await, world.clone());
     backend.ready().await.unwrap();
@@ -325,7 +325,7 @@ async fn what_an_event_too_large_to_send_would_have_changed_is_read_again() {
 async fn a_lost_connection_is_made_again_and_what_was_opened_is_opened_again() {
     let (dialer, mut listener) = streams();
     let dialled = dialer.dialled.clone();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let mut world = World::recorded();
     world
         .sessions
@@ -384,7 +384,7 @@ async fn a_lost_connection_is_made_again_and_what_was_opened_is_opened_again() {
 #[tokio::test]
 async fn a_server_that_closes_the_connection_is_reached_again() {
     let (dialer, mut listener) = streams();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let first = serve(listener.accept().await, World::recorded());
     backend.ready().await.unwrap();
     let mut link = backend.link();
@@ -406,7 +406,7 @@ async fn a_server_that_cannot_be_reached_is_tried_again_until_it_can() {
     let down = dialer.down.clone();
     let dialled = dialer.dialled.clone();
     *down.lock().unwrap() = true;
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
 
     let mut link = backend.link();
     until("it has been tried more than once", || {
@@ -431,7 +431,7 @@ async fn a_server_that_cannot_be_reached_is_tried_again_until_it_can() {
 async fn a_server_of_another_revision_is_refused_and_not_tried_again() {
     let (dialer, mut listener) = streams();
     let dialled = dialer.dialled.clone();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let stream = listener.stream().await;
     let mut welcome = Recorded::load().welcome();
     welcome["api_revision"] = json!(20);
@@ -459,7 +459,7 @@ async fn a_server_of_another_revision_is_refused_and_not_tried_again() {
 #[tokio::test]
 async fn what_a_server_sends_beyond_all_bounds_is_refused_and_does_no_harm() {
     let (dialer, mut listener) = streams();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
 
     // More sessions than any server holds: the connection is given up and made again.
     let mut conn = listener.accept().await;
@@ -508,7 +508,7 @@ async fn what_a_server_sends_beyond_all_bounds_is_refused_and_does_no_harm() {
 async fn a_backend_that_is_shut_down_says_goodbye_and_stays_away() {
     let (dialer, mut listener) = streams();
     let dialled = dialer.dialled.clone();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let served = serve(listener.accept().await, World::recorded());
     backend.ready().await.unwrap();
 
@@ -523,7 +523,7 @@ async fn a_backend_that_is_shut_down_says_goodbye_and_stays_away() {
 #[tokio::test]
 async fn what_is_asked_of_a_terminal_that_is_not_known_is_refused() {
     let (dialer, mut listener) = streams();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let _served = serve(listener.accept().await, World::recorded());
     backend.ready().await.unwrap();
 
@@ -545,5 +545,6 @@ async fn what_is_asked_of_a_terminal_that_is_not_known_is_refused() {
             other => panic!("{other:?}"),
         }
     }
-    assert!(backend.layout().is_none());
+    // A layout is kept, and with nothing on show there is nothing in it.
+    assert!(backend.layout().is_some());
 }

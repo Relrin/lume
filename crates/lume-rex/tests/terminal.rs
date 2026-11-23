@@ -52,7 +52,7 @@ struct Setup {
 
 async fn setup_with(world: World) -> Setup {
     let (dialer, mut listener) = streams();
-    let backend = RexBackend::over("test".to_owned(), dialer, client());
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let served = serve(listener.accept().await, world);
     backend.ready().await.unwrap();
     backend.open_session(SESSION).await.unwrap();

@@ -10,8 +10,11 @@ mod common;
 use std::time::Duration;
 
 use common::{client, until};
+use lume_layout::{
+    Axis, LayoutAuthority, LayoutEvent, Minimised, Node, UNITS, Workspace, is_normalised, validate,
+};
 use lume_proto::tuning::CREDIT_WINDOW;
-use lume_proto::{CellPx, ClientFacts, ColorScheme, ExitStatus, Palette, TermSize};
+use lume_proto::{BackendId, CellPx, ClientFacts, ColorScheme, ExitStatus, Palette, TermSize};
 use lume_rex::tuning::{TERMINAL_DATA_REF, TERMINAL_SUBPROTOCOL};
 use lume_rex::{
     Control, DataConn, DataEnd, DataOpen, Endpoint, Link, Note, Opening, Piece, Reject, RexBackend,
@@ -339,7 +342,7 @@ async fn the_backend_follows_a_real_server() {
         .expect("is a Rex server running?");
     let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
 
-    let backend = RexBackend::connect(Endpoint::Local, client());
+    let backend = RexBackend::connect(BackendId("rex".to_owned()), Endpoint::Local, client());
     let version = backend.ready().await.unwrap();
     assert!(!version.rex_version.is_empty());
     assert!(matches!(&*backend.link().borrow(), Link::Connected(_)));
@@ -531,7 +534,7 @@ async fn a_terminal_of_a_real_server_is_attached_to() {
         )
     };
 
-    let backend = RexBackend::connect(Endpoint::Local, client());
+    let backend = RexBackend::connect(BackendId("rex".to_owned()), Endpoint::Local, client());
     backend.ready().await.unwrap();
     backend.open_session(&session).await.unwrap();
     let id = backend.list().await.unwrap()[0].id;
@@ -640,7 +643,7 @@ async fn a_terminal_of_a_real_server_is_typed_into_sized_and_read() {
         .unwrap();
     let of_block = |args: Value| json!({ "session_id": session, "block_id": block, "args": args });
 
-    let backend = RexBackend::connect(Endpoint::Local, client());
+    let backend = RexBackend::connect(BackendId("rex".to_owned()), Endpoint::Local, client());
     backend.ready().await.unwrap();
     backend.open_session(&session).await.unwrap();
     let id = backend.list().await.unwrap()[0].id;
@@ -797,7 +800,7 @@ async fn two_views_of_a_terminal_of_a_real_server_share_its_stream() {
         .await
         .unwrap();
 
-    let backend = RexBackend::connect(Endpoint::Local, client());
+    let backend = RexBackend::connect(BackendId("rex".to_owned()), Endpoint::Local, client());
     backend.ready().await.unwrap();
     backend.open_session(&session).await.unwrap();
     let id = backend.list().await.unwrap()[0].id;
@@ -1052,7 +1055,7 @@ async fn a_full_screen_program_is_shown_as_the_server_shows_it() {
     });
     let (session, block) = session_with(&other, "lume-live-screen", editor).await;
 
-    let backend = RexBackend::connect(Endpoint::Local, client());
+    let backend = RexBackend::connect(BackendId("rex".to_owned()), Endpoint::Local, client());
     backend.ready().await.unwrap();
     backend.open_session(&session).await.unwrap();
     let id = backend.list().await.unwrap()[0].id;
@@ -1127,7 +1130,7 @@ async fn a_shell_with_scrollback_is_shown_as_the_server_shows_it_at_every_size()
     let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
     let (session, block) = session_with(&other, "lume-live-scroll", plain_shell()).await;
 
-    let backend = RexBackend::connect(Endpoint::Local, client());
+    let backend = RexBackend::connect(BackendId("rex".to_owned()), Endpoint::Local, client());
     backend.ready().await.unwrap();
     backend.open_session(&session).await.unwrap();
     let id = backend.list().await.unwrap()[0].id;
@@ -1186,5 +1189,347 @@ async fn a_shell_with_scrollback_is_shown_as_the_server_shows_it_at_every_size()
     let _ = other
         .call("session.destroy", json!({ "session_id": session }))
         .await;
+    backend.shutdown();
+}
+
+/// Waits until the layout is as `wanted` says, and gives it.
+async fn laid_out(
+    layout: &dyn LayoutAuthority,
+    what: &str,
+    wanted: impl Fn(&Workspace) -> bool,
+) -> Workspace {
+    let waiting = async {
+        loop {
+            if let Ok(snapshot) = layout.view().await
+                && wanted(&snapshot.workspace)
+            {
+                return snapshot.workspace;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    match tokio::time::timeout(Duration::from_secs(20), waiting).await {
+        Ok(workspace) => workspace,
+        Err(_) => panic!(
+            "{what} never showed in the layout: {:#?}",
+            layout.view().await
+        ),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a Rex server running on this machine"]
+async fn the_layout_of_a_real_session_follows_what_another_client_does() {
+    let io = dial(&Endpoint::Local)
+        .await
+        .expect("is a Rex server running?");
+    let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
+    let (session, first) = session_with(&other, "lume-live-layout", plain_shell()).await;
+    let of_session = |mut args: Value| {
+        args["session_id"] = json!(session);
+        args
+    };
+
+    let backend = RexBackend::connect(BackendId("rex".to_owned()), Endpoint::Local, client());
+    backend.ready().await.unwrap();
+    until("the session is known", || {
+        backend.sessions().iter().any(|known| known.id == session)
+    })
+    .await;
+    let layout = backend.layout().unwrap();
+    let mut changes = layout.changes();
+    backend.show_session(&session).await.unwrap();
+
+    // One window with one terminal: one tab with one pane, which is a session of the
+    // backend.
+    let shown = layout.view().await.unwrap().workspace;
+    validate(&shown).unwrap();
+    assert_eq!(shown.name, "lume-live-layout");
+    let tab = &shown.windows[0].centre.tabs[0];
+    let Node::Pane(pane) = &tab.root else {
+        panic!("one block is one pane: {tab:#?}");
+    };
+    let first_pane = pane.id;
+    assert_eq!(shown.windows[0].focus, Some(first_pane));
+    assert_eq!(shown.sessions().len(), 1);
+    assert_eq!(backend.list().await.unwrap()[0].id, shown.sessions()[0].1);
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(20), changes.next()).await,
+        Ok(Some(LayoutEvent::Reset(_)))
+    ));
+
+    // Two splits of the same direction, the second inside the first: one row of three.
+    let shell = || json!({ "block": plain_shell() });
+    let split = other
+        .call(
+            "session.new_split",
+            of_session(json!({
+                "anchor_id": first, "direction": "horizontal", "side": "after",
+                "layout": shell(), "ratio": 0.25,
+            })),
+        )
+        .await
+        .unwrap();
+    let second = split.payload["block_ids"][0].as_str().unwrap().to_owned();
+    let shown = laid_out(&*layout, "the split", |workspace| {
+        workspace.windows[0].centre.tabs[0].pane_ids().len() == 2
+    })
+    .await;
+    let Node::Split(row) = &shown.windows[0].centre.tabs[0].root else {
+        panic!("two blocks are a split");
+    };
+    println!(
+        "a split asked for with ratio 0.25 has the shares {:?}",
+        row.ratios
+    );
+    assert_eq!(row.axis, Axis::Row);
+    assert_eq!(row.children[0].pane_ids(), [first_pane]);
+    let row_id = row.id;
+
+    let split = other
+        .call(
+            "session.new_split",
+            of_session(json!({
+                "anchor_id": second, "direction": "horizontal", "side": "after",
+                "layout": shell(),
+            })),
+        )
+        .await
+        .unwrap();
+    let third = split.payload["block_ids"][0].as_str().unwrap().to_owned();
+    let shown = laid_out(&*layout, "the second split", |workspace| {
+        workspace.windows[0].centre.tabs[0].pane_ids().len() == 3
+    })
+    .await;
+    validate(&shown).unwrap();
+    assert!(is_normalised(&shown));
+    let Node::Split(row) = &shown.windows[0].centre.tabs[0].root else {
+        panic!("three blocks in a row are a split");
+    };
+    assert_eq!(row.children.len(), 3, "{row:#?}");
+    assert_eq!(row.ratios.iter().sum::<u32>(), UNITS);
+    // The split is the one it was, and so is the first pane.
+    assert_eq!(row.id, row_id);
+    let panes = shown.windows[0].centre.tabs[0].pane_ids();
+    assert_eq!(panes[0], first_pane);
+    let (second_pane, third_pane) = (panes[1], panes[2]);
+    assert_eq!(shown.sessions().len(), 3);
+
+    // A split the other way stays a split of its own.
+    other
+        .call(
+            "session.new_split",
+            of_session(json!({
+                "anchor_id": third, "direction": "vertical", "side": "before",
+                "layout": shell(),
+            })),
+        )
+        .await
+        .unwrap();
+    let shown = laid_out(&*layout, "the split the other way", |workspace| {
+        workspace.windows[0].centre.tabs[0].pane_ids().len() == 4
+    })
+    .await;
+    assert!(is_normalised(&shown));
+    let Node::Split(row) = &shown.windows[0].centre.tabs[0].root else {
+        panic!("a split");
+    };
+    let Node::Split(column) = &row.children[2] else {
+        panic!("the third child is a split of its own: {row:#?}");
+    };
+    assert_eq!(column.axis, Axis::Column);
+    assert_eq!(column.children[1].pane_ids(), [third_pane]);
+
+    // Names: the window's, and a block's.
+    let window = other
+        .call("session.view", of_session(json!({})))
+        .await
+        .unwrap()
+        .payload["windows"][0]["window_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    other
+        .call(
+            "session.set_window_label",
+            of_session(json!({ "window_id": window, "label": "lume-live-tab" })),
+        )
+        .await
+        .unwrap();
+    other
+        .call(
+            "session.set_block_label",
+            of_session(json!({ "block_id": second, "label": "logs" })),
+        )
+        .await
+        .unwrap();
+    let shown = laid_out(&*layout, "the names", |workspace| {
+        workspace.windows[0].centre.tabs[0].title.as_deref() == Some("lume-live-tab")
+            && workspace.pane(second_pane).unwrap().title.as_deref() == Some("logs")
+    })
+    .await;
+    assert_eq!(shown.pane(first_pane).unwrap().title, None);
+
+    // Focus and zoom.
+    other
+        .call(
+            "session.focus_block",
+            of_session(json!({ "block_id": second })),
+        )
+        .await
+        .unwrap();
+    laid_out(&*layout, "the focus", |workspace| {
+        workspace.windows[0].focus == Some(second_pane)
+    })
+    .await;
+    other
+        .call(
+            "session.zoom_block",
+            of_session(json!({ "block_id": second, "zoom": true })),
+        )
+        .await
+        .unwrap();
+    laid_out(&*layout, "the zoom", |workspace| {
+        workspace.windows[0].centre.tabs[0].zoomed == Some(second_pane)
+    })
+    .await;
+    other
+        .call(
+            "session.zoom_block",
+            of_session(json!({ "block_id": second, "zoom": false })),
+        )
+        .await
+        .unwrap();
+    laid_out(&*layout, "the end of the zoom", |workspace| {
+        workspace.windows[0].centre.tabs[0].zoomed.is_none()
+    })
+    .await;
+
+    // A block floats, is put away and brought back.
+    let floated = other
+        .call(
+            "session.float_block",
+            of_session(json!({ "block_id": second, "bounds": [0.25, 0.125, 0.5, 0.5] })),
+        )
+        .await
+        .unwrap();
+    let layer = floated.payload["layer_id"].as_str().unwrap().to_owned();
+    let shown = laid_out(&*layout, "the floating block", |workspace| {
+        workspace.windows[0].floating.len() == 1
+    })
+    .await;
+    validate(&shown).unwrap();
+    let floating = &shown.windows[0].floating[0];
+    assert_eq!(floating.pane.id, second_pane);
+    assert_eq!(
+        (
+            floating.rect.x,
+            floating.rect.y,
+            floating.rect.w,
+            floating.rect.h
+        ),
+        (UNITS / 4, UNITS / 8, UNITS / 2, UNITS / 2)
+    );
+    assert_eq!(floating.minimised, None);
+    assert_eq!(shown.windows[0].centre.tabs[0].pane_ids().len(), 3);
+    other
+        .call(
+            "session.set_layer_state",
+            of_session(json!({ "layer_id": layer, "state": "minimized" })),
+        )
+        .await
+        .unwrap();
+    let shown = laid_out(&*layout, "the floating block put away", |workspace| {
+        workspace.windows[0].floating[0].minimised == Some(Minimised::Floating)
+    })
+    .await;
+    validate(&shown).unwrap();
+    assert_ne!(shown.windows[0].focus, Some(second_pane));
+
+    // A second window is a second tab, on show; what floats over the first is not
+    // shown with it.
+    let opened = other
+        .call(
+            "session.new_window",
+            of_session(json!({ "layout": shell(), "window_label": "lume-live-second" })),
+        )
+        .await
+        .unwrap();
+    let new_window = opened.payload["window_id"].as_str().unwrap().to_owned();
+    let shown = laid_out(&*layout, "the second window", |workspace| {
+        workspace.windows[0].centre.tabs.len() == 2
+    })
+    .await;
+    validate(&shown).unwrap();
+    let centre = &shown.windows[0].centre;
+    assert_eq!(centre.active, Some(centre.tabs[1].id));
+    assert_eq!(centre.tabs[1].title.as_deref(), Some("lume-live-second"));
+    assert!(shown.windows[0].floating.is_empty());
+    assert_eq!(shown.windows.len(), 1);
+    let first_tab = centre.tabs[0].id;
+
+    // The tabs change places, and the first is shown again with what floats over it.
+    other
+        .call(
+            "session.move_window",
+            of_session(json!({ "window_id": new_window, "before_window_id": window })),
+        )
+        .await
+        .unwrap();
+    other
+        .call(
+            "session.focus_window",
+            of_session(json!({ "window_id": window })),
+        )
+        .await
+        .unwrap();
+    let shown = laid_out(&*layout, "the first window on show again", |workspace| {
+        let centre = &workspace.windows[0].centre;
+        centre.tabs[1].id == first_tab && centre.active == Some(first_tab)
+    })
+    .await;
+    assert_eq!(shown.windows[0].floating.len(), 1);
+
+    other
+        .call(
+            "session.close_window",
+            of_session(json!({ "window_id": new_window })),
+        )
+        .await
+        .unwrap();
+    let shown = laid_out(&*layout, "the second window closed", |workspace| {
+        workspace.windows[0].centre.tabs.len() == 1
+    })
+    .await;
+    validate(&shown).unwrap();
+    // After all of it the first pane is the one it was, showing the session it showed.
+    assert_eq!(shown.windows[0].centre.tabs[0].id, first_tab);
+    assert_eq!(shown.windows[0].centre.tabs[0].pane_ids()[0], first_pane);
+
+    // Every step came as a step of the one layout, none as a new one.
+    let mut steps = 0;
+    while let Ok(Some(event)) =
+        tokio::time::timeout(Duration::from_millis(200), changes.next()).await
+    {
+        assert!(matches!(event, LayoutEvent::Changed { .. }), "{event:?}");
+        steps += 1;
+    }
+    assert!(steps >= 10, "only {steps} steps were reported");
+
+    // The session is destroyed: the empty window, whole.
+    other
+        .call("session.destroy", of_session(json!({})))
+        .await
+        .unwrap();
+    let shown = laid_out(&*layout, "the session gone", |workspace| {
+        workspace.windows[0].centre.tabs.is_empty()
+    })
+    .await;
+    assert!(shown.windows[0].floating.is_empty());
+    assert_eq!(backend.shown_session(), None);
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(20), changes.next()).await,
+        Ok(Some(LayoutEvent::Reset(_)))
+    ));
     backend.shutdown();
 }
