@@ -7,10 +7,10 @@
 //!
 //! What a server has no way to do is refused here, before anything is asked.
 
-use lume_layout::tuning::SHARE_MIN;
+use lume_layout::tuning::{FLOAT_DEFAULT, SHARE_MIN};
 use lume_layout::{
     Axis, Dir, FocusTarget, Intent, IntentError, LayoutError, NewContent, Node, PaneId, Place,
-    SpawnRequest, UNITS, Workspace,
+    SpawnRequest, TabGroup, TabId, TabTarget, UNITS, UnitRect, Workspace,
 };
 use lume_proto::Launcher;
 use serde_json::{Map, Value, json};
@@ -29,14 +29,30 @@ const SAME_SHARE: f64 = 2.0 / UNITS as f64;
 pub(crate) struct Call {
     pub method: &'static str,
     pub args: Value,
+    /// An argument that is something the call before this one made: the argument's
+    /// name, and the name the call before answers with it under.
+    pub takes: Option<(&'static str, &'static str)>,
+}
+
+impl Call {
+    fn new(method: &'static str, args: Value) -> Self {
+        Self {
+            method,
+            args,
+            takes: None,
+        }
+    }
 }
 
 /// What an intent makes that the application is told the number of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Makes {
     Nothing,
-    /// A pane: the first block the last call says it made.
+    /// A pane: the first block the first call says it made.
     Pane,
+    /// A tab and the pane in it: the window and the first block the first call says
+    /// it made.
+    Tab,
 }
 
 /// The calls that carry out an intent, in order.
@@ -49,7 +65,7 @@ pub(crate) struct Plan {
 impl Plan {
     fn one(method: &'static str, args: Value) -> Self {
         Self {
-            calls: vec![Call { method, args }],
+            calls: vec![Call::new(method, args)],
             makes: Makes::Nothing,
         }
     }
@@ -221,15 +237,15 @@ fn resize(
         let (Some(before), Some(after)) = (before, after) else {
             continue;
         };
-        calls.push(Call {
-            method: "session.resize_pane",
-            args: asked.of_session(json!({
+        calls.push(Call::new(
+            "session.resize_pane",
+            asked.of_session(json!({
                 "direction": direction_of(found.axis),
                 "before_block_id": asked.block(before)?,
                 "after_block_id": asked.block(after)?,
                 "ratio": fraction(wanted * f64::from(UNITS)),
             })),
-        });
+        ));
     }
     Ok(calls)
 }
@@ -259,9 +275,9 @@ pub(crate) fn plan(
                 f64::from(UNITS) - new
             };
             Plan {
-                calls: vec![Call {
-                    method: "session.new_split",
-                    args: asked.of_session(json!({
+                calls: vec![Call::new(
+                    "session.new_split",
+                    asked.of_session(json!({
                         "anchor_id": asked.tiled(*pane)?,
                         "direction": direction,
                         "side": side,
@@ -269,7 +285,7 @@ pub(crate) fn plan(
                         "layout": new_layout(content)?,
                         "focus": true,
                     })),
-                }],
+                )],
                 makes: Makes::Pane,
             }
         }
@@ -356,7 +372,298 @@ pub(crate) fn plan(
                 "label": title.as_deref().unwrap_or_default(),
             })),
         ),
-        _ => return Err(unsupported("do this yet")),
+        Intent::TabNew {
+            content,
+            index,
+            activate,
+            group,
+            ..
+        } => {
+            if group.is_some() {
+                return Err(unsupported("gather tabs in groups"));
+            }
+            let mut calls = vec![Call::new(
+                "session.new_window",
+                asked.of_session(json!({ "layout": new_layout(content)?, "focus": activate })),
+            )];
+            // A server puts a new window after the last. Anywhere else it is moved to.
+            let tabs = &asked.centre()?.tabs;
+            if let Some(after) = index.and_then(|index| tabs.get(index as usize)) {
+                calls.push(Call {
+                    method: "session.move_window",
+                    args: asked.of_session(json!({ "before_window_id": asked.window(after.id)? })),
+                    takes: Some(("window_id", "window_id")),
+                });
+            }
+            Plan {
+                calls,
+                makes: Makes::Tab,
+            }
+        }
+        Intent::TabClose { tab } => Plan::one(
+            "session.close_window",
+            asked.of_session(json!({ "window_id": asked.window(*tab)? })),
+        ),
+        Intent::TabsClose { tabs } => {
+            let mut calls = Vec::with_capacity(tabs.len());
+            for tab in tabs {
+                calls.push(Call::new(
+                    "session.close_window",
+                    asked.of_session(json!({ "window_id": asked.window(*tab)? })),
+                ));
+            }
+            Plan {
+                calls,
+                makes: Makes::Nothing,
+            }
+        }
+        Intent::TabMove { tab, index } => asked.place(*tab, *index)?,
+        Intent::TabPlace { tab, index, group } => {
+            if group.is_some() {
+                return Err(unsupported("gather tabs in groups"));
+            }
+            asked.place(*tab, *index)?
+        }
+        Intent::TabRename { tab, title } => Plan::one(
+            "session.set_window_label",
+            asked.of_session(json!({
+                "window_id": asked.window(*tab)?,
+                // An empty name gives the window the server's own name for it again.
+                "label": title.as_deref().unwrap_or_default(),
+            })),
+        ),
+        Intent::TabActivate { target } => {
+            let centre = asked.centre()?;
+            let shown = centre.active.and_then(|tab| centre.index_of(tab));
+            let count = centre.tabs.len();
+            let tab = match target {
+                TabTarget::Id { tab } => *tab,
+                TabTarget::Index { index, .. } => match centre.tabs.get(*index as usize) {
+                    Some(tab) => tab.id,
+                    None => {
+                        return Err(IntentError::BadIndex {
+                            index: *index,
+                            len: count,
+                        }
+                        .into());
+                    }
+                },
+                // The one after the tab on show, or the one before, around the ends.
+                TabTarget::Next { .. } | TabTarget::Previous { .. } => {
+                    let Some(shown) = shown else {
+                        return Err(unsupported("show a tab where there are none"));
+                    };
+                    let step = if matches!(target, TabTarget::Next { .. }) {
+                        1
+                    } else {
+                        count - 1
+                    };
+                    centre.tabs[(shown + step) % count].id
+                }
+            };
+            Plan::one(
+                "session.focus_window",
+                asked.of_session(json!({ "window_id": asked.window(tab)? })),
+            )
+        }
+        Intent::Float { pane, rect } => match asked.names.layers.get(pane) {
+            // It floats already: with a place given, that is where it goes.
+            Some(_) => match rect {
+                Some(rect) => asked.float_to(*pane, *rect)?,
+                None => Plan {
+                    calls: Vec::new(),
+                    makes: Makes::Nothing,
+                },
+            },
+            None => Plan::one(
+                "session.float_block",
+                asked.of_session(json!({
+                    "block_id": asked.block(*pane)?,
+                    "bounds": bounds(rect.unwrap_or(FLOAT_PLACE)),
+                })),
+            ),
+        },
+        Intent::FloatMove { pane, rect } => asked.float_to(*pane, *rect)?,
+        Intent::Minimise { pane, on } => match asked.names.layers.get(pane) {
+            Some(_) => {
+                let mut args = json!({
+                    "layer_id": asked.layer(*pane)?,
+                    "state": if *on { "minimized" } else { "normal" },
+                });
+                if !on {
+                    // Brought back, it has the keyboard, as a pane brought back here has.
+                    args["focus"] = json!(true);
+                }
+                Plan::one("session.set_layer_state", asked.of_session(args))
+            }
+            None if *on => Plan {
+                // A server puts away what floats. A pane among the tiles floats first.
+                calls: vec![
+                    Call::new(
+                        "session.float_block",
+                        asked.of_session(json!({
+                            "block_id": asked.block(*pane)?,
+                            "bounds": bounds(FLOAT_PLACE),
+                        })),
+                    ),
+                    Call {
+                        method: "session.set_layer_state",
+                        args: asked.of_session(json!({ "state": "minimized" })),
+                        takes: Some(("layer_id", "layer_id")),
+                    },
+                ],
+                makes: Makes::Nothing,
+            },
+            // A pane among the tiles is not put away: there is nothing to bring back.
+            None => {
+                asked.block(*pane)?;
+                Plan {
+                    calls: Vec::new(),
+                    makes: Makes::Nothing,
+                }
+            }
+        },
+        Intent::Dock { pane, to } => {
+            if !asked.names.layers.contains_key(pane) {
+                asked.block(*pane)?;
+                return Err(IntentError::NotFloating(*pane).into());
+            }
+            let (anchor, edge) = match to {
+                Some(Place::Beside { pane, edge }) => (*pane, *edge),
+                Some(Place::NewTab { .. }) => {
+                    return Err(unsupported("move a pane into a tab of its own"));
+                }
+                // Beside the pane of the tab on show that last had the keyboard, or
+                // its first.
+                None => {
+                    let tab = asked.centre()?.active_tab();
+                    let anchor = tab
+                        .and_then(|tab| tab.last_focus)
+                        .or_else(|| tab.map(|tab| tab.first_pane()));
+                    match anchor {
+                        Some(anchor) => (anchor, Dir::Right),
+                        None => return Err(unsupported("put a pane back where there is no tab")),
+                    }
+                }
+            };
+            let (direction, side) = towards(edge);
+            Plan::one(
+                "session.move_block",
+                asked.of_session(json!({
+                    "block_id": asked.block(*pane)?,
+                    "anchor_block_id": asked.tiled(anchor)?,
+                    "direction": direction,
+                    "side": side,
+                })),
+            )
+        }
+        Intent::PaneIcon { .. } => return Err(unsupported("give a pane a picture")),
+        Intent::TabColor { .. } | Intent::TabLock { .. } | Intent::TabMute { .. } => {
+            return Err(unsupported("colour, lock or mute a tab"));
+        }
+        Intent::TabMerge { .. } => return Err(unsupported("merge one tab into another")),
+        Intent::GroupNew { .. }
+        | Intent::GroupSet { .. }
+        | Intent::GroupMove { .. }
+        | Intent::GroupUngroup { .. }
+        | Intent::GroupClose { .. }
+        | Intent::GroupReopen { .. }
+        | Intent::GroupForget { .. } => return Err(unsupported("gather tabs in groups")),
+        Intent::ScratchShow { .. } | Intent::ScratchHide {} => {
+            return Err(unsupported("keep a scratch terminal"));
+        }
+        Intent::WindowNew { .. } | Intent::WindowClose { .. } => {
+            return Err(unsupported("be shown in more than one window"));
+        }
+        // What is the application's own to do never comes here.
+        _ => return Err(unsupported("do this")),
     };
     Ok(plan)
+}
+
+/// Where a pane floats that was not told where: in the middle.
+const FLOAT_PLACE: UnitRect = UnitRect {
+    x: (UNITS - FLOAT_DEFAULT) / 2,
+    y: (UNITS - FLOAT_DEFAULT) / 2,
+    w: FLOAT_DEFAULT,
+    h: FLOAT_DEFAULT,
+};
+
+/// A rectangle as a server takes the bounds of a layer: x, y, width and height as
+/// fractions of the window, inside it.
+fn bounds(rect: UnitRect) -> Value {
+    let whole = f64::from(UNITS);
+    let w = rect.w.clamp(1, UNITS);
+    let h = rect.h.clamp(1, UNITS);
+    let x = rect.x.min(UNITS - w);
+    let y = rect.y.min(UNITS - h);
+    json!([
+        f64::from(x) / whole,
+        f64::from(y) / whole,
+        f64::from(w) / whole,
+        f64::from(h) / whole,
+    ])
+}
+
+impl Asked<'_> {
+    /// The tabs of the one window a server's layout is shown in.
+    fn centre(&self) -> Result<&TabGroup, LayoutError> {
+        match self.workspace.windows.first() {
+            Some(window) => Ok(&window.centre),
+            None => Err(unsupported("be changed while it is not shown")),
+        }
+    }
+
+    /// The window a tab is.
+    fn window(&self, tab: TabId) -> Result<&str, LayoutError> {
+        match self.names.tabs.get(&tab) {
+            Some(window) => Ok(window),
+            None => Err(IntentError::NoSuchTab(tab).into()),
+        }
+    }
+
+    /// The layer of a floating pane, which is the pane's alone.
+    fn layer(&self, pane: PaneId) -> Result<&str, LayoutError> {
+        match self.names.layers.get(&pane) {
+            Some(layer) if layer.alone => Ok(&layer.layer_id),
+            // A layer is moved, sized and put away as a whole, and here each of its
+            // blocks is a pane of its own.
+            Some(_) => Err(unsupported(
+                "move or put away one of several panes that float together",
+            )),
+            None => {
+                self.block(pane)?;
+                Err(IntentError::NotFloating(pane).into())
+            }
+        }
+    }
+
+    /// Gives a floating pane another place.
+    fn float_to(&self, pane: PaneId, rect: UnitRect) -> Result<Plan, LayoutError> {
+        if rect.w == 0 || rect.h == 0 {
+            return Err(IntentError::BadRect.into());
+        }
+        Ok(Plan::one(
+            "session.resize_layer",
+            self.of_session(json!({ "layer_id": self.layer(pane)?, "bounds": bounds(rect) })),
+        ))
+    }
+
+    /// Puts a tab at a place among the tabs, counted without it.
+    fn place(&self, tab: TabId, index: u32) -> Result<Plan, LayoutError> {
+        let window = self.window(tab)?;
+        let others: Vec<TabId> = self
+            .centre()?
+            .tabs
+            .iter()
+            .map(|other| other.id)
+            .filter(|other| *other != tab)
+            .collect();
+        let mut args = json!({ "window_id": window });
+        // Before the tab that is there now; with none there, at the end.
+        if let Some(after) = others.get(index as usize) {
+            args["before_window_id"] = json!(self.window(*after)?);
+        }
+        Ok(Plan::one("session.move_window", self.of_session(args)))
+    }
 }

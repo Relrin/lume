@@ -7,11 +7,12 @@ mod common;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use common::views::{across, down, layer, leaf, leaf_at, view, window};
+use common::views::{across, down, layer, leaf, leaf_at, tiled, view, window};
 use common::{Listener, SESSION, Served, Tell, World, client, serve, streams, until};
 use lume_layout::{
-    Dir, FocusTarget, Intent, LayoutAuthority, LayoutError, LayoutSnapshot, NewContent,
-    PaneContent, PaneId, Place, SpawnRequest, SplitId, UNITS, WindowId,
+    Dir, FocusTarget, GroupId, Intent, LayoutAuthority, LayoutError, LayoutSnapshot, NewContent,
+    PaneContent, PaneId, Place, SpawnRequest, SplitId, TabColor, TabId, TabTarget, UNITS, UnitRect,
+    WindowId,
 };
 use lume_proto::{Launcher, TermSize};
 use lume_rex::tuning::APPLY_SETTLE;
@@ -684,4 +685,516 @@ async fn nothing_is_asked_of_a_server_that_cannot_be_reached() {
     .unwrap_err();
     assert_eq!(refused, LayoutError::Closed);
     assert_eq!(refused.code(), "disconnected");
+}
+
+/// Three windows. Over the first, f floats alone and g and h float together.
+fn three_windows() -> Value {
+    view(vec![
+        window(
+            "window:1",
+            vec![
+                layer("layer:t", "tiled", layout_of_four()),
+                layer(
+                    "layer:f",
+                    "floating",
+                    leaf_at("block:f", [0.25, 0.25, 0.5, 0.5]),
+                ),
+                layer(
+                    "layer:g",
+                    "floating",
+                    across(
+                        "split:g",
+                        0.5,
+                        leaf_at("block:g", [0.0, 0.0, 0.25, 0.5]),
+                        leaf_at("block:h", [0.25, 0.0, 0.25, 0.5]),
+                    ),
+                ),
+            ],
+        ),
+        tiled("window:2", leaf("block:x")),
+        tiled("window:3", leaf("block:y")),
+    ])
+}
+
+impl Showing {
+    async fn tabs(&self) -> Vec<TabId> {
+        self.view().await.workspace.windows[0]
+            .centre
+            .tabs
+            .iter()
+            .map(|tab| tab.id)
+            .collect()
+    }
+}
+
+fn rect(x: u32, y: u32, w: u32, h: u32) -> UnitRect {
+    let eighth = UNITS / 8;
+    UnitRect {
+        x: x * eighth,
+        y: y * eighth,
+        w: w * eighth,
+        h: h * eighth,
+    }
+}
+
+#[tokio::test]
+async fn each_intent_about_tabs_and_floating_panes_is_the_call_a_server_takes_it_as() {
+    let showing = Showing::of(world_of(three_windows())).await;
+    let panes = showing.panes().await;
+    let (a, f) = (panes[0], panes[4]);
+    let tabs = showing.tabs().await;
+    let (one, two, three) = (tabs[0], tabs[1], tabs[2]);
+    let of = |args: Value| {
+        let mut args = args;
+        args["session_id"] = json!(SESSION);
+        args
+    };
+    let activate = |target: TabTarget| Intent::TabActivate { target };
+
+    let asked: Vec<(Intent, &str, Value)> = vec![
+        (
+            Intent::TabClose { tab: two },
+            "session.close_window",
+            json!({ "window_id": "window:2" }),
+        ),
+        // To the front: before the tab that is first.
+        (
+            Intent::TabMove {
+                tab: three,
+                index: 0,
+            },
+            "session.move_window",
+            json!({ "window_id": "window:3", "before_window_id": "window:1" }),
+        ),
+        // To the end: before nothing.
+        (
+            Intent::TabMove { tab: one, index: 2 },
+            "session.move_window",
+            json!({ "window_id": "window:1" }),
+        ),
+        // Between the two others, which are counted without it.
+        (
+            Intent::TabMove { tab: one, index: 1 },
+            "session.move_window",
+            json!({ "window_id": "window:1", "before_window_id": "window:3" }),
+        ),
+        (
+            Intent::TabPlace {
+                tab: two,
+                index: 0,
+                group: None,
+            },
+            "session.move_window",
+            json!({ "window_id": "window:2", "before_window_id": "window:1" }),
+        ),
+        (
+            Intent::TabRename {
+                tab: two,
+                title: Some("build".to_owned()),
+            },
+            "session.set_window_label",
+            json!({ "window_id": "window:2", "label": "build" }),
+        ),
+        (
+            Intent::TabRename {
+                tab: two,
+                title: None,
+            },
+            "session.set_window_label",
+            json!({ "window_id": "window:2", "label": "" }),
+        ),
+        (
+            activate(TabTarget::Id { tab: two }),
+            "session.focus_window",
+            json!({ "window_id": "window:2" }),
+        ),
+        (
+            activate(TabTarget::Index {
+                window: window_id(),
+                index: 2,
+            }),
+            "session.focus_window",
+            json!({ "window_id": "window:3" }),
+        ),
+        // The first tab is on show: the next is the second, the one before the last.
+        (
+            activate(TabTarget::Next {
+                window: window_id(),
+            }),
+            "session.focus_window",
+            json!({ "window_id": "window:2" }),
+        ),
+        (
+            activate(TabTarget::Previous {
+                window: window_id(),
+            }),
+            "session.focus_window",
+            json!({ "window_id": "window:3" }),
+        ),
+        // Not told where, a pane floats in the middle.
+        (
+            Intent::Float {
+                pane: a,
+                rect: None,
+            },
+            "session.float_block",
+            json!({ "block_id": "block:a", "bounds": [0.2, 0.2, 0.6, 0.6] }),
+        ),
+        (
+            Intent::Float {
+                pane: a,
+                rect: Some(rect(1, 2, 4, 2)),
+            },
+            "session.float_block",
+            json!({ "block_id": "block:a", "bounds": [0.125, 0.25, 0.5, 0.25] }),
+        ),
+        // One that floats already is given the place.
+        (
+            Intent::Float {
+                pane: f,
+                rect: Some(rect(0, 0, 4, 4)),
+            },
+            "session.resize_layer",
+            json!({ "layer_id": "layer:f", "bounds": [0.0, 0.0, 0.5, 0.5] }),
+        ),
+        (
+            Intent::FloatMove {
+                pane: f,
+                rect: rect(2, 1, 4, 6),
+            },
+            "session.resize_layer",
+            json!({ "layer_id": "layer:f", "bounds": [0.25, 0.125, 0.5, 0.75] }),
+        ),
+        (
+            Intent::Minimise { pane: f, on: true },
+            "session.set_layer_state",
+            json!({ "layer_id": "layer:f", "state": "minimized" }),
+        ),
+        (
+            Intent::Minimise { pane: f, on: false },
+            "session.set_layer_state",
+            json!({ "layer_id": "layer:f", "state": "normal", "focus": true }),
+        ),
+        (
+            Intent::Dock {
+                pane: f,
+                to: Some(Place::Beside {
+                    pane: a,
+                    edge: Dir::Left,
+                }),
+            },
+            "session.move_block",
+            json!({
+                "block_id": "block:f", "anchor_block_id": "block:a",
+                "direction": "horizontal", "side": "before",
+            }),
+        ),
+        // Not told where: to the right of the tab's first pane.
+        (
+            Intent::Dock { pane: f, to: None },
+            "session.move_block",
+            json!({
+                "block_id": "block:f", "anchor_block_id": "block:a",
+                "direction": "horizontal", "side": "after",
+            }),
+        ),
+    ];
+    let count = asked.len();
+    for (intent, method, args) in asked {
+        let applied = showing.layout.apply(intent.clone()).await.unwrap();
+        assert_eq!(showing.last(method), of(args), "{intent:?}");
+        assert_eq!(applied.created, Default::default(), "{intent:?}");
+    }
+    assert_eq!(showing.changes().len(), count);
+
+    // Several tabs closed are closed one by one.
+    showing
+        .layout
+        .apply(Intent::TabsClose {
+            tabs: vec![two, three],
+        })
+        .await
+        .unwrap();
+    let closed = showing.served.asked("session.close_window");
+    let closed: Vec<&Value> = closed
+        .iter()
+        .rev()
+        .take(2)
+        .map(|args| &args["window_id"])
+        .collect();
+    assert_eq!(closed, [&json!("window:3"), &json!("window:2")]);
+
+    // What changes nothing asks nothing: a pane among the tiles is not brought back,
+    // and one that floats and is given no place stays.
+    let before = showing.changes().len();
+    for intent in [
+        Intent::Minimise { pane: a, on: false },
+        Intent::Float {
+            pane: f,
+            rect: None,
+        },
+    ] {
+        showing.layout.apply(intent).await.unwrap();
+    }
+    assert_eq!(showing.changes().len(), before);
+}
+
+#[tokio::test]
+async fn a_new_tab_is_answered_with_the_tab_and_the_pane_the_server_made() {
+    let mut world = world_of(three_windows());
+    let mut after = three_windows();
+    after["windows"]
+        .as_array_mut()
+        .unwrap()
+        .push(tiled("window:9", leaf("block:n")));
+    after["active_window_id"] = json!("window:9");
+    world.then.push_back(after);
+    world.extra.insert(
+        "session.new_window".to_owned(),
+        json!({ "window_id": "window:9", "block_ids": ["block:n"] }),
+    );
+    let showing = Showing::of(world).await;
+    let tabs = showing.tabs().await;
+    let new_tab = |index: Option<u32>, activate: bool| Intent::TabNew {
+        window: window_id(),
+        content: terminal(),
+        index,
+        activate,
+        group: None,
+    };
+
+    let applied = showing.layout.apply(new_tab(None, true)).await.unwrap();
+    assert_eq!(
+        showing.last("session.new_window"),
+        json!({ "session_id": SESSION, "focus": true, "layout": {"block": {"flavor": SHELL}} })
+    );
+    assert!(showing.served.asked("session.move_window").is_empty());
+    let now = showing.view().await;
+    let centre = &now.workspace.windows[0].centre;
+    let made = applied.created.tab.expect("the new tab's number");
+    assert!(!tabs.contains(&made));
+    assert_eq!(centre.tabs.last().unwrap().id, made);
+    assert_eq!(centre.active, Some(made));
+    assert_eq!(
+        applied.created.pane,
+        Some(centre.tabs.last().unwrap().first_pane())
+    );
+    assert_eq!((applied.epoch, applied.revision), (now.epoch, now.revision));
+
+    // At a place: made, then moved before the tab that is there, by the name the
+    // server gave it.
+    showing.layout.apply(new_tab(Some(1), false)).await.unwrap();
+    assert_eq!(showing.last("session.new_window")["focus"], false);
+    assert_eq!(
+        showing.last("session.move_window"),
+        json!({
+            "session_id": SESSION, "window_id": "window:9", "before_window_id": "window:2",
+        })
+    );
+    // Past the last, it stays where the server put it.
+    showing.layout.apply(new_tab(Some(99), true)).await.unwrap();
+    assert_eq!(showing.served.asked("session.move_window").len(), 1);
+}
+
+#[tokio::test]
+async fn a_pane_among_the_tiles_floats_before_it_is_put_away() {
+    let mut world = world_of(three_windows());
+    world.extra.insert(
+        "session.float_block".to_owned(),
+        json!({ "layer_id": "layer:new" }),
+    );
+    let showing = Showing::of(world).await;
+    let a = showing.panes().await[0];
+
+    showing
+        .layout
+        .apply(Intent::Minimise { pane: a, on: true })
+        .await
+        .unwrap();
+    assert_eq!(
+        showing.changes(),
+        ["session.float_block", "session.set_layer_state"]
+    );
+    assert_eq!(showing.last("session.float_block")["block_id"], "block:a");
+    assert_eq!(
+        showing.last("session.set_layer_state"),
+        json!({ "session_id": SESSION, "layer_id": "layer:new", "state": "minimized" })
+    );
+}
+
+#[tokio::test]
+async fn an_answer_that_lacks_what_the_next_call_needs_ends_it_there() {
+    // The pretend server answers `session.float_block` with a revision and no layer.
+    let mut world = world_of(three_windows());
+    let mut after = three_windows();
+    after["windows"][0]["layers"][0]["blocks"][0]["label"] = json!("changed by the first call");
+    world.then.push_back(after);
+    let showing = Showing::of(world).await;
+    let a = showing.panes().await[0];
+    let refused = showing
+        .layout
+        .apply(Intent::Minimise { pane: a, on: true })
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), "protocol_error");
+    assert_eq!(showing.changes(), ["session.float_block"]);
+    // What the call before it changed is in the layout when the refusal comes.
+    let now = showing.view().await;
+    assert_eq!(
+        now.workspace.pane(a).unwrap().title.as_deref(),
+        Some("changed by the first call")
+    );
+}
+
+#[tokio::test]
+async fn what_a_server_has_no_tabs_or_layers_for_is_refused_without_asking_it() {
+    let showing = Showing::of(world_of(three_windows())).await;
+    let panes = showing.panes().await;
+    let (a, f, g) = (panes[0], panes[4], panes[5]);
+    let tabs = showing.tabs().await;
+    let (one, two) = (tabs[0], tabs[1]);
+    let gone = TabId::new(9999);
+    let group = GroupId::new(7);
+    let window = window_id();
+
+    let refusals: Vec<(Intent, &str)> = vec![
+        (Intent::TabClose { tab: gone }, "not_found"),
+        (
+            Intent::TabsClose {
+                tabs: vec![one, gone],
+            },
+            "not_found",
+        ),
+        (
+            Intent::TabMove {
+                tab: gone,
+                index: 0,
+            },
+            "not_found",
+        ),
+        (
+            Intent::TabRename {
+                tab: gone,
+                title: None,
+            },
+            "not_found",
+        ),
+        (
+            Intent::TabActivate {
+                target: TabTarget::Index { window, index: 3 },
+            },
+            "invalid_intent",
+        ),
+        // Two blocks that float together are one layer there and two panes here.
+        (
+            Intent::FloatMove {
+                pane: g,
+                rect: rect(0, 0, 4, 4),
+            },
+            "unsupported",
+        ),
+        (Intent::Minimise { pane: g, on: true }, "unsupported"),
+        (
+            Intent::FloatMove {
+                pane: a,
+                rect: rect(0, 0, 4, 4),
+            },
+            "invalid_intent",
+        ),
+        (
+            Intent::FloatMove {
+                pane: f,
+                rect: rect(0, 0, 0, 4),
+            },
+            "invalid_intent",
+        ),
+        (Intent::Dock { pane: a, to: None }, "invalid_intent"),
+        (
+            Intent::Dock {
+                pane: f,
+                to: Some(Place::NewTab {
+                    window,
+                    index: None,
+                }),
+            },
+            "unsupported",
+        ),
+        // Back beside another floating pane is not back among the tiles.
+        (
+            Intent::Dock {
+                pane: f,
+                to: Some(Place::Beside {
+                    pane: g,
+                    edge: Dir::Left,
+                }),
+            },
+            "invalid_intent",
+        ),
+        (
+            Intent::TabNew {
+                window,
+                content: terminal(),
+                index: None,
+                activate: true,
+                group: Some(group),
+            },
+            "unsupported",
+        ),
+        (
+            Intent::TabNew {
+                window,
+                content: NewContent::PluginView {
+                    plugin: "git-review".to_owned(),
+                    view: "changes".to_owned(),
+                    state: Value::Null,
+                },
+                index: None,
+                activate: true,
+                group: None,
+            },
+            "unsupported",
+        ),
+        (
+            Intent::TabPlace {
+                tab: one,
+                index: 0,
+                group: Some(group),
+            },
+            "unsupported",
+        ),
+        (
+            Intent::TabColor {
+                tab: one,
+                color: Some(TabColor::Teal),
+            },
+            "unsupported",
+        ),
+        (Intent::TabLock { tab: one, on: true }, "unsupported"),
+        (Intent::TabMute { tab: one, on: true }, "unsupported"),
+        (
+            Intent::TabMerge {
+                tab: one,
+                into: two,
+            },
+            "unsupported",
+        ),
+        (Intent::GroupNew { tab: one }, "unsupported"),
+        (Intent::GroupUngroup { group }, "unsupported"),
+        (Intent::ScratchHide {}, "unsupported"),
+        (
+            Intent::WindowNew {
+                content: terminal(),
+                bounds: None,
+            },
+            "unsupported",
+        ),
+        (Intent::WindowClose { window }, "unsupported"),
+    ];
+    let before = showing.view().await;
+    for (intent, code) in refusals {
+        let refused = showing.layout.apply(intent.clone()).await.unwrap_err();
+        assert_eq!(refused.code(), code, "{intent:?}: {refused}");
+    }
+    assert_eq!(showing.changes(), Vec::<String>::new());
+    assert_eq!(showing.view().await, before);
 }

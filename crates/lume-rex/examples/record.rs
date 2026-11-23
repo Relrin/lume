@@ -375,6 +375,93 @@ async fn main() -> Result<(), Failure> {
         recorder.settle().await?;
     }
     recorder.call("session.view", of_session()).await?;
+
+    // What changing floating panes and tabs takes: the third block floats, is moved,
+    // put away and brought back, and goes back among the tiles; a second window is
+    // made, named, moved and closed.
+    let window = view["payload"]["windows"][0]["window_id"]
+        .as_str()
+        .ok_or("no window")?
+        .to_owned();
+    let floated = recorder
+        .call(
+            "session.float_block",
+            of(json!({ "block_id": third, "bounds": [0.2, 0.2, 0.6, 0.6] })),
+        )
+        .await?;
+    let layer = floated["payload"]["layer_id"]
+        .as_str()
+        .ok_or("no layer")?
+        .to_owned();
+    recorder.settle().await?;
+    let floating = [
+        (
+            "session.resize_layer",
+            json!({ "layer_id": layer, "bounds": [0.25, 0.125, 0.5, 0.5] }),
+        ),
+        (
+            "session.set_layer_state",
+            json!({ "layer_id": layer, "state": "minimized" }),
+        ),
+    ];
+    for (method, args) in floating {
+        recorder.call(method, of(args)).await?;
+        recorder.settle().await?;
+    }
+    recorder.call("session.view", of_session()).await?;
+    recorder
+        .call(
+            "session.set_layer_state",
+            of(json!({ "layer_id": layer, "state": "normal", "focus": true })),
+        )
+        .await?;
+    recorder.settle().await?;
+    let opened = recorder
+        .call(
+            "session.new_window",
+            of(json!({ "layout": {"block": plain_shell()}, "focus": true })),
+        )
+        .await?;
+    let second_window = opened["payload"]["window_id"]
+        .as_str()
+        .ok_or("no second window")?
+        .to_owned();
+    recorder.settle().await?;
+    let tabs = [
+        (
+            "session.set_window_label",
+            json!({ "window_id": second_window, "label": "build" }),
+        ),
+        (
+            "session.move_window",
+            json!({ "window_id": second_window, "before_window_id": window }),
+        ),
+        ("session.move_window", json!({ "window_id": second_window })),
+        ("session.focus_window", json!({ "window_id": window })),
+    ];
+    for (method, args) in tabs {
+        recorder.call(method, of(args)).await?;
+        recorder.settle().await?;
+    }
+    // Two windows, the first on show with a block floating over it.
+    recorder.call("session.view", of_session()).await?;
+    recorder
+        .call(
+            "session.close_window",
+            of(json!({ "window_id": second_window })),
+        )
+        .await?;
+    recorder.settle().await?;
+    recorder
+        .call(
+            "session.move_block",
+            of(json!({
+                "block_id": third, "anchor_block_id": block,
+                "direction": "horizontal", "side": "after",
+            })),
+        )
+        .await?;
+    recorder.settle().await?;
     recorder
         .call("block.close", of(json!({ "block_id": third })))
         .await?;

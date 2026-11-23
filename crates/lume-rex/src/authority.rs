@@ -19,9 +19,10 @@ use async_trait::async_trait;
 use lume_layout::{
     Applied, ChangeSource, ChangeStream, Created, Intent, LayoutAuthority, LayoutError,
     LayoutEvent, LayoutSnapshot, LocalLayout, PaneId, SpawnFailure, SpawnRequest, Spawner, Started,
-    validate,
+    TabId, validate,
 };
 use lume_proto::BackendId;
+use serde_json::Value;
 
 use crate::api::View;
 use crate::backend::{Link, Seen, Shared};
@@ -255,32 +256,65 @@ impl LayoutAuthority for RexLayout {
         let control = self.shared.control().map_err(refusal)?;
 
         let mut revision = 0;
-        let mut made = None;
-        for call in plan.calls {
-            let answer = control
-                .call(call.method, call.args)
-                .await
-                .map_err(refusal)?;
+        // What the first call made, by the server's names: a window and a block.
+        let mut made = (None, None);
+        let mut before = Value::Null;
+        // Why the calls ended before the last, if they did.
+        let mut ended = None;
+        for (nth, mut call) in plan.calls.into_iter().enumerate() {
+            if let Some((argument, answered)) = call.takes {
+                let Some(taken) = before[answered].as_str() else {
+                    ended = Some(refusal(RexError::Protocol(format!(
+                        "the server's answer names no `{answered}`"
+                    ))));
+                    break;
+                };
+                call.args[argument] = Value::String(taken.to_owned());
+            }
+            let answer = match control.call(call.method, call.args).await {
+                Ok(answer) => answer,
+                Err(error) => {
+                    ended = Some(refusal(error));
+                    break;
+                }
+            };
             let reached = answer.payload["revision"].as_u64().unwrap_or(0);
             revision = revision.max(reached);
-            if plan.makes == Makes::Pane {
-                made = answer.payload["block_ids"][0].as_str().map(str::to_owned);
+            if nth == 0 && plan.makes != Makes::Nothing {
+                let named = |value: &Value| value.as_str().map(str::to_owned);
+                made = (
+                    named(&answer.payload["window_id"]).filter(|_| plan.makes == Makes::Tab),
+                    named(&answer.payload["block_ids"][0]),
+                );
             }
+            before = answer.payload;
         }
-        self.settle(&control, &session, revision).await;
+        // What the calls before a refused one changed is in the copy as well, before
+        // the refusal is answered: whoever asked sees what became of the layout.
+        if ended.is_none() || revision > 0 {
+            self.settle(&control, &session, revision).await;
+        }
 
         let mut held = self.held();
         self.publish(&mut held);
+        if let Some(refused) = ended {
+            return Err(refused);
+        }
         let Some(layout) = &held.layout else {
             return Err(LayoutError::Closed);
         };
         let snapshot = layout.snapshot();
+        // What the server made, as the copy now numbers it.
+        let (window, block) = made;
         let created = Created {
-            // The pane of the block the server made, as the copy now numbers it.
-            pane: made
+            pane: block
                 .and_then(|block| held.ids.known(&block))
                 .map(PaneId::new)
                 .filter(|pane| held.names.panes.contains_key(pane)),
+            tab: window
+                .and_then(|window| held.ids.known(&window))
+                .map(TabId::new)
+                .filter(|tab| held.names.tabs.contains_key(tab)),
             ..Created::default()
         };
         Ok(Applied {

@@ -255,6 +255,61 @@ fn requests() -> Vec<(&'static str, Value)> {
             "session.set_block_label",
             json!({ "session_id": "session:1", "block_id": "block:1", "label": "logs" }),
         ),
+        (
+            "session.new_window",
+            json!({
+                "session_id": "session:1", "focus": true,
+                "layout": {"block": {"flavor": "com.superlogical.terminal.shell"}},
+            }),
+        ),
+        (
+            "session.move_window",
+            json!({
+                "session_id": "session:1", "window_id": "window:2",
+                "before_window_id": "window:1",
+            }),
+        ),
+        (
+            "session.move_window",
+            json!({ "session_id": "session:1", "window_id": "window:1" }),
+        ),
+        (
+            "session.close_window",
+            json!({ "session_id": "session:1", "window_id": "window:1" }),
+        ),
+        (
+            "session.focus_window",
+            json!({ "session_id": "session:1", "window_id": "window:1" }),
+        ),
+        (
+            "session.set_window_label",
+            json!({ "session_id": "session:1", "window_id": "window:1", "label": "build" }),
+        ),
+        (
+            "session.float_block",
+            json!({
+                "session_id": "session:1", "block_id": "block:1",
+                "bounds": [0.2, 0.2, 0.6, 0.6],
+            }),
+        ),
+        (
+            "session.resize_layer",
+            json!({
+                "session_id": "session:1", "layer_id": "layer:1",
+                "bounds": [0.25, 0.125, 0.5, 0.5],
+            }),
+        ),
+        (
+            "session.set_layer_state",
+            json!({ "session_id": "session:1", "layer_id": "layer:1", "state": "minimized" }),
+        ),
+        (
+            "session.set_layer_state",
+            json!({
+                "session_id": "session:1", "layer_id": "layer:1", "state": "normal",
+                "focus": true,
+            }),
+        ),
     ]
 }
 

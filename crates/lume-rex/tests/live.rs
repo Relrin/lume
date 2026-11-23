@@ -12,7 +12,8 @@ use std::time::Duration;
 use common::{client, until};
 use lume_layout::{
     Axis, Dir, FocusTarget, Intent, LayoutAuthority, LayoutError, LayoutEvent, Minimised,
-    NewContent, Node, Place, SpawnRequest, UNITS, WindowId, Workspace, is_normalised, validate,
+    NewContent, Node, Place, SpawnRequest, TabTarget, UNITS, UnitRect, WindowId, Workspace,
+    is_normalised, validate,
 };
 use lume_proto::tuning::CREDIT_WINDOW;
 use lume_proto::{
@@ -1880,4 +1881,372 @@ async fn what_is_asked_of_a_real_sessions_layout_is_seen_by_another_client() {
         .await
         .unwrap();
     backend.shutdown();
+}
+
+/// The ids of a session's windows as another client sees them, in tab order.
+fn windows_of(view: &Value) -> Vec<String> {
+    view["windows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|window| window["window_id"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "needs a Rex server running on this machine"]
+async fn tabs_and_floating_panes_of_a_real_session_are_changed_from_here() {
+    let io = dial(&Endpoint::Local)
+        .await
+        .expect("is a Rex server running?");
+    let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
+    let (session, first_block) = session_with(&other, "lume-live-tabs", plain_shell()).await;
+
+    let backend = RexBackend::connect(BackendId("rex".to_owned()), Endpoint::Local, client());
+    backend.ready().await.unwrap();
+    until("the session is known", || {
+        backend.sessions().iter().any(|known| known.id == session)
+    })
+    .await;
+    backend.show_session(&session).await.unwrap();
+    let layout = backend.layout().unwrap();
+    let window = WindowId::new(1);
+    let now = || async { layout.view().await.unwrap().workspace };
+    let first_tab = now().await.windows[0].centre.tabs[0].id;
+    let first = now().await.windows[0].centre.tabs[0].first_pane();
+    let first_window = windows_of(&seen(&other, &session).await)[0].clone();
+    let new_tab = |index: Option<u32>, activate: bool| Intent::TabNew {
+        window,
+        content: plain_pane(),
+        index,
+        activate,
+        group: None,
+    };
+
+    // A new tab, on show: the answer has its number and its pane's.
+    let applied = layout.apply(new_tab(None, true)).await.unwrap();
+    let second_tab = applied.created.tab.expect("the new tab");
+    let shown = now().await;
+    validate(&shown).unwrap();
+    let centre = &shown.windows[0].centre;
+    assert_eq!(centre.tabs.len(), 2);
+    assert_eq!(centre.tabs[1].id, second_tab);
+    assert_eq!(centre.active, Some(second_tab));
+    assert_eq!(applied.created.pane, Some(centre.tabs[1].first_pane()));
+    let view = seen(&other, &session).await;
+    let second_window = windows_of(&view)[1].clone();
+    assert_eq!(view["active_window_id"], second_window.as_str());
+
+    // Its name, and no name.
+    layout
+        .apply(Intent::TabRename {
+            tab: second_tab,
+            title: Some("build".to_owned()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(seen(&other, &session).await["windows"][1]["label"], "build");
+    assert_eq!(
+        now().await.windows[0].centre.tabs[1].title.as_deref(),
+        Some("build")
+    );
+    layout
+        .apply(Intent::TabRename {
+            tab: second_tab,
+            title: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(now().await.windows[0].centre.tabs[1].title, None);
+
+    // A new tab at the front that is not put on show.
+    let applied = layout.apply(new_tab(Some(0), false)).await.unwrap();
+    let third_tab = applied.created.tab.unwrap();
+    let shown = now().await;
+    let order: Vec<_> = shown.windows[0]
+        .centre
+        .tabs
+        .iter()
+        .map(|tab| tab.id)
+        .collect();
+    assert_eq!(order, [third_tab, first_tab, second_tab]);
+    assert_eq!(shown.windows[0].centre.active, Some(second_tab));
+    let view = seen(&other, &session).await;
+    let third_window = windows_of(&view)[0].clone();
+    assert_eq!(
+        windows_of(&view),
+        [
+            third_window.clone(),
+            first_window.clone(),
+            second_window.clone()
+        ]
+    );
+    assert_eq!(view["active_window_id"], second_window.as_str());
+
+    // It is moved to the end, and then between the two others.
+    layout
+        .apply(Intent::TabMove {
+            tab: third_tab,
+            index: 2,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        windows_of(&seen(&other, &session).await),
+        [
+            first_window.clone(),
+            second_window.clone(),
+            third_window.clone()
+        ]
+    );
+    layout
+        .apply(Intent::TabMove {
+            tab: third_tab,
+            index: 1,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        windows_of(&seen(&other, &session).await),
+        [
+            first_window.clone(),
+            third_window.clone(),
+            second_window.clone()
+        ]
+    );
+    let order: Vec<_> = now().await.windows[0]
+        .centre
+        .tabs
+        .iter()
+        .map(|tab| tab.id)
+        .collect();
+    assert_eq!(order, [first_tab, third_tab, second_tab]);
+
+    // The tab on show: by number, by place, the next and the one before.
+    let active = || async {
+        seen(&other, &session).await["active_window_id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let activate = |target: TabTarget| Intent::TabActivate { target };
+    layout
+        .apply(activate(TabTarget::Id { tab: first_tab }))
+        .await
+        .unwrap();
+    assert_eq!(active().await, first_window);
+    assert_eq!(now().await.windows[0].centre.active, Some(first_tab));
+    layout
+        .apply(activate(TabTarget::Previous { window }))
+        .await
+        .unwrap();
+    assert_eq!(
+        active().await,
+        second_window,
+        "before the first is the last"
+    );
+    layout
+        .apply(activate(TabTarget::Next { window }))
+        .await
+        .unwrap();
+    assert_eq!(active().await, first_window);
+    layout
+        .apply(activate(TabTarget::Index { window, index: 1 }))
+        .await
+        .unwrap();
+    assert_eq!(active().await, third_window);
+
+    // Tabs are closed: one, and then the other with its tab on show.
+    layout
+        .apply(Intent::TabClose { tab: third_tab })
+        .await
+        .unwrap();
+    assert_eq!(
+        windows_of(&seen(&other, &session).await),
+        [first_window.clone(), second_window.clone()]
+    );
+    layout
+        .apply(Intent::TabsClose {
+            tabs: vec![second_tab],
+        })
+        .await
+        .unwrap();
+    let shown = now().await;
+    validate(&shown).unwrap();
+    assert_eq!(shown.windows[0].centre.tabs.len(), 1);
+    assert_eq!(shown.windows[0].centre.active, Some(first_tab));
+    assert_eq!(
+        windows_of(&seen(&other, &session).await),
+        std::slice::from_ref(&first_window)
+    );
+
+    // A second pane, which floats in the middle when it is not told where.
+    let applied = layout
+        .apply(Intent::Split {
+            pane: first,
+            dir: Dir::Right,
+            ratio: UNITS / 2,
+            content: plain_pane(),
+        })
+        .await
+        .unwrap();
+    let second = applied.created.pane.unwrap();
+    layout
+        .apply(Intent::Float {
+            pane: second,
+            rect: None,
+        })
+        .await
+        .unwrap();
+    let shown = now().await;
+    validate(&shown).unwrap();
+    assert_eq!(shown.windows[0].centre.tabs[0].pane_ids(), [first]);
+    let floating = &shown.windows[0].floating[0];
+    assert_eq!(floating.pane.id, second);
+    let fifth = UNITS / 5;
+    assert_eq!(
+        (
+            floating.rect.x,
+            floating.rect.y,
+            floating.rect.w,
+            floating.rect.h
+        ),
+        (fifth, fifth, 3 * fifth, 3 * fifth)
+    );
+    let layers = |view: &Value| view["windows"][0]["layers"].as_array().unwrap().clone();
+    let floated = layers(&seen(&other, &session).await);
+    assert_eq!(floated.len(), 2);
+    assert_eq!(floated[1]["kind"], "floating");
+    for (bound, wanted) in floated[1]["bounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip([0.2, 0.2, 0.6, 0.6])
+    {
+        assert!(close_to(bound, wanted), "{}", floated[1]["bounds"]);
+    }
+
+    // It is given another place.
+    let eighth = UNITS / 8;
+    layout
+        .apply(Intent::FloatMove {
+            pane: second,
+            rect: UnitRect {
+                x: 2 * eighth,
+                y: eighth,
+                w: 4 * eighth,
+                h: 6 * eighth,
+            },
+        })
+        .await
+        .unwrap();
+    let moved = layers(&seen(&other, &session).await);
+    for (bound, wanted) in moved[1]["bounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip([0.25, 0.125, 0.5, 0.75])
+    {
+        assert!(close_to(bound, wanted), "{}", moved[1]["bounds"]);
+    }
+    assert_eq!(now().await.windows[0].floating[0].rect.h, 6 * eighth);
+
+    // Put away and brought back, with the keyboard.
+    layout
+        .apply(Intent::Minimise {
+            pane: second,
+            on: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        layers(&seen(&other, &session).await)[1]["state"],
+        "minimized"
+    );
+    let shown = now().await;
+    assert_eq!(
+        shown.windows[0].floating[0].minimised,
+        Some(Minimised::Floating)
+    );
+    assert_eq!(shown.windows[0].focus, Some(first));
+    layout
+        .apply(Intent::Minimise {
+            pane: second,
+            on: false,
+        })
+        .await
+        .unwrap();
+    assert!(layers(&seen(&other, &session).await)[1]["state"].is_null());
+    let shown = now().await;
+    assert_eq!(shown.windows[0].floating[0].minimised, None);
+    assert_eq!(shown.windows[0].focus, Some(second));
+
+    // Back among the tiles, where it is not told: beside the tab's pane.
+    layout
+        .apply(Intent::Dock {
+            pane: second,
+            to: None,
+        })
+        .await
+        .unwrap();
+    let shown = now().await;
+    validate(&shown).unwrap();
+    assert!(shown.windows[0].floating.is_empty());
+    assert_eq!(shown.windows[0].centre.tabs[0].pane_ids(), [first, second]);
+    assert_eq!(layers(&seen(&other, &session).await).len(), 1);
+
+    // A pane among the tiles is put away: it floats, out of sight.
+    layout
+        .apply(Intent::Minimise {
+            pane: second,
+            on: true,
+        })
+        .await
+        .unwrap();
+    let shown = now().await;
+    validate(&shown).unwrap();
+    assert_eq!(shown.windows[0].centre.tabs[0].pane_ids(), [first]);
+    assert_eq!(shown.windows[0].floating[0].pane.id, second);
+    assert_eq!(
+        shown.windows[0].floating[0].minimised,
+        Some(Minimised::Floating)
+    );
+    let put_away = layers(&seen(&other, &session).await);
+    assert_eq!(put_away[1]["state"], "minimized");
+
+    // The last pane on show is not put away: the server refuses, in its words.
+    let refused = layout
+        .apply(Intent::Minimise {
+            pane: first,
+            on: true,
+        })
+        .await
+        .unwrap_err();
+    println!("putting away the last pane on show: {refused:?}");
+    assert!(
+        matches!(refused, LayoutError::Refused { .. }),
+        "{refused:?}"
+    );
+    // It floated before it was refused, and that is what the layout says.
+    let shown = now().await;
+    validate(&shown).unwrap();
+    assert_eq!(shown.windows[0].floating.len(), 2);
+    assert_eq!(first_block, seen_floating(&seen(&other, &session).await)[1]);
+
+    other
+        .call("session.destroy", json!({ "session_id": session }))
+        .await
+        .unwrap();
+    backend.shutdown();
+}
+
+/// The blocks of the first window's floating layers, from the back to the front.
+fn seen_floating(view: &Value) -> Vec<String> {
+    view["windows"][0]["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .skip(1)
+        .map(|layer| layer["blocks"][0]["block_id"].as_str().unwrap().to_owned())
+        .collect()
 }
