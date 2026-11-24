@@ -344,7 +344,7 @@ pub struct Page {
 }
 
 /// The pages of the application's own settings, in the order they are listed.
-pub fn pages() -> [Page; 4] {
+pub fn pages() -> [Page; 5] {
     [
         Page {
             id: "general",
@@ -376,6 +376,14 @@ pub fn pages() -> [Page; 4] {
                 "Buffer",
                 "Closing",
             ],
+        },
+        Page {
+            id: "hosts",
+            label: "Hosts & SSH",
+            icon: "hosts",
+            group: WORKSPACE,
+            blurb: "Machines Lume can open sessions on.",
+            groups: &["This computer"],
         },
         Page {
             id: "notifications",

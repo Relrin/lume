@@ -202,6 +202,11 @@ pub const REX_LOOK_EVERY: Duration = if cfg!(test) {
 /// the connection to open. A host slower than this is said not to answer in time.
 pub const HOST_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// How long signing in to a machine is tried for before a profile for it is written: the
+/// whole of it, and in seconds the part that opens the connection.
+pub const SSH_TRY_WAIT: Duration = Duration::from_secs(30);
+pub const SSH_TRY_CONNECT_SECONDS: u32 = 10;
+
 /// How long the OpenSSH client is given to say where a host leads (`ssh -G`), and how
 /// often it is looked at meanwhile. It only reads its configuration, so it is quick.
 pub const SSH_CONFIG_WAIT: Duration = Duration::from_secs(2);

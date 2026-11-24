@@ -20,12 +20,16 @@ import type {
   HostProbe,
   LayoutApplied,
   LayoutView,
+  ListedProfile,
   Notice,
   PaneStart,
   ProfileList,
+  RexAddress,
   RexHosts,
+  RexTried,
   SessionsStarted,
   ShellEntry,
+  SshHost,
   ThemeEntry,
   UiContributions,
   WindowAction,
@@ -166,6 +170,63 @@ export class CoreClient {
    */
   rexHostsLook(): Promise<RexHosts> {
     return this.transport.command("rex_hosts_look");
+  }
+
+  /**
+   * How an address of a Rex server is read, with the server already reached there if
+   * it is another than the one called `except`.
+   */
+  rexRead(address: string, except: string | null): Promise<RexAddress> {
+    return this.transport.command("rex_read", { address, except });
+  }
+
+  /** How long the machine at an address takes to answer, or why that is not known. */
+  rexReach(address: string): Promise<HostProbe> {
+    return this.transport.command("rex_reach", { address });
+  }
+
+  /**
+   * Connects to the server at an address, to see what it is, and lets go of it again.
+   * `agreed` is whether the user agreed to a connection that is not encrypted.
+   */
+  rexTry(address: string, agreed: boolean): Promise<RexTried> {
+    return this.transport.command("rex_try", { address, agreed });
+  }
+
+  /** Writes a Rex server into the user's file, in place of the one called `was` if any. */
+  rexHostPut(was: string | null, label: string, address: string): Promise<void> {
+    return this.transport.command("rex_host_put", { was, label, address });
+  }
+
+  /** Takes a Rex server out of the user's file. */
+  rexHostRemove(label: string): Promise<void> {
+    return this.transport.command("rex_host_remove", { label });
+  }
+
+  /** How long a machine takes to answer on its SSH port, or why that is not known. */
+  sshReach(host: SshHost): Promise<HostProbe> {
+    return this.transport.command("ssh_reach", { host });
+  }
+
+  /** Signs in to a machine over SSH and leaves again. It fails with the reason it could not. */
+  sshTry(host: SshHost): Promise<void> {
+    return this.transport.command("ssh_try", { host });
+  }
+
+  /** Writes a profile for a machine reached over SSH, in place of the one whose id is
+   *  given if any. Gives its id. */
+  sshProfilePut(id: string | null, name: string, host: SshHost): Promise<string> {
+    return this.transport.command("ssh_profile_put", { id, name, host });
+  }
+
+  /** Takes a profile of the user's own out of their file. */
+  profileRemove(id: string): Promise<void> {
+    return this.transport.command("profile_remove", { id });
+  }
+
+  /** Says of profiles that were found whether they are listed and where they start. */
+  profilesListed(changes: readonly ListedProfile[]): Promise<ProfileList> {
+    return this.transport.command("profiles_listed", { changes });
   }
 
   /** The fixed-width fonts installed on this machine. */

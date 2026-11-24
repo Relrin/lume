@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rex-reach"
+description = "Enables the rex_reach command without any pre-configured scope."
+commands.allow = ["rex_reach"]
+
+[[permission]]
+identifier = "deny-rex-reach"
+description = "Denies the rex_reach command without any pre-configured scope."
+commands.deny = ["rex_reach"]

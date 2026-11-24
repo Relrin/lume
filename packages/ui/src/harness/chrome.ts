@@ -24,6 +24,7 @@ import { createElement, Profiler } from "react";
 import { createRoot } from "react-dom/profiling";
 
 import { selectActiveTab } from "../layout/selectors.ts";
+import { connectionDialog } from "../connections/store.ts";
 import { startSettings } from "../settings/boot.ts";
 import { SettingsWindow } from "../settings/SettingsWindow.tsx";
 import { startShell, type ShellApp } from "../shell/boot.ts";
@@ -36,6 +37,7 @@ import { FIXTURE_BINDINGS, FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import { readReference, saveFile, type HarnessInfo } from "./host.ts";
 import { CONNECT_SCENES } from "./connect-scenes.ts";
 import { PANE_SCENES } from "./pane-scenes.ts";
+import { CONNECTION_SCENES, HOSTS_WINDOW } from "./connection-scenes.ts";
 import { REX_SCENES } from "./rex-scenes.ts";
 import { PLUGIN_SCENES, PLUGIN_SETTINGS_SCENES } from "./plugin-scenes.ts";
 import { TAB_SCENES } from "./tab-scenes.ts";
@@ -174,6 +176,7 @@ const SCENES: readonly Scene[] = [
   ...PANE_SCENES,
   ...CONNECT_SCENES,
   ...REX_SCENES,
+  ...CONNECTION_SCENES,
   ...TAB_SCENES,
   ...PLUGIN_SCENES,
 ];
@@ -185,6 +188,8 @@ interface SettingsScene {
   readonly page: string;
   /** What is typed into the field that searches the settings, if anything. */
   readonly query?: string;
+  /** The button that is pressed, by what it says, and what comes of it, if one is. */
+  readonly press?: { readonly button: string; readonly shows: string };
   /** What the core is like. Left out, the application's own settings and nothing more. */
   readonly window?: FakeCoreOptions;
 }
@@ -197,6 +202,13 @@ const SETTINGS_SCENES: readonly SettingsScene[] = [
     name: "settings-commands",
     page: "commands",
     window: { titleBar: "custom", commands: FIXTURE_COMMANDS, bindings: FIXTURE_BINDINGS },
+  },
+  { name: "settings-hosts", page: "hosts", window: HOSTS_WINDOW },
+  {
+    name: "settings-hosts-add",
+    page: "hosts",
+    window: HOSTS_WINDOW,
+    press: { button: "Add host…", shows: ".connection" },
   },
   { name: "settings-about", page: "about" },
   ...PLUGIN_SETTINGS_SCENES,
@@ -270,6 +282,8 @@ export async function mountWindow(
   asked: FakeCoreOptions,
   limitMs: number = CHROME_START_TIMEOUT_MS,
 ): Promise<Mounted> {
+  // A dialog is the page's, and the page is the same from one scene to the next.
+  connectionDialog.getState().close();
   const core = new FakeCore(asked);
   const app = await startShell(core);
   // A box of its own size for the window to fill, whatever size the real window is.
@@ -327,6 +341,7 @@ export async function showScene(name: string, scheme: "light" | "dark"): Promise
       const field = mounted.container.querySelector<HTMLInputElement>(".settings-search input");
       if (field) typeInto(field, settings.query);
     }
+    await pressIn(mounted.container, settings);
     await sleep(CHROME_SETTLE_MS);
     return [];
   }
@@ -346,6 +361,7 @@ async function mountSettings(
   page: string,
   options: FakeCoreOptions = { titleBar: "custom" },
 ): Promise<Pick<Mounted, "core" | "container" | "unmount">> {
+  connectionDialog.getState().close();
   const core = new FakeCore(options);
   const app = await startSettings(core, `#${page}`);
   const container = document.createElement("div");
@@ -381,6 +397,21 @@ function typeInto(field: HTMLInputElement, text: string): void {
   field.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+/** Presses the button a scene of the settings window names, if it names one. */
+async function pressIn(container: HTMLElement, scene: SettingsScene): Promise<void> {
+  const { press } = scene;
+  if (!press) return;
+  const find = () =>
+    [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === press.button,
+    );
+  await until(`“${press.button}” being offered`, CHROME_START_TIMEOUT_MS, () => !!find());
+  find()?.click();
+  await until("what it shows", CHROME_START_TIMEOUT_MS, () => {
+    return container.querySelector(press.shows) !== null;
+  });
+}
+
 async function runSettingsScene(
   scene: SettingsScene,
   info: HarnessInfo | null,
@@ -393,6 +424,7 @@ async function runSettingsScene(
       if (!field) throw new Error("the settings window has no field to search with");
       typeInto(field, scene.query);
     }
+    await pressIn(mounted.container, scene);
     return await writeScene(scene.name, mounted, ".settings-window", () => [], info, problems);
   } finally {
     mounted.unmount();

@@ -19,6 +19,7 @@ const DEVBOX: RexHost = {
   label: "devbox-01",
   address: "ssh://mira@devbox-01.example",
   local: false,
+  written: true,
   state: {
     kind: "connected",
     version: "0.1.0-preview.22",
@@ -187,7 +188,11 @@ export const REX_SCENES: readonly Scene[] = [
         "Unreachable",
         "Not encrypted",
       ]),
-      ...wanted("what can be done", texts(page, ".connect-act-label"), ["Connect", "Copy address"]),
+      ...wanted("what can be done", texts(page, ".connect-act-label"), [
+        "Connect",
+        "Copy address",
+        "Edit…",
+      ]),
     ],
   },
   {
@@ -231,7 +236,11 @@ export const REX_SCENES: readonly Scene[] = [
       ...wanted("why", texts(page, ".connect-call"), [
         "Unreachable. The host did not answer in time.",
       ]),
-      ...wanted("what can be done", texts(page, ".connect-act-label"), ["Retry", "Copy address"]),
+      ...wanted("what can be done", texts(page, ".connect-act-label"), [
+        "Retry",
+        "Copy address",
+        "Edit…",
+      ]),
     ],
   },
   {
@@ -252,6 +261,7 @@ export const REX_SCENES: readonly Scene[] = [
       wanted("what can be done", texts(page, ".connect-act-label"), [
         "Connect without encryption",
         "Copy address",
+        "Edit…",
       ]),
   },
   {
@@ -330,7 +340,7 @@ export const REX_SCENES: readonly Scene[] = [
       ...wanted("what is on show", texts(page, ".selector-row[data-on] .selector-right"), [
         "Attached",
       ]),
-      ...wanted("what can be done", texts(page, ".selector-act-label"), [
+      ...wanted("what can be done", texts(page, ".selector-side .selector-act-label"), [
         "New session on devbox-01",
         "Disconnect",
       ]),
@@ -349,7 +359,7 @@ export const REX_SCENES: readonly Scene[] = [
     },
     check: (page) => [
       ...wanted("what is on show", texts(page, ".selector-row[data-on]"), []),
-      ...wanted("what can be done", texts(page, ".selector-act-label"), [
+      ...wanted("what can be done", texts(page, ".selector-side .selector-act-label"), [
         "Open folder…",
         "New workspace…",
       ]),
@@ -370,8 +380,38 @@ export const REX_SCENES: readonly Scene[] = [
       ...wanted("why", texts(page, ".selector-why"), [
         "Unreachable. The host did not answer in time.",
       ]),
-      ...wanted("what can be done", texts(page, ".selector-act-label"), ["Retry"]),
+      ...wanted("what can be done", texts(page, ".selector-side .selector-act-label"), [
+        "Retry",
+        "Edit connection…",
+      ]),
     ],
+  },
+  {
+    // A server being called something else, where it is listed.
+    name: "selector-rename-host",
+    window: WINDOW,
+    prepare: async (app) => {
+      const field = await openSelector(app);
+      await lookAt(NAS.id);
+      press(field, "Tab");
+      await until("the hosts' column having the arrows", () =>
+        document.querySelector(".selector-host[data-marked]"),
+      );
+      press(field, "F2");
+      const name = await until("the name's field", () =>
+        document.querySelector<HTMLInputElement>(".selector-rename"),
+      );
+      typeInto(name, "Lab");
+      await until("the name being refused", () =>
+        document.querySelector('.selector-rename[aria-invalid="true"]'),
+      );
+    },
+    check: (page) =>
+      wanted(
+        "why",
+        page.querySelector(".selector-rename")?.getAttribute("title"),
+        "That name is taken",
+      ),
   },
   {
     // What was typed is not there, and can be made on the host looked at.
@@ -385,7 +425,7 @@ export const REX_SCENES: readonly Scene[] = [
       );
     },
     check: (page) =>
-      wanted("what can be done", texts(page, ".selector-act-label").slice(0, 1), [
+      wanted("what can be done", texts(page, ".selector-side .selector-act-label").slice(0, 1), [
         "Create “nightly” on devbox-01",
       ]),
   },

@@ -32,6 +32,9 @@ pub enum ConfigError {
     /// The setting cannot be written where it was asked to be.
     #[error("{0}")]
     NotWritable(String),
+    /// The entry of a list is not one that can be written.
+    #[error("{0}")]
+    BadEntry(String),
     /// The name cannot be a workspace's.
     #[error("{0}")]
     BadName(String),

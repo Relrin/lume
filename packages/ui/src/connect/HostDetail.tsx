@@ -35,6 +35,8 @@ export interface HostActs {
   disconnect(entry: HostEntry): void;
   copy(entry: HostEntry): void;
   pin(entry: HostEntry): void;
+  /** Changes how it is reached, for one the user added. */
+  edit(entry: HostEntry): void;
 }
 
 /** A button of the column, which leaves the keyboard in the palette's field. */
@@ -213,6 +215,7 @@ export function HostDetail({
           />
         )}
         <Act label="Copy address" keys={key("Ctrl+Shift+C", "⌃⇧C")} act={() => acts.copy(entry)} />
+        {host.written && !canDisconnect(host) && <Act label="Edit…" act={() => acts.edit(entry)} />}
         {canDisconnect(host) && (
           <Act
             label={state.kind === "connecting" ? "Cancel" : "Disconnect"}

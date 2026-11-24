@@ -45,6 +45,7 @@ import { settingsViewOf, withAddons } from "./addons.ts";
 import { AddonSections, AddonsManager } from "./Addons.tsx";
 import type { SettingsApp } from "./boot.ts";
 import { CommandsPage } from "./Commands.tsx";
+import { HostsPage, SettingsConnection } from "./Hosts.tsx";
 import {
   searchSettings,
   settingsPages,
@@ -88,6 +89,8 @@ function PageIcon({ name, image }: { name: string; image?: string | undefined })
       return <Glyph name="keyboard" size={15} />;
     case "notify":
       return <Glyph name="bell" size={15} />;
+    case "hosts":
+      return <Glyph name="server" size={15} />;
     case "about":
       return <Glyph name="info" size={15} />;
     default:
@@ -402,6 +405,7 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
                   current && (
                     <>
                       {current.blurb !== "" && <p className="settings-intro">{current.blurb}</p>}
+                      {current.own === "hosts" && <HostsPage app={app} />}
                       {current.groups
                         .map((group) => ({ ...group, rows: group.rows.filter((row) => row.shown) }))
                         .filter((group) => group.rows.length > 0)
@@ -431,6 +435,7 @@ export function SettingsWindow({ app }: { app: SettingsApp }) {
         </main>
       </div>
       <ColorPickerHost />
+      <SettingsConnection app={app} />
       <Notices store={app.notices} />
     </div>
   );

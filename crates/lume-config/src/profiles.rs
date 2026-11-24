@@ -20,7 +20,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::schema::CloseOnExit;
-use crate::tuning::{FONT_SIZE_MAX, FONT_SIZE_MIN, PROFILE_ID_MAX_CHARS};
+use crate::tuning::{FONT_SIZE_MAX, FONT_SIZE_MIN, PROFILE_ID_MAX_CHARS, PROFILE_ID_STEM_CHARS};
 
 /// The ids of the profiles the application makes begin with this.
 pub const GENERATED_PREFIX: &str = "auto.";
@@ -183,6 +183,32 @@ pub fn check_profile_id(id: &str) -> Result<(), String> {
         )),
         None => Ok(()),
     }
+}
+
+/// An id for a profile called `name` that `taken` says no other has.
+pub fn free_profile_id(name: &str, taken: impl Fn(&str) -> bool) -> String {
+    let mut stem = String::new();
+    for c in name.trim().chars().take(PROFILE_ID_STEM_CHARS) {
+        if c.is_alphanumeric() || matches!(c, '.' | '_') {
+            stem.extend(c.to_lowercase());
+        } else if !stem.is_empty() && !stem.ends_with('-') {
+            stem.push('-');
+        }
+    }
+    let stem = stem.trim_matches(['-', '.']);
+    // The ids of the profiles the application makes are not for others.
+    let stem = match stem {
+        "" => "profile".to_owned(),
+        stem if is_generated_id(stem) => format!("my-{stem}"),
+        stem => stem.to_owned(),
+    };
+    let mut id = stem.clone();
+    let mut number = 2;
+    while taken(&id) {
+        id = format!("{stem}-{number}");
+        number += 1;
+    }
+    id
 }
 
 /// Whether the application makes profiles with ids like this one.

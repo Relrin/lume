@@ -46,6 +46,16 @@
     "allow-folders-list",
     "allow-rex-hosts",
     "allow-rex-hosts-look",
+    "allow-rex-read",
+    "allow-rex-reach",
+    "allow-rex-try",
+    "allow-rex-host-put",
+    "allow-rex-host-remove",
+    "allow-ssh-reach",
+    "allow-ssh-try",
+    "allow-ssh-profile-put",
+    "allow-profile-remove",
+    "allow-profiles-listed",
     "dialog:allow-open"
   ]
 }

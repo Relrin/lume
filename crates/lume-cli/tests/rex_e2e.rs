@@ -1432,3 +1432,310 @@ fn an_empty_session_is_shown_and_a_tab_can_be_made_in_it() {
     app.status_with_session();
     app.quit();
 }
+
+/// What presses the button of a page that says `label`, once it can be pressed.
+fn pressing(within: &str, label: &str) -> String {
+    format!(
+        "(() => {{ const found = [...document.querySelectorAll({})] \
+         .find((one) => one.textContent === {} && !one.disabled); \
+         found?.click(); return found !== undefined; }})()",
+        json!(format!("{within} button")),
+        json!(label)
+    )
+}
+
+/// The Rex servers the application lists, as their labels and addresses.
+fn listed(app: &App) -> Vec<(String, String)> {
+    let listed = app.ctl(&["rex"]).ok("rex");
+    let hosts = listed["rex"]["hosts"].as_array().cloned();
+    let text = |value: &Value| value.as_str().unwrap_or_default().to_owned();
+    hosts
+        .unwrap_or_default()
+        .iter()
+        .map(|host| (text(&host["label"]), text(&host["address"])))
+        .collect()
+}
+
+/// What stands in the application's configuration file.
+fn written(app: &App) -> String {
+    std::fs::read_to_string(app.home.join("config").join("config.toml")).unwrap()
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn a_server_is_added_from_the_connect_palette_after_it_was_tried() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let mut server = Server::start();
+    server.session("alpha");
+    let (app, pages) = application_to_drive("");
+    let before = written(&app);
+    assert_eq!(listed(&app), []);
+
+    app.ctl(&["command", "lume.connect.open"]).ok("palette");
+    until_page(
+        &pages,
+        "the palette to have the keyboard",
+        "document.activeElement?.className === 'connect-input'",
+    );
+    press(&pages, &["Ctrl+Shift+A"]);
+    until_page(
+        &pages,
+        "the dialog to have the keyboard",
+        "document.activeElement?.id === 'connection-address'",
+    );
+    // Nothing can be added that is not an address.
+    press(&pages, &["text:not an address"]);
+    until_page(
+        &pages,
+        "the address to be refused",
+        "document.querySelector('.connection-read[data-tone=warn]') !== null",
+    );
+    press(&pages, &["Enter"]);
+    assert_eq!(written(&app), before);
+    page(
+        &pages,
+        "(() => { document.querySelector('#connection-address').select(); return true; })()",
+    );
+    press(&pages, &[&format!("text:{}", server.address)]);
+    until_page(
+        &pages,
+        "the address to be read",
+        "document.querySelector('.connection-read[data-tone=good]') !== null",
+    );
+    // With the server gone the test says so, and the address can be added all the same.
+    server.stop();
+    until_page(&pages, "Test", &pressing(".connection-foot", "Test"));
+    until_texts(&pages, ".connection-status", &["It could not be reached"]);
+    server.run();
+    until_page(&pages, "Test", &pressing(".connection-foot", "Test"));
+    until_texts(&pages, ".connection-status", &["Connection works"]);
+    let steps = texts(&pages, ".connection-step");
+    assert!(
+        steps[1].contains("rex ") && steps[1].contains("Windows"),
+        "{steps:?}"
+    );
+    // What was tried is let go of, and is in no list.
+    assert_eq!(listed(&app), []);
+
+    page(
+        &pages,
+        "(() => { document.querySelector('#connection-name').focus(); return true; })()",
+    );
+    press(&pages, &["text:Mine", "Enter"]);
+    until("the server to be listed", || {
+        (listed(&app) == [("Mine".to_owned(), server.address.clone())]).then_some(())
+    });
+    // The selector shows it, and connects to it.
+    until_texts(
+        &pages,
+        ".selector-host[aria-selected=true] .selector-name",
+        &["Mine"],
+    );
+    mark(&pages, "Connect");
+    press(&pages, &["Enter"]);
+    until_texts(&pages, ".selector-row .selector-name", &["alpha"]);
+    press(&pages, &["Escape"]);
+    let text = written(&app);
+    assert!(
+        text.contains(&format!(
+            "[[rex.host]]\nlabel = \"Mine\"\naddress = \"{}\"\n",
+            server.address
+        )),
+        "{text}"
+    );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn the_selector_renames_a_server_and_changes_how_it_is_reached() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    server.session("alpha");
+    // The address of no server: it is put right.
+    let wrong = format!("{}-not", server.address);
+    let (app, pages) = application_to_drive(&format!(
+        "\n# The machine in the cellar.\n[[rex.host]]\nlabel = 'old'\naddress = '{wrong}'\n"
+    ));
+    selector(&pages);
+    look_at(&pages, "old");
+    mark(&pages, "Connect");
+    press(&pages, &["Enter"]);
+    until_page(
+        &pages,
+        "the server to be said to be out of reach",
+        "document.querySelector('.selector-why')?.textContent.startsWith('Unreachable')",
+    );
+    mark(&pages, "Edit connection…");
+    press(&pages, &["Enter"]);
+    until_page(
+        &pages,
+        "the dialog to have the keyboard",
+        "document.activeElement?.id === 'connection-address' \
+         && document.activeElement.value.endsWith('-not')",
+    );
+    press(
+        &pages,
+        &["End", "Backspace", "Backspace", "Backspace", "Backspace"],
+    );
+    until_page(
+        &pages,
+        "the address to be read",
+        &format!(
+            "document.activeElement.value === {} \
+             && document.querySelector('.connection-read[data-tone=good]') !== null",
+            json!(server.address)
+        ),
+    );
+    press(&pages, &["Enter"]);
+    until("the address to be put right", || {
+        (listed(&app) == [("old".to_owned(), server.address.clone())]).then_some(())
+    });
+    mark(&pages, "Connect");
+    press(&pages, &["Enter"]);
+    until_texts(&pages, ".selector-row .selector-name", &["alpha"]);
+
+    // Called something else in place, it stays connected.
+    press(&pages, &["Tab"]);
+    until_page(
+        &pages,
+        "the hosts to have the arrows",
+        "document.querySelector('.selector-host[data-marked] .selector-name')\
+         ?.textContent === 'old'",
+    );
+    press(&pages, &["F2"]);
+    until_page(
+        &pages,
+        "the name to have the keyboard",
+        "document.activeElement?.className === 'selector-rename'",
+    );
+    press(&pages, &["text:cellar", "Enter"]);
+    until("the server to be renamed", || {
+        (listed(&app) == [("cellar".to_owned(), server.address.clone())]).then_some(())
+    });
+    assert_eq!(host(&app)["state"]["kind"], "connected");
+    let text = written(&app);
+    assert!(
+        text.contains("# The machine in the cellar.\n[[rex.host]]\nlabel = \"cellar\""),
+        "{text}"
+    );
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn the_settings_window_adds_a_server_and_takes_it_out() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    const SETTINGS: &str = "settings.html";
+    let server = Server::start();
+    server.session("alpha");
+    let (app, pages) = application_to_drive("");
+    let before = written(&app);
+    app.ctl(&["command", "lume.settings.open", r#"{"section":"hosts"}"#])
+        .ok("opening the settings");
+    let until_settings = |what: &str, expression: &str| {
+        until(what, || {
+            (pages.evaluate(SETTINGS, expression) == Some(json!(true))).then_some(())
+        });
+    };
+    until_settings("Add host…", &pressing(".settings-main", "Add host…"));
+    until_settings(
+        "the dialog to have the keyboard",
+        "document.activeElement?.id === 'connection-address'",
+    );
+    pages.press(SETTINGS, &[&format!("text:{}", server.address)]);
+    until_settings("Test", &pressing(".connection-foot", "Test"));
+    until_settings(
+        "the test to have gone well",
+        "document.querySelector('.connection-status')?.textContent === 'Connection works'",
+    );
+    pages.evaluate(
+        SETTINGS,
+        "(() => { document.querySelector('#connection-name').focus(); return true; })()",
+    );
+    pages.press(SETTINGS, &["text:Mine", "Enter"]);
+    until("the server to be listed", || {
+        (listed(&app) == [("Mine".to_owned(), server.address.clone())]).then_some(())
+    });
+    let badge = |says: &str| {
+        format!(
+            "document.querySelector('.host-row .host-badge')?.textContent === {}",
+            json!(says)
+        )
+    };
+    until_settings("its row to be there", &badge("Idle"));
+    // The page follows how the server stands.
+    command(&app, "lume.rex.connect", json!({ "host": "Mine" })).ok("connect");
+    until_settings("the server to be said to be connected", &badge("Connected"));
+
+    until_settings("Remove", &pressing(".host-row", "Remove"));
+    until_settings("the question", &pressing(".host-row", "Keep"));
+    until_settings("Remove again", &pressing(".host-row", "Remove"));
+    until_settings(
+        "the question again",
+        "[...document.querySelectorAll('.addon-ask')].length === 1",
+    );
+    until_settings("the answer", &pressing(".host-row", "Remove"));
+    until("the server to be taken out", || {
+        listed(&app).is_empty().then_some(())
+    });
+    until_settings(
+        "its row to be gone",
+        "document.querySelector('.host-row') === null",
+    );
+    assert_eq!(written(&app), before);
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn a_machine_reached_over_ssh_is_added_and_is_listed_with_the_profiles() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let (app, pages) = application_to_drive("");
+    app.ctl(&["command", "lume.connection.add", r#"{"kind":"ssh"}"#])
+        .ok("the dialog");
+    until_page(
+        &pages,
+        "the dialog to have the keyboard",
+        "document.activeElement?.id === 'connection-host'",
+    );
+    // Nothing listens there: the test says so, and the machine can be added all the same.
+    press(&pages, &["text:127.0.0.1", "Tab", "text:nobody", "Tab"]);
+    page(
+        &pages,
+        "(() => { document.querySelector('#connection-port').select(); return true; })()",
+    );
+    press(&pages, &[&format!("text:{}", free_port())]);
+    until_page(&pages, "Test", &pressing(".connection-foot", "Test"));
+    until_texts(&pages, ".connection-status", &["It could not be reached"]);
+    press(&pages, &["Enter"]);
+    // The Connect palette shows it.
+    until_page(
+        &pages,
+        "the profile to be listed",
+        "[...document.querySelectorAll('.connect-row-name')]\
+         .some((one) => one.textContent === '127.0.0.1')",
+    );
+    until_page(
+        &pages,
+        "the machines reached over SSH to be what is listed",
+        "document.querySelector('.connect-chip[data-filter=ssh]')?.ariaPressed === 'true'",
+    );
+    let text = written(&app);
+    assert!(text.contains("[[profile]]\nid = \"127.0.0.1\"\n"), "{text}");
+    assert!(text.contains("user = \"nobody\"\n"), "{text}");
+    press(&pages, &["Escape"]);
+    app.quit();
+}

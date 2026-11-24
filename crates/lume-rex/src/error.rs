@@ -16,6 +16,9 @@ pub enum RexError {
     /// The address is one this client does not reach, though it is an address.
     #[error("the Rex server at {endpoint} is not reached by this application: {why}")]
     Unsupported { endpoint: String, why: String },
+    /// The machine was reached, and has no Rex.
+    #[error("Rex was not found on the machine at {endpoint}")]
+    NotInstalled { endpoint: String },
     /// Reaching the server would send everything unencrypted over a network, and the
     /// user has not agreed to that for this connection.
     #[error(
@@ -78,6 +81,7 @@ impl RexError {
         match self {
             RexError::BadEndpoint(_) => "bad_request",
             RexError::Unsupported { .. } => "unsupported",
+            RexError::NotInstalled { .. } => "not_installed",
             RexError::Unconfirmed { .. } => "confirmation_required",
             RexError::Untrusted { .. } => "untrusted",
             RexError::Ssh { .. } => "ssh",
@@ -113,6 +117,7 @@ impl From<RexError> for SessionError {
             RexError::BadEndpoint(_) => ErrorCode::BadRequest,
             RexError::Refused { .. }
             | RexError::Unsupported { .. }
+            | RexError::NotInstalled { .. }
             | RexError::Unconfirmed { .. }
             | RexError::Untrusted { .. }
             | RexError::Ssh { .. } => ErrorCode::Unsupported,

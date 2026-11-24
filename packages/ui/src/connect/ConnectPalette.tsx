@@ -28,6 +28,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 
+import { connectionDialog } from "../connections/store.ts";
 import type { DetachedSession, HostProbe } from "../core/types.ts";
 import { Glyph } from "../icons/Glyph.tsx";
 import { homeShortened } from "../events/where.ts";
@@ -42,6 +43,7 @@ import { HostDetail, sessionOptionId, type HostActs } from "./HostDetail.tsx";
 import { KindIcon } from "./icons.tsx";
 import { readPins, togglePin } from "./pins.ts";
 import {
+  CONNECT_ACTIONS,
   connectFilters,
   connectGroups,
   connectSections,
@@ -513,7 +515,7 @@ function ConnectDialog() {
   };
   const act = (action: ConnectAction) => {
     close();
-    app.commands.run(action.command);
+    app.commands.run(action.command, action.args ?? null);
   };
   const attach = (entry: DetachedEntry, how: "tab" | "split") => {
     const command = reattachCommand(entry.session, how);
@@ -555,6 +557,12 @@ function ConnectDialog() {
         );
     },
     pin: (entry) => pinRow({ type: "host", entry }),
+    edit: (entry) => {
+      close();
+      connectionDialog
+        .getState()
+        .edit({ kind: "rex", label: entry.host.label, address: entry.host.address }, false);
+    },
   };
   /** What choosing a server does: attaches, makes a session, or connects. */
   const acceptHost = (entry: HostEntry, agreed: boolean) => {
@@ -683,9 +691,21 @@ function ConnectDialog() {
           row,
           <>
             <span className="connect-action-icon">
-              {row.action.id === "config" ? <FileIcon /> : <RefreshIcon />}
+              {row.action.id === "add" ? (
+                <Glyph name="plus" size={15} />
+              ) : row.action.id === "config" ? (
+                <FileIcon />
+              ) : (
+                <RefreshIcon />
+              )}
             </span>
             <span className="connect-action-label">{row.action.label}</span>
+            {row.action.keys !== undefined && (
+              <KeyCaps
+                label={platform === "macos" ? row.action.keys.mac : row.action.keys.pc}
+                className="connect-keys"
+              />
+            )}
           </>,
           "connect-action",
         );
@@ -752,6 +772,12 @@ function ConnectDialog() {
                 const key = event.key.toLowerCase();
                 if (key === "d" && !event.shiftKey) {
                   pinRow(markedRow);
+                  taken();
+                  return;
+                }
+                if (key === "a" && event.shiftKey) {
+                  const add = CONNECT_ACTIONS.find((action) => action.id === "add");
+                  if (add) act(add);
                   taken();
                   return;
                 }
@@ -872,7 +898,7 @@ function ConnectDialog() {
                     <p className="connect-note">
                       {query.trim() !== "" && servers !== null && servers.hosts.length > 0
                         ? "No server matches."
-                        : "No Rex server is known. One is written as a [[rex.host]] table in config.toml."}
+                        : "No Rex server is known. Add one below."}
                     </p>
                   )
                 : profileCount === 0 &&

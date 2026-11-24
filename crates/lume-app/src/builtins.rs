@@ -601,6 +601,13 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.connection.add",
+        "Add Connection…",
+        "Host",
+        Runs::Page,
+        true,
+    ),
+    (
         "lume.search.open",
         "Find in Terminal",
         "Search",
@@ -1058,6 +1065,16 @@ fn arguments(id: &str) -> Option<Value> {
             &["host"],
         )),
         "lume.rex.disconnect" => Some(object(json!({ "host": rex_host }), &["host"])),
+        "lume.connection.add" => Some(object(
+            json!({
+                "kind": {
+                    "type": "string",
+                    "enum": ["rex", "ssh", "wsl"],
+                    "description": "What is added: a Rex server, a machine reached over SSH, or Linux distributions of this machine. Left out, a Rex server.",
+                },
+            }),
+            &[],
+        )),
         "lume.rex.rename-session" => Some(object(
             json!({
                 "host": rex_host,
@@ -1920,6 +1937,7 @@ mod tests {
         let registry = registry();
         for id in [
             "lume.connect.open",
+            "lume.connection.add",
             "lume.search.open",
             "lume.search.next",
             "lume.search.previous",

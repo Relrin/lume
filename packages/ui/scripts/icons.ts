@@ -66,6 +66,7 @@ export const LINE_NAMES: readonly string[] = [
   "hard-drive",
   "heart",
   "info",
+  "key-round",
   "keyboard",
   "layers",
   "list",

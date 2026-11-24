@@ -95,6 +95,9 @@ pub const PROFILE_ID_MAX_CHARS: usize = 128;
 /// How many profiles one file may define. More than this is not a list a person keeps.
 pub const PROFILES_MAX: usize = 512;
 
+/// How much of a profile's name goes into the id that is made from it, in characters.
+pub const PROFILE_ID_STEM_CHARS: usize = 48;
+
 /// How many Rex servers the configuration may name.
 pub const REX_HOSTS_MAX: usize = 64;
 

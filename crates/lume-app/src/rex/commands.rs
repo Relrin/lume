@@ -2,12 +2,17 @@
 
 use std::sync::Arc;
 
+use lume_config::RexHostEntry;
 use lume_layout::WindowId;
 use serde_json::Value;
 use tauri::State;
 
+use super::attempt;
+use super::hosts::endpoint_of;
+use crate::commands_connections::write;
 use crate::error::CommandError;
 use crate::host::{Question, ask_first};
+use crate::host_probe::Probe;
 use crate::services::{Asker, Services};
 
 type Shared<'a> = State<'a, Arc<Services>>;
@@ -27,6 +32,56 @@ pub fn rex_hosts(services: Shared<'_>) -> Value {
 #[tauri::command]
 pub async fn rex_hosts_look(services: Shared<'_>) -> Result<Value, CommandError> {
     Ok(services.rex.look().await)
+}
+
+/// How an address is read: its parts, and the label of the server that is reached at it
+/// already, if one other than `except` is.
+// Run beside the main thread, which the windows need while they start.
+#[tauri::command(async)]
+pub fn rex_read(
+    services: Shared<'_>,
+    address: String,
+    except: Option<String>,
+) -> Result<Value, CommandError> {
+    services.rex.read(&address, except.as_deref())
+}
+
+/// How long the machine at an address takes to answer, or why that is not known.
+#[tauri::command]
+pub async fn rex_reach(address: String) -> Result<Probe, CommandError> {
+    Ok(attempt::reach(&endpoint_of(&address)?).await)
+}
+
+/// Connects to the server at an address, says what it is, and lets go of it again. A
+/// connection that would not be encrypted is made only if the user agreed to it.
+#[tauri::command]
+pub async fn rex_try(address: String, agreed: bool) -> Result<Value, CommandError> {
+    attempt::attempt(endpoint_of(&address)?, agreed).await
+}
+
+/// Writes a server into the user's file: a new one, or one in place of what it was.
+#[tauri::command]
+pub async fn rex_host_put(
+    services: Shared<'_>,
+    was: Option<String>,
+    label: String,
+    address: String,
+) -> Result<(), CommandError> {
+    let entry = RexHostEntry {
+        label: label.trim().to_owned(),
+        address: address.trim().to_owned(),
+    };
+    services.rex.check(was.as_deref(), &entry)?;
+    write(&services, move |config| {
+        config.put_rex_host(was.as_deref(), &entry)
+    })
+    .await
+}
+
+/// Takes a server out of the user's file. The connection to it is ended.
+#[tauri::command]
+pub async fn rex_host_remove(services: Shared<'_>, label: String) -> Result<(), CommandError> {
+    write(&services, move |config| config.remove_rex_host(&label)).await
 }
 
 fn text<'a>(args: &'a Value, name: &str) -> Result<Option<&'a str>, CommandError> {

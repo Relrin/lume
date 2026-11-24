@@ -10,6 +10,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::settings::Shown;
 use crate::tuning::{REX_ADDRESS_MAX_CHARS, REX_LABEL_MAX_CHARS};
 
 /// The Rex servers the application can show sessions of.
@@ -18,6 +19,8 @@ use crate::tuning::{REX_ADDRESS_MAX_CHARS, REX_LABEL_MAX_CHARS};
 pub struct RexConfig {
     /// Look for the Rex server of this account on this machine, when the places that
     /// list servers are on show. One that runs is listed; none is ever started.
+    #[schemars(extend("x-lume-settings" = Shown::switch("hosts", "This computer", 10, "Look for a Rex server here")
+        .help("One that runs is listed with its sessions; none is ever started")))]
     pub local: bool,
     /// Rex servers. Each is a `[[rex.host]]` table with a `label` and an `address`.
     #[serde(rename = "host", skip_serializing_if = "Vec::is_empty")]

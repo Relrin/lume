@@ -60,6 +60,10 @@
               },
               {
                 "role": "button",
+                "name": "Hosts & SSH"
+              },
+              {
+                "role": "button",
                 "name": "Keybindings"
               },
               {

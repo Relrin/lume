@@ -35,6 +35,7 @@ mod carrier;
 mod clipboard;
 mod commands;
 mod commands_config;
+mod commands_connections;
 mod commands_folders;
 mod commands_layout;
 mod commands_plugins;
@@ -61,6 +62,7 @@ mod rex;
 mod served;
 mod services;
 mod sessions;
+mod ssh_try;
 mod state;
 mod synthetic;
 #[cfg(test)]
@@ -484,6 +486,16 @@ fn main() -> ExitCode {
         commands_folders::folders_list,
         rex::commands::rex_hosts,
         rex::commands::rex_hosts_look,
+        rex::commands::rex_read,
+        rex::commands::rex_reach,
+        rex::commands::rex_try,
+        rex::commands::rex_host_put,
+        rex::commands::rex_host_remove,
+        commands_connections::ssh_reach,
+        commands_connections::ssh_try,
+        commands_connections::ssh_profile_put,
+        commands_connections::profile_remove,
+        commands_connections::profiles_listed,
         commands_plugins::ui_contributions,
         commands_plugins::ui_visible,
         commands_plugins::ui_assets,

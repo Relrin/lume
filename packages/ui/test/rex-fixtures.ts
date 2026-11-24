@@ -13,6 +13,7 @@ export function rexHost(id: string, label: string, extra: Partial<RexHost> = {})
     label,
     address: id,
     local: false,
+    written: true,
     state: { kind: "idle" },
     sessions: [],
     on_show: null,

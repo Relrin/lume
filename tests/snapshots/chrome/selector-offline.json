@@ -37,39 +37,95 @@
                 "name": "Hosts",
                 "parts": [
                   {
-                    "role": "option",
-                    "name": "This PC3 workspaces",
-                    "state": {
-                      "selected": "false"
-                    }
+                    "role": "presentation",
+                    "parts": [
+                      {
+                        "role": "option",
+                        "name": "This PC3 workspaces",
+                        "state": {
+                          "selected": "false"
+                        }
+                      }
+                    ]
                   },
                   {
-                    "role": "option",
-                    "name": "devbox-01Rex · 12 ms · 3 sessions",
-                    "state": {
-                      "selected": "false"
-                    }
+                    "role": "presentation",
+                    "parts": [
+                      {
+                        "role": "option",
+                        "name": "devbox-01Rex · 12 ms · 3 sessions",
+                        "state": {
+                          "selected": "false"
+                        }
+                      },
+                      {
+                        "role": "button",
+                        "name": "Rename devbox-01"
+                      }
+                    ]
                   },
                   {
-                    "role": "option",
-                    "name": "home-nasRex · Not connected",
-                    "state": {
-                      "selected": "false"
-                    }
+                    "role": "presentation",
+                    "parts": [
+                      {
+                        "role": "option",
+                        "name": "home-nasRex · Not connected",
+                        "state": {
+                          "selected": "false"
+                        }
+                      },
+                      {
+                        "role": "button",
+                        "name": "Rename home-nas"
+                      }
+                    ]
                   },
                   {
-                    "role": "option",
-                    "name": "dev-ci-runnerRex · Unreachable",
-                    "state": {
-                      "selected": "true"
-                    }
+                    "role": "presentation",
+                    "parts": [
+                      {
+                        "role": "option",
+                        "name": "dev-ci-runnerRex · Unreachable",
+                        "state": {
+                          "selected": "true"
+                        }
+                      },
+                      {
+                        "role": "button",
+                        "name": "Rename dev-ci-runner"
+                      }
+                    ]
                   },
                   {
-                    "role": "option",
-                    "name": "labRex · Not encrypted",
-                    "state": {
-                      "selected": "false"
-                    }
+                    "role": "presentation",
+                    "parts": [
+                      {
+                        "role": "option",
+                        "name": "labRex · Not encrypted",
+                        "state": {
+                          "selected": "false"
+                        }
+                      },
+                      {
+                        "role": "button",
+                        "name": "Rename lab"
+                      }
+                    ]
+                  },
+                  {
+                    "role": "presentation",
+                    "parts": [
+                      {
+                        "role": "presentation"
+                      },
+                      {
+                        "role": "option",
+                        "name": "Add connection…",
+                        "state": {
+                          "selected": "false"
+                        }
+                      }
+                    ]
                   }
                 ]
               },
@@ -92,6 +148,18 @@
                         "name": "Retry",
                         "state": {
                           "selected": "true"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "role": "presentation",
+                    "parts": [
+                      {
+                        "role": "option",
+                        "name": "Edit connection…",
+                        "state": {
+                          "selected": "false"
                         }
                       }
                     ]

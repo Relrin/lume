@@ -750,3 +750,80 @@ async fn the_server_of_this_machine_is_let_go_of_when_nothing_lists_servers() {
     until("it is let go of", || app.kind() == "idle").await;
     app.stop().await;
 }
+
+#[tokio::test]
+async fn an_address_is_tried_and_let_go_of() {
+    let server = Server::start(World::recorded()).await;
+    let app = Running::start("rex-tried", "[rex]\nlocal = false\n").await;
+    let tried = attempt::attempt(endpoint_of(&server.url()).unwrap(), false)
+        .await
+        .unwrap();
+    assert_eq!(tried["version"], "0.1.0-preview.22");
+    assert!(tried["ms"].is_u64(), "{tried}");
+    assert_eq!(server.connections(), 1);
+    // It is in no list, and no backend of the application's.
+    assert_eq!(app.rex().view()["hosts"], json!([]));
+
+    let (address, listener) = door().await;
+    drop(listener);
+    let gone = endpoint_of(&format!("http://{address}")).unwrap();
+    let refused = attempt::attempt(gone, false).await.unwrap_err();
+    assert_eq!(refused.code, "unreachable", "{refused}");
+    // Nothing is sent unencrypted over a network before the user agrees.
+    let far = endpoint_of("http://192.0.2.1:7297").unwrap();
+    let refused = attempt::attempt(far, false).await.unwrap_err();
+    assert_eq!(refused.code, "confirmation_required", "{refused}");
+    app.stop().await;
+}
+
+#[tokio::test]
+async fn a_server_that_is_written_is_listed_and_one_that_is_taken_out_is_let_go_of() {
+    let server = Server::start(World::recorded()).await;
+    let app = Running::start("rex-written", "# Mine.\n[rex]\nlocal = false\n").await;
+    let entry = |label: &str, address: &str| RexHostEntry {
+        label: label.to_owned(),
+        address: address.to_owned(),
+    };
+    let config = &app.services.config;
+    let first = entry("one", &server.url());
+    app.rex().check(None, &first).unwrap();
+    config.put_rex_host(None, &first).unwrap();
+    app.rex().config_changed();
+    assert_eq!(app.host()["label"], "one");
+    assert_eq!(app.host()["written"], true);
+
+    // Another way to write the same address is the same server.
+    let same = entry("two", &format!("{}/", server.url().replace("http", "HTTP")));
+    let refused = app.rex().check(None, &same).unwrap_err();
+    assert!(refused.message.contains("`one`"), "{refused}");
+    app.rex().check(Some("one"), &same).unwrap();
+    assert!(app.rex().check(None, &entry("x", "ftp://x")).is_err());
+    assert!(app.rex().check(None, &entry("x", "  ")).is_err());
+    assert_eq!(app.rex().read(&server.url(), None).unwrap()["taken"], "one");
+    assert_eq!(
+        app.rex().read(&server.url(), Some("one")).unwrap()["taken"],
+        Value::Null
+    );
+
+    // A connection outlives what the server is called, and not the server.
+    app.outside("lume.rex.connect", json!({ "host": "one" }))
+        .await
+        .unwrap();
+    config
+        .put_rex_host(Some("one"), &entry("other", &server.url()))
+        .unwrap();
+    app.rex().config_changed();
+    assert_eq!(app.host()["label"], "other");
+    assert_eq!(app.kind(), "connected");
+    assert_eq!(server.connections(), 1);
+    config.remove_rex_host("other").unwrap();
+    app.rex().config_changed();
+    assert_eq!(app.rex().view()["hosts"], json!([]));
+    until("it is let go of", || {
+        app.rex().inner().connections.is_empty()
+    })
+    .await;
+    let text = std::fs::read_to_string(app.dir.dirs().config_file()).unwrap();
+    assert_eq!(text, "# Mine.\n[rex]\nlocal = false\n");
+    app.stop().await;
+}

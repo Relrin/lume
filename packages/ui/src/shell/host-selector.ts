@@ -6,6 +6,8 @@
  * Nothing here touches the page, so all of it is tested with plain objects.
  */
 
+import { createStore, type StoreApi } from "zustand/vanilla";
+
 import type { RexHost, RexHosts, WorkspaceList } from "../core/types.ts";
 import {
   connected,
@@ -19,6 +21,22 @@ import {
   usable,
   type RexLink,
 } from "../rex/model.ts";
+
+/** Whether the selector is to be opened, and what is to be looked at in it. */
+export interface SelectorDoorState {
+  /** The label of the server to look at. */
+  readonly asked: string | null;
+  open(label: string): void;
+  /** It was opened. */
+  opened(): void;
+}
+
+/** The way to open the selector from elsewhere in the page: a window has one. */
+export const selectorDoor: StoreApi<SelectorDoorState> = createStore<SelectorDoorState>((set) => ({
+  asked: null,
+  open: (label) => set({ asked: label }),
+  opened: () => set({ asked: null }),
+}));
 
 /** The key of this machine among the hosts. */
 export const THIS_PC = "pc";
@@ -192,6 +210,7 @@ export type SelectorAct =
   | { readonly kind: "new-session"; readonly label: string }
   | { readonly kind: "connect"; readonly label: string; readonly agree: boolean }
   | { readonly kind: "disconnect"; readonly label: string }
+  | { readonly kind: "edit"; readonly label: string }
   | { readonly kind: "command"; readonly label: string; readonly command: string };
 
 /** The commands about workspaces, with what the selector calls each. */
@@ -226,7 +245,10 @@ export function selectorActs(
     }
     return acts;
   }
-  if (!usable(server)) return acts;
+  if (!usable(server)) {
+    if (server.written) acts.push({ kind: "edit", label: "Edit connection…" });
+    return acts;
+  }
   if (connected(server)) acts.push({ kind: "new-session", label: `New session on ${place}` });
   const step = next(server);
   if (step) acts.push({ kind: "connect", label: step.label, agree: step.kind === "agree" });
@@ -235,6 +257,9 @@ export function selectorActs(
     acts.push({ kind: "disconnect", label: "Disconnect" });
   } else if (kind === "connecting") {
     acts.push({ kind: "disconnect", label: "Cancel" });
+  }
+  if (server.written && linkOf(server) === "down") {
+    acts.push({ kind: "edit", label: "Edit connection…" });
   }
   return acts;
 }

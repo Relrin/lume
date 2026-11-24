@@ -9,6 +9,7 @@
  */
 
 import type { ConnectStore } from "../connect/store.ts";
+import type { ConnectionKind } from "../connections/model.ts";
 import type { CoreClient } from "../core/client.ts";
 import type { PaneId } from "../layout/types.ts";
 import type { PaletteStore } from "../palette/store.ts";
@@ -51,6 +52,8 @@ export interface CommandServices {
   renamePane(pane: PaneId | null): void;
   /** Shows the dialog that opens a folder as a workspace. */
   openFolder(): void;
+  /** Shows the dialog that adds a connection. */
+  addConnection(kind: ConnectionKind): void;
   /**
    * Answers the question on show as its buttons would: going ahead (with the item of a
    * choice), or not. Says whether there was one.
@@ -73,6 +76,11 @@ function tabOf(args: unknown): string | undefined {
 function queryOf(args: unknown): string | undefined {
   if (typeof args !== "object" || args === null || !("query" in args)) return undefined;
   return typeof args.query === "string" ? args.query : undefined;
+}
+
+function kindOf(args: unknown): ConnectionKind {
+  const kind = typeof args === "object" && args !== null && "kind" in args ? args.kind : null;
+  return kind === "ssh" || kind === "wsl" ? kind : "rex";
 }
 
 /** Runs commands in this window. */
@@ -203,6 +211,11 @@ export class Commands {
         palette.getState().close();
         connect.getState().close();
         this.#services.openFolder();
+        return;
+      case "lume.connection.add":
+        palette.getState().close();
+        connect.getState().close();
+        this.#services.addConnection(kindOf(args));
         return;
       case "lume.window.answer": {
         const fields =

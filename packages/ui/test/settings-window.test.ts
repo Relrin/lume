@@ -10,6 +10,7 @@ import type { SettingsApp, ShownPage } from "../src/settings/boot.ts";
 import type { SettingsLists, SettingsPage } from "../src/settings/model.ts";
 import { SettingsRegistry } from "../src/settings/registry.ts";
 import { SettingsWindow } from "../src/settings/SettingsWindow.tsx";
+import { createRexStore } from "../src/rex/store.ts";
 import { NoticeStore } from "../src/shell/notices.ts";
 import { createWindowStateStore } from "../src/window/state.ts";
 import { LISTS, SCHEMA, view } from "./settings-support.ts";
@@ -34,6 +35,7 @@ function app(
     notices: new NoticeStore(),
     windowState: createWindowStateStore(),
     shown: createStore<ShownPage>()(() => ({ page, asked: 0, show: () => undefined })),
+    rex: createRexStore(),
     addons: createStore<{ readonly list: readonly AddonEntry[] | null }>()(() => ({
       list: addons,
     })),

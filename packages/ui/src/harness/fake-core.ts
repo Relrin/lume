@@ -25,6 +25,7 @@ import type {
   PanelRowData,
   Scheme,
   ProfileList,
+  RexAddress,
   RexHosts,
   ShellEntry,
   ThemeEntry,
@@ -470,6 +471,38 @@ interface TabsNow {
   readonly groups: readonly Group[];
 }
 
+/** Reads an address as the core does, as far as the scenes need. */
+function readAddress(
+  address: string,
+  hosts: RexHosts["hosts"],
+  except: unknown,
+): RexAddress | { readonly code: string; readonly message: string } {
+  const found =
+    /^(?:(ssh|https|http|tailnet):\/\/)?(?:([^@/]+)@)?([a-z0-9.-]+)(?::(\d+))?(\/.*)?$/i.exec(
+      address.trim(),
+    );
+  if (!found) {
+    return { code: "bad_request", message: `\`${address}\` is not an address` };
+  }
+  const [, scheme, user, host = "", port, path] = found;
+  const kind = (scheme ?? "host") as RexAddress["kind"];
+  if (user !== undefined && kind !== "ssh") {
+    return { code: "unsupported", message: "an account cannot be chosen" };
+  }
+  const usual = kind === "https" ? 443 : kind === "http" ? 80 : null;
+  const taken = hosts.find(
+    (listed) => listed.address === address.trim() && listed.label !== except,
+  );
+  return {
+    kind,
+    host,
+    user: user ?? null,
+    port: port === undefined ? usual : Number(port),
+    path: path ?? null,
+    taken: taken?.label ?? null,
+  };
+}
+
 /** A core that is only a layout, a configuration and whatever a test sends through it. */
 export class FakeCore implements Carrier {
   readonly #options: FakeCoreOptions;
@@ -503,6 +536,8 @@ export class FakeCore implements Carrier {
   #nextGroup = GROUP_IDS_FROM;
   /** The commands the page ran, with their arguments, in order. */
   readonly ran: { readonly id: string; readonly args: unknown }[] = [];
+  /** What the page had written into the user's file, in order. */
+  readonly written: { readonly name: string; readonly args: unknown }[] = [];
   /** What the page last said it has on screen of the plugins' things. */
   visible: readonly string[] = [];
 
@@ -892,6 +927,62 @@ export class FakeCore implements Carrier {
       case "rex_hosts":
       case "rex_hosts_look":
         return answer(this.#rex);
+      case "rex_read": {
+        const read = readAddress(String(args["address"]), this.#rex.hosts, args["except"]);
+        return "code" in read ? Promise.reject(read) : answer(read);
+      }
+      case "rex_reach":
+      case "ssh_reach":
+        return answer({ ms: 12 });
+      // One machine has no Rex, and one is reached with nothing encrypted.
+      case "rex_try":
+        if (String(args["address"]).includes("old")) {
+          return Promise.reject({
+            code: "not_installed",
+            message: "Rex was not found on the machine",
+          });
+        }
+        if (String(args["address"]).startsWith("http:") && args["agreed"] !== true) {
+          return Promise.reject({
+            code: "confirmation_required",
+            message: "the connection would not be encrypted",
+          });
+        }
+        return answer({ version: "0.1.0-preview.22", platform: "linux_amd64", ms: 12 });
+      case "ssh_try":
+        return answer(null);
+      case "rex_host_put": {
+        this.written.push({ name, args });
+        const address = String(args["address"]);
+        const label = String(args["label"]);
+        const kept = this.#rex.hosts.filter((host) => host.label !== args["was"]);
+        this.rexHostsChanged([
+          ...kept,
+          {
+            id: `rex:${address}`,
+            label,
+            address,
+            local: false,
+            written: true,
+            state: { kind: "idle" },
+            sessions: [],
+            on_show: null,
+            latency_ms: null,
+          },
+        ]);
+        return answer(null);
+      }
+      case "rex_host_remove":
+        this.written.push({ name, args });
+        this.rexHostsChanged(this.#rex.hosts.filter((host) => host.label !== args["label"]));
+        return answer(null);
+      case "ssh_profile_put":
+        this.written.push({ name, args });
+        return answer(args["id"] ?? "written");
+      case "profile_remove":
+      case "profiles_listed":
+        this.written.push({ name, args });
+        return answer(this.#profiles);
       case "sessions_detached":
         return answer({ sessions: [...this.#detached] });
       // Every host is near, and the one called "far" does not answer.

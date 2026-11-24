@@ -48,7 +48,7 @@ pub use data::{
     Answer, DataConn, DataEnd, DataOpen, DataWelcome, Reject, ResumeToken, Ticket, hello,
     read_answer, resume,
 };
-pub use endpoint::Endpoint;
+pub use endpoint::{Endpoint, HTTPS_PORT, REX_PORT};
 pub use error::RexError;
 pub use ssh::SshOptions;
 pub use stream::{Note, Opened, Opening, Piece, Splitter, Theme};

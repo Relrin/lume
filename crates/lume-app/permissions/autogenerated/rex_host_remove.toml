@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rex-host-remove"
+description = "Enables the rex_host_remove command without any pre-configured scope."
+commands.allow = ["rex_host_remove"]
+
+[[permission]]
+identifier = "deny-rex-host-remove"
+description = "Denies the rex_host_remove command without any pre-configured scope."
+commands.deny = ["rex_host_remove"]

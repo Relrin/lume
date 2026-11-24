@@ -16,7 +16,7 @@ use toml_edit::{DocumentMut, InlineTable, Item, Table, TableLike};
 use crate::schema::WORKSPACE_ROOT_KEY;
 
 /// A JSON value as a TOML one. TOML has no way to write nothing.
-fn toml_value(value: &Value) -> Result<toml_edit::Value, String> {
+pub(crate) fn toml_value(value: &Value) -> Result<toml_edit::Value, String> {
     Ok(match value {
         Value::Null => {
             return Err("a setting cannot be set to nothing; unset it instead".to_owned());

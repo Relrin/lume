@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ssh-reach"
+description = "Enables the ssh_reach command without any pre-configured scope."
+commands.allow = ["ssh_reach"]
+
+[[permission]]
+identifier = "deny-ssh-reach"
+description = "Denies the ssh_reach command without any pre-configured scope."
+commands.deny = ["ssh_reach"]

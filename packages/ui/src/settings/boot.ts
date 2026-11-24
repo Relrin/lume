@@ -15,6 +15,7 @@ import { createConfigStore, type ConfigStore } from "../config/store.ts";
 import { CoreClient } from "../core/client.ts";
 import type { Notice, ProfileList } from "../core/types.ts";
 import { deliverViewEvent, reloadPluginFrames } from "../plugins/frame/registry.ts";
+import { createRexStore, type RexStore } from "../rex/store.ts";
 import { NoticeStore, sentence } from "../shell/notices.ts";
 import { TauriCarrier, type Carrier } from "../transport/carrier.ts";
 import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
@@ -49,6 +50,8 @@ export interface SettingsApp {
   readonly windowState: WindowStateStore;
   /** The page the window was last asked to show. */
   readonly shown: StoreApi<ShownPage>;
+  /** The Rex servers there are, and how each stands. */
+  readonly rex: RexStore;
   /** The plugins installed, in the order they load in; null until they are known. */
   readonly addons: StoreApi<{ readonly list: readonly AddonEntry[] | null }>;
   /** Asks for the plugins again, as after a change made here. */
@@ -85,6 +88,7 @@ export async function startSettings(
   const notices = new NoticeStore();
   const windowState = createWindowStateStore();
   const registry = new SettingsRegistry();
+  const rex = createRexStore();
   const lists = createStore<SettingsLists>()(() => NO_LISTS);
   const addons = createStore<{ readonly list: readonly AddonEntry[] | null }>()(() => ({
     list: null,
@@ -158,6 +162,9 @@ export async function startSettings(
       case "profiles_changed":
         takeProfiles(notice);
         break;
+      case "rex_hosts_changed":
+        rex.getState().set(notice);
+        break;
       case "config_changed":
         if (!config.getState().set(notice.view)) break;
         applyConfig(notice.view);
@@ -226,6 +233,10 @@ export async function startSettings(
   // Looking at the machine for profiles takes the core a moment; the list comes on
   // its own, and again whenever it changes.
   client.profilesList().then(takeProfiles, () => undefined);
+  client.rexHosts().then(
+    (list) => void rex.getState().set(list),
+    () => undefined,
+  );
 
   client.windowState().then(
     (state) => windowState.getState().set(state),
@@ -247,6 +258,7 @@ export async function startSettings(
     notices,
     windowState,
     shown,
+    rex,
     addons,
     refreshAddons,
     pickFolder: async () => {

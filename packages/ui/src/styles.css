@@ -568,6 +568,7 @@
   }
 
   .selector-host[aria-selected="true"],
+  .selector-host[data-renaming],
   .selector-row[data-marked],
   .selector-row[data-renaming],
   .selector-act[data-marked] {
@@ -582,6 +583,14 @@
 
   .selector-host[data-off] > * {
     opacity: 0.6;
+  }
+
+  /* The way to add a host, below those there are. */
+  .selector-add {
+    position: sticky;
+    bottom: 0;
+    margin-top: auto;
+    background: var(--lume-color-popover);
   }
 
   .selector-tile {
@@ -726,6 +735,7 @@
   }
 
   .selector-place:hover .selector-tools,
+  .selector-host[data-marked] ~ .selector-tools,
   .selector-row[data-marked] ~ .selector-tools {
     opacity: 1;
     pointer-events: auto;
@@ -804,6 +814,7 @@
   }
 
   .selector-act[data-act="command"] .selector-act-icon,
+  .selector-act[data-act="edit"] .selector-act-icon,
   .selector-act[data-act="disconnect"] .selector-act-icon {
     @apply text-ink-muted;
     background: transparent;
@@ -3017,6 +3028,570 @@
   .group-editor-color:focus-visible {
     outline: 2px solid var(--lume-color-border-focus);
     outline-offset: 3px;
+  }
+
+  /*
+   * The dialog that adds or changes a connection: what kind it is, its fields, and the
+   * steps of a test. Opened from a key it is there at once.
+   */
+  .connection-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 72;
+    background: rgb(6 7 9 / 0.45);
+  }
+
+  .connection {
+    @apply text-ink;
+    position: fixed;
+    top: min(72px, 8vh);
+    left: 50%;
+    z-index: 73;
+    display: flex;
+    flex-direction: column;
+    width: min(580px, calc(100vw - 32px));
+    max-height: calc(100vh - min(72px, 8vh) - 24px);
+    overflow: hidden;
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--lume-color-popover) 96%, transparent);
+    box-shadow:
+      0 0 0 1px var(--lume-color-border),
+      0 24px 70px rgb(0 0 0 / 0.55);
+    font-size: 13px;
+    translate: -50% 0;
+    backdrop-filter: blur(20px) saturate(1.3);
+  }
+
+  .connection[data-animate] {
+    animation: open-folder-in 200ms var(--lume-motion-easing-standard);
+  }
+
+  .connection-head {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 18px 12px;
+  }
+
+  .connection-head h2 {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connection-kinds {
+    display: grid;
+    flex-shrink: 0;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    gap: 8px;
+    padding: 0 18px 4px;
+  }
+
+  .connection-kind {
+    @apply text-ink-muted;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lume-color-text) 12%, transparent);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      scale 140ms var(--lume-motion-easing-standard),
+      background-color 120ms ease;
+  }
+
+  .connection-kind:active:not(:disabled) {
+    scale: 0.98;
+  }
+
+  .connection-kind b {
+    @apply text-ink;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+  }
+
+  .connection-kind small {
+    font-size: 11.5px;
+    line-height: 1.35;
+  }
+
+  .connection-kind[aria-checked="true"] {
+    background: color-mix(in srgb, var(--lume-color-accent) 5%, transparent);
+    box-shadow: inset 0 0 0 1.5px var(--lume-color-accent);
+  }
+
+  .connection-kind:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .connection-kind:disabled[aria-checked="true"] {
+    opacity: 1;
+  }
+
+  .connection-best {
+    margin-left: auto;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--lume-color-accent) 12%, transparent);
+    color: var(--lume-color-accent);
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .connection-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    padding: 14px 18px 4px;
+    overflow: auto;
+    scrollbar-width: thin;
+  }
+
+  .connection-body > * {
+    flex-shrink: 0;
+  }
+
+  .connection-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .connection-field > label,
+  .connection-label {
+    @apply text-ink-muted;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .connection-problem {
+    color: var(--lume-color-status-danger);
+    font-size: 11.5px;
+  }
+
+  .connection-input {
+    @apply text-ink;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: var(--lume-color-control);
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    font-size: 13px;
+    outline: none;
+    user-select: text;
+    transition: box-shadow 120ms ease;
+  }
+
+  .connection-input[data-mono] {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+
+  .connection-input::placeholder {
+    color: color-mix(in srgb, var(--lume-color-text-muted) 70%, transparent);
+  }
+
+  .connection-input:focus {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--lume-color-accent) 45%, transparent),
+      0 0 0 3px color-mix(in srgb, var(--lume-color-accent) 12%, transparent);
+  }
+
+  .connection-input[aria-invalid="true"] {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lume-color-status-danger) 60%, transparent);
+  }
+
+  .connection-three {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 76px;
+    gap: 10px;
+  }
+
+  .connection-read {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--lume-color-text) 4%, transparent);
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+
+  .connection-read > span:first-child {
+    display: flex;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .connection-read[data-tone="good"] > span:first-child {
+    color: var(--lume-color-accent);
+  }
+
+  .connection-read[data-tone="warn"] {
+    background: color-mix(in srgb, var(--lume-color-status-warning) 8%, transparent);
+    color: color-mix(in srgb, var(--lume-color-status-warning) 72%, var(--lume-color-text));
+  }
+
+  .connection-read[data-tone="warn"] > span:first-child {
+    color: var(--lume-color-status-warning);
+  }
+
+  .connection-read b,
+  .connection-fix b {
+    @apply text-ink;
+    font-weight: 500;
+  }
+
+  .connection-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-height: 92px;
+    /* The edges of the chips, which are drawn outside their boxes. */
+    padding: 1px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .connection-chip {
+    @apply text-ink;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lume-color-text) 12%, transparent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    cursor: pointer;
+    transition: scale 140ms var(--lume-motion-easing-standard);
+  }
+
+  .connection-chip:active:not(:disabled),
+  .connection-button:active:not(:disabled) {
+    scale: 0.97;
+  }
+
+  .connection-chip:disabled {
+    @apply text-ink-muted;
+    opacity: 0.7;
+    cursor: default;
+  }
+
+  .connection-chip small {
+    font-family: var(--font-ui);
+    font-size: 11px;
+  }
+
+  .connection-auth {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .connection-segmented {
+    display: inline-flex;
+    flex-shrink: 0;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--lume-color-control);
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+  }
+
+  .connection-segmented button {
+    @apply text-ink-muted;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  .connection-segmented button[aria-pressed="true"] {
+    @apply text-ink;
+    background: var(--lume-color-control-active);
+  }
+
+  .connection-note {
+    @apply text-ink-muted;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .connection-note code {
+    font-family: var(--font-mono);
+  }
+
+  .connection-distros {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .connection-distro {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 46px;
+    padding: 6px 12px;
+    border-radius: 9px;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lume-color-text) 12%, transparent);
+  }
+
+  .connection-distro-icon {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .connection-distro-name {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.3;
+  }
+
+  .connection-distro-name small {
+    @apply text-ink-muted;
+    font-size: 11.5px;
+  }
+
+  .connection-distro .connection-input {
+    width: 190px;
+    height: 28px;
+  }
+
+  .connection-distro .connection-input:disabled {
+    opacity: 0.45;
+  }
+
+  .connection-distro input[type="checkbox"] {
+    flex-shrink: 0;
+    width: 15px;
+    height: 15px;
+    border-radius: 3px;
+    accent-color: var(--lume-color-accent);
+  }
+
+  .connection-distro input[type="checkbox"]:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--lume-color-accent) 60%, transparent);
+    outline-offset: 2px;
+  }
+
+  .connection-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--lume-color-text) 4%, transparent);
+  }
+
+  .connection-step {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 24px;
+    font-size: 12.5px;
+  }
+
+  .connection-step > i {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    font-style: normal;
+  }
+
+  .connection-step > em {
+    @apply text-ink-muted;
+    margin-left: auto;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-style: normal;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connection-step[data-state="ok"] {
+    color: color-mix(in srgb, var(--lume-color-text) 85%, transparent);
+  }
+
+  .connection-step[data-state="ok"] > i {
+    color: var(--lume-color-accent);
+  }
+
+  .connection-step[data-state="bad"] {
+    color: var(--lume-color-status-danger);
+  }
+
+  .connection-step[data-state="wait"] {
+    opacity: 0.65;
+  }
+
+  .connection-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.6;
+  }
+
+  .connection-spin {
+    width: 12px;
+    height: 12px;
+    border: 1.5px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: open-folder-spin 800ms linear infinite;
+  }
+
+  .connection-fix {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 4px 0 2px 23px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--lume-color-control);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .connection-fix > span {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+
+  .connection-foot {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 18px 16px;
+  }
+
+  .connection-status {
+    @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connection-status[data-problem] {
+    color: var(--lume-color-status-danger);
+    white-space: normal;
+  }
+
+  .connection-button {
+    @apply text-ink;
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--lume-color-text) 9%, var(--lume-color-popover));
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    font-size: 12.5px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      scale 140ms var(--lume-motion-easing-standard),
+      background-color 120ms ease;
+  }
+
+  .connection-button[data-primary] {
+    @apply bg-accent text-accent-ink;
+    box-shadow: none;
+    font-weight: 600;
+  }
+
+  .connection-button:disabled {
+    @apply text-ink-muted;
+    background: color-mix(in srgb, var(--lume-color-text) 6%, var(--lume-color-popover));
+    box-shadow: none;
+    opacity: 0.7;
+    cursor: default;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .connection-chip:hover:not(:disabled) {
+      @apply bg-control-hover;
+    }
+
+    .connection-button:hover:not(:disabled, [data-primary]) {
+      background: color-mix(in srgb, var(--lume-color-text) 13%, var(--lume-color-popover));
+    }
+
+    .connection-button[data-primary]:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--lume-color-accent) 88%, white);
+    }
+  }
+
+  /* A narrow window has the kinds under one another, and the fields of a machine. */
+  @media (max-width: 480px) {
+    .connection-kinds {
+      grid-auto-flow: row;
+    }
+
+    .connection-kind small {
+      display: none;
+    }
+
+    .connection-auth,
+    .connection-foot,
+    .connection-fix {
+      flex-wrap: wrap;
+    }
+
+    .connection-status {
+      flex-basis: 100%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .connection[data-animate] {
+      animation: none;
+    }
+
+    .connection-spin {
+      animation-duration: 1.6s;
+    }
   }
 
   /*
@@ -7226,6 +7801,31 @@
    * The plugins: a row for each install with what can be done to it, the panel that
    * says what installing a package would do, and what a plugin did lately.
    */
+  /* A machine sessions can be opened on, with how it stands. */
+  .host-dot {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .host-row .settings-label > div + div {
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
+  }
+
+  .host-badge {
+    @apply text-ink-muted;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--settings-pressed);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .host-badge[data-on] {
+    background: color-mix(in srgb, var(--lume-color-accent) 12%, transparent);
+    color: var(--lume-color-accent);
+  }
+
   .addon-actions {
     display: flex;
     align-items: center;

@@ -7,12 +7,12 @@
  * selector of hosts and what they hold.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 
 import { hostOnShow } from "../rex/model.ts";
 import { useShell } from "./context.ts";
-import { selectorLabel } from "./host-selector.ts";
+import { selectorDoor, selectorLabel } from "./host-selector.ts";
 import { HostSelector } from "./HostSelector.tsx";
 import { ChevronDownIcon } from "./icons.tsx";
 
@@ -27,6 +27,15 @@ export function WorkspaceSwitcher() {
   const [open, setOpen] = useState<"keyboard" | "pointer" | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const label = selectorLabel(name, backend, server, connected);
+  // What is to be looked at, when something else of the page opened the selector.
+  const [browse, setBrowse] = useState<string | null>(null);
+  const asked = useStore(selectorDoor, (state) => state.asked);
+  useEffect(() => {
+    if (asked === null) return;
+    selectorDoor.getState().opened();
+    setBrowse(asked);
+    setOpen("keyboard");
+  }, [asked]);
 
   const dismiss = useCallback(() => setOpen(null), []);
   const close = useCallback(() => {
@@ -49,8 +58,12 @@ export function WorkspaceSwitcher() {
         data-served={backend !== null || undefined}
         title={`${label.host} / ${label.name}\n${label.said}`}
         onClick={(event) => {
-          if (open !== null) close();
-          else setOpen(event.detail === 0 ? "keyboard" : "pointer");
+          if (open !== null) {
+            close();
+            return;
+          }
+          setBrowse(null);
+          setOpen(event.detail === 0 ? "keyboard" : "pointer");
         }}
       >
         {/* The dot is said in the button's description, not in its name. */}
@@ -66,7 +79,12 @@ export function WorkspaceSwitcher() {
         </span>
       </button>
       {open !== null && (
-        <HostSelector keyboard={open === "keyboard"} close={close} dismiss={dismiss} />
+        <HostSelector
+          keyboard={open === "keyboard"}
+          browse={browse}
+          close={close}
+          dismiss={dismiss}
+        />
       )}
     </div>
   );

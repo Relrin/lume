@@ -25,9 +25,9 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use lume_config::schema::TitleBar;
 use lume_config::source::split_path;
 use lume_config::{
-    ColorScheme, ConfigError, ConfigStore, Dirs, Dropped, Keymap, Platform, PluginBinding, Problem,
-    Resolved, Theme, Themes, TokenValue, WatchEvent, Watcher, check_value, plugin_setting_problems,
-    resolve_keymap_with, resolve_tokens,
+    ColorScheme, ConfigError, ConfigStore, Dirs, Dropped, Keymap, ListedProfile, Platform,
+    PluginBinding, Problem, Resolved, RexHostEntry, SshProfile, Theme, Themes, TokenValue,
+    WatchEvent, Watcher, check_value, plugin_setting_problems, resolve_keymap_with, resolve_tokens,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -334,6 +334,47 @@ impl ConfigService {
     /// own file.
     pub fn set_workspace_root(&self, name: &str, root: Option<&str>) -> Result<(), ConfigError> {
         self.store.set_workspace_root(name, root)?;
+        self.announce();
+        Ok(())
+    }
+
+    /// Writes a Rex server into the user's file, in place of the one labelled `was` if
+    /// one is named.
+    pub fn put_rex_host(&self, was: Option<&str>, entry: &RexHostEntry) -> Result<(), ConfigError> {
+        self.store.put_rex_host(was, entry)?;
+        self.announce();
+        Ok(())
+    }
+
+    /// Takes a Rex server out of the user's file.
+    pub fn remove_rex_host(&self, label: &str) -> Result<(), ConfigError> {
+        self.store.remove_rex_host(label)?;
+        self.announce();
+        Ok(())
+    }
+
+    /// Writes a profile for a machine reached over SSH into the user's file, in place of
+    /// the one called `id` if one is named. Gives its id.
+    pub fn put_ssh_profile(
+        &self,
+        id: Option<&str>,
+        profile: &SshProfile,
+    ) -> Result<String, ConfigError> {
+        let id = self.store.put_ssh_profile(id, profile)?;
+        self.announce();
+        Ok(id)
+    }
+
+    /// Takes a profile out of the user's file.
+    pub fn remove_profile(&self, id: &str) -> Result<(), ConfigError> {
+        self.store.remove_profile(id)?;
+        self.announce();
+        Ok(())
+    }
+
+    /// Says of profiles that were found whether they are listed and where they start.
+    pub fn list_profiles(&self, changes: &[ListedProfile]) -> Result<(), ConfigError> {
+        self.store.list_profiles(changes)?;
         self.announce();
         Ok(())
     }

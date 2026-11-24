@@ -134,17 +134,24 @@ describe("what can be done with a host of the selector", () => {
 
   it("is making a session, and letting go of the server", () => {
     expect(labels(OWN, DEVBOX.id)).toEqual(["New session on devbox", "Disconnect"]);
-    expect(labels(OWN, NAS.id)).toEqual(["Connect"]);
+    const edit = "Edit connection…";
+    expect(labels(OWN, NAS.id)).toEqual(["Connect", edit]);
+    // The server of this machine is nobody's to change until it is written.
+    const here = { ...NAS, written: false };
+    expect(labels({ ...OWN, servers: rexList(here) }, here.id)).toEqual(["Connect"]);
     const state = (state: typeof UP | ReturnType<typeof rexFailed> | { kind: "connecting" }) => {
       const sources = { ...OWN, servers: rexList({ ...NAS, state }) };
       return labels(sources, NAS.id);
     };
     expect(state({ kind: "connecting" })).toEqual(["Cancel"]);
-    expect(state(rexFailed("unreachable", "x"))).toEqual(["Retry"]);
-    expect(state(rexFailed("confirmation_required", "x"))).toEqual(["Connect without encryption"]);
+    expect(state(rexFailed("unreachable", "x"))).toEqual(["Retry", edit]);
+    expect(state(rexFailed("confirmation_required", "x"))).toEqual([
+      "Connect without encryption",
+      edit,
+    ]);
     const odd = rexHost("?odd", "odd", { state: rexFailed("bad_request", "x") });
     const sources = { ...OWN, servers: rexList(odd) };
-    expect(labels(sources, odd.id)).toEqual([]);
+    expect(labels(sources, odd.id)).toEqual([edit]);
   });
 
   it("is making what was typed, where nothing is called so", () => {

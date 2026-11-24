@@ -34,7 +34,24 @@
               },
               {
                 "role": "listbox",
-                "name": "Hosts"
+                "name": "Hosts",
+                "parts": [
+                  {
+                    "role": "presentation",
+                    "parts": [
+                      {
+                        "role": "presentation"
+                      },
+                      {
+                        "role": "option",
+                        "name": "Add connection…",
+                        "state": {
+                          "selected": "false"
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               {
                 "role": "listbox",

@@ -30,6 +30,7 @@ pub mod import;
 pub mod keymap;
 pub mod keys;
 pub mod layers;
+pub mod listed;
 pub mod paths;
 pub mod profiles;
 pub mod rex;
@@ -66,7 +67,7 @@ pub use schema::{
     default_config_text,
 };
 pub use source::{Problem, ProblemKind, Source};
-pub use store::{ConfigStore, Resolved, check_setting};
+pub use store::{ConfigStore, ListedProfile, Resolved, SshProfile, check_setting};
 pub use theme::{
     Theme, Themes, default_tokens, light_tokens, parse_theme, resolve_tokens, theme_schema,
 };

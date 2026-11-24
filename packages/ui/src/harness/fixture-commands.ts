@@ -70,8 +70,15 @@ export const FIXTURE_BINDINGS: readonly KeyBinding[] = [
   },
 ];
 
-/** The commands about workspaces and about the sessions of Rex servers. */
+/** The commands about workspaces, about the sessions of Rex servers and about adding them. */
 export const HOST_COMMANDS: readonly CommandSpec[] = [
+  {
+    id: "lume.connection.add",
+    title: "Add Connection…",
+    category: "Host",
+    runs: "page",
+    palette: true,
+  },
   ...["switch", "new", "rename", "delete", "open-folder", "set-root"].map((verb) => ({
     id: `lume.workspace.${verb}`,
     title: `Workspace ${verb}`,

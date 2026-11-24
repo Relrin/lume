@@ -12,6 +12,7 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use lume_session::Launcher;
+use lume_session::ssh::check_word;
 use serde::Serialize;
 use tokio::net::{TcpStream, lookup_host};
 
@@ -28,13 +29,27 @@ pub struct Probe {
     /// Why there is no time, in words.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Whether the machine is reached through another, so that a connection from here
+    /// would say nothing of it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub relayed: bool,
 }
 
 impl Probe {
-    fn without(note: impl Into<String>) -> Self {
+    pub fn without(note: impl Into<String>) -> Self {
         Self {
             ms: None,
             note: Some(note.into()),
+            relayed: false,
+        }
+    }
+
+    /// The machine answered within so many milliseconds.
+    pub fn within(ms: u64) -> Self {
+        Self {
+            ms: Some(ms),
+            note: None,
+            relayed: false,
         }
     }
 }
@@ -163,6 +178,11 @@ pub async fn probe(launcher: Launcher) -> Probe {
     else {
         return Probe::without("not a host reached over SSH");
     };
+    // The client is asked about it, and would read a word that begins with a hyphen as
+    // an option.
+    if let Err(error) = check_word("host", &host) {
+        return Probe::without(error.message);
+    }
     let asked = Target {
         host,
         port: port.unwrap_or(SSH_PORT),
@@ -176,7 +196,10 @@ pub async fn probe(launcher: Launcher) -> Probe {
             Err(_) => return Probe::without("the SSH configuration could not be read"),
         };
     if target.relayed {
-        return Probe::without("reached through another machine");
+        return Probe {
+            relayed: true,
+            ..Probe::without("reached through another machine")
+        };
     }
     let address = match tokio::time::timeout(
         HOST_PROBE_TIMEOUT,
@@ -193,10 +216,9 @@ pub async fn probe(launcher: Launcher) -> Probe {
     };
     let started = Instant::now();
     match tokio::time::timeout(HOST_PROBE_TIMEOUT, TcpStream::connect(address)).await {
-        Ok(Ok(_)) => Probe {
-            ms: Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)),
-            note: None,
-        },
+        Ok(Ok(_)) => {
+            Probe::within(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX))
+        }
         Ok(Err(_)) => Probe::without("the host did not take the connection"),
         Err(_) => Probe::without("the host did not answer in time"),
     }
@@ -251,6 +273,19 @@ mod tests {
         })
         .await;
         assert_eq!(probe.ms, None);
+    }
+
+    #[tokio::test]
+    async fn a_word_the_client_would_read_as_an_option_is_not_asked_about() {
+        let probe = probe(Launcher::Ssh {
+            host: "-oProxyCommand=calc".to_owned(),
+            user: None,
+            port: None,
+            extra_args: Vec::new(),
+            client: None,
+        })
+        .await;
+        assert!(probe.ms.is_none() && probe.note.is_some(), "{probe:?}");
     }
 
     #[tokio::test]

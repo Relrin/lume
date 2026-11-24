@@ -10,6 +10,9 @@
  * connection that would not be encrypted is said to be so, and is made by its button or
  * by keys of its own.
  *
+ * Below the hosts stands the way to add one. A server the user added is called something
+ * else in place too, and is changed from there while it is not connected.
+ *
  * Ending a session or deleting a workspace asks first. Whatever needs something else
  * asked for is handed to the command palette, which asks.
  */
@@ -17,12 +20,14 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useStore } from "zustand";
 
+import { labelTaken } from "../connections/model.ts";
+import { connectionDialog } from "../connections/store.ts";
 import type { WorkspaceList } from "../core/types.ts";
 import { Glyph } from "../icons/Glyph.tsx";
 import { KeyCaps } from "../palette/KeyCaps.tsx";
 import { LinkDot } from "../rex/LinkDot.tsx";
 import { useRexActions, useRexLook } from "../rex/look.ts";
-import { reason } from "../rex/model.ts";
+import { reason, usable } from "../rex/model.ts";
 import { useShell } from "./context.ts";
 import {
   browsedHost,
@@ -40,6 +45,9 @@ import { SearchIcon } from "./icons.tsx";
 
 const HOSTS_ID = "selector-hosts";
 const ROWS_ID = "selector-rows";
+const ADD_ID = "selector-add";
+/** What is marked among the hosts when it is the way to add one. */
+const ADD = "add";
 
 /** A row being renamed in place, and what is typed for it. */
 interface Renaming {
@@ -112,10 +120,13 @@ function RenameField({
  */
 export function HostSelector({
   keyboard,
+  browse,
   close,
   dismiss,
 }: {
   keyboard: boolean;
+  /** The label of the server to look at first, in place of what is on show. */
+  browse: string | null;
   close: () => void;
   dismiss: () => void;
 }) {
@@ -132,8 +143,12 @@ export function HostSelector({
   const field = useRef<HTMLInputElement>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceList | null>(null);
   const [query, setQuery] = useState("");
-  const [wanted, setWanted] = useState<string | null>(backend);
+  const [wanted, setWanted] = useState<string | null>(
+    () => servers?.hosts.find((found) => found.label === browse)?.id ?? backend,
+  );
   const [column, setColumn] = useState<"hosts" | "rows">("rows");
+  // Whether the mark among the hosts is on the way to add one.
+  const [adding, setAdding] = useState(false);
   // What is marked at the right, by its key. Nothing means what is on show.
   const [stopAt, setStopAt] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<Renaming | null>(null);
@@ -183,12 +198,19 @@ export function HostSelector({
   const optionId = (index: number) => `selector-option-${index}`;
   const hostId = (index: number) => `selector-host-${index}`;
 
-  const markedId = column === "hosts" ? hostId(hostAt) : optionId(marked);
+  const markedId = column === "hosts" ? (adding ? ADD_ID : hostId(hostAt)) : optionId(marked);
   useEffect(() => {
     box.current?.querySelector(`#${CSS.escape(markedId)}`)?.scrollIntoView({ block: "nearest" });
   }, [markedId]);
 
+  // A server that was added just now may be listed only after the selector opened.
+  const sought = servers?.hosts.find((listed) => listed.label === browse)?.id;
+  useEffect(() => {
+    if (sought !== undefined) setWanted(sought);
+  }, [sought]);
+
   const look = (key: string) => {
+    setAdding(false);
     if (key === host?.key) return;
     setWanted(key);
     setStopAt(null);
@@ -197,6 +219,19 @@ export function HostSelector({
   const leaveWith = (run: () => void) => {
     close();
     run();
+  };
+  const add = (byKey: boolean) => {
+    dismiss();
+    connectionDialog.getState().add("rex", byKey);
+  };
+  /** Changes how the server looked at is reached. */
+  const edit = (byKey: boolean) => {
+    const server = host?.rex;
+    if (!server) return;
+    dismiss();
+    connectionDialog
+      .getState()
+      .edit({ kind: "rex", label: server.label, address: server.address }, byKey);
   };
   const openRow = (row: SelectorRow) => {
     if (!host) return;
@@ -208,7 +243,7 @@ export function HostSelector({
       }
     });
   };
-  const act = (what: SelectorAct, agreed: boolean) => {
+  const act = (what: SelectorAct, agreed: boolean, byKey = false) => {
     if (!host) return;
     const server = host.rex;
     switch (what.kind) {
@@ -230,6 +265,9 @@ export function HostSelector({
         return;
       case "disconnect":
         if (server) rex.disconnect(server);
+        return;
+      case "edit":
+        edit(byKey);
         return;
       case "command":
         leaveWith(() => {
@@ -287,11 +325,29 @@ export function HostSelector({
     );
   };
 
+  const startHostRename = (listed: SelectorHost) => {
+    if (renames(listed)) setRenaming({ key: listed.key, value: listed.name });
+  };
+  const saveHostRename = (listed: SelectorHost, value: string) => {
+    const label = value.trim();
+    stopRename();
+    const server = listed.rex;
+    if (!server || label === listed.name) return;
+    app.client
+      .rexHostPut(listed.name, label, server.address)
+      .catch((error: unknown) =>
+        app.notices.push("error", error instanceof Error ? error.message : String(error)),
+      );
+  };
+
   const move = (by: 1 | -1) => {
     if (column === "hosts") {
-      if (hosts.length === 0) return;
-      const to = hosts[(hostAt + by + hosts.length) % hosts.length];
-      if (to) look(to.key);
+      // The way to add a host comes after the last of them.
+      const places = [...hosts.map((listed) => listed.key), ADD];
+      const from = adding ? places.length - 1 : hostAt;
+      const to = places[(from + by + places.length) % places.length];
+      if (to === ADD) setAdding(true);
+      else if (to !== undefined) look(to);
       return;
     }
     if (stops.length === 0) return;
@@ -299,12 +355,13 @@ export function HostSelector({
   };
   const accept = (agreed: boolean) => {
     if (column === "hosts") {
-      setColumn("rows");
+      if (adding) add(true);
+      else setColumn("rows");
       return;
     }
     if (!at) return;
     if (at.kind === "row") openRow(at.row);
-    else act(at.act, agreed);
+    else act(at.act, agreed, true);
   };
   const onKey = (event: KeyboardEvent<HTMLInputElement>) => {
     const command = event.ctrlKey || event.metaKey;
@@ -316,13 +373,16 @@ export function HostSelector({
         move(-1);
         break;
       case "Tab":
+        setAdding(false);
         setColumn(column === "hosts" ? "rows" : "hosts");
         break;
       case "Enter":
         accept(command);
         break;
       case "F2":
-        if (at?.kind === "row") startRename(at.row);
+        if (column === "hosts") {
+          if (host && !adding) startHostRename(host);
+        } else if (at?.kind === "row") startRename(at.row);
         break;
       case "Delete":
         if (!command) {
@@ -384,9 +444,11 @@ export function HostSelector({
             aria-autocomplete="list"
             aria-activedescendant={
               column === "hosts"
-                ? hostAt >= 0
-                  ? hostId(hostAt)
-                  : undefined
+                ? adding
+                  ? ADD_ID
+                  : hostAt >= 0 && renaming?.key !== host?.key
+                    ? hostId(hostAt)
+                    : undefined
                 : at && at.key !== renaming?.key
                   ? optionId(marked)
                   : undefined
@@ -406,31 +468,83 @@ export function HostSelector({
         </div>
         <div className="selector-columns">
           <div id={HOSTS_ID} className="selector-hosts" role="listbox" aria-label="Hosts">
-            {hosts.map((listed, index) => (
-              <div
-                key={listed.key}
-                id={hostId(index)}
-                className="selector-host"
-                role="option"
-                aria-selected={listed.key === host?.key}
-                data-host={listed.key}
-                data-off={listed.link === "down" || undefined}
-                data-marked={(column === "hosts" && index === hostAt) || undefined}
-                onPointerMove={() => look(listed.key)}
-                onClick={() => {
-                  look(listed.key);
-                  setColumn("rows");
-                }}
-              >
-                {tile(listed)}
-                <span className="selector-text">
-                  <span className="selector-name">{listed.name}</span>
-                  <span className="selector-line">{listed.line}</span>
-                </span>
-                {listed.link === "busy" && <LinkDot link="busy" className="switcher-dot" />}
-              </div>
-            ))}
+            {hosts.map((listed, index) => {
+              if (renaming?.key === listed.key) {
+                return (
+                  <div key={listed.key} className="selector-host" data-renaming role="presentation">
+                    {tile(listed)}
+                    <RenameField
+                      label="Host name"
+                      value={renaming.value}
+                      taken={labelTaken(renaming.value, servers?.hosts ?? [], listed.name) !== null}
+                      set={(value) => setRenaming({ key: listed.key, value })}
+                      save={() => saveHostRename(listed, renaming.value)}
+                      cancel={stopRename}
+                    />
+                  </div>
+                );
+              }
+              return (
+                <div key={listed.key} className="selector-place" role="presentation">
+                  <div
+                    id={hostId(index)}
+                    className="selector-host"
+                    role="option"
+                    aria-selected={listed.key === host?.key}
+                    data-host={listed.key}
+                    data-off={listed.link === "down" || undefined}
+                    data-marked={(column === "hosts" && !adding && index === hostAt) || undefined}
+                    onPointerMove={() => look(listed.key)}
+                    onClick={() => {
+                      look(listed.key);
+                      setColumn("rows");
+                    }}
+                  >
+                    {tile(listed)}
+                    <span className="selector-text">
+                      <span className="selector-name">{listed.name}</span>
+                      <span className="selector-line">{listed.line}</span>
+                    </span>
+                    {listed.link === "busy" && <LinkDot link="busy" className="switcher-dot" />}
+                  </div>
+                  {renames(listed) && (
+                    <span className="selector-tools">
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        aria-label={`Rename ${listed.name}`}
+                        title="Rename (F2)"
+                        onClick={() => startHostRename(listed)}
+                      >
+                        <Glyph name="pencil" size={13} />
+                      </button>
+                    </span>
+                  )}
+                </div>
+              );
+            })}
             {hosts.length === 0 && <p className="selector-note">Nothing matches.</p>}
+            <div className="selector-add" role="presentation">
+              <div className="selector-separator" role="presentation" />
+              <div
+                id={ADD_ID}
+                className="selector-act"
+                data-act="command"
+                role="option"
+                aria-selected={adding}
+                data-marked={(column === "hosts" && adding) || undefined}
+                onPointerMove={() => {
+                  setColumn("hosts");
+                  setAdding(true);
+                }}
+                onClick={() => add(false)}
+              >
+                <span className="selector-act-icon">
+                  <Glyph name="plus" size={13} weight={2.2} />
+                </span>
+                <span className="selector-act-label">Add connection…</span>
+              </div>
+            </div>
           </div>
           {host && (
             <div className="selector-side">
@@ -573,6 +687,11 @@ export function HostSelector({
   );
 }
 
+/** Whether a host is a server the user can call something else. */
+function renames(host: SelectorHost): boolean {
+  return host.rex !== null && host.rex.written && usable(host.rex);
+}
+
 /** The picture of something that can be done. */
 function actGlyph(act: SelectorAct) {
   switch (act.kind) {
@@ -580,6 +699,8 @@ function actGlyph(act: SelectorAct) {
       return act.agree ? "triangle-exclamation-point" : "refresh-cw";
     case "disconnect":
       return "x";
+    case "edit":
+      return "pencil";
     case "command":
       return act.command === "lume.workspace.new" ? "plus" : "folder";
     default:

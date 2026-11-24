@@ -493,6 +493,7 @@ describe("the configuration's own schema", () => {
       "general",
       "appearance",
       "terminal",
+      "hosts",
       "notifications",
     ]);
     for (const page of pages) {

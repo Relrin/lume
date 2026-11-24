@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
-use lume_config::Config;
+use lume_config::{Config, RexHostEntry};
 use lume_proto::BackendId;
 use lume_rex::{ClientInfo, Endpoint, Link, Options, RexBackend, RexError, RexSession};
 use lume_session::SessionBackend as _;
@@ -28,7 +28,7 @@ use tokio::sync::watch;
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
-use super::installed;
+use super::{attempt, installed};
 use crate::configsvc::ConfigService;
 use crate::error::CommandError;
 use crate::panes::Panes;
@@ -50,6 +50,8 @@ struct Host {
     /// The address as the user wrote it.
     address: String,
     endpoint: Endpoint,
+    /// Whether the user wrote it, so that it is theirs to change.
+    written: bool,
 }
 
 impl Host {
@@ -140,6 +142,7 @@ fn hosts_of(config: &Config) -> (Vec<Host>, Vec<Unusable>) {
                             label: entry.label.clone(),
                             address: entry.address.clone(),
                             endpoint,
+                            written: true,
                         });
                         continue;
                     }
@@ -171,17 +174,26 @@ fn hosts_of(config: &Config) -> (Vec<Host>, Vec<Unusable>) {
                 label: LOCAL_LABEL.to_owned(),
                 address: Endpoint::Local.to_string(),
                 endpoint: Endpoint::Local,
+                written: false,
             },
         );
     }
     (hosts, unusable)
 }
 
+/// Where an address that is typed leads. Nothing typed leads nowhere.
+pub(super) fn endpoint_of(address: &str) -> Result<Endpoint, CommandError> {
+    if address.trim().is_empty() {
+        return Err(CommandError::bad_request("there is no address"));
+    }
+    Endpoint::parse(address).map_err(|error| command_error(&error))
+}
+
 fn id_of(endpoint: &Endpoint) -> BackendId {
     BackendId(format!("{ID_PREFIX}{endpoint}"))
 }
 
-fn command_error(error: &RexError) -> CommandError {
+pub(super) fn command_error(error: &RexError) -> CommandError {
     CommandError::new(error.code().to_owned(), error.to_string())
 }
 
@@ -283,6 +295,7 @@ impl Hosts {
                 "label": host.label,
                 "address": host.address,
                 "local": host.is_local(),
+                "written": host.written,
                 "state": state,
                 "sessions": sessions,
                 "on_show": on_show,
@@ -296,6 +309,7 @@ impl Hosts {
                 "label": unusable.label,
                 "address": unusable.address,
                 "local": false,
+                "written": true,
                 "state": {
                     "kind": "failed",
                     "code": unusable.failure.code,
@@ -447,6 +461,40 @@ impl Hosts {
                 this.announce();
             }
         });
+    }
+
+    /// How an address is read, and which server that the user wrote is reached at it
+    /// already, if one other than `except` is.
+    pub fn read(&self, address: &str, except: Option<&str>) -> Result<Value, CommandError> {
+        let endpoint = endpoint_of(address)?;
+        let taken = self.taken(&endpoint, except);
+        let mut read = attempt::parts(&endpoint);
+        if let Some(read) = read.as_object_mut() {
+            read.insert("taken".to_owned(), json!(taken));
+        }
+        Ok(read)
+    }
+
+    /// The label of the server the user wrote that is reached at an endpoint.
+    fn taken(&self, endpoint: &Endpoint, except: Option<&str>) -> Option<String> {
+        self.inner()
+            .hosts
+            .iter()
+            .filter(|host| host.written && Some(host.label.as_str()) != except)
+            .find(|host| host.endpoint == *endpoint)
+            .map(|host| host.label.clone())
+    }
+
+    /// Whether a server can be written as it is described, in place of the one labelled
+    /// `was` if one is named.
+    pub fn check(&self, was: Option<&str>, entry: &RexHostEntry) -> Result<(), CommandError> {
+        let endpoint = endpoint_of(&entry.address)?;
+        match self.taken(&endpoint, was) {
+            Some(label) => Err(CommandError::bad_request(format!(
+                "the address is the same server's as that of `{label}`"
+            ))),
+            None => Ok(()),
+        }
     }
 
     /// The server somebody means by its id, its label or its address.
@@ -1035,7 +1083,7 @@ mod tests;
 
 #[cfg(test)]
 mod naming {
-    use lume_config::{RexConfig, RexHostEntry};
+    use lume_config::RexConfig;
 
     use super::*;
 

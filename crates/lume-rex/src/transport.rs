@@ -156,6 +156,7 @@ fn settles(error: &RexError) -> bool {
             | RexError::Unconfirmed { .. }
             | RexError::Refused { .. }
             | RexError::Unsupported { .. }
+            | RexError::NotInstalled { .. }
             | RexError::BadEndpoint(_)
     )
 }

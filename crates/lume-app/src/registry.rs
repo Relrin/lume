@@ -24,7 +24,7 @@ const ID_MAX_LEN: usize = 96;
 const OWN_PREFIX: &str = "lume";
 
 /// The areas the application's own commands are in.
-pub const AREAS: [&str; 18] = [
+pub const AREAS: [&str; 19] = [
     "app",
     "host",
     "session",
@@ -40,6 +40,7 @@ pub const AREAS: [&str; 18] = [
     "config",
     "palette",
     "connect",
+    "connection",
     "search",
     "settings",
     "rex",
@@ -108,6 +109,7 @@ pub fn plugin_access(id: &str) -> PluginAccess {
         || id.starts_with("lume.session.")
         || id.starts_with("lume.host.")
         || id.starts_with("lume.rex.")
+        || id.starts_with("lume.connection.")
     {
         return PluginAccess::UserOnly;
     }

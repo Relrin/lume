@@ -1,6 +1,7 @@
 /**
  * The pages of the settings window that the window draws itself: the commands with
- * their keys, and what the application is.
+ * their keys, what the application is, and the machines sessions can be opened on,
+ * which have a setting of the configuration's beside them.
  *
  * They are pages like the others, listed with the application's own, and the window
  * draws what is on them itself (see `Commands.tsx` and `About.tsx`). Nothing here
@@ -11,6 +12,9 @@ import type { SettingsPage } from "./model.ts";
 
 /** The id of the page that lists the commands. `lume.app.commands` opens it. */
 export const COMMANDS_PAGE = "commands";
+
+/** The id of the page that lists the machines sessions can be opened on. */
+export const HOSTS_PAGE = "hosts";
 
 /** The id of the page that says what the application is. `lume.app.about` opens it. */
 export const ABOUT_PAGE = "about";
@@ -43,14 +47,17 @@ const ABOUT: SettingsPage = {
 
 /**
  * The pages with the window's own among them: what the application is after the last
- * of the application's pages, and the keys first of the workspace's. A page that
- * already has one of their ids is passed over, as it is for a page handed over.
+ * of the application's pages, and the keys first of the workspace's after the machines.
+ * A page that already has one of their ids is passed over, as it is for a page handed
+ * over.
  */
 export function withOwnPages(pages: readonly SettingsPage[]): SettingsPage[] {
-  const kept = pages.filter((page) => page.id !== COMMANDS_PAGE && page.id !== ABOUT_PAGE);
+  const kept = pages
+    .filter((page) => page.id !== COMMANDS_PAGE && page.id !== ABOUT_PAGE)
+    .map((page): SettingsPage => (page.id === HOSTS_PAGE ? { ...page, own: "hosts" } : page));
   const last = kept.findLastIndex((page) => page.group === APPLICATION);
   const listed = [...kept.slice(0, last + 1), ABOUT, ...kept.slice(last + 1)];
-  const first = listed.findIndex((page) => page.group === WORKSPACE);
+  const first = listed.findIndex((page) => page.group === WORKSPACE && page.id !== HOSTS_PAGE);
   const at = first < 0 ? last + 2 : first;
   return [...listed.slice(0, at), COMMANDS, ...listed.slice(at)];
 }

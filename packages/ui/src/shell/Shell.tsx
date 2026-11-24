@@ -13,6 +13,7 @@ import { Prompts } from "../Prompts.tsx";
 import { tabStyle, tabStyleName } from "../motion/tab.ts";
 import { Background } from "./Background.tsx";
 import { ColorPickerHost } from "./ColorPicker.tsx";
+import { Connection } from "./Connection.tsx";
 import { CursorFxLayer } from "./CursorFxLayer.tsx";
 import type { ShellApp } from "./boot.ts";
 import { ShellContext } from "./context.ts";
@@ -59,6 +60,7 @@ export function Shell({ app }: { app: ShellApp }) {
         <ConnectPalette />
         <ColorPickerHost />
         <OpenFolder />
+        <Connection />
         <Notices store={app.notices} run={(command, args) => app.commands.run(command, args)} />
         <Prompts store={app.prompts} />
       </div>

@@ -94,12 +94,24 @@ export interface ConnectAction {
   readonly label: string;
   /** The command it runs. */
   readonly command: string;
+  /** What the command is told. */
+  readonly args?: Readonly<Record<string, unknown>>;
+  /** The keys that run it while the palette is on show. */
+  readonly keys?: { readonly pc: string; readonly mac: string };
   /** What is said of it beside the list while it is marked. */
   readonly about: string;
 }
 
 /** The actions the palette offers after the profiles. */
 export const CONNECT_ACTIONS: readonly ConnectAction[] = [
+  {
+    id: "add",
+    label: "Add a Rex server…",
+    command: "lume.connection.add",
+    args: { kind: "rex" },
+    keys: { pc: "Ctrl+Shift+A", mac: "⌃⇧A" },
+    about: "A machine that runs Rex, reached over SSH, HTTPS or your tailnet.",
+  },
   {
     id: "config",
     label: "Open config.toml",

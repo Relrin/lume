@@ -394,7 +394,9 @@ impl Tunnel {
             }
         }
         let Some((rex, status, answer, said)) = asked else {
-            return Err(self.unsupported("`rex` was not found on the other machine"));
+            return Err(RexError::NotInstalled {
+                endpoint: self.name.clone(),
+            });
         };
         if status.success() {
             return socket_in(&answer).map_err(|why| self.unsupported(why));

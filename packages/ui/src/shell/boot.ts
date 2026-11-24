@@ -22,6 +22,7 @@ import { applyConfig, describeProblem } from "../config/apply.ts";
 import { loadTerminalFonts } from "../config/fonts.ts";
 import { createConfigStore, type ConfigStore } from "../config/store.ts";
 import { createConnectStore, type ConnectStore } from "../connect/store.ts";
+import { connectionDialog } from "../connections/store.ts";
 import { CoreClient } from "../core/client.ts";
 import type { ConfigView, Machine, Notice } from "../core/types.ts";
 import { checkFrameContract } from "../frame-contract.ts";
@@ -541,6 +542,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     },
     answerPrompt: (proceed, item) => prompts.answerCurrent(proceed, item),
     openFolder: () => folderDialog.getState().show(false),
+    addConnection: (kind) => connectionDialog.getState().add(kind, true),
     failed: (message) => notices.push("error", sentence(message)),
   });
   const cardDrag = new CardDrag({

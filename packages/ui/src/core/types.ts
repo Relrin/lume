@@ -504,6 +504,8 @@ export interface RexHost {
   readonly address: string;
   /** Whether it is the one of this machine. */
   readonly local: boolean;
+  /** Whether the user wrote it into their configuration, so that it is theirs to change. */
+  readonly written: boolean;
   readonly state: RexHostState;
   /** Its sessions, while there is a connection to it. */
   readonly sessions: readonly RexSession[];
@@ -547,6 +549,44 @@ export interface HostProbe {
   readonly ms: number | null;
   /** Why there is no time, in words. */
   readonly note?: string;
+  /** Whether the machine is reached through another, which is why it was not measured. */
+  readonly relayed?: boolean;
+}
+
+/** An address of a Rex server as the core reads it. */
+export interface RexAddress {
+  readonly kind: "local" | "pipe" | "unix" | "https" | "http" | "tailnet" | "host" | "ssh";
+  readonly user?: string | null;
+  readonly host?: string;
+  readonly port?: number | null;
+  /** The pipe, or the socket. */
+  readonly path?: string | null;
+  /** What the server is called that is reached there already, if one is. */
+  readonly taken: string | null;
+}
+
+/** A Rex server that was connected to, to see whether it can be. */
+export interface RexTried {
+  readonly version: string;
+  readonly platform: string;
+  readonly ms: number;
+}
+
+/** A machine reached over SSH, as it is typed. */
+export interface SshHost {
+  readonly host: string;
+  readonly user: string | null;
+  readonly port: number | null;
+  /** Arguments for the SSH client, before the host. */
+  readonly args: readonly string[];
+}
+
+/** Whether a profile that was found is listed, and where its terminals start. */
+export interface ListedProfile {
+  readonly id: string;
+  readonly listed: boolean;
+  /** Nothing is where it starts by itself. */
+  readonly cwd: string | null;
 }
 
 /** What `sessions_detached` returns. */

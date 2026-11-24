@@ -178,10 +178,12 @@ describe("what the Connect palette lists", () => {
       "auto.wsl.Ubuntu",
       "box",
       "auto.ssh.dev-staging",
+      "add",
       "config",
       "refresh",
     ]);
     expect(CONNECT_ACTIONS.map((action) => action.command)).toEqual([
+      "lume.connection.add",
       "lume.config.open",
       "lume.profile.refresh",
     ]);

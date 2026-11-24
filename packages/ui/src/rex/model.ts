@@ -58,6 +58,7 @@ const FAILURES: Readonly<Record<string, string>> = {
   version_mismatch: "Other version",
   ssh: "SSH failed",
   unsupported: "Not supported",
+  not_installed: "Not installed",
   bad_request: "Address not usable",
 };
 
@@ -161,6 +162,8 @@ export function reason(host: Pick<RexHost, "id" | "state">): string | null {
       return `The server does not let this computer in. ${ended(state.error)}`;
     case "version_mismatch":
       return `The server speaks another version of Rex. ${ended(state.error)}`;
+    case "not_installed":
+      return `${ended(state.error)} Install it there, and try again.`;
     case "ssh":
       return `${ended(state.error)} Connecting once in a terminal shows what SSH asks for.`;
     default:

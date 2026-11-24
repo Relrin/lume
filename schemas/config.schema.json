@@ -2186,7 +2186,15 @@
         "local": {
           "default": true,
           "description": "Look for the Rex server of this account on this machine, when the places that\nlist servers are on show. One that runs is listed; none is ever started.",
-          "type": "boolean"
+          "type": "boolean",
+          "x-lume-settings": {
+            "control": "switch",
+            "group": "This computer",
+            "help": "One that runs is listed with its sessions; none is ever started",
+            "label": "Look for a Rex server here",
+            "order": 10,
+            "page": "hosts"
+          }
         }
       },
       "type": "object"
@@ -2948,6 +2956,16 @@
       "icon": "terminal",
       "id": "terminal",
       "label": "Terminal"
+    },
+    {
+      "blurb": "Machines Lume can open sessions on.",
+      "group": "Workspace",
+      "groups": [
+        "This computer"
+      ],
+      "icon": "hosts",
+      "id": "hosts",
+      "label": "Hosts & SSH"
     },
     {
       "blurb": "When Lume should get your attention.",

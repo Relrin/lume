@@ -269,6 +269,13 @@
                 "parts": [
                   {
                     "role": "option",
+                    "name": "Add a Rex server…",
+                    "state": {
+                      "selected": "false"
+                    }
+                  },
+                  {
+                    "role": "option",
                     "name": "Open config.toml",
                     "state": {
                       "selected": "false"
