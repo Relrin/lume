@@ -677,7 +677,9 @@ export interface ServicesCall {
  */
 export interface SessionEntry {
   /**
-   * Its working directory, as it last reported it.
+   * The folder it is in, as a path: of this machine, or inside the Linux distribution
+   * it runs in. Left out where the folder is not known or not there, and for a session
+   * on another machine.
    */
   cwd?: string;
   /**
@@ -698,7 +700,9 @@ export interface SessionEntry {
  */
 export interface SessionReport {
   /**
-   * What was reported, as the session reported it.
+   * What was reported, as the session reported it. A session on another machine, or
+   * one that a server runs, makes no `cwd` report, and its others give no folder and
+   * no number of a process.
    */
   details: Json;
   /**

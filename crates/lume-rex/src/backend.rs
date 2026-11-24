@@ -20,6 +20,7 @@ use lume_proto::{
     BackendCaps, BackendId, ClientFacts, ErrorCode, ExitStatus, HydrateKinds, ProtoError,
     Responder, SessionId, SessionInfo, SessionStats, SpawnSpec, TermSize,
 };
+use lume_session::cwd::file_url_of;
 use lume_session::{Attachment, ScreenText, SessionBackend, SessionError, TextFound};
 use serde_json::{Value, json};
 use tokio::sync::watch;
@@ -595,7 +596,8 @@ impl RexBackend {
                 .and_then(|process| process.cwd.clone())
                 // A path that is cut, or has something in it that cannot be seen, is
                 // another path.
-                .filter(|path| path.len() <= TEXT_MAX_BYTES && plain(path) == *path),
+                .filter(|path| path.len() <= TEXT_MAX_BYTES && plain(path) == *path)
+                .and_then(|path| file_url_of(&path)),
         })
     }
 

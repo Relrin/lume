@@ -58,6 +58,9 @@ pub const WAIT_MAX: Duration = Duration::from_secs(60 * 60);
 /// whose exit nothing reports because no page is attached to them.
 pub const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+/// How long a server is waited for when the sessions of every backend are listed.
+pub const SERVER_LIST_WAIT: Duration = Duration::from_secs(6);
+
 /// How many sessions' exit statuses are remembered after the sessions are gone.
 pub const EXITS_KEPT: usize = 256;
 

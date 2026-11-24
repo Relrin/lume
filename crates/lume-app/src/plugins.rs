@@ -340,6 +340,56 @@ pub struct Plugins {
     read_again: tokio::sync::Notify,
 }
 
+/// Takes out of what a session reported what would be read as this machine's: the
+/// folder it is in, and the number of a process.
+fn without_places(details: &mut Value) {
+    let Some(fields) = details.as_object_mut() else {
+        return;
+    };
+    fields.remove("cwd");
+    if let Some(Value::Object(foreground)) = fields.get_mut("foreground") {
+        foreground.remove("pid");
+    }
+}
+
+/// A session's report as plugins are told it. One of a session that is not of this
+/// machine names no folder and no process, and is nothing when that is all it says.
+fn report_of(what: &SessionNews, here: bool) -> Option<(String, Value)> {
+    use lume_proto::SessionEvent;
+
+    let event = match what {
+        SessionNews::Exit(status) => {
+            let details = serde_json::to_value(status).unwrap_or(Value::Null);
+            return Some(("exit".to_owned(), details));
+        }
+        SessionNews::Event(event) => event,
+    };
+    if !here && matches!(event, SessionEvent::Cwd { .. }) {
+        return None;
+    }
+    let mut details = serde_json::to_value(event).unwrap_or(Value::Null);
+    let kind = details
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("event")
+        .to_owned();
+    if let Some(fields) = details.as_object_mut() {
+        fields.remove("type");
+        match event {
+            SessionEvent::Foreground(_) if !here => {
+                fields.remove("pid");
+            }
+            SessionEvent::State { .. } if !here => {
+                if let Some(state) = fields.get_mut("state") {
+                    without_places(state);
+                }
+            }
+            _ => {}
+        }
+    }
+    Some((kind, details))
+}
+
 fn api_error(code: ErrorCode, message: impl Into<String>) -> ApiError {
     ApiError::new(code, message)
 }
@@ -2123,25 +2173,10 @@ impl Plugins {
         if !anyone {
             return;
         }
-        let (kind, details) = match &news.what {
-            SessionNews::Event(event) => {
-                let mut value = serde_json::to_value(event).unwrap_or(Value::Null);
-                let kind = value
-                    .get("type")
-                    .and_then(Value::as_str)
-                    .unwrap_or("event")
-                    .to_owned();
-                if let Some(object) = value.as_object_mut() {
-                    object.remove("type");
-                }
-                (kind, value)
-            }
-            SessionNews::Exit(status) => (
-                "exit".to_owned(),
-                serde_json::to_value(status).unwrap_or(Value::Null),
-            ),
-        };
-        self.session_report(&news.key, kind, details).await;
+        let here = self.state.is_here(&news.key);
+        if let Some((kind, details)) = report_of(&news.what, here) {
+            self.session_report(&news.key, kind, details).await;
+        }
     }
 
     /// Tells the plugins what each of these sessions adds up to, as a `state` report.
@@ -2150,7 +2185,10 @@ impl Plugins {
         sessions: Vec<(crate::carrier::SessionKey, lume_proto::SessionState)>,
     ) {
         for (key, state) in sessions {
-            let details = serde_json::to_value(&state).unwrap_or(Value::Null);
+            let mut details = serde_json::to_value(&state).unwrap_or(Value::Null);
+            if !self.state.is_here(&key) {
+                without_places(&mut details);
+            }
             self.session_report(&key, "state".to_owned(), details).await;
         }
     }
@@ -2936,6 +2974,55 @@ mod tests {
         let file = plugins.store.data_dir("acme.kept").join(KV_FILE);
         let written: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
         assert_eq!(written, json!({ "one": true, "other": true }));
+    }
+
+    #[test]
+    fn a_session_that_is_not_of_this_machine_names_no_folder_and_no_process() {
+        use lume_proto::{ExitStatus, Foreground, SessionEvent, SessionState};
+
+        let foreground = Foreground {
+            pid: 4711,
+            name: "vim".to_owned(),
+        };
+        let cwd = SessionNews::Event(SessionEvent::Cwd {
+            url: "file:///C:/secret".to_owned(),
+        });
+        let running = SessionNews::Event(SessionEvent::Foreground(foreground.clone()));
+        let whole = SessionNews::Event(SessionEvent::State {
+            state: SessionState {
+                title: Some("a title".to_owned()),
+                cwd: Some("file:///C:/secret".to_owned()),
+                foreground: Some(foreground),
+                ..SessionState::default()
+            },
+        });
+        let told = |what: &SessionNews, here| {
+            report_of(what, here).map(|(kind, details)| (kind, details.to_string()))
+        };
+
+        assert_eq!(told(&cwd, false), None);
+        let (kind, details) = told(&running, false).unwrap();
+        assert_eq!(
+            (kind.as_str(), details.as_str()),
+            ("foreground", r#"{"name":"vim"}"#)
+        );
+        let (kind, details) = told(&whole, false).unwrap();
+        assert_eq!(kind, "state");
+        assert!(details.contains("a title") && details.contains("vim"));
+        assert!(!details.contains("secret") && !details.contains("4711"));
+
+        // Of this machine everything is told, as it was said.
+        let (kind, details) = report_of(&cwd, true).unwrap();
+        assert_eq!(kind, "cwd");
+        assert_eq!(details, json!({ "url": "file:///C:/secret" }));
+        for what in [&running, &whole] {
+            assert!(told(what, true).unwrap().1.contains("4711"));
+        }
+        let bell = SessionNews::Event(SessionEvent::Bell);
+        let exit = SessionNews::Exit(ExitStatus::Code(3));
+        for what in [&bell, &exit] {
+            assert_eq!(report_of(what, false), report_of(what, true));
+        }
     }
 
     fn rows(value: Value) -> Vec<PanelRow> {

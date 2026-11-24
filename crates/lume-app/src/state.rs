@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 
 use lume_proto::HydrateMode;
 use lume_proto::app::{AppError, codes};
+use lume_session::cwd::is_elsewhere;
 use lume_session::{
     BackendCaps, BackendId, ClientFacts, ExitStatus, Hydrate, Launcher, LocalBackend, Router,
     SessionId, SessionInfo, SpawnSpec, TermSize,
@@ -33,14 +34,14 @@ use lume_session::{
 use serde::Serialize;
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
-use tokio::task::{AbortHandle, JoinHandle};
+use tokio::task::{AbortHandle, JoinHandle, JoinSet};
 
 use crate::carrier::{Carrier, Link, OnExit, PageAnswer, SessionKey};
 use crate::error::CommandError;
 use crate::marks::Marks;
 use crate::panes::Panes;
 use crate::sessions::SessionStates;
-use crate::tuning::{EXIT_POLL_INTERVAL, EXITS_KEPT};
+use crate::tuning::{EXIT_POLL_INTERVAL, EXITS_KEPT, SERVER_LIST_WAIT};
 use crate::window;
 
 /// Who is responsible for a session.
@@ -524,7 +525,7 @@ impl AppState {
     }
 
     /// Whether a backend is of this machine, and not a server's that may be out of reach.
-    fn is_local(&self, backend: &BackendId) -> bool {
+    pub fn is_local(&self, backend: &BackendId) -> bool {
         *backend == Router::local_id()
             || self
                 .locals
@@ -532,31 +533,83 @@ impl AppState {
                 .any(|local| self.backend_id_of(local) == *backend)
     }
 
-    /// Every session of every backend. A server that cannot be asked just now has none
-    /// that could be used.
+    /// Whether the folders and processes a session reports are this machine's: it was
+    /// started here and is not a connection to another machine. What a server runs, or
+    /// what is not known, is not.
+    pub fn is_here(&self, key: &SessionKey) -> bool {
+        self.is_local(&key.backend)
+            && self
+                .reports
+                .launched(key)
+                .is_some_and(|launched| !is_elsewhere(&launched.launcher))
+    }
+
+    /// Every session of every backend. A server that cannot be asked just now, or does
+    /// not answer in time, has none that could be used.
     pub async fn list_all(&self) -> Result<Vec<Listed>, CommandError> {
+        let mut listed = self.list_own().await?;
+        listed.extend(self.list_servers().await);
+        Ok(listed)
+    }
+
+    /// Every session of the backends of this machine.
+    async fn list_own(&self) -> Result<Vec<Listed>, CommandError> {
         let mut listed = Vec::new();
         for backend in self.router.ids() {
+            if !self.is_local(&backend) {
+                continue;
+            }
             // Gone since its id was listed.
             let Ok(asked) = self.router.get(&backend) else {
                 continue;
             };
-            let sessions = match asked.list().await {
-                Ok(sessions) => sessions,
-                Err(error) if self.is_local(&backend) => return Err(error.into()),
-                Err(error) => {
-                    tracing::debug!(%backend, %error, "a server's sessions are left out of a list");
-                    continue;
-                }
-            };
-            for info in sessions {
-                listed.push(Listed {
-                    backend: backend.clone(),
-                    info,
-                });
-            }
+            listed.extend(asked.list().await?.into_iter().map(|info| Listed {
+                backend: backend.clone(),
+                info,
+            }));
         }
         Ok(listed)
+    }
+
+    /// Every session of the servers, which are asked beside each other: none of them
+    /// holds up the others, nor whoever asks for longer than a while.
+    async fn list_servers(&self) -> Vec<Listed> {
+        let mut asking = JoinSet::new();
+        for backend in self.router.ids() {
+            if self.is_local(&backend) {
+                continue;
+            }
+            let Ok(asked) = self.router.get(&backend) else {
+                continue;
+            };
+            asking.spawn(async move {
+                let answered = tokio::time::timeout(SERVER_LIST_WAIT, asked.list()).await;
+                (backend, answered)
+            });
+        }
+        let mut answers = Vec::new();
+        while let Some(answered) = asking.join_next().await {
+            match answered {
+                Ok((backend, Ok(Ok(sessions)))) => answers.push((backend, sessions)),
+                Ok((backend, Ok(Err(error)))) => {
+                    tracing::debug!(%backend, %error, "a server's sessions are left out of a list");
+                }
+                Ok((backend, Err(_))) => {
+                    tracing::debug!(%backend, "a server did not list its sessions in time");
+                }
+                Err(error) => tracing::warn!(%error, "a server's sessions could not be listed"),
+            }
+        }
+        answers.sort_by(|(one, _), (other, _)| one.cmp(other));
+        answers
+            .into_iter()
+            .flat_map(|(backend, sessions)| {
+                sessions.into_iter().map(move |info| Listed {
+                    backend: backend.clone(),
+                    info,
+                })
+            })
+            .collect()
     }
 
     /// Acts on the frames a page sent on its carrier.
@@ -641,17 +694,23 @@ impl AppState {
         tokio::time::timeout(limit, waiting).await.ok()
     }
 
-    /// Finds the backend a session runs on.
+    /// Finds the backend a session runs on. The servers are only asked for one that does
+    /// not run on this machine's own.
     pub async fn find(&self, session: SessionId) -> Result<SessionKey, AppError> {
-        let listed = self.list_all().await?;
-        listed
-            .into_iter()
-            .find(|entry| entry.info.id == session)
-            .map(|entry| SessionKey {
-                backend: entry.backend,
-                session,
-            })
-            .ok_or_else(|| AppError::new(codes::NOT_FOUND, format!("no session {session}")))
+        let of = |listed: Vec<Listed>| {
+            listed
+                .into_iter()
+                .find(|entry| entry.info.id == session)
+                .map(|entry| SessionKey {
+                    backend: entry.backend,
+                    session,
+                })
+        };
+        let found = match of(self.list_own().await?) {
+            Some(own) => Some(own),
+            None => of(self.list_servers().await),
+        };
+        found.ok_or_else(|| AppError::new(codes::NOT_FOUND, format!("no session {session}")))
     }
 
     /// Waits until a session's program has ended, for `limit` at most, and says how it
@@ -674,17 +733,28 @@ impl AppState {
             if let Some(status) = lock(&self.exits).of(key) {
                 return Ok(status);
             }
+            // Looked at once at least, and for no longer than there is to wait.
+            let left = deadline.saturating_duration_since(Instant::now());
             let listed = match self.router.get(&key.backend) {
-                Ok(backend) => backend.list().await.map_err(CommandError::from)?,
-                Err(_) => Vec::new(),
+                Ok(backend) => {
+                    let wait = left.max(EXIT_POLL_INTERVAL);
+                    match tokio::time::timeout(wait, backend.list()).await {
+                        Ok(listed) => Some(listed.map_err(CommandError::from)?),
+                        Err(_) => None,
+                    }
+                }
+                Err(_) => Some(Vec::new()),
             };
-            match listed.iter().find(|info| info.id == key.session) {
-                Some(info) => {
+            let found = listed.map(|listed| listed.into_iter().find(|info| info.id == key.session));
+            match found {
+                // Its backend has not said.
+                None => {}
+                Some(Some(info)) => {
                     if let Some(status) = info.exit {
                         return Ok(status);
                     }
                 }
-                None => {
+                Some(None) => {
                     // Its exit may be on the way here still.
                     tokio::time::sleep(EXIT_POLL_INTERVAL).await;
                     let seen = lock(&self.exits).of(key);
@@ -748,7 +818,8 @@ mod tests {
 
     use super::*;
     use crate::testing::{
-        CREDIT, PRINT_MARK, RecordingCarrier, STEP, client_frames, facts, shell, size,
+        CREDIT, FakeServer, PRINT_MARK, RecordingCarrier, STEP, client_frames, facts,
+        server_session, shell, size,
     };
 
     const WINDOW: &str = "main";
@@ -831,6 +902,132 @@ mod tests {
             .send(WINDOW, carrier, &client_frames(messages))
             .await
             .unwrap();
+    }
+
+    /// An application with backends that only list: its own, and servers by name.
+    fn listing(own: FakeServer, servers: Vec<(&str, Arc<FakeServer>)>) -> Arc<AppState> {
+        let router = Router::new();
+        router.insert(Router::local_id(), Arc::new(own));
+        for (name, server) in servers {
+            router.insert(BackendId(name.to_owned()), server);
+        }
+        AppState::new(
+            Handle::current(),
+            router,
+            Vec::new(),
+            PATIENT,
+            Arc::new(Marks::start()),
+        )
+    }
+
+    fn running(raws: &[u64]) -> FakeServer {
+        FakeServer {
+            sessions: raws.iter().map(|raw| server_session(*raw, "sh")).collect(),
+            ..FakeServer::default()
+        }
+    }
+
+    fn silent() -> Arc<FakeServer> {
+        Arc::new(FakeServer {
+            silent: true,
+            ..FakeServer::default()
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn servers_that_do_not_answer_hold_a_list_up_for_a_while_all_together() {
+        let state = listing(
+            running(&[1]),
+            vec![
+                ("a", silent()),
+                ("b", Arc::new(running(&[3, 2]))),
+                ("c", silent()),
+                ("d", Arc::new(running(&[4]))),
+            ],
+        );
+        let began = tokio::time::Instant::now();
+        let listed: Vec<(String, u64)> = state
+            .list_all()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|listed| (listed.backend.0, listed.info.id.get()))
+            .collect();
+        assert_eq!(began.elapsed(), SERVER_LIST_WAIT);
+        let of = |name: &str, raw| (name.to_owned(), raw);
+        assert_eq!(listed, [of("local", 1), of("b", 3), of("b", 2), of("d", 4)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_session_of_this_machine_is_found_without_asking_any_server() {
+        let far = silent();
+        // A server may list a session under a number of this machine's.
+        let same = Arc::new(running(&[1, 2]));
+        let state = listing(running(&[1]), vec![("a", far.clone()), ("b", same.clone())]);
+        let id = |raw| SessionId::new(raw).unwrap();
+        assert_eq!(state.find(id(1)).await.unwrap().backend, local());
+        assert_eq!(far.asked.load(Ordering::Relaxed), 0);
+        assert_eq!(same.asked.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            state.find(id(2)).await.unwrap().backend,
+            BackendId("b".to_owned())
+        );
+        assert_eq!(state.find(id(9)).await.unwrap_err().code, codes::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn waiting_for_a_session_keeps_its_limit_whatever_its_server_does() {
+        let state = listing(running(&[]), vec![("a", silent())]);
+        let key = SessionKey {
+            backend: BackendId("a".to_owned()),
+            session: SessionId::new(1).unwrap(),
+        };
+        let waiting = state.wait_exit(&key, Duration::from_millis(300));
+        let ended = timeout(Duration::from_secs(5), waiting).await;
+        // Nothing is known of it, which is not that it has ended.
+        assert_eq!(
+            ended.expect("it waits on").unwrap_err().code,
+            codes::TIMEOUT
+        );
+    }
+
+    #[tokio::test]
+    async fn what_a_session_says_of_this_machine_counts_where_it_is_known_to_run_here() {
+        let state = listing(running(&[1]), vec![("a", Arc::new(running(&[1])))]);
+        let key = |backend: &str, raw| SessionKey {
+            backend: BackendId(backend.to_owned()),
+            session: SessionId::new(raw).unwrap(),
+        };
+        let shell = |program: &str| Launcher::Shell {
+            program: program.to_owned(),
+            args: Vec::new(),
+            login: false,
+        };
+        let reports = state.reports();
+        reports.started(key("local", 1), shell("pwsh"), None);
+        reports.started(key("local", 2), shell("ssh"), None);
+        reports.started(
+            key("local", 3),
+            Launcher::Ssh {
+                host: "box".to_owned(),
+                user: None,
+                port: None,
+                extra_args: Vec::new(),
+                client: None,
+            },
+            None,
+        );
+        // Not even were it noted as one of this machine's.
+        reports.started(key("a", 1), shell("pwsh"), None);
+        assert!(state.is_here(&key("local", 1)));
+        for elsewhere in [
+            key("local", 2),
+            key("local", 3),
+            key("local", 4),
+            key("a", 1),
+        ] {
+            assert!(!state.is_here(&elsewhere), "{elsewhere:?}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

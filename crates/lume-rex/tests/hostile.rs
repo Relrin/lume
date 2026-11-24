@@ -217,11 +217,14 @@ async fn what_a_server_calls_things_is_made_plain_wherever_it_is_handed_on() {
 async fn a_folder_of_this_machines_own_server_is_one_that_can_be_gone_to() {
     count_panics();
     for (named, given) in [
-        ("/home/user", Some("/home/user")),
-        (r"C:\Users\me", Some(r"C:\Users\me")),
+        ("/home/user", Some("file:///home/user")),
+        (r"C:\Users\me", Some("file:///C:/Users/me")),
+        (r"\\elsewhere\share", None),
+        ("//elsewhere/share", None),
+        ("relative", None),
         ("/home/\u{202e}user", None),
         ("/home/us\ner", None),
-        ("", Some("")),
+        ("", None),
     ] {
         let (mut dialer, mut listener) = streams();
         dialer.here = true;

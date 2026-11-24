@@ -723,15 +723,18 @@ impl Plugins {
     /// What the programs of a pane use: the one its session started and all it started.
     async fn pane_stats(&self, pane: &str) -> Result<Value, ApiError> {
         let (_, key) = self.pane_session(pane)?;
-        let listed = self
-            .state
-            .list_all()
-            .await
-            .map_err(|error| api_error(ErrorCode::Failed, error.message))?;
+        let listed = match self.state.router().get(&key.backend) {
+            Ok(backend) => backend
+                .list()
+                .await
+                .map_err(|error| api_error(ErrorCode::Failed, error.to_string()))?,
+            Err(_) => Vec::new(),
+        };
+        // A server gives a process only where it is one of this machine's.
         let pid = listed
             .iter()
-            .find(|listed| listed.backend == key.backend && listed.info.id == key.session)
-            .and_then(|listed| listed.info.pid)
+            .find(|info| info.id == key.session)
+            .and_then(|info| info.pid)
             .ok_or_else(|| {
                 api_error(
                     ErrorCode::Unavailable,

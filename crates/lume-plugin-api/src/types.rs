@@ -334,7 +334,9 @@ pub struct SessionReport {
     /// `command_finished`, `program_status`, `foreground`, `activity`,
     /// `disconnected`, `state` or `exit`.
     pub kind: String,
-    /// What was reported, as the session reported it.
+    /// What was reported, as the session reported it. A session on another machine, or
+    /// one that a server runs, makes no `cwd` report, and its others give no folder and
+    /// no number of a process.
     pub details: Value,
 }
 
@@ -754,7 +756,9 @@ pub struct SessionEntry {
     pub program: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// Its working directory, as it last reported it.
+    /// The folder it is in, as a path: of this machine, or inside the Linux distribution
+    /// it runs in. Left out where the folder is not known or not there, and for a session
+    /// on another machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     /// Whether its program has ended.

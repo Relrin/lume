@@ -1,12 +1,19 @@
 //! Shared by this crate's tests: a carrier that records what it is given, and the
 //! pieces of a session against a real shell.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use lume_proto::{FrameDecoder, Header, Kind, Message, Role, encode};
-use lume_session::{CellPx, ClientFacts, ColorScheme, Launcher, Palette, SpawnSpec, TermSize};
+use async_trait::async_trait;
+use lume_proto::{
+    BackendCaps, FrameDecoder, Header, HydrateKinds, Kind, Message, Responder, Role, SessionInfo,
+    SessionStats, encode,
+};
+use lume_session::{
+    Attachment, CellPx, ClientFacts, ColorScheme, Launcher, Palette, SessionBackend, SessionError,
+    SessionId, SpawnSpec, TermSize,
+};
 
 use crate::carrier::{Carrier, CarrierClosed};
 
@@ -118,6 +125,77 @@ pub fn facts() -> ClientFacts {
         scheme: ColorScheme::Dark,
         focused: true,
         visible: true,
+    }
+}
+
+/// A server that runs sessions somewhere, as far as listing them goes.
+#[derive(Default)]
+pub struct FakeServer {
+    pub sessions: Vec<SessionInfo>,
+    /// Whether it never answers.
+    pub silent: bool,
+    /// How often it was asked for its sessions.
+    pub asked: AtomicUsize,
+}
+
+/// A session of a server's, as it is listed.
+pub fn server_session(raw: u64, program: &str) -> SessionInfo {
+    SessionInfo {
+        id: SessionId::new(raw).unwrap(),
+        program: program.to_owned(),
+        pid: None,
+        size: size(80, 24),
+        created_unix_ms: 0,
+        attached: false,
+        exit: None,
+        stats: SessionStats {
+            read_bytes: 0,
+            sent_bytes: 0,
+            pending_bytes: 0,
+            paused: false,
+        },
+        title: None,
+        cwd: None,
+    }
+}
+
+#[async_trait]
+impl SessionBackend for FakeServer {
+    fn caps(&self) -> BackendCaps {
+        BackendCaps {
+            persistent: true,
+            multi_client: true,
+            server_layout: true,
+            responder: Responder::Backend,
+            hydrate: HydrateKinds {
+                snapshot: true,
+                vt_replay: false,
+            },
+        }
+    }
+
+    async fn list(&self) -> lume_session::Result<Vec<SessionInfo>> {
+        self.asked.fetch_add(1, Ordering::Relaxed);
+        if self.silent {
+            std::future::pending::<()>().await;
+        }
+        Ok(self.sessions.clone())
+    }
+
+    async fn spawn(&self, _spec: SpawnSpec) -> lume_session::Result<SessionId> {
+        Err(SessionError::Disconnected)
+    }
+
+    async fn attach(
+        &self,
+        _id: SessionId,
+        _facts: ClientFacts,
+    ) -> lume_session::Result<Attachment> {
+        Err(SessionError::Disconnected)
+    }
+
+    async fn kill(&self, _id: SessionId) -> lume_session::Result<()> {
+        Ok(())
     }
 }
 

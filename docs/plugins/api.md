@@ -1170,7 +1170,7 @@ A session: a program running in a terminal.
 
 | Field | Type | |
 |---|---|---|
-| `cwd` | `string` | optional. Its working directory, as it last reported it. |
+| `cwd` | `string` | optional. The folder it is in, as a path: of this machine, or inside the Linux distribution it runs in. Left out where the folder is not known or not there, and for a session on another machine. |
 | `exited` | `boolean` | Whether its program has ended. |
 | `pane` | `string` | optional. The pane that shows it, if one does. |
 | `program` | `string` |  |
@@ -1183,7 +1183,7 @@ Something a session reported, as a plugin hears it.
 
 | Field | Type | |
 |---|---|---|
-| `details` | `Json` | What was reported, as the session reported it. |
+| `details` | `Json` | What was reported, as the session reported it. A session on another machine, or one that a server runs, makes no `cwd` report, and its others give no folder and no number of a process. |
 | `kind` | `string` | The kind of report: `title`, `cwd`, `bell`, `command_started`, `command_finished`, `program_status`, `foreground`, `activity`, `disconnected`, `state` or `exit`. |
 | `pane` | `string` | optional. The pane that shows it, if one does. |
 | `session` | `string` | The session. |

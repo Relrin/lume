@@ -18,7 +18,7 @@ use lume_plugin_api::types::{
 use lume_plugin_api::{ApiError, Call, ErrorCode};
 use lume_proto::app::{AppReplyBody, PageRequestBody};
 use lume_proto::{ErrorCode as SessionCode, Launcher, Responder};
-use lume_session::SessionError;
+use lume_session::{SessionError, start_dir_from_report};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
@@ -26,6 +26,7 @@ use super::asking::plain;
 use super::{Plugins, api_error, command_wait};
 use crate::carrier::SessionKey;
 use crate::error::CommandError;
+use crate::state::Listed;
 use crate::tuning::PAGE_ANSWER_TIMEOUT;
 use crate::window::label_of;
 
@@ -482,12 +483,25 @@ impl Plugins {
         value_of(&info)
     }
 
-    async fn session_list(&self) -> Result<Value, ApiError> {
+    /// Every session, each with its folder where that is one of this machine's.
+    pub(crate) async fn session_list(&self) -> Result<Value, ApiError> {
         let services = self.services_or_fail()?;
         let listed = self.state.list_all().await.map_err(from_command)?;
+        let said: Vec<_> = listed.iter().map(|listed| self.said_dir(listed)).collect();
+        let folders = tokio::task::spawn_blocking(move || {
+            said.into_iter()
+                .map(|said| {
+                    let (launcher, url) = said?;
+                    start_dir_from_report(&launcher, &url)
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|error| api_error(ErrorCode::Failed, error.to_string()))?;
         let entries: Vec<SessionEntry> = listed
             .into_iter()
-            .map(|listed| {
+            .zip(folders)
+            .map(|(listed, cwd)| {
                 let key = SessionKey {
                     backend: listed.backend,
                     session: listed.info.id,
@@ -500,16 +514,36 @@ impl Plugins {
                     title: listed
                         .info
                         .title
-                        .or_else(|| state.as_ref().and_then(|state| state.title.clone())),
-                    cwd: listed
-                        .info
-                        .cwd
-                        .or_else(|| state.and_then(|state| state.cwd)),
+                        .or_else(|| state.and_then(|state| state.title)),
+                    cwd,
                     exited: listed.info.exit.is_some(),
                 }
             })
             .collect();
         value_of(&entries)
+    }
+
+    /// What a session said its folder is, with what it runs, for the folder to be looked
+    /// for on this machine. Of a server's session only the server's own word counts,
+    /// which it gives where it runs on this machine, and nothing that was printed.
+    fn said_dir(&self, listed: &Listed) -> Option<(Launcher, String)> {
+        if !self.state.is_local(&listed.backend) {
+            let launcher = Launcher::Shell {
+                program: String::new(),
+                args: Vec::new(),
+                login: false,
+            };
+            return Some((launcher, listed.info.cwd.clone()?));
+        }
+        let key = SessionKey {
+            backend: listed.backend.clone(),
+            session: listed.info.id,
+        };
+        let reports = self.state.reports();
+        let launched = reports.launched(&key)?;
+        let reported = || reports.state(&key).and_then(|state| state.cwd);
+        let url = listed.info.cwd.clone().or_else(reported)?;
+        Some((launched.launcher, url))
     }
 
     /// The workspace in use, as plugins hear of it.
@@ -706,5 +740,224 @@ impl Plugins {
                 ))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::time::Duration;
+
+    use lume_layout::Store;
+    use lume_proto::{BackendId, SessionEvent, SessionInfo};
+    use lume_session::cwd::{file_url_of, machine_name};
+    use lume_session::{HostConfig, LocalBackend, Router};
+    use tokio::runtime::Handle;
+
+    use super::*;
+    use crate::configsvc::ConfigService;
+    use crate::marks::Marks;
+    use crate::panes::{PaneStart, Panes};
+    use crate::services::Services;
+    use crate::state::AppState;
+    use crate::testing::{FakeServer, FakeShell, TempDir, server_session, size};
+    use crate::tuning::WORKSPACE_NAME;
+
+    /// The URL a shell of this machine reports when it is in `dir`.
+    fn reported(dir: &Path) -> String {
+        let url = file_url_of(&dir.to_string_lossy()).unwrap();
+        url.replacen("file://", &format!("file://{}", machine_name().unwrap()), 1)
+    }
+
+    /// The application with a shell of its own running in a pane.
+    async fn running(dir: &TempDir) -> (Arc<Services>, SessionKey) {
+        std::fs::create_dir_all(dir.dirs().config).unwrap();
+        let shell = if cfg!(windows) {
+            "[terminal]\nshell = \"cmd.exe\"\nshell-args = [\"/d\"]\n"
+        } else {
+            "[terminal]\nshell = \"/bin/sh\"\n"
+        };
+        std::fs::write(dir.dirs().config_file(), shell).unwrap();
+        let local = Arc::new(
+            LocalBackend::in_process(HostConfig::default())
+                .await
+                .unwrap(),
+        );
+        let router = Router::new();
+        router.insert(Router::local_id(), local.clone());
+        let state = AppState::new(
+            Handle::current(),
+            router,
+            vec![local],
+            Duration::from_secs(600),
+            Arc::new(Marks::start()),
+        );
+        let config = ConfigService::load(dir.dirs(), Some(WORKSPACE_NAME));
+        let store = Store::new(dir.dirs().state_workspaces_dir());
+        let (panes, _) =
+            Panes::open(&state, Arc::clone(&config), store, WORKSPACE_NAME, None).await;
+        state.set_panes(Arc::clone(&panes));
+        let shell = Arc::new(FakeShell::default());
+        panes.run(shell.clone());
+        let window = panes.focused_window().unwrap();
+        let pane = panes.workspace().panes()[0].id;
+        let asked = vec![PaneStart {
+            pane,
+            size: size(80, 24),
+        }];
+        let started = panes.start_sessions(window, asked).await.started.remove(0);
+        let registry = Arc::new(crate::builtins::registry());
+        let plugins = Plugins::new(
+            config.dirs(),
+            Arc::clone(&registry),
+            Arc::clone(&state),
+            Arc::clone(&config),
+        );
+        let services = Arc::new(Services {
+            rex: crate::rex::Hosts::new(&config, &state, &panes, None),
+            state,
+            panes,
+            config,
+            registry,
+            shell,
+            plugins,
+        });
+        services.plugins.start(&services);
+        let key = SessionKey {
+            backend: started.backend,
+            session: started.session,
+        };
+        (services, key)
+    }
+
+    fn says_it_is_in(services: &Services, key: &SessionKey, url: &str) {
+        let event = SessionEvent::Cwd {
+            url: url.to_owned(),
+        };
+        services.state.reports().on_event(key, &event);
+    }
+
+    /// The folder a plugin is given for a session.
+    async fn folder(services: &Services, key: &SessionKey) -> Option<String> {
+        let listed = services.plugins.session_list().await.unwrap();
+        let listed: Vec<SessionEntry> = serde_json::from_value(listed).unwrap();
+        listed
+            .into_iter()
+            .find(|entry| entry.session == key.session.to_string())
+            .unwrap()
+            .cwd
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_plugin_is_given_a_folder_only_where_it_is_one_of_this_machines() {
+        let dir = TempDir::new("plugin-folders");
+        let (services, key) = running(&dir).await;
+        let here = dir.dirs().config;
+        let found = Some(here.to_string_lossy().into_owned());
+        assert_eq!(folder(&services, &key).await, None);
+        says_it_is_in(&services, &key, &reported(&here));
+        assert_eq!(folder(&services, &key).await, found);
+
+        // Printed over a connection the user typed, and a folder that is not there.
+        let machine = machine_name().unwrap();
+        let other = reported(&here).replacen(&machine, "some-other-machine", 1);
+        says_it_is_in(&services, &key, &other);
+        assert_eq!(folder(&services, &key).await, None);
+        says_it_is_in(&services, &key, &reported(&here.join("gone")));
+        assert_eq!(folder(&services, &key).await, None);
+
+        // A profile that connects to another machine, whatever that machine says.
+        let remote = Launcher::Ssh {
+            host: "box".to_owned(),
+            user: None,
+            port: None,
+            extra_args: Vec::new(),
+            client: None,
+        };
+        services.state.reports().started(key.clone(), remote, None);
+        says_it_is_in(&services, &key, &reported(&here));
+        assert_eq!(folder(&services, &key).await, None);
+        services.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn of_a_servers_session_a_plugin_is_given_what_the_server_says_and_nothing_printed() {
+        let dir = TempDir::new("plugin-server-folders");
+        let (services, own) = running(&dir).await;
+        let here = dir.dirs().config;
+        let url = file_url_of(&here.to_string_lossy()).unwrap();
+        let backend = BackendId("server".to_owned());
+        let of = |raw: u64, cwd: Option<String>| SessionInfo {
+            cwd,
+            ..server_session(raw, "pwsh")
+        };
+        let sessions = vec![
+            of(1, Some(url.clone())),
+            of(2, None),
+            of(3, Some(r"\\elsewhere\share".to_owned())),
+            of(4, Some("file://elsewhere/share".to_owned())),
+            of(5, Some(here.to_string_lossy().into_owned())),
+        ];
+        let keys: Vec<SessionKey> = sessions
+            .iter()
+            .map(|info| SessionKey {
+                backend: backend.clone(),
+                session: info.id,
+            })
+            .collect();
+        services.state.router().insert(
+            backend,
+            Arc::new(FakeServer {
+                sessions,
+                ..FakeServer::default()
+            }),
+        );
+        for key in &keys[1..] {
+            says_it_is_in(&services, key, &reported(&here));
+        }
+        let given = Some(here.to_string_lossy().into_owned());
+        assert_eq!(folder(&services, &keys[0]).await, given);
+        for key in &keys[1..] {
+            assert_eq!(folder(&services, key).await, None, "{key:?}");
+        }
+        assert_eq!(folder(&services, &own).await, None);
+        services.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn what_a_servers_pane_uses_cannot_be_seen_and_no_other_server_is_asked() {
+        let dir = TempDir::new("plugin-server-stats");
+        let (services, own) = running(&dir).await;
+        let panes = &services.panes;
+        let backend = BackendId("server".to_owned());
+        let session = server_session(1, "pwsh");
+        let key = SessionKey {
+            backend: backend.clone(),
+            session: session.id,
+        };
+        let server = FakeServer {
+            sessions: vec![session],
+            ..FakeServer::default()
+        };
+        let other = Arc::new(FakeServer {
+            silent: true,
+            ..FakeServer::default()
+        });
+        let router = services.state.router();
+        router.insert(backend, Arc::new(server));
+        router.insert(BackendId("other".to_owned()), other.clone());
+        let window = panes.focused_window().unwrap();
+        crate::host::reattach(panes, window, key.clone(), crate::host::Place::Tab)
+            .await
+            .unwrap();
+        let stats = async |key: &SessionKey| {
+            let pane = panes.pane_of(key).unwrap().to_string();
+            let asked = Call::PanesStats(lume_plugin_api::types::PaneRef { pane });
+            services.plugins.serve_more("acme.metrics", asked).await
+        };
+        assert_eq!(stats(&key).await.unwrap_err().code, ErrorCode::Unavailable);
+        assert!(stats(&own).await.unwrap()["processes"].as_u64() >= Some(1));
+        assert_eq!(other.asked.load(std::sync::atomic::Ordering::Relaxed), 0);
+        services.state.shutdown().await;
     }
 }

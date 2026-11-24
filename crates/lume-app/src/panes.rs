@@ -312,7 +312,8 @@ impl PaneSpawner {
     }
 
     /// Takes in a session that runs already, as a pane's: what it runs is noted as if
-    /// it had been started here.
+    /// it had been started here. Not so a server's: nothing here knows what that runs,
+    /// and a guess would have its folders and processes taken for this machine's.
     async fn remember(
         &self,
         state: &AppState,
@@ -320,6 +321,9 @@ impl PaneSpawner {
         request: &SpawnRequest,
         info: &SessionInfo,
     ) {
+        if !state.is_local(&key.backend) {
+            return;
+        }
         if state.reports().launched(key).is_none() {
             let (launcher, profile) = self.launcher_of(request, info).await;
             state.reports().started(key.clone(), launcher, profile);
@@ -1767,7 +1771,8 @@ mod tests {
     use super::*;
     use crate::marks::Marks;
     use crate::testing::{
-        CREDIT, FakeShell, RecordingCarrier, STEP, TempDir, client_frames, facts, size,
+        CREDIT, FakeServer, FakeShell, RecordingCarrier, STEP, TempDir, client_frames, facts,
+        server_session, size,
     };
     use crate::tuning::WORKSPACE_NAME;
     use crate::workspaces::Find;
@@ -3002,6 +3007,57 @@ mod tests {
         says_it_is_in(&app, &key, &reported(&here));
         assert_eq!(app.panes.inherited_dir(pane, None).await, None);
         assert_eq!(app.panes.live_dir(pane).await, None);
+        app.state.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_servers_session_in_an_own_workspace_never_gives_a_directory_or_a_process() {
+        let dir = TempDir::new("served-elsewhere");
+        plain_shell(&dir, "");
+        let dirs = dir.dirs();
+        let app = running_in(dir).await;
+        let here = dirs.config.join("k7q-folder");
+        std::fs::create_dir_all(&here).unwrap();
+        let mut info = server_session(7, "pwsh.exe");
+        info.pid = Some(std::process::id());
+        let key = SessionKey {
+            backend: BackendId("server".to_owned()),
+            session: info.id,
+        };
+        app.state.router().insert(
+            key.backend.clone(),
+            Arc::new(FakeServer {
+                sessions: vec![info],
+                ..FakeServer::default()
+            }),
+        );
+        crate::host::reattach(&app.panes, app.window, key.clone(), crate::host::Place::Tab)
+            .await
+            .unwrap();
+        let pane = app.panes.pane_of(&key).unwrap();
+
+        // The report is as good as one gets.
+        says_it_is_in(&app, &key, &reported(&here));
+        assert_eq!(app.state.reports().launched(&key), None);
+        assert_eq!(app.panes.inherited_dir(pane, None).await, None);
+        assert_eq!(app.panes.live_dir(pane).await, None);
+        // What a program of this machine's number does there says nothing of it.
+        let running = lume_session::Foreground {
+            pid: std::process::id(),
+            name: "pwsh".to_owned(),
+        };
+        app.state
+            .reports()
+            .on_event(&key, &lume_session::SessionEvent::Foreground(running));
+        assert!(app.state.reports().busy(&key, false));
+
+        app.panes.save().await;
+        let kept = std::fs::read_dir(dirs.state_workspaces_dir())
+            .unwrap()
+            .map(|file| std::fs::read_to_string(file.unwrap().path()).unwrap())
+            .collect::<String>();
+        assert!(kept.contains("server"), "{kept}");
+        assert!(!kept.contains("k7q-folder"), "{kept}");
         app.state.shutdown().await;
     }
 

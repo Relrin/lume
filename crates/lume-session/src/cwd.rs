@@ -18,6 +18,7 @@ use std::path::Path;
 
 use lume_proto::Launcher;
 
+use crate::shell::program_stem;
 use crate::wsl;
 
 /// The longest machine name the older Windows naming keeps. A longer name is cut to
@@ -73,6 +74,32 @@ pub fn parse_file_url(url: &str) -> Option<(String, String)> {
         return None;
     }
     Some((host.to_owned(), path))
+}
+
+/// The `file:` URL of a directory of this machine, as a shell in it would report it. A
+/// share of another machine has none, and neither has a path that does not begin at a
+/// root or a drive.
+pub fn file_url_of(path: &str) -> Option<String> {
+    let mut chars = path.chars();
+    let drive = chars.next()?.is_ascii_alphabetic()
+        && chars.next() == Some(':')
+        && matches!(chars.next(), Some('\\' | '/'));
+    let path = if drive {
+        format!("/{}", path.replace('\\', "/"))
+    } else if path.starts_with('/') && !path.starts_with("//") {
+        path.to_owned()
+    } else {
+        return None;
+    };
+    let mut url = String::from("file://");
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || b"/:._-~".contains(&byte) {
+            url.push(char::from(byte));
+        } else {
+            url.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    Some(url)
 }
 
 /// The directory a `file:` URL names, as it is shown to the user: a path of a Windows
@@ -143,6 +170,16 @@ fn windows_path(path: &str) -> Option<String> {
     Some(native)
 }
 
+/// Whether what a session runs is known to be a connection to another machine, whose
+/// directories are not this one's: one over SSH, or the SSH client run as a program.
+pub fn is_elsewhere(launcher: &Launcher) -> bool {
+    match launcher {
+        Launcher::Ssh { .. } => true,
+        Launcher::Shell { program, .. } => program_stem(program) == "ssh",
+        _ => false,
+    }
+}
+
 /// The directory a new terminal may start in, going by what a session that runs
 /// `launcher` reported as its directory. `None` unless the report passes every check
 /// this module's description lists.
@@ -151,7 +188,7 @@ fn windows_path(path: &str) -> Option<String> {
 /// Linux distribution it is the path inside the distribution.
 pub fn start_dir_on(launcher: &Launcher, url: &str, machine: &Machine<'_>) -> Option<String> {
     let (host, path) = parse_file_url(url)?;
-    if !is_this_machine(&host, machine) {
+    if is_elsewhere(launcher) || !is_this_machine(&host, machine) {
         return None;
     }
     match launcher {
@@ -342,6 +379,22 @@ mod tests {
             on(windows, "box", &[&dir], &ssh(), &format!("file://{in_url}")),
             None
         );
+        // The client run by its name is a connection all the same.
+        for program in ["ssh", "ssh.exe", r"C:\Windows\System32\OpenSSH\SSH.EXE"] {
+            let client = Launcher::Shell {
+                program: program.to_owned(),
+                args: vec!["box".to_owned()],
+                login: false,
+            };
+            assert!(is_elsewhere(&client));
+            let url = format!("file://{in_url}");
+            assert_eq!(
+                on(windows, "box", &[&dir], &client, &url),
+                None,
+                "{program}"
+            );
+        }
+        assert!(!is_elsewhere(&shell()) && !is_elsewhere(&wsl("Ubuntu")));
     }
 
     #[test]
@@ -372,6 +425,38 @@ mod tests {
             parse_file_url("file://box/home/me/a%20b/%C3%A9t%C3%A9%25"),
             Some(("box".to_owned(), "/home/me/a b/été%".to_owned()))
         );
+    }
+
+    #[test]
+    fn a_directory_of_this_machine_has_the_url_a_shell_in_it_would_report() {
+        for (path, url) in [
+            (r"C:\Users\me", "file:///C:/Users/me"),
+            (r"D:\", "file:///D:/"),
+            ("c:/work/a b", "file:///c:/work/a%20b"),
+            ("/home/me/été%", "file:///home/me/%C3%A9t%C3%A9%25"),
+            (r"/home/a\b", "file:///home/a%5Cb"),
+            ("/", "file:///"),
+        ] {
+            assert_eq!(file_url_of(path).as_deref(), Some(url), "{path}");
+            let (host, named) = parse_file_url(url).unwrap();
+            assert_eq!(host, "");
+            let back = windows_path(&named).unwrap_or(named);
+            let same = |text: &str| text.replace('\\', "/").to_lowercase();
+            assert_eq!(same(&back), same(path));
+        }
+        for path in [
+            "",
+            r"\\server\share",
+            "//server/share",
+            r"\\?\C:\x",
+            r"C:relative",
+            "C:",
+            "relative",
+            r"\rooted",
+            "é:/x",
+        ] {
+            assert_eq!(file_url_of(path), None, "{path}");
+        }
     }
 
     #[test]
