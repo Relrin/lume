@@ -7,8 +7,8 @@
     "node": ">=24.11.0"
   },
   "scripts": {
-    "lint": "eslint . && prettier --check . && pnpm --recursive --if-present run typecheck",
-    "format": "prettier --write ."
+    "lint": "eslint . && prettier --check . \"!target/**\" \"!vendor/**\" \"!.tools/**\" && pnpm --recursive --if-present run typecheck",
+    "format": "prettier --write . \"!target/**\" \"!vendor/**\" \"!.tools/**\""
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

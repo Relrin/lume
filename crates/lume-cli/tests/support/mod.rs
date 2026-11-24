@@ -115,6 +115,13 @@ impl App {
         )
     }
 
+    /// The same, with these variables added to the application's environment.
+    pub fn start_in_with(home: PathBuf, environment: &[(&str, String)]) -> Self {
+        let number = NEXT.fetch_add(1, Ordering::Relaxed);
+        let endpoint = format!("e2e-{}-{number}", std::process::id());
+        Self::start_on_with(home, false, endpoint, environment)
+    }
+
     /// Starts an application on `endpoint`, whose configuration and saved workspaces
     /// are in `home`. An application on the endpoint of one before it uses the session
     /// host that one used.

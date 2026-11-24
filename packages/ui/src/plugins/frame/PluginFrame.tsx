@@ -38,6 +38,18 @@ export const READY_WAIT_MS = 10_000;
 /** How long a frame that is out of sight is kept running. */
 export const HIDDEN_UNLOAD_MS = 30_000;
 
+declare global {
+  interface Window {
+    /** Set by a debug build that a test asked for another limit than the usual one. */
+    readonly __lumeHiddenViewMs?: number;
+  }
+}
+
+/** How long a frame that is out of sight is kept running in this window. */
+function hiddenUnloadMs(): number {
+  return window.__lumeHiddenViewMs ?? HIDDEN_UNLOAD_MS;
+}
+
 /** How long after a view last asked to have something kept it is handed on. */
 export const STATE_SETTLE_MS = 300;
 
@@ -91,7 +103,7 @@ export function PluginFrame(props: PluginFrameProps) {
       setAsleep(false);
       return undefined;
     }
-    const timer = setTimeout(() => setAsleep(true), HIDDEN_UNLOAD_MS);
+    const timer = setTimeout(() => setAsleep(true), hiddenUnloadMs());
     return () => clearTimeout(timer);
   }, [shown]);
 

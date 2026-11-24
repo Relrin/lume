@@ -2826,7 +2826,11 @@ fn a_view_that_gets_in_the_way_is_stopped_or_left_to_itself() {
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn a_view_out_of_sight_is_kept_for_a_while_and_then_started_again_from_what_it_kept() {
     let home = home_with_plugins(&["echo-view"]);
-    let app = App::start_in(home.clone(), false);
+    let limit = Duration::from_secs(5);
+    let app = App::start_in_with(
+        home.clone(),
+        &[("LUME_TEST_HIDDEN_VIEW_MS", limit.as_millis().to_string())],
+    );
     app.status_with_session();
     app.until_plugin("test.echo-view", "the plugin to be read", |plugin| {
         plugin["state"] == "ready"
@@ -2855,9 +2859,9 @@ fn a_view_out_of_sight_is_kept_for_a_while_and_then_started_again_from_what_it_k
     // and its plugin never heard it close.
     let at = plugin_log_len(&home, "test.echo-view");
     show(0);
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(Duration::from_secs(1));
     show(1);
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(limit);
     let log = std::fs::read_to_string(home.join("state/plugins/logs/test.echo-view.log"))
         .unwrap_or_default();
     assert!(
@@ -2868,8 +2872,10 @@ fn a_view_out_of_sight_is_kept_for_a_while_and_then_started_again_from_what_it_k
 
     // Away for longer than a view out of sight is kept: it is let go of, which its
     // plugin hears, and started again from what it kept when it is next shown.
+    let away = Instant::now();
     show(0);
     plugin_log_until(&home, "test.echo-view", at, "view closed echo");
+    assert!(away.elapsed() >= limit, "it was let go of too soon");
     let log = std::fs::read_to_string(home.join("state/plugins/logs/test.echo-view.log"))
         .unwrap_or_default();
     assert!(!log[at..].contains("started"), "{}", &log[at..]);
@@ -3529,11 +3535,17 @@ fn the_git_review_plugin_shows_the_changes_of_a_real_repository() {
     assert!(plugin.join("plugin.toml").is_file());
 }
 
+/// What makes a plugin's command have this long, in place of the usual limit.
+fn command_wait(limit: Duration) -> (&'static str, String) {
+    ("LUME_TEST_COMMAND_WAIT_MS", limit.as_millis().to_string())
+}
+
 #[test]
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn the_time_a_question_is_on_show_is_not_taken_from_what_a_command_may_take() {
     let home = home_with_plugins(&["asker"]);
-    let app = App::start_in(home, false);
+    let limit = Duration::from_secs(3);
+    let app = App::start_in_with(home, &[command_wait(limit)]);
     let status = app.status_with_session();
     let pane = status["focused"]["pane"].as_str().unwrap().to_owned();
     app.until_plugin("test.asker", "the plugin to be read", |plugin| {
@@ -3546,14 +3558,10 @@ fn the_time_a_question_is_on_show_is_not_taken_from_what_a_command_may_take() {
     let text = serde_json::json!({ "pane": pane, "text": "echo lume-waited\r" }).to_string();
     let began = Instant::now();
     let typed = app.ctl_in_background(&["command", "test.asker.type", &text]);
-    std::thread::sleep(Duration::from_secs(33));
+    std::thread::sleep(limit + Duration::from_secs(1));
     app.answer_prompt(true);
     let answer = typed.join().unwrap();
-    assert!(
-        began.elapsed() > Duration::from_secs(30),
-        "{:?}",
-        began.elapsed()
-    );
+    assert!(began.elapsed() > limit, "{:?}", began.elapsed());
     answer.ok("the command, approved late");
     app.wait_text_in(&pane, "lume-waited");
     app.quit();
@@ -3670,7 +3678,8 @@ fn a_plugins_verb_prints_what_its_command_gives_and_ends_with_its_status() {
 fn a_verb_goes_on_past_a_calls_limit_and_stops_when_its_client_goes_away() {
     use std::io::{BufRead as _, BufReader};
     let home = home_with_plugins(&["verbs"]);
-    let app = App::start_in(home, false);
+    let limit = Duration::from_secs(3);
+    let app = App::start_in_with(home, &[command_wait(limit)]);
     app.until_plugin("test.verbs", "the plugin to be read", |plugin| {
         plugin["state"] == "ready"
     });
@@ -3689,7 +3698,7 @@ fn a_verb_goes_on_past_a_calls_limit_and_stops_when_its_client_goes_away() {
 
     // Longer than one call of a command may take: the run is many short calls, and
     // none of them counts against the plugin.
-    std::thread::sleep(Duration::from_secs(35));
+    std::thread::sleep(limit + Duration::from_secs(2));
     assert!(
         child.try_wait().expect("lume can be waited for").is_none(),
         "the verb ended by itself"

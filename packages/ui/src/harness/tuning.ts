@@ -90,6 +90,14 @@ export const COMMIT_TEST_MS = 2000;
 /** How long the page is given to follow a change before its state is looked at. */
 export const CHROME_SETTLE_MS = 300;
 
+/**
+ * How long a scene has to stay as it is, with nothing in it moving, before it is taken
+ * as settled; how often that is looked at; and how long it is waited for at most.
+ */
+export const SCENE_STILL_MS = 100;
+export const SCENE_LOOK_MS = 20;
+export const SCENE_SETTLE_MAX_MS = 1500;
+
 /** How long the page may take to start and attach to its panes' sessions. */
 export const CHROME_START_TIMEOUT_MS = 20_000;
 

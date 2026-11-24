@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use super::asking::plain;
-use super::{COMMAND_WAIT, Plugins, api_error};
+use super::{Plugins, api_error, command_wait};
 use crate::carrier::SessionKey;
 use crate::error::CommandError;
 use crate::tuning::PAGE_ANSWER_TIMEOUT;
@@ -688,7 +688,7 @@ impl Plugins {
             .invocations
             .insert(invocation, (bound.clone(), generation, sender));
         plugin.service(invocation, &asked.name, asked.args.unwrap_or(Value::Null));
-        match self.asked.within(COMMAND_WAIT, receiver).await {
+        match self.asked.within(command_wait(), receiver).await {
             Some(Ok(result)) => result,
             Some(Err(_)) => Err(api_error(
                 ErrorCode::Stopped,
@@ -701,7 +701,7 @@ impl Plugins {
                     format!(
                         "{bound} did not answer {} in {} seconds",
                         asked.name,
-                        COMMAND_WAIT.as_secs()
+                        command_wait().as_secs()
                     ),
                 ))
             }

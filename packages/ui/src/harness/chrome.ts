@@ -47,6 +47,9 @@ import {
   CHROME_START_TIMEOUT_MS,
   COMMIT_TEST_MS,
   SCENE_BOX_TOLERANCE_PX,
+  SCENE_LOOK_MS,
+  SCENE_SETTLE_MAX_MS,
+  SCENE_STILL_MS,
   SCENE_HEIGHT_PX,
   SCENE_WIDTH_PX,
 } from "./tuning.ts";
@@ -412,6 +415,32 @@ async function runScene(
 }
 
 /**
+ * Waits until what `state` gives has stayed the same for a while, with nothing moving that
+ * comes to rest. What turns for ever, such as a spinner, is not waited for.
+ */
+async function stillness(container: HTMLElement, state: () => string): Promise<void> {
+  const began = performance.now();
+  let last = "";
+  let since = began;
+  for (;;) {
+    await sleep(SCENE_LOOK_MS);
+    const now = performance.now();
+    const moving = container
+      .getAnimations({ subtree: true })
+      .some(
+        (animation) =>
+          animation.playState === "running" &&
+          animation.effect?.getComputedTiming().endTime !== Infinity,
+      );
+    const found = moving ? "" : state();
+    if (moving || found !== last) since = now;
+    last = found;
+    if (!moving && now - since >= SCENE_STILL_MS) return;
+    if (now - began >= SCENE_SETTLE_MAX_MS) return;
+  }
+}
+
+/**
  * Writes a page down once it has settled, in both looks, checks it for what a keyboard
  * and a screen reader need, and compares it with its reference. `also` is asked for
  * anything else that is wrong with it.
@@ -425,9 +454,6 @@ async function writeScene(
   problems: string[],
 ): Promise<SceneResult> {
   const { core, container } = mounted;
-  await sleep(CHROME_SETTLE_MS);
-  for (const problem of also()) problems.push(`${name}: ${problem}`);
-
   const page = container.querySelector(root);
   if (!page) throw new Error("the page drew no window");
   const write = (): Part => {
@@ -439,6 +465,9 @@ async function writeScene(
     );
   };
 
+  const still = () => stillness(container, () => JSON.stringify([write(), lookOf(page)]));
+  await still();
+  for (const problem of also()) problems.push(`${name}: ${problem}`);
   const structure = write();
   const dark = lookOf(page);
   const found = audit(page as unknown as AuditNode);
@@ -448,7 +477,7 @@ async function writeScene(
   await until("the light look", CHROME_START_TIMEOUT_MS, () => {
     return document.documentElement.dataset["scheme"] === "light";
   });
-  await sleep(CHROME_SETTLE_MS);
+  await still();
   const inLight = write();
   const light = lookOf(page);
   const sameInLight = differences(structure, inLight, 0).length === 0;

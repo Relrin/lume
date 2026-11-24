@@ -210,3 +210,18 @@ pub const SSH_CONFIG_POLL: Duration = Duration::from_millis(20);
 /// How many folders listing one folder gives at most, for choosing one to open as a
 /// workspace. A folder with more is listed in part, and its others are found by typing.
 pub const FOLDERS_LISTED_MAX: usize = 2000;
+
+/// What a test calls the limit of a plugin's call, and that of a view out of sight, when
+/// it asks for another, in milliseconds.
+pub const COMMAND_WAIT_VARIABLE: &str = "LUME_TEST_COMMAND_WAIT_MS";
+pub const HIDDEN_VIEW_VARIABLE: &str = "LUME_TEST_HIDDEN_VIEW_MS";
+
+/// A limit that a test of a debug build asked for in the environment, so that it need
+/// not wait out the usual one. A release build has no such thing.
+pub fn asked_limit(variable: &str) -> Option<Duration> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    let asked = std::env::var(variable).ok()?;
+    asked.parse().ok().map(Duration::from_millis)
+}

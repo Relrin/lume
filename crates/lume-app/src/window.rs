@@ -41,8 +41,8 @@ use crate::configsvc::ConfigService;
 use crate::control::Shell;
 use crate::state::AppState;
 use crate::tuning::{
-    BOUNDS_DEBOUNCE, SETTINGS_SECTION_MAX_BYTES, SETTINGS_WINDOW_MIN_SIZE, SETTINGS_WINDOW_SIZE,
-    TITLE_MAX_BYTES,
+    BOUNDS_DEBOUNCE, HIDDEN_VIEW_VARIABLE, SETTINGS_SECTION_MAX_BYTES, SETTINGS_WINDOW_MIN_SIZE,
+    SETTINGS_WINDOW_SIZE, TITLE_MAX_BYTES, asked_limit,
 };
 
 /// The label of the window that shows no terminals: the webview report, or a test
@@ -433,6 +433,13 @@ impl WindowShell {
         let mut builder = WebviewWindowBuilder::from_config(&self.app, &described)?
             .additional_browser_args(&browser_args())
             .on_document_title_changed(follow_title);
+        // Read by the page where it lets go of a view that is out of sight.
+        if let Some(limit) = asked_limit(HIDDEN_VIEW_VARIABLE) {
+            builder = builder.initialization_script(format!(
+                "window.__lumeHiddenViewMs = {};",
+                limit.as_millis()
+            ));
+        }
         if let Some(color) = self.config.surface_color() {
             builder =
                 builder.background_color(tauri::window::Color(color.r, color.g, color.b, 255));

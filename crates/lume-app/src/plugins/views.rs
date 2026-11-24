@@ -23,7 +23,7 @@ use lume_services::streams::Streams;
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-use super::{COMMAND_WAIT, Plugins, api_error};
+use super::{Plugins, api_error, command_wait};
 use crate::carrier::Pipe;
 use crate::error::CommandError;
 use crate::window::window_of;
@@ -742,7 +742,7 @@ impl Plugins {
             .insert(invocation, (local.clone(), generation, sender));
         let from = serde_json::to_value(described(window, page, &open)).unwrap_or(Value::Null);
         plugin.view_call(invocation, name, args, from);
-        match self.asked.within(COMMAND_WAIT, receiver).await {
+        match self.asked.within(command_wait(), receiver).await {
             Some(Ok(result)) => result,
             Some(Err(_)) => Err(api_error(
                 ErrorCode::Stopped,
@@ -754,7 +754,7 @@ impl Plugins {
                     ErrorCode::TimedOut,
                     format!(
                         "{local} did not answer {name} in {} seconds",
-                        COMMAND_WAIT.as_secs()
+                        command_wait().as_secs()
                     ),
                 ))
             }

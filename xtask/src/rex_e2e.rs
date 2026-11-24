@@ -5,11 +5,10 @@
 //! their own beside whatever runs already; this finds the program and runs them.
 
 use std::path::PathBuf;
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-use crate::{paths, run};
+use crate::run;
 
 /// The variable that names the program, to this and to the tests.
 const PROGRAM: &str = "LUME_REX_BIN";
@@ -44,13 +43,11 @@ fn program() -> Result<PathBuf> {
 pub fn run(only: Option<&str>) -> Result<()> {
     let program = program()?;
     println!("rex-e2e: {}", program.display());
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let mut tests = Command::new(cargo);
+    let mut tests = run::cargo_command();
     tests
         .args(["test", "-p", "lume-cli", "--test", "rex_e2e", "--"])
         .args(["--ignored", "--test-threads=1"])
         .args(only)
-        .env(PROGRAM, program)
-        .current_dir(paths::root());
+        .env(PROGRAM, program);
     run::check(tests, "the tests against a Rex server")
 }

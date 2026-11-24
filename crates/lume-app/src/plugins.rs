@@ -66,6 +66,7 @@ use crate::registry::{CommandSpec, Owner, PluginAccess, Registry, Runs, plugin_a
 use crate::services::{Asker, Services};
 use crate::sessions::News;
 use crate::state::AppState;
+use crate::tuning::{COMMAND_WAIT_VARIABLE, asked_limit};
 use lume_proto::app::SessionNews;
 
 /// How long after the start the plugins are read when no terminal shows any output.
@@ -75,6 +76,13 @@ const WITHOUT_OUTPUT: Duration = Duration::from_secs(2);
 /// The time the user is being asked something is not counted against the second.
 const START_WAIT: Duration = Duration::from_secs(10);
 const COMMAND_WAIT: Duration = Duration::from_secs(30);
+
+/// How long a plugin's code has for a command or a call: [`COMMAND_WAIT`], unless a test
+/// asked for another limit.
+fn command_wait() -> Duration {
+    static WAIT: OnceLock<Duration> = OnceLock::new();
+    *WAIT.get_or_init(|| asked_limit(COMMAND_WAIT_VARIABLE).unwrap_or(COMMAND_WAIT))
+}
 
 /// How many breaches in how long turn a plugin off.
 const BREACHES_TO_TURN_OFF: usize = 3;
@@ -2051,7 +2059,7 @@ impl Plugins {
             .invocations
             .insert(invocation, (local.clone(), generation, sender));
         plugin.command(invocation, &name, args.clone());
-        match self.asked.within(COMMAND_WAIT, receiver).await {
+        match self.asked.within(command_wait(), receiver).await {
             Some(Ok(Ok(value))) => Ok(value),
             Some(Ok(Err(error))) => Err(CommandError::new(
                 "failed",
@@ -2065,7 +2073,10 @@ impl Plugins {
                 self.inner().invocations.remove(&invocation);
                 Err(CommandError::new(
                     lume_proto::app::codes::TIMEOUT,
-                    format!("{id} did not finish in {} seconds", COMMAND_WAIT.as_secs()),
+                    format!(
+                        "{id} did not finish in {} seconds",
+                        command_wait().as_secs()
+                    ),
                 ))
             }
         }

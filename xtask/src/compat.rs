@@ -79,8 +79,7 @@ fn build_host(source: &Path) -> Result<PathBuf> {
         .join("target")
         .join("vt")
         .join(paths::host_triple()?);
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let mut build = Command::new(cargo);
+    let mut build = run::cargo_command();
     build
         .args(["build", "-p", "lume-host", "--bin", "lume-host"])
         .current_dir(source)
@@ -131,8 +130,7 @@ pub fn run(host_ref: &str) -> Result<()> {
     let host = build_host(&source)?;
 
     // The whole workspace's test build, so that what is tested is this tree's backend.
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let mut test = Command::new(cargo);
+    let mut test = run::cargo_command();
     test.args([
         "test",
         "-p",

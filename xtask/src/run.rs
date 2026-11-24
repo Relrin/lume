@@ -7,11 +7,36 @@ use anyhow::{Context, Result, bail};
 
 use crate::paths;
 
-/// Run `cargo <args>` in the repository root.
-pub fn cargo(args: &[&str]) -> Result<()> {
+/// What cargo sets for the one package it runs, which is this program.
+const OF_THIS_PACKAGE: &[&str] = &[
+    "CARGO_PKG_",
+    "CARGO_MANIFEST_",
+    "CARGO_BIN_NAME",
+    "CARGO_CRATE_NAME",
+    "CARGO_PRIMARY_PACKAGE",
+];
+
+/// The cargo this program was started with, in the repository root, as it is started
+/// from a shell: without what cargo said of this program. A build script may ask to be
+/// run again when one of those variables changes, and then whatever depends on it would
+/// be compiled anew each time a build is started from here.
+pub fn cargo_command() -> Command {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut cmd = Command::new(cargo);
-    cmd.args(args).current_dir(paths::root());
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if OF_THIS_PACKAGE.iter().any(|of| text.starts_with(of)) {
+            cmd.env_remove(&name);
+        }
+    }
+    cmd.current_dir(paths::root());
+    cmd
+}
+
+/// Run `cargo <args>` in the repository root.
+pub fn cargo(args: &[&str]) -> Result<()> {
+    let mut cmd = cargo_command();
+    cmd.args(args);
     check(cmd, &format!("cargo {}", args.join(" ")))
 }
 
