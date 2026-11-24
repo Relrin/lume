@@ -11,13 +11,15 @@ use lume_config::{ConfigError, ListedProfile, SshProfile};
 use lume_session::Launcher;
 use serde::Deserialize;
 use serde_json::Value;
-use tauri::State;
+use tauri::{State, Webview};
 
 use crate::configsvc::ConfigService;
 use crate::error::CommandError;
 use crate::host_probe::{self, Probe};
 use crate::services::Services;
 use crate::ssh_try;
+use crate::tries::Tries;
+use crate::window::window_of;
 
 type Shared<'a> = State<'a, Arc<Services>>;
 
@@ -46,6 +48,14 @@ pub struct SshHost {
 }
 
 impl SshHost {
+    /// The machine as an address is written.
+    fn address(&self) -> String {
+        let user = self.user.as_deref().filter(|user| !user.is_empty());
+        let user = user.map(|user| format!("{user}@")).unwrap_or_default();
+        let port = self.port.map(|port| format!(":{port}")).unwrap_or_default();
+        format!("{user}{}{port}", self.host.trim())
+    }
+
     fn launcher(self) -> Launcher {
         Launcher::Ssh {
             host: self.host.trim().to_owned(),
@@ -63,10 +73,28 @@ pub async fn ssh_reach(host: SshHost) -> Result<Probe, CommandError> {
     Ok(host_probe::probe(host.launcher()).await)
 }
 
-/// Whether the machine can be signed in to over SSH without anything being asked.
+/// Whether the machine can be signed in to over SSH. What that takes is asked in the
+/// window, if it is one of terminals; a window of another kind asks nothing.
 #[tauri::command]
-pub async fn ssh_try(host: SshHost) -> Result<(), CommandError> {
-    ssh_try::sign_in(host.launcher()).await
+pub async fn ssh_try(
+    webview: Webview,
+    services: Shared<'_>,
+    tries: State<'_, Tries>,
+    host: SshHost,
+    attempt: u32,
+) -> Result<(), CommandError> {
+    let name = host.host.trim().to_owned();
+    let address = host.address();
+    let window = window_of(webview.label());
+    let asks = services.rex.attempt(&name, &address, window);
+    let trying = ssh_try::sign_in(host.launcher(), asks);
+    tries.run(webview.label(), attempt, trying).await
+}
+
+/// Ends a try that its page does not wait for any more.
+#[tauri::command]
+pub fn try_end(webview: Webview, tries: State<'_, Tries>, attempt: u32) {
+    tries.end(webview.label(), attempt);
 }
 
 /// Writes a profile that opens a shell on a machine reached over SSH: a new one, or one

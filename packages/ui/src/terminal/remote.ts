@@ -4,8 +4,9 @@
  * The core passes on what only the page can do or know: how large a pane that is about
  * to be made will be, running a command that acts on a terminal, reading what is on a
  * pane's screen, waiting for text to appear there, giving a terminal a size of the
- * caller's choosing, and putting a plugin's question to the user. A request arrives as a control message on the carrier; the answer
- * goes back through a command, with the request's id.
+ * caller's choosing, and putting a plugin's question, or one of the SSH client's, to the
+ * user. A request arrives as a control message on the carrier; the answer goes back
+ * through a command, with the request's id.
  *
  * Nothing here touches a terminal itself. The page hands in the few operations a
  * request can lead to, so the reading of requests and the shape of answers can be tested
@@ -14,7 +15,7 @@
 
 import type { Intent } from "../layout/types.ts";
 import { CommandError, isTermSize, type TermSize } from "../transport/types.ts";
-import type { PickItem, PluginAsk, PluginAsker } from "./prompts.ts";
+import type { PickItem, PluginAsk, PluginAsker, SignIn, SignInKind } from "./prompts.ts";
 
 /**
  * The terminal a request is about: a pane, the pane that shows a session, or, with
@@ -59,6 +60,8 @@ export interface RemoteTarget {
   resizeTo(target: PaneRef, size: TermSize): Promise<TermSize>;
   /** Puts a plugin's question to the user and gives their answer. */
   ask(ask: PluginAsk): Promise<Record<string, unknown>>;
+  /** Puts a question of the SSH client's to the user and gives what they answer, if they do. */
+  signIn(signIn: SignIn): Promise<string | null>;
 }
 
 /** An answer as the core takes it: what the request yielded, or why it yielded nothing. */
@@ -165,6 +168,33 @@ export function readAsk(body: unknown): PluginAsk {
   }
 }
 
+const SIGN_IN_KINDS: readonly SignInKind[] = [
+  "host_key",
+  "password",
+  "passphrase",
+  "confirm",
+  "code",
+];
+
+/** A question of the SSH client's as the core sent it, checked field by field. */
+export function readSignIn(body: Readonly<Record<string, unknown>>): SignIn {
+  const { ask, again } = body;
+  const kind = SIGN_IN_KINDS.find((known) => known === body["kind"]);
+  if (kind === undefined) {
+    throw badRequest(`the page knows no question called ${String(body["kind"])}`);
+  }
+  if (typeof ask !== "number") throw badRequest("the question has no number");
+  if (typeof again !== "boolean") throw badRequest("the question has no again");
+  return {
+    ask,
+    kind,
+    host: text(body, "host"),
+    address: text(body, "address"),
+    words: text(body, "words"),
+    again,
+  };
+}
+
 function sizeOf(value: unknown): TermSize {
   if (isFields(value)) {
     const size = { cols: value["cols"], rows: value["rows"] } as TermSize;
@@ -232,6 +262,8 @@ async function carryOut(target: RemoteTarget, body: Fields): Promise<Record<stri
       const answer = await target.ask(readAsk(body["ask"]));
       return { type: "answered", answer };
     }
+    case "sign_in":
+      return { type: "secret", secret: await target.signIn(readSignIn(body)) };
     default:
       throw badRequest(`the page knows no request called ${String(body["type"])}`);
   }

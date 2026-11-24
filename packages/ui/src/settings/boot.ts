@@ -139,6 +139,11 @@ export async function startSettings(
     lists.setState({ ...lists.getState(), profiles: list.profiles });
   };
 
+  // The servers are also what a setting is chosen from.
+  rex.subscribe((state) => {
+    lists.setState({ ...lists.getState(), rexHosts: state.list?.hosts ?? [] });
+  });
+
   // Answers are numbered so that one that comes late does not undo a newer one.
   let addonsAsked = 0;
   const refreshAddons = (): void => {

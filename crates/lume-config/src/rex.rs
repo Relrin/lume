@@ -22,6 +22,13 @@ pub struct RexConfig {
     #[schemars(extend("x-lume-settings" = Shown::switch("hosts", "This computer", 10, "Look for a Rex server here")
         .help("One that runs is listed with its sessions; none is ever started")))]
     pub local: bool,
+    /// The Rex server a session of which is shown at start: its address, or its label.
+    /// Empty for none. A start that names a workspace, a program or a server is for that.
+    #[schemars(extend("x-lume-settings" = Shown::select("hosts", "Startup", 10, "Start on")
+        .help("What Lume shows first. Signing in may be asked for; your workspace stays if that is put away")
+        .unset("Your workspace")
+        .list("rex-hosts")))]
+    pub start_on: String,
     /// Rex servers. Each is a `[[rex.host]]` table with a `label` and an `address`.
     #[serde(rename = "host", skip_serializing_if = "Vec::is_empty")]
     pub hosts: Vec<RexHostEntry>,
@@ -31,6 +38,7 @@ impl Default for RexConfig {
     fn default() -> Self {
         Self {
             local: true,
+            start_on: String::new(),
             hosts: Vec::new(),
         }
     }

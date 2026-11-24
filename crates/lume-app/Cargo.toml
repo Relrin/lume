@@ -40,6 +40,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
+zeroize.workspace = true
 
 # On Linux the clipboard is reached through X11 by default; this adds the Wayland way.
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
@@ -63,6 +64,7 @@ data-encoding.workspace = true
 futures-util.workspace = true
 rcgen.workspace = true
 rustls.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 tokio-rustls.workspace = true
 tokio-tungstenite.workspace = true
 

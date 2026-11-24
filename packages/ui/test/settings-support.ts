@@ -7,6 +7,7 @@ import { DEFAULT_TOKENS } from "@lume/tokens";
 
 import type { ConfigView } from "../src/core/types.ts";
 import type { SettingsLists } from "../src/settings/model.ts";
+import { DEVBOX, NAS } from "./rex-fixtures.ts";
 
 /** A schema in the shape the configuration's has, small enough to read. */
 export const SCHEMA = {
@@ -43,6 +44,24 @@ export const SCHEMA = {
         control: "select",
         list: "profiles",
         unset: "System default",
+      },
+    },
+    rex: {
+      type: "object",
+      properties: {
+        "start-on": {
+          type: "string",
+          default: "",
+          "x-lume-settings": {
+            page: "terminal",
+            group: "Shell",
+            order: 50,
+            label: "Start on",
+            control: "select",
+            list: "rex-hosts",
+            unset: "Your workspace",
+          },
+        },
       },
     },
     terminal: {
@@ -289,6 +308,7 @@ export const LISTS: SettingsLists = {
   interfaceFonts: ["Cascadia Mono", "Consolas", "Inter", "Segoe UI"],
   shells: [{ name: "PowerShell", program: "pwsh.exe" }],
   workspaces: ["default", "notes"],
+  rexHosts: [DEVBOX, { ...NAS, id: "rex:?broken", label: "broken", address: "not an address" }],
   profiles: [
     {
       id: "box",

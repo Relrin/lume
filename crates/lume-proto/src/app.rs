@@ -20,15 +20,17 @@
 //! passes those on as a [`PageRequest`], and the page answers with a [`PageResult`].
 
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 use crate::control::ClientKind;
 use crate::error::{DecodeError, EncodeError};
 use crate::event::SessionEvent;
 use crate::frame::{Kind, encode_control_json};
+use crate::secret::Secret;
 use crate::types::{BackendId, ExitStatus, Launcher, SessionId, SessionInfo, TermSize};
 
 /// The version of the control endpoint's messages this crate speaks.
-pub const APP_PROTO_VERSION: u32 = 10;
+pub const APP_PROTO_VERSION: u32 = 11;
 
 /// The name the control endpoint is served under, and looked for, when none is given.
 ///
@@ -40,6 +42,16 @@ pub const ENDPOINT_NAME: &str = if cfg!(debug_assertions) {
 } else {
     "app"
 };
+
+/// The variables the command-line tool is given when the SSH client runs it to ask the
+/// user something: the name of the endpoint to ask at, and what says which run of the
+/// client asks.
+pub const ASKPASS_ENDPOINT_VAR: &str = "LUME_ASKPASS";
+pub const ASKPASS_TOKEN_VAR: &str = "LUME_ASKPASS_TOKEN";
+
+/// Room for a message that holds a secret, so that it is not moved while it is made and
+/// leaves no copy behind.
+const SECRET_MESSAGE_ROOM: usize = 4096;
 
 /// The codes an [`AppError`] carries beyond those of the session protocol, which pass
 /// through unchanged when a backend refuses a request. Their spelling is part of the
@@ -123,9 +135,31 @@ pub struct AppEvent {
 }
 
 impl AppMessage {
-    /// Appends the message to `out` as the frames of one control message.
+    /// Appends the message to `out` as the frames of one control message. The frames of a
+    /// message that holds a secret are the caller's to wipe.
     pub fn encode(&self, out: &mut Vec<u8>) -> Result<(), EncodeError> {
-        encode_json(self, out)
+        if !self.holds_secret() {
+            return encode_json(self, out);
+        }
+        let mut json = Zeroizing::new(Vec::with_capacity(SECRET_MESSAGE_ROOM));
+        serde_json::to_writer(&mut *json, self).map_err(unrepresentable)?;
+        out.reserve(SECRET_MESSAGE_ROOM);
+        encode_control_json(&json, out)
+    }
+
+    /// Whether the message holds something nobody but its receiver is to see.
+    pub fn holds_secret(&self) -> bool {
+        match self {
+            AppMessage::Request(request) => matches!(request.body, AppRequestBody::Askpass { .. }),
+            AppMessage::Response(response) => matches!(
+                &response.result,
+                Ok(AppReply {
+                    body: AppReplyBody::Secret { .. },
+                    ..
+                })
+            ),
+            AppMessage::Event(_) | AppMessage::Output(_) | AppMessage::Done(_) => false,
+        }
     }
 
     /// Reads a message from the JSON of one control message.
@@ -137,11 +171,15 @@ impl AppMessage {
     }
 }
 
-fn encode_json<T: Serialize>(message: &T, out: &mut Vec<u8>) -> Result<(), EncodeError> {
-    let json = serde_json::to_vec(message).map_err(|error| EncodeError::Unrepresentable {
+fn unrepresentable(error: serde_json::Error) -> EncodeError {
+    EncodeError::Unrepresentable {
         kind: Kind::Control,
         reason: error.to_string(),
-    })?;
+    }
+}
+
+fn encode_json<T: Serialize>(message: &T, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+    let json = serde_json::to_vec(message).map_err(unrepresentable)?;
     encode_control_json(&json, out)
 }
 
@@ -226,7 +264,7 @@ pub enum AppRequestBody {
     },
     /// Does what starting the application again asks for: its window is brought to the
     /// front, the workspace named is switched to, and the program named is run in a new
-    /// tab. A second copy of the application sends this and exits, so that there is one
+    /// tab, or a session of the Rex server named is put on show. A second copy of the application sends this and exits, so that there is one
     /// application however often it is started.
     Launch {
         /// The workspace to show. Left out, the one on show stays.
@@ -238,6 +276,10 @@ pub enum AppRequestBody {
         /// The directory the program is started in: where the command was typed.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cwd: Option<String>,
+        /// The Rex server to show a session of, by its label or address; empty, the one
+        /// of this machine. The answer does not wait until it is shown.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rex: Option<String>,
     },
     /// Closes the application as closing its window would: its sessions are ended first.
     Quit {},
@@ -367,6 +409,17 @@ pub enum AppRequestBody {
         /// What was piped to the client, if anything was.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stdin: Option<String>,
+    },
+    /// Asks the user what the SSH client wants to know. The client runs the command-line
+    /// tool to ask it, and the token says for which run. A client that closes the
+    /// connection withdraws the question.
+    Askpass {
+        token: Secret,
+        /// The client's words.
+        prompt: String,
+        /// What the client says the question is, where it says so.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hint: Option<String>,
     },
 }
 
@@ -702,6 +755,11 @@ pub enum AppReplyBody {
     Answered {
         answer: serde_json::Value,
     },
+    /// What the user answered to something the SSH client asked; nothing when they give
+    /// no answer.
+    Secret {
+        secret: Option<Secret>,
+    },
 }
 
 /// A request from the application to a window's page. It travels to the page as a
@@ -769,6 +827,36 @@ pub enum PageRequestBody {
     /// plugin's name; the plugin cannot draw, fill in or dismiss it. Answered with
     /// [`AppReplyBody::Answered`].
     PluginAsk { ask: serde_json::Value },
+    /// Put a question of the SSH client's to the user. Answered with
+    /// [`AppReplyBody::Secret`].
+    SignIn {
+        /// What the question is called if it is withdrawn.
+        ask: u64,
+        kind: SignInKind,
+        /// What the user calls the server that is connected to, and its address.
+        host: String,
+        address: String,
+        /// The client's words. A machine on the way may have written some of them.
+        words: String,
+        /// Whether the same was asked before and answered.
+        again: bool,
+    },
+}
+
+/// What the SSH client wants to know.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignInKind {
+    /// Whether a machine that was not seen before is the one that is meant.
+    HostKey,
+    /// The password of an account.
+    Password,
+    /// The passphrase of a key.
+    Passphrase,
+    /// Yes or no.
+    Confirm,
+    /// Anything else: a one-time code, or whatever the other machine asks.
+    Code,
 }
 
 /// Appends something the application tells a page without being asked to `out`, as the
@@ -856,6 +944,54 @@ mod tests {
     }
 
     #[test]
+    fn a_question_of_the_ssh_clients_and_its_answer_keep_what_is_secret() {
+        let request = PageRequest {
+            id: 4,
+            body: PageRequestBody::SignIn {
+                ask: 9,
+                kind: SignInKind::HostKey,
+                host: "Build box".to_owned(),
+                address: "ssh://me@build".to_owned(),
+                words: "Are you sure?".to_owned(),
+                again: false,
+            },
+        };
+        assert_eq!(
+            serde_json::to_string(&request).unwrap(),
+            r#"{"id":4,"body":{"type":"sign_in","ask":9,"kind":"host_key","host":"Build box","address":"ssh://me@build","words":"Are you sure?","again":false}}"#
+        );
+        let answers = [
+            (
+                Some(Secret::new("hunter2".to_owned())),
+                r#"{"ok":{"type":"secret","secret":"hunter2"}}"#,
+            ),
+            (None, r#"{"ok":{"type":"secret","secret":null}}"#),
+        ];
+        for (secret, json) in answers {
+            let answer = PageResult::Ok(AppReplyBody::Secret { secret });
+            assert_eq!(serde_json::to_string(&answer).unwrap(), json);
+            assert_eq!(serde_json::from_str::<PageResult>(json).unwrap(), answer);
+            assert!(!format!("{answer:?}").contains("hunter2"));
+        }
+        let asked = AppMessage::Request(AppRequest {
+            id: 1,
+            body: AppRequestBody::Askpass {
+                token: Secret::new("hunter2".to_owned()),
+                prompt: "words".to_owned(),
+                hint: None,
+            },
+        });
+        assert!(!format!("{asked:?}").contains("hunter2"));
+        assert!(asked.holds_secret());
+        let mut frames = Vec::new();
+        asked.encode(&mut frames).unwrap();
+        let mut decoder = crate::ControlDecoder::new();
+        decoder.push(&frames);
+        let json = decoder.next().unwrap().unwrap();
+        assert_eq!(AppMessage::decode(&json).unwrap(), asked);
+    }
+
+    #[test]
     fn requests_have_the_documented_shape() {
         let cases = [
             (
@@ -871,14 +1007,25 @@ mod tests {
                     workspace: None,
                     exec: Vec::new(),
                     cwd: None,
+                    rex: None,
                 },
                 r#"{"type":"launch"}"#,
+            ),
+            (
+                AppRequestBody::Launch {
+                    workspace: None,
+                    exec: Vec::new(),
+                    cwd: None,
+                    rex: Some(String::new()),
+                },
+                r#"{"type":"launch","rex":""}"#,
             ),
             (
                 AppRequestBody::Launch {
                     workspace: Some("site".to_owned()),
                     exec: vec!["htop".to_owned(), "-d".to_owned()],
                     cwd: Some("/work".to_owned()),
+                    rex: None,
                 },
                 r#"{"type":"launch","workspace":"site","exec":["htop","-d"],"cwd":"/work"}"#,
             ),
@@ -902,6 +1049,22 @@ mod tests {
             ),
             (AppRequestBody::Profiles {}, r#"{"type":"profiles"}"#),
             (AppRequestBody::Rex {}, r#"{"type":"rex"}"#),
+            (
+                AppRequestBody::Askpass {
+                    token: Secret::new("t".to_owned()),
+                    prompt: "me@build's password: ".to_owned(),
+                    hint: None,
+                },
+                r#"{"type":"askpass","token":"t","prompt":"me@build's password: "}"#,
+            ),
+            (
+                AppRequestBody::Askpass {
+                    token: Secret::new("t".to_owned()),
+                    prompt: "?".to_owned(),
+                    hint: Some("confirm".to_owned()),
+                },
+                r#"{"type":"askpass","token":"t","prompt":"?","hint":"confirm"}"#,
+            ),
             (
                 AppRequestBody::Spawn {
                     spec: OpenSpec {

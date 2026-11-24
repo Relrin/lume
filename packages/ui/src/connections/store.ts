@@ -9,6 +9,8 @@ import type { ConnectionKind, EditedConnection } from "./model.ts";
 /** What the dialog was asked to show. */
 export interface ConnectionAsked {
   readonly kind: ConnectionKind;
+  /** The address of a Rex server to begin with. */
+  readonly address: string;
   /** What is changed. Nothing, to add something. */
   readonly edit: EditedConnection | null;
   /** Whether a key opened it, which shows it at once. */
@@ -21,7 +23,7 @@ export interface ConnectionAsked {
 export interface ConnectionDialogState {
   readonly open: ConnectionAsked | null;
   /** Shows the dialog to add something. */
-  add(kind: ConnectionKind, keyboard: boolean): void;
+  add(kind: ConnectionKind, keyboard: boolean, address?: string): void;
   /** Shows the dialog to change something. */
   edit(edit: EditedConnection, keyboard: boolean): void;
   close(): void;
@@ -33,9 +35,18 @@ export const connectionDialog: StoreApi<ConnectionDialogState> = createStore<Con
     let opening = 0;
     return {
       open: null,
-      add: (kind, keyboard) => set({ open: { kind, edit: null, keyboard, opening: ++opening } }),
+      add: (kind, keyboard, address = "") =>
+        set({ open: { kind, address, edit: null, keyboard, opening: ++opening } }),
       edit: (edit, keyboard) =>
-        set({ open: { kind: edit.kind, edit, keyboard, opening: ++opening } }),
+        set({
+          open: {
+            kind: edit.kind,
+            address: edit.kind === "rex" ? edit.address : "",
+            edit,
+            keyboard,
+            opening: ++opening,
+          },
+        }),
       close: () => {
         if (get().open !== null) set({ open: null });
       },

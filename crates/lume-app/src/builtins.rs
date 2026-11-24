@@ -1065,12 +1065,17 @@ fn arguments(id: &str) -> Option<Value> {
             &["host"],
         )),
         "lume.rex.disconnect" => Some(object(json!({ "host": rex_host }), &["host"])),
+        "lume.connect.open" => Some(object(json!({ "host": rex_host }), &[])),
         "lume.connection.add" => Some(object(
             json!({
                 "kind": {
                     "type": "string",
                     "enum": ["rex", "ssh", "wsl"],
                     "description": "What is added: a Rex server, a machine reached over SSH, or Linux distributions of this machine. Left out, a Rex server.",
+                },
+                "address": {
+                    "type": "string",
+                    "description": "The address of the Rex server, to begin with",
                 },
             }),
             &[],

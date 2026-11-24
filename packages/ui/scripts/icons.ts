@@ -52,6 +52,7 @@ export const LINE_NAMES: readonly string[] = [
   "database",
   "download",
   "eye",
+  "eye-off",
   "file",
   "file-text",
   "flame",

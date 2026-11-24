@@ -58,6 +58,7 @@ import { followPluginStatus } from "../plugins/status.ts";
 import { createPluginsStore, type PluginsStore } from "../plugins/store.ts";
 import { VisibleItems } from "../plugins/visible.ts";
 import { createProfilesStore, findProfile, type ProfilesStore } from "../profiles/store.ts";
+import { rexHostNamed } from "../rex/model.ts";
 import { createRexStore, type RexStore } from "../rex/store.ts";
 import { SearchController } from "../search/controller.ts";
 import { createStatusStore, type StatusStore } from "../status/registry.ts";
@@ -542,7 +543,8 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     },
     answerPrompt: (proceed, item) => prompts.answerCurrent(proceed, item),
     openFolder: () => folderDialog.getState().show(false),
-    addConnection: (kind) => connectionDialog.getState().add(kind, true),
+    addConnection: (kind, address) => connectionDialog.getState().add(kind, true, address),
+    rexHost: (named) => rexHostNamed(rex.getState().list, named),
     failed: (message) => notices.push("error", sentence(message)),
   });
   const cardDrag = new CardDrag({
@@ -628,6 +630,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       case "notice":
         notices.push(notice.level, notice.message, notice.action);
         break;
+      case "sign_in_withdrawn":
+        prompts.withdraw(notice.ask);
+        break;
       case "host_link":
         hostLink.getState().set(notice.connected);
         break;
@@ -678,6 +683,12 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   };
   const target: RemoteTarget = {
     ask: (ask) => prompts.askPlugin(ask),
+    signIn: async (signIn) => {
+      const answered = await prompts.signIn(signIn);
+      // The dialog gives the keyboard back to what had it, if that is still there.
+      setTimeout(onWindowFocus);
+      return answered;
+    },
     estimate: (intent: Intent) => {
       const box = area.box();
       if (!box) throw new CommandError("no_window", "the window has not been laid out yet");
@@ -746,6 +757,8 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
   // of the focused pane, or that pane's search bar if they were typing there.
   const refocus = (): void => {
     if (overlayContext()) return;
+    // What is typed there is for nothing else.
+    if (prompts.current()?.kind === "sign-in") return;
     const pane = selectFocus(layout.getState());
     if (pane !== null && search.focusBar(pane)) return;
     // A pane that shows a plugin's view has no terminal: its frame takes the keyboard.

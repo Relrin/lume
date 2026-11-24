@@ -43,6 +43,10 @@ fn program() -> Result<PathBuf> {
 pub fn run(only: Option<&str>) -> Result<()> {
     let program = program()?;
     println!("rex-e2e: {}", program.display());
+    // Stands in for the SSH client in some of the tests.
+    let mut stand_in = run::cargo_command();
+    stand_in.args(["build", "-p", "lume-rex", "--example", "stand_in_ssh"]);
+    run::check(stand_in, "the stand-in for the SSH client")?;
     let mut tests = run::cargo_command();
     tests
         .args(["test", "-p", "lume-cli", "--test", "rex_e2e", "--"])

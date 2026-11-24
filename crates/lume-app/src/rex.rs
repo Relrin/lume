@@ -4,9 +4,13 @@
 //! a server that is connected is one more backend in the router, and a session of it on
 //! show is a layout that a server owns.
 
+mod asking;
 mod attempt;
 pub mod commands;
 mod hosts;
 pub mod installed;
+mod remembered;
+pub mod start;
 
-pub use hosts::Hosts;
+pub use asking::{Asking, Attempt};
+pub use hosts::{GIVEN_UP, Hosts};

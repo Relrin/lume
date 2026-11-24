@@ -9,6 +9,7 @@ import {
   nearness,
   next,
   reason,
+  rexHostNamed,
   sessionName,
   sessionOnShow,
   standing,
@@ -29,6 +30,17 @@ describe("the Rex servers a page holds", () => {
     expect(store.getState().list?.hosts).toEqual([NAS]);
     expect(store.getState().set({ ...rexList(), revision: 3 })).toBe(true);
     expect(store.getState().list?.hosts).toEqual([]);
+  });
+});
+
+describe("which Rex server is meant", () => {
+  it("is found by its id, its label whatever the case, or its address", () => {
+    const list = rexList(DEVBOX, NAS);
+    expect(rexHostNamed(list, NAS.id)).toBe(NAS.id);
+    expect(rexHostNamed(list, "DevBox")).toBe(DEVBOX.id);
+    expect(rexHostNamed(list, "https://nas")).toBe(NAS.id);
+    expect(rexHostNamed(list, "nas")).toBeNull();
+    expect(rexHostNamed(null, "devbox")).toBeNull();
   });
 });
 
@@ -103,8 +115,10 @@ describe("what is said of a Rex server", () => {
       else expect(why.toLowerCase()).toContain("the peer went away");
     }
     expect(reason({ ...NAS, state: rexFailed("ssh", "Permission denied.") })).toMatch(
-      /^Permission denied\. Connecting once/,
+      /^Permission denied\. Try again to be asked/,
     );
+    const changed = rexFailed("ssh", "Host key verification failed");
+    expect(reason({ ...NAS, state: changed })).toMatch(/its key has changed/);
     expect(reason({ ...NAS, state: { kind: "waiting", error: "reset" } })).toContain("Reset.");
     const odd = rexHost("?odd", "odd", { state: rexFailed("bad_request", "ftp is not known") });
     expect(reason(odd)).toBe("The address cannot be used. Ftp is not known.");

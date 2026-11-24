@@ -2156,7 +2156,8 @@
     },
     "rex": {
       "default": {
-        "local": true
+        "local": true,
+        "start-on": ""
       },
       "description": "Rex servers, whose sessions can be shown.",
       "properties": {
@@ -2194,6 +2195,21 @@
             "label": "Look for a Rex server here",
             "order": 10,
             "page": "hosts"
+          }
+        },
+        "start-on": {
+          "default": "",
+          "description": "The Rex server a session of which is shown at start: its address, or its label.\nEmpty for none. A start that names a workspace, a program or a server is for that.",
+          "type": "string",
+          "x-lume-settings": {
+            "control": "select",
+            "group": "Startup",
+            "help": "What Lume shows first. Signing in may be asked for; your workspace stays if that is put away",
+            "label": "Start on",
+            "list": "rex-hosts",
+            "order": 10,
+            "page": "hosts",
+            "unset": "Your workspace"
           }
         }
       },
@@ -2961,6 +2977,7 @@
       "blurb": "Machines Lume can open sessions on.",
       "group": "Workspace",
       "groups": [
+        "Startup",
         "This computer"
       ],
       "icon": "hosts",

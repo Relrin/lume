@@ -116,6 +116,31 @@ export interface PluginPick {
 /** Anything a plugin may put to the user. */
 export type PluginAsk = PluginQuestion | PluginPick;
 
+/** What the SSH client wants to know while a server is signed in to. */
+export type SignInKind = "host_key" | "password" | "passphrase" | "confirm" | "code";
+
+/** A question of the SSH client's, put by the core. */
+export interface SignIn {
+  /** What it is called if it is withdrawn. */
+  readonly ask: number;
+  readonly kind: SignInKind;
+  /** What the user calls the server, and its address. */
+  readonly host: string;
+  readonly address: string;
+  /** The client's words. The machine that is signed in to may have written them. */
+  readonly words: string;
+  /** Whether the same was asked before and answered. */
+  readonly again: boolean;
+}
+
+/** What came of answering the question on show from outside the window. */
+export type Answered =
+  | "answered"
+  /** There is none. */
+  | "none"
+  /** It is one that only the user answers, in the window. */
+  | "refused";
+
 /** One thing waiting for the user. */
 export type Prompt =
   | { readonly kind: "paste"; readonly preview: PastePreview; answer(ok: boolean): void }
@@ -128,6 +153,12 @@ export type Prompt =
     }
   | { readonly kind: "notice"; readonly message: string; answer(ok: boolean): void }
   | { readonly kind: "plugin"; readonly ask: PluginQuestion; answer(ok: boolean): void }
+  | {
+      readonly kind: "sign-in";
+      readonly signIn: SignIn;
+      /** What was typed or chosen, unless the user signs in to nothing after all. */
+      answer(ok: boolean, answered?: string): void;
+    }
   | {
       readonly kind: "pick";
       readonly ask: PluginPick;
@@ -196,6 +227,33 @@ export class PromptStore {
     return ask.kind === "confirm" ? { ok } : { allow: ok };
   }
 
+  /**
+   * Puts a question of the SSH client's to the user, before whatever else waits for
+   * them, and gives what they answer: nothing when they do not sign in.
+   */
+  async signIn(signIn: SignIn): Promise<string | null> {
+    let answered: string | null = null;
+    await this.#ask(
+      (answer) => ({
+        kind: "sign-in",
+        signIn,
+        answer: (ok, given) => {
+          answered = ok ? (given ?? null) : null;
+          answer(ok);
+        },
+      }),
+      true,
+    );
+    return answered;
+  }
+
+  /** Takes back a question of the SSH client's that nobody waits for any more. */
+  withdraw(ask: number): void {
+    for (const prompt of this.#queue) {
+      if (prompt.kind === "sign-in" && prompt.signIn.ask === ask) prompt.answer(false);
+    }
+  }
+
   /** Answers every question waiting with its cautious answer, as when nobody is left to ask. */
   dismissAll(): void {
     for (const prompt of [...this.#queue]) prompt.answer(false);
@@ -203,21 +261,23 @@ export class PromptStore {
 
   /**
    * Answers the question on show as the user's keys would: going ahead (with the
-   * choice `item`, for a choice), or not. Says whether there was one.
+   * choice `item`, for a choice), or not. A question of the SSH client's is the user's
+   * alone to answer.
    */
-  answerCurrent(proceed: boolean, item?: string): boolean {
+  answerCurrent(proceed: boolean, item?: string): Answered {
     const current = this.current();
-    if (!current) return false;
+    if (!current) return "none";
+    if (current.kind === "sign-in") return "refused";
     if (current.kind === "pick") {
       const known = item !== undefined && current.ask.items.some((one) => one.id === item);
       current.answer(proceed && known, known ? item : undefined);
     } else {
       current.answer(proceed);
     }
-    return true;
+    return "answered";
   }
 
-  #ask(make: (answer: (ok: boolean) => void) => Prompt): Promise<boolean> {
+  #ask(make: (answer: (ok: boolean) => void) => Prompt, urgent = false): Promise<boolean> {
     return new Promise((resolve) => {
       const prompt = make((ok) => {
         const at = this.#queue.indexOf(prompt);
@@ -226,7 +286,9 @@ export class PromptStore {
         resolve(ok);
         this.#changed();
       });
-      this.#queue = [...this.#queue, prompt];
+      // One that cannot wait goes before the rest, and after others like it.
+      const at = urgent ? this.#queue.filter((queued) => queued.kind === prompt.kind).length : -1;
+      this.#queue = at < 0 ? [...this.#queue, prompt] : this.#queue.toSpliced(at, 0, prompt);
       this.#changed();
     });
   }

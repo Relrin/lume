@@ -8,12 +8,21 @@ use std::time::Duration;
 
 use common::{Conn, Listener, Served, Tell, World, door, serve};
 use lume_layout::{Intent, PaneContent, Store};
+use lume_proto::app::{
+    APP_PROTO_VERSION, ASKPASS_TOKEN_VAR, AppMessage, AppReplyBody, AppRequest, AppRequestBody,
+    AppResponse, PageResult,
+};
+use lume_proto::{ClientKind, ControlDecoder};
+use lume_rex::{PromptRun, Prompter as _};
 use lume_session::{HostConfig, LocalBackend, Router};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Handle;
 use tokio::time::{sleep, timeout};
 
+use super::super::start;
 use super::*;
 use crate::builtins;
+use crate::control::{self, Control};
 use crate::marks::Marks;
 use crate::panes::PaneStart;
 use crate::plugins::Plugins;
@@ -78,6 +87,9 @@ impl Drop for Server {
 struct Running {
     services: Arc<Services>,
     carrier: Arc<RecordingCarrier>,
+    /// The id of the page's carrier.
+    page: u32,
+    asking: Arc<Asking>,
     dir: TempDir,
 }
 
@@ -117,9 +129,10 @@ impl Running {
         );
         let carrier = RecordingCarrier::new();
         let window = panes.focused_window().unwrap();
-        state.open(&label_of(window), carrier.clone()).await;
+        let page = state.open(&label_of(window), carrier.clone()).await;
+        let asking = Asking::new("test", "lume".into());
         let services = Arc::new(Services {
-            rex: Hosts::new(&config, &state, &panes),
+            rex: Hosts::new(&config, &state, &panes, Some(Arc::clone(&asking))),
             state,
             panes,
             config,
@@ -130,6 +143,8 @@ impl Running {
         Self {
             services,
             carrier,
+            page,
+            asking,
             dir,
         }
     }
@@ -195,6 +210,280 @@ async fn until(what: &str, mut done: impl FnMut() -> bool) {
     if timeout(STEP, waiting).await.is_err() {
         panic!("{what} never happened");
     }
+}
+
+/// A connection to the control endpoint, as the program the SSH client asks through
+/// makes one.
+struct Askpass(DuplexStream);
+
+impl Askpass {
+    async fn ask(app: &Running, run: &PromptRun, words: &str) -> Self {
+        let (near, far) = tokio::io::duplex(64 * 1024);
+        let control = Control::new(Arc::clone(&app.services), STEP);
+        tokio::spawn(async move { control::serve_client(far, &control).await });
+        let mut this = Self(near);
+        this.say(
+            1,
+            AppRequestBody::Hello {
+                proto: APP_PROTO_VERSION,
+                proto_min: APP_PROTO_VERSION,
+                client_kind: ClientKind::Ctl,
+            },
+        )
+        .await;
+        this.heard().await.unwrap();
+        let (_, token) = run
+            .env
+            .iter()
+            .find(|(name, _)| name == ASKPASS_TOKEN_VAR)
+            .unwrap();
+        let body = AppRequestBody::Askpass {
+            token: Secret::new(token.to_str().unwrap().to_owned()),
+            prompt: words.to_owned(),
+            hint: None,
+        };
+        this.say(2, body).await;
+        this
+    }
+
+    async fn say(&mut self, id: u64, body: AppRequestBody) {
+        let mut frames = Vec::new();
+        let request = AppMessage::Request(AppRequest { id, body });
+        request.encode(&mut frames).unwrap();
+        self.0.write_all(&frames).await.unwrap();
+    }
+
+    async fn heard(&mut self) -> Result<AppReplyBody, AppError> {
+        let mut decoder = ControlDecoder::new();
+        let mut chunk = [0; 1024];
+        loop {
+            if let Some(json) = decoder.next().unwrap() {
+                let AppMessage::Response(AppResponse { result, .. }) =
+                    AppMessage::decode(&json).unwrap()
+                else {
+                    panic!("not an answer");
+                };
+                return result.map(|reply| reply.body);
+            }
+            let read = timeout(STEP, self.0.read(&mut chunk))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_ne!(read, 0, "the endpoint closed the connection");
+            decoder.push(&chunk[..read]);
+        }
+    }
+}
+
+impl Running {
+    fn put(&self) -> Vec<Value> {
+        self.carrier
+            .requests()
+            .into_iter()
+            .filter_map(|sent| sent.get("request").cloned())
+            .filter(|request| request["body"]["type"] == "sign_in")
+            .collect()
+    }
+
+    /// The nth question put to the user.
+    async fn nth(&self, nth: usize) -> Value {
+        until("a question is put", || self.put().len() > nth).await;
+        self.put()[nth].clone()
+    }
+
+    fn answer(&self, put: &Value, secret: &str) {
+        let window = self.services.panes.focused_window().unwrap();
+        let answer = PageResult::Ok(AppReplyBody::Secret {
+            secret: Some(Secret::new(secret.to_owned())),
+        });
+        let id = put["id"].as_u64().unwrap();
+        self.services
+            .state
+            .answer(&label_of(window), self.page, id, answer.into())
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_question_comes_in_at_the_endpoint_and_either_side_can_take_it_back() {
+    let app = Running::with("rex-askpass", "ssh://me@build").await;
+    let window = app.services.panes.focused_window().unwrap();
+    let state = Arc::downgrade(&app.services.state);
+    let attempt = app.asking.attempt(&state, window, HOST, "ssh://me@build");
+    let run = attempt.run().unwrap();
+    let words = "me@build's password: ";
+
+    let mut asker = Askpass::ask(&app, &run, words).await;
+    let put = app.nth(0).await;
+    assert_eq!(put["body"]["words"], words.trim());
+    app.answer(&put, "hunter2");
+    let secret = Some(Secret::new("hunter2".to_owned()));
+    assert_eq!(asker.heard().await, Ok(AppReplyBody::Secret { secret }));
+    // The connection goes on to be one.
+    asker.say(3, AppRequestBody::Status {}).await;
+    assert!(matches!(
+        asker.heard().await,
+        Ok(AppReplyBody::Status { .. })
+    ));
+
+    // The program that asks is ended.
+    let asker = Askpass::ask(&app, &run, words).await;
+    let put = app.nth(1).await;
+    drop(asker);
+    until("the question is withdrawn", || {
+        app.told("sign_in_withdrawn")
+            .iter()
+            .any(|notice| notice["ask"] == put["body"]["ask"])
+    })
+    .await;
+
+    // The run of the client is.
+    let mut asker = Askpass::ask(&app, &run, words).await;
+    app.nth(2).await;
+    drop(run);
+    assert_eq!(
+        asker.heard().await,
+        Ok(AppReplyBody::Secret { secret: None })
+    );
+    until("the question is withdrawn", || {
+        app.told("sign_in_withdrawn").len() == 2
+    })
+    .await;
+    app.stop().await;
+}
+
+impl Running {
+    /// Starts on a server, as the command line or the settings ask.
+    fn start_on(&self, host: &str, said: start::Said) {
+        start::begin(&self.services, host.to_owned(), said, STEP);
+    }
+
+    /// What the page was asked to run.
+    fn commands(&self) -> Vec<Value> {
+        self.carrier
+            .requests()
+            .into_iter()
+            .filter_map(|sent| sent.get("request").cloned())
+            .map(|request| request["body"].clone())
+            .filter(|body| body["type"] == "command")
+            .collect()
+    }
+
+    /// The one notice the page was given.
+    async fn noticed(&self) -> Value {
+        until("the page is told", || !self.told("notice").is_empty()).await;
+        let told = self.told("notice");
+        assert_eq!(told.len(), 1, "{told:?}");
+        told[0].clone()
+    }
+}
+
+#[tokio::test]
+async fn the_session_last_shown_is_there_for_the_next_start() {
+    let server = Server::start(World::recorded().changing()).await;
+    let app = Running::with("rex-start", &server.url()).await;
+    app.outside("lume.rex.open", json!({ "host": HOST }))
+        .await
+        .unwrap();
+    app.outside(
+        "lume.rex.new-session",
+        json!({ "host": HOST, "label": "work" }),
+    )
+    .await
+    .unwrap();
+    let last = app.host()["on_show"].clone();
+    assert_ne!(last, common::SESSION);
+    // What the next run of it finds.
+    let held = super::super::remembered::Remembered::load(&app.dir.dirs());
+    let id = BackendId(format!("rex:{}", server.url()));
+    assert_eq!(json!(held.of(&id)), last);
+    app.stop().await;
+}
+
+#[tokio::test]
+async fn a_server_is_started_on_by_its_label_or_address() {
+    let server = Server::start(World::recorded()).await;
+    let app = Running::with("rex-start-on", &server.url()).await;
+    app.start_on(&server.url(), start::Said::Settings);
+    until("the session is on show", || {
+        app.host()["on_show"] == common::SESSION
+    })
+    .await;
+    assert_eq!(app.told("notice"), Vec::<Value>::new());
+    app.stop().await;
+}
+
+#[tokio::test]
+async fn a_start_that_comes_to_nothing_says_why_and_leaves_the_workspace() {
+    let (address, listener) = door().await;
+    drop(listener);
+    let app = Running::with("rex-start-gone", &format!("http://{address}")).await;
+    app.start_on(HOST, start::Said::Here);
+    let notice = app.noticed().await;
+    let said = notice["message"].as_str().unwrap();
+    assert!(said.starts_with("Build box could not be shown: "), "{said}");
+    assert_eq!(notice["action"]["command"], "lume.rex.open");
+    assert_eq!(notice["action"]["args"]["host"], HOST);
+    assert!(app.own_on_show());
+    app.stop().await;
+}
+
+#[tokio::test]
+async fn a_start_on_a_server_that_is_not_listed_offers_to_add_it_or_says_so() {
+    let app = Running::with("rex-start-unknown", "https://build.example").await;
+    app.start_on("nobody", start::Said::Here);
+    let notice = app.noticed().await;
+    assert_eq!(notice["message"], "There is no Rex server called nobody.");
+    assert_eq!(notice.get("action"), None);
+    app.start_on("ssh://me@nas", start::Said::Settings);
+    until("the page is told", || app.told("notice").len() == 2).await;
+    let said = app.told("notice")[1]["message"].clone();
+    assert!(
+        said.as_str().unwrap().contains("not listed any more"),
+        "{said}"
+    );
+    assert_eq!(app.commands(), Vec::<Value>::new());
+
+    app.start_on("ssh://me@nas", start::Said::Here);
+    until("the dialog is asked for", || !app.commands().is_empty()).await;
+    assert_eq!(
+        app.commands(),
+        [json!({
+            "type": "command",
+            "id": "lume.connection.add",
+            "args": { "kind": "rex", "address": "ssh://me@nas" },
+        })]
+    );
+    assert_eq!(app.told("notice").len(), 2);
+    app.stop().await;
+}
+
+#[tokio::test]
+async fn a_start_on_a_server_without_sessions_lists_it() {
+    let mut world = World::recorded();
+    world.sessions.clear();
+    let server = Server::start(world).await;
+    let app = Running::with("rex-start-empty", &server.url()).await;
+    app.start_on(HOST, start::Said::Here);
+    until("the palette is asked for", || !app.commands().is_empty()).await;
+    assert_eq!(app.commands()[0]["id"], "lume.connect.open");
+    assert_eq!(app.commands()[0]["args"], json!({ "host": HOST }));
+    assert!(app.own_on_show());
+    app.stop().await;
+}
+
+#[tokio::test]
+async fn a_start_on_a_connection_without_encryption_asks_first() {
+    let app = Running::with("rex-start-plain", "http://192.0.2.1:7297").await;
+    app.start_on(HOST, start::Said::Settings);
+    until("the user is asked", || {
+        !app.told("confirm_requested").is_empty()
+    })
+    .await;
+    let asked = app.told("confirm_requested")[0].clone();
+    assert_eq!(asked["command"], "lume.rex.open");
+    assert_eq!(asked["args"], json!({ "host": HOST, "confirmed": true }));
+    app.stop().await;
 }
 
 #[tokio::test]
@@ -523,9 +812,9 @@ async fn a_server_that_is_not_there_fails_once_and_stands_in_nobodys_way() {
     app.services.state.list_all().await.unwrap();
 
     // Trying again tries again.
-    let error = app.rex().connect(HOST, false).await.unwrap_err();
+    let error = app.rex().connect(HOST, false, None).await.unwrap_err();
     assert_eq!(error.code, "unreachable");
-    let error = app.rex().connect("nobody", false).await.unwrap_err();
+    let error = app.rex().connect("nobody", false, None).await.unwrap_err();
     assert_eq!(error.code, "not_found");
     app.stop().await;
 }
@@ -724,7 +1013,7 @@ async fn the_server_of_this_machine_is_let_go_of_when_nothing_lists_servers() {
     let rex = app.rex();
     let host = rex.inner().hosts[0].clone();
     // As the server of this machine is connected when something lists servers.
-    rex.begin(&host, false, false);
+    rex.begin(&host, false, false, None);
     rex.inner().connections.get_mut(&host.id).unwrap().local = true;
     rex.inner().lease = Some(Instant::now() + Duration::from_secs(600));
     until("it is connected", || app.kind() == "connected").await;
@@ -755,7 +1044,8 @@ async fn the_server_of_this_machine_is_let_go_of_when_nothing_lists_servers() {
 async fn an_address_is_tried_and_let_go_of() {
     let server = Server::start(World::recorded()).await;
     let app = Running::start("rex-tried", "[rex]\nlocal = false\n").await;
-    let tried = attempt::attempt(endpoint_of(&server.url()).unwrap(), false)
+    let quiet = || app.rex().ssh_options("", "", None);
+    let tried = attempt::attempt(endpoint_of(&server.url()).unwrap(), false, quiet())
         .await
         .unwrap();
     assert_eq!(tried["version"], "0.1.0-preview.22");
@@ -767,11 +1057,11 @@ async fn an_address_is_tried_and_let_go_of() {
     let (address, listener) = door().await;
     drop(listener);
     let gone = endpoint_of(&format!("http://{address}")).unwrap();
-    let refused = attempt::attempt(gone, false).await.unwrap_err();
+    let refused = attempt::attempt(gone, false, quiet()).await.unwrap_err();
     assert_eq!(refused.code, "unreachable", "{refused}");
     // Nothing is sent unencrypted over a network before the user agrees.
     let far = endpoint_of("http://192.0.2.1:7297").unwrap();
-    let refused = attempt::attempt(far, false).await.unwrap_err();
+    let refused = attempt::attempt(far, false, quiet()).await.unwrap_err();
     assert_eq!(refused.code, "confirmation_required", "{refused}");
     app.stop().await;
 }

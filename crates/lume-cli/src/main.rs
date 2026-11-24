@@ -1,10 +1,11 @@
 //! `lume`: the console command.
 //!
 //! On its own it starts the application, or brings its window to the front if it is
-//! running; it can name the workspace to show and a program to run in a tab. `lume ctl` drives the running application: it starts sessions, types into
-//! them, waits for text or for an exit, reads the screen, and so on. Each command is one
-//! request on the application's control endpoint, which only the user who runs the
-//! application can reach.
+//! running; it can name the workspace to show and a program to run in a tab, or a Rex
+//! server to show a session of. `lume ctl` drives the running application: it starts
+//! sessions, types into them, waits for text or for an exit, reads the screen, and so on.
+//! Each command is one request on the application's control endpoint, which only the user
+//! who runs the application can reach.
 //!
 //! `lume host` says whether the session host runs, and starts or stops it.
 //!
@@ -16,8 +17,12 @@
 //! `lume config`, `lume keymap` and `lume theme` read and write the configuration's
 //! files and need no application: they check a file, list the keys that are bound, and
 //! make a theme from another terminal's colour scheme.
+//!
+//! The SSH client runs it too, to ask the user for a password or the like while the
+//! application signs in to another machine: see [`askpass`].
 
 mod args;
+mod askpass;
 mod attach;
 mod client;
 mod console;
@@ -37,6 +42,10 @@ use crate::args::Command;
 const EXIT_USAGE: u8 = 2;
 
 fn main() -> ExitCode {
+    // Before the arguments: they are the SSH client's words, not the user's.
+    if let Some(asked) = askpass::asked() {
+        return askpass::run(asked);
+    }
     let command = match args::parse(std::env::args().skip(1)) {
         Ok(command) => command,
         Err(problem) => {
@@ -79,11 +88,13 @@ fn main() -> ExitCode {
         Command::Start {
             endpoint,
             workspace,
+            rex,
             exec,
         } => (
             Some(launch::Start {
                 endpoint,
                 workspace,
+                rex,
                 exec,
             }),
             None,

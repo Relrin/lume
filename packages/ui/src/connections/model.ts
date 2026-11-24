@@ -14,7 +14,7 @@ import type {
   RexTried,
   SshHost,
 } from "../core/types.ts";
-import { systemName } from "../rex/model.ts";
+import { sshAdvice, systemName } from "../rex/model.ts";
 
 /** What can be added. */
 export type ConnectionKind = "rex" | "ssh" | "wsl";
@@ -207,6 +207,7 @@ const SHORT: Readonly<Record<string, string>> = {
   ssh: "SSH did not sign in",
   auth: "SSH did not sign in",
   host_key: "The machine's key is not known",
+  given_up: "You did not sign in",
   unsupported: "It cannot be used",
 };
 
@@ -226,7 +227,9 @@ export function testFailure(code: string, message: string): TestFailure {
         ? `${ended(message)} A terminal can still be opened, and asks for what is missing.`
         : code === "host_key"
           ? `${ended(message)} Connecting once in a terminal settles it.`
-          : ended(message);
+          : code === "ssh"
+            ? `${ended(message)} ${sshAdvice(message)}`
+            : ended(message);
   return {
     code,
     short: SHORT[code] ?? "It did not work",
@@ -242,7 +245,7 @@ export function rexSteps(address: RexAddress): readonly string[] {
     case "ssh":
       return address.path == null
         ? [`Reach ${host} over SSH`, "Sign in and find rex", "Talk to your Rex server"]
-        : [`Reach ${host} over SSH`, "Sign in with your SSH keys", "Talk to the Rex server"];
+        : [`Reach ${host} over SSH`, "Sign in", "Talk to the Rex server"];
     case "https":
       return [`Reach ${host}`, "Check its certificate", "Talk to the Rex server"];
     case "host":
@@ -261,6 +264,7 @@ export function failedStep(address: RexAddress, code: string): number {
   const middle = Math.min(1, last);
   switch (code) {
     case "ssh":
+    case "given_up":
     case "not_installed":
     case "untrusted":
     case "confirmation_required":
@@ -403,11 +407,7 @@ export function sshHost(form: SshForm): SshHost | string {
 
 /** What the test of a machine reached over SSH goes through. */
 export function sshSteps(host: SshHost): readonly string[] {
-  return [
-    `Reach ${host.host} on port ${host.port ?? 22}`,
-    "Sign in with your SSH keys",
-    "Open a login shell",
-  ];
+  return [`Reach ${host.host} on port ${host.port ?? 22}`, "Sign in", "Open a login shell"];
 }
 
 /** A host of the user's OpenSSH configuration, offered to fill the dialog from. */

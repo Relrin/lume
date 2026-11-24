@@ -58,6 +58,7 @@ const COMMANDS: &[&str] = &[
     "rex_host_remove",
     "ssh_reach",
     "ssh_try",
+    "try_end",
     "ssh_profile_put",
     "profile_remove",
     "profiles_listed",

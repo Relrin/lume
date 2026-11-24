@@ -28,6 +28,7 @@ mod ids;
 mod input;
 mod intents;
 pub mod layout;
+mod prompter;
 mod pulse;
 mod screen;
 mod ssh;
@@ -50,7 +51,8 @@ pub use data::{
 };
 pub use endpoint::{Endpoint, HTTPS_PORT, REX_PORT};
 pub use error::RexError;
-pub use ssh::SshOptions;
+pub use prompter::{PromptRun, Prompter};
+pub use ssh::{SshOptions, clients_ended as ssh_clients_ended};
 pub use stream::{Note, Opened, Opening, Piece, Splitter, Theme};
 pub use tls::Trust;
 pub use transport::{Dialed, Io, LOCAL_AUTHORITY, Options, Reach, dial, dial_with, listens};

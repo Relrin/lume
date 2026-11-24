@@ -38,6 +38,11 @@ pub const SSH_ASK_TIMEOUT: Duration = Duration::from_secs(30);
 pub const SSH_START_TIMEOUT: Duration = Duration::from_secs(30);
 /// How often a client that has been started is looked at until it forwards.
 pub const SSH_READY_POLL: Duration = Duration::from_millis(50);
+/// How long what the client printed is waited for once it has ended: a program it started
+/// may still hold its output.
+pub const SSH_REST_WAIT: Duration = Duration::from_secs(1);
+/// How soon a wait that is held up by a question to the user looks again whether it is.
+pub const PROMPT_POLL: Duration = Duration::from_millis(100);
 /// How much of what another machine prints about its server is read.
 pub const SSH_STATUS_MAX_BYTES: usize = 256 * 1024;
 /// The longest path of a socket on another machine that is forwarded to.

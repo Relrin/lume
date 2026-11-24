@@ -5,9 +5,12 @@
 //! place on this machine to that socket; every connection to the server is then a
 //! stream to that place. Nothing listens on a network but the SSH server.
 //!
-//! The client runs out of sight, so it is told never to ask anything: a machine whose
-//! key it does not know, or an account that needs a password typed, fails with what the
-//! client said, and the user connects once in a terminal to settle it.
+//! The client runs out of sight. While a connection is first made it may ask the user
+//! what it has to know, through the [`Prompter`] it was given: a password, the passphrase
+//! of a key, whether an unknown machine is the one they mean. That is over with the first
+//! stream to the server, or with the failure to open one. From then on, and without a
+//! prompter from the start, the client is told never to ask anything: a machine it could
+//! only be signed in to by asking fails with what the client said.
 //!
 //! The host and the account are words of an address, checked before they are used, and
 //! the client is started from a list of arguments in which the destination follows
@@ -16,19 +19,23 @@
 use std::io;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use lume_proto::{DisconnectReason, ExitStatus};
 use lume_session::ssh::{Tail, check_word, classify, client};
 use serde::Deserialize;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
+use tokio::sync::watch;
+use tokio::task::JoinSet;
 
 use crate::error::RexError;
+use crate::prompter::{Asking, Cut, PromptRun, Prompter};
 use crate::transport::Dialed;
 use crate::tuning::{
-    SSH_ASK_TIMEOUT, SSH_CONNECT_SECONDS, SSH_PORT_TRIES, SSH_READY_POLL, SSH_SOCKET_MAX_BYTES,
-    SSH_START_TIMEOUT, SSH_STATUS_MAX_BYTES,
+    SSH_ASK_TIMEOUT, SSH_CONNECT_SECONDS, SSH_PORT_TRIES, SSH_READY_POLL, SSH_REST_WAIT,
+    SSH_SOCKET_MAX_BYTES, SSH_START_TIMEOUT, SSH_STATUS_MAX_BYTES,
 };
 
 /// What Rex is asked on the other machine to learn where the account's server listens.
@@ -51,6 +58,8 @@ pub struct SshOptions {
     /// More arguments for the client, before the destination: the user's own, such as
     /// `-F` and a configuration file.
     pub args: Vec<String>,
+    /// Whom the client may ask while the connection is first made; nobody when none.
+    pub prompter: Option<Arc<dyn Prompter>>,
 }
 
 /// Where on this machine the forwarded socket is reached.
@@ -64,12 +73,40 @@ enum Local {
     Socket(PathBuf),
 }
 
+/// How many SSH clients run.
+static CLIENTS: LazyLock<watch::Sender<usize>> = LazyLock::new(|| watch::Sender::new(0));
+
+/// Counts a client for as long as it is held. It is to be let go of after the client.
+struct Counted;
+
+impl Counted {
+    fn new() -> Self {
+        CLIENTS.send_modify(|clients| *clients += 1);
+        Self
+    }
+}
+
+impl Drop for Counted {
+    fn drop(&mut self) {
+        CLIENTS.send_modify(|clients| *clients -= 1);
+    }
+}
+
+/// Comes back once every SSH client of this process has been ended, as they are when the
+/// backends that use them are shut down.
+pub async fn clients_ended() {
+    let mut clients = CLIENTS.subscribe();
+    let _ = clients.wait_for(|clients| *clients == 0).await;
+}
+
 /// A client that is running and forwarding.
 struct Up {
     child: Child,
     local: Local,
     /// The end of what the client printed.
     said: Arc<Mutex<Tail>>,
+    /// Last, so that it goes after the client.
+    _counted: Counted,
 }
 
 impl Drop for Up {
@@ -96,6 +133,11 @@ pub(crate) struct Tunnel {
     port: Option<u16>,
     socket: Option<String>,
     options: SshOptions,
+    /// Whom the client may ask, until the first stream was asked for. It is given up with
+    /// it, so that nothing the user said is held once a connection was made or was not.
+    prompter: Mutex<Option<Arc<dyn Prompter>>>,
+    /// Whether no client is to be started any more.
+    closed: AtomicBool,
     up: tokio::sync::Mutex<Option<Up>>,
 }
 
@@ -192,6 +234,22 @@ async fn keep_tail(mut from: impl AsyncRead + Unpin, said: Arc<Mutex<Tail>>) {
     }
 }
 
+/// Reads what another machine printed, as far as a server would say something, for what
+/// is read to be looked at when the client has ended.
+async fn keep_answer(from: impl AsyncRead + Unpin, answer: Arc<Mutex<Vec<u8>>>) {
+    let mut from = from.take(SSH_STATUS_MAX_BYTES as u64 + 1);
+    let mut buffer = [0; 4096];
+    while let Ok(read) = from.read(&mut buffer).await {
+        if read == 0 {
+            break;
+        }
+        answer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend_from_slice(&buffer[..read]);
+    }
+}
+
 impl Tunnel {
     /// A way to the server an `ssh://` address names. `socket` is the server's socket
     /// on that machine, when the address names one.
@@ -201,8 +259,9 @@ impl Tunnel {
         host: String,
         port: Option<u16>,
         socket: Option<String>,
-        options: SshOptions,
+        mut options: SshOptions,
     ) -> Self {
+        let prompter = Mutex::new(options.prompter.take());
         Self {
             name,
             user,
@@ -210,7 +269,18 @@ impl Tunnel {
             port,
             socket,
             options,
+            prompter,
+            closed: AtomicBool::new(false),
             up: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    /// Ends the client, if one runs. One that is being started is ended by whoever gives
+    /// up waiting for it.
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        if let Ok(mut up) = self.up.try_lock() {
+            *up = None;
         }
     }
 
@@ -228,17 +298,32 @@ impl Tunnel {
         }
     }
 
+    /// Why something of the client's was not waited for to its end.
+    fn cut(&self, cut: Cut) -> RexError {
+        match cut {
+            Cut::Late => RexError::Unreachable {
+                endpoint: self.name.clone(),
+                source: io::ErrorKind::TimedOut.into(),
+            },
+            Cut::GivenUp => RexError::GivenUp {
+                endpoint: self.name.clone(),
+            },
+        }
+    }
+
     /// The arguments every run of the client begins with. The destination is not among
-    /// them: it comes last, after `--`.
-    fn common(&self) -> Result<Vec<String>, RexError> {
+    /// them: it comes last, after `--`. A run that `asks` is not told to ask nothing.
+    fn common(&self, asks: bool) -> Result<Vec<String>, RexError> {
         check_word("host", &self.host).map_err(|error| self.unsupported(error.message))?;
         if let Some(user) = &self.user {
             check_word("user's name", user).map_err(|error| self.unsupported(error.message))?;
         }
         let mut args = Vec::new();
+        if !asks {
+            // It runs out of sight, with nobody to answer.
+            args.extend(["-o".to_owned(), "BatchMode=yes".to_owned()]);
+        }
         for option in [
-            // It runs out of sight: it asks nothing and reads nothing.
-            "BatchMode=yes".to_owned(),
             format!("ConnectTimeout={SSH_CONNECT_SECONDS}"),
             // A connection of the user's own that others share is not this one's to
             // add a forward to, or to end.
@@ -267,15 +352,15 @@ impl Tunnel {
     }
 
     /// The arguments that ask the other machine one thing and end.
-    fn asking(&self, what: &str) -> Result<Vec<String>, RexError> {
-        let mut args = self.common()?;
+    fn asking(&self, what: &str, asks: bool) -> Result<Vec<String>, RexError> {
+        let mut args = self.common(asks)?;
         args.extend(["--".to_owned(), self.destination(), what.to_owned()]);
         Ok(args)
     }
 
     /// The arguments that forward `local` to the server's socket and do nothing else.
-    fn forwarding(&self, local: &Local, socket: &str) -> Result<Vec<String>, RexError> {
-        let mut args = self.common()?;
+    fn forwarding(&self, local: &Local, socket: &str, asks: bool) -> Result<Vec<String>, RexError> {
+        let mut args = self.common(asks)?;
         let forward = match local {
             Local::Port(port) => format!("127.0.0.1:{port}:{socket}"),
             #[cfg(unix)]
@@ -289,8 +374,8 @@ impl Tunnel {
         Ok(args)
     }
 
-    /// The client, ready to be started with `args`.
-    fn command(&self, args: Vec<String>) -> Result<Command, RexError> {
+    /// The client, ready to be started with `args`, and to ask through `run` if it may.
+    fn command(&self, args: Vec<String>, run: Option<&PromptRun>) -> Result<Command, RexError> {
         let program = self.options.client.clone().or_else(client).ok_or_else(|| {
             self.unsupported("this machine has no OpenSSH client to reach the server with")
         })?;
@@ -301,6 +386,9 @@ impl Tunnel {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Some(run) = run {
+            command.envs(run.env.iter().map(|(name, value)| (name, value)));
+        }
         #[cfg(windows)]
         {
             // No console window flashes up for a program that is one.
@@ -329,51 +417,51 @@ impl Tunnel {
 
     /// Runs the client to ask the other machine one thing. Gives how it ended, what it
     /// printed, and the end of what it said beside that.
-    async fn ask(&self, what: &str) -> Result<(std::process::ExitStatus, Vec<u8>, Tail), RexError> {
+    async fn ask(
+        &self,
+        what: &str,
+        asking: &Asking,
+    ) -> Result<(std::process::ExitStatus, Vec<u8>, Tail), RexError> {
+        // Before the client, and so let go of after it: a client that is told that nobody
+        // answers tries an empty password, which the other machine takes for a failure to
+        // sign in. It is ended first.
+        let run = asking.run();
+        let _counted = Counted::new();
         let mut child = self
-            .command(self.asking(what)?)?
+            .command(self.asking(what, run.is_some())?, run.as_ref())?
             .spawn()
             .map_err(|error| self.unreachable(format!("the SSH client did not start: {error}")))?;
-        let printed = child.stdout.take();
-        let errors = child.stderr.take();
         let said = Arc::new(Mutex::new(Tail::new()));
-        let asking = async {
-            let answer = async {
-                let mut answer = Vec::new();
-                if let Some(printed) = printed {
-                    let limit = SSH_STATUS_MAX_BYTES as u64 + 1;
-                    let _ = printed.take(limit).read_to_end(&mut answer).await;
-                }
-                answer
-            };
-            let tail = async {
-                if let Some(errors) = errors {
-                    keep_tail(errors, Arc::clone(&said)).await;
-                }
-            };
-            let (answer, ()) = tokio::join!(answer, tail);
-            if answer.len() > SSH_STATUS_MAX_BYTES {
-                return Err(self.unreachable("the other machine printed more than a server says"));
+        let answer = Arc::new(Mutex::new(Vec::new()));
+        // Read beside the client, not by it: a program it started may hold on to what it
+        // printed to after it has ended.
+        let mut readers = JoinSet::new();
+        if let Some(printed) = child.stdout.take() {
+            readers.spawn(keep_answer(printed, Arc::clone(&answer)));
+        }
+        if let Some(errors) = child.stderr.take() {
+            readers.spawn(keep_tail(errors, Arc::clone(&said)));
+        }
+        let status = match asking.within(SSH_ASK_TIMEOUT, child.wait()).await {
+            Ok(status) => status.map_err(|error| self.unreachable(error.to_string()))?,
+            Err(cut) => {
+                let _ = child.start_kill();
+                return Err(self.cut(cut));
             }
-            let status = child
-                .wait()
-                .await
-                .map_err(|error| self.unreachable(error.to_string()))?;
-            Ok((status, answer))
         };
-        let (status, answer) = tokio::time::timeout(SSH_ASK_TIMEOUT, asking)
-            .await
-            .map_err(|_| RexError::Unreachable {
-                endpoint: self.name.clone(),
-                source: io::ErrorKind::TimedOut.into(),
-            })??;
+        let rest = async { while readers.join_next().await.is_some() {} };
+        let _ = tokio::time::timeout(SSH_REST_WAIT, rest).await;
+        let answer = std::mem::take(&mut *answer.lock().unwrap_or_else(PoisonError::into_inner));
+        if answer.len() > SSH_STATUS_MAX_BYTES {
+            return Err(self.unreachable("the other machine printed more than a server says"));
+        }
         let said = std::mem::take(&mut *said.lock().unwrap_or_else(PoisonError::into_inner));
         Ok((status, answer, said))
     }
 
     /// The socket to forward to: the one the address names, or the one the account's
     /// own server says it listens on.
-    async fn socket(&self) -> Result<String, RexError> {
+    async fn socket(&self, asking: &Asking) -> Result<String, RexError> {
         if let Some(socket) = &self.socket {
             return if is_socket_path(socket) {
                 Ok(socket.clone())
@@ -387,7 +475,7 @@ impl Tunnel {
         // one account puts it.
         let mut asked = None;
         for rex in REX_PROGRAMS {
-            let (status, answer, said) = self.ask(&format!("{rex} {ASK}")).await?;
+            let (status, answer, said) = self.ask(&format!("{rex} {ASK}"), asking).await?;
             if exit_of(status) != ExitStatus::Code(NOT_FOUND) {
                 asked = Some((rex, status, answer, said));
                 break;
@@ -408,7 +496,7 @@ impl Tunnel {
         // was started from a shell with no runtime directory listens in the other place
         // a server of one account has; that one is asked, and nothing is started there.
         let elsewhere = format!("{rex} --autostart=false -S {FALLBACK_SOCKET} {ASK}");
-        let (again, answer, _) = self.ask(&elsewhere).await?;
+        let (again, answer, _) = self.ask(&elsewhere, asking).await?;
         if again.success() {
             return socket_in(&answer).map_err(|why| self.unsupported(why));
         }
@@ -470,17 +558,28 @@ impl Tunnel {
 
     /// Starts the client forwarding to `socket`, and waits until a stream through it
     /// can be opened. `Ok(None)` when the place on this machine was taken meanwhile.
-    async fn start(&self, socket: &str) -> Result<Option<(Up, Dialed)>, RexError> {
+    async fn start(&self, socket: &str, asking: &Asking) -> Result<Option<(Up, Dialed)>, RexError> {
         let local = self.place().await?;
+        // Let go of when the client forwards: nothing is asked of the user after that. If
+        // it never does, the client is ended first, as above.
+        let run = asking.run();
         let mut child = self
-            .command(self.forwarding(&local, socket)?)?
+            .command(
+                self.forwarding(&local, socket, run.is_some())?,
+                run.as_ref(),
+            )?
             .spawn()
             .map_err(|error| self.unreachable(format!("the SSH client did not start: {error}")))?;
         let said = Arc::new(Mutex::new(Tail::new()));
         if let Some(errors) = child.stderr.take() {
             tokio::spawn(keep_tail(errors, Arc::clone(&said)));
         }
-        let mut up = Up { child, local, said };
+        let mut up = Up {
+            child,
+            local,
+            said,
+            _counted: Counted::new(),
+        };
         let ready = async {
             loop {
                 if let Ok(dialed) = Self::connect(&up.local).await {
@@ -492,7 +591,7 @@ impl Tunnel {
                 tokio::time::sleep(SSH_READY_POLL).await;
             }
         };
-        match tokio::time::timeout(SSH_START_TIMEOUT, ready).await {
+        match asking.within(SSH_START_TIMEOUT, ready).await {
             Ok(Ok(dialed)) => Ok(Some((up, dialed))),
             Ok(Err(status)) => {
                 // What the client said last is read once it has all been taken.
@@ -506,16 +605,16 @@ impl Tunnel {
                 }
                 Err(self.failure(status, &said))
             }
-            Err(_) => Err(RexError::Unreachable {
-                endpoint: self.name.clone(),
-                source: io::ErrorKind::TimedOut.into(),
-            }),
+            Err(cut) => Err(self.cut(cut)),
         }
     }
 
     /// A stream to the server. The client is started first if it is not running.
     pub(crate) async fn dial(&self) -> Result<Dialed, RexError> {
         let mut up = self.up.lock().await;
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(RexError::Disconnected);
+        }
         if let Some(running) = up.as_mut() {
             if matches!(running.child.try_wait(), Ok(None))
                 && let Ok(dialed) = Self::connect(&running.local).await
@@ -525,10 +624,17 @@ impl Tunnel {
             tracing::debug!(server = %self.name, "the SSH client that reached a server has ended");
             *up = None;
         }
-        let socket = self.socket().await?;
+        let prompter = {
+            let mut prompter = self.prompter.lock().unwrap_or_else(PoisonError::into_inner);
+            Asking::of(prompter.take())
+        };
+        let socket = self.socket(&prompter).await?;
         for _ in 0..SSH_PORT_TRIES {
-            if let Some((started, dialed)) = self.start(&socket).await? {
+            if let Some((started, dialed)) = self.start(&socket, &prompter).await? {
                 tracing::debug!(server = %self.name, "an SSH client reaches a server");
+                if self.closed.load(Ordering::SeqCst) {
+                    return Err(RexError::Disconnected);
+                }
                 *up = Some(started);
                 return Ok(dialed);
             }
@@ -554,6 +660,7 @@ mod tests {
         let options = SshOptions {
             client: None,
             args: vec!["-F".to_owned(), "its.conf".to_owned()],
+            prompter: None,
         };
         Tunnel::new(address.to_owned(), user, host, port, socket, options)
     }
@@ -561,7 +668,7 @@ mod tests {
     #[test]
     fn the_client_asks_nothing_and_the_destination_is_never_an_option() {
         let asking = tunnel("ssh://alice@build.example.com:2222")
-            .asking("rex server status --json")
+            .asking("rex server status --json", false)
             .unwrap();
         // What makes the client ask nothing comes before the user's own arguments: the
         // client keeps the first value an option is given.
@@ -598,10 +705,20 @@ mod tests {
     }
 
     #[test]
+    fn a_client_that_may_ask_is_told_everything_else_the_same() {
+        let tunnel = tunnel("ssh://alice@build");
+        let quiet = tunnel.asking("rex", false).unwrap();
+        let asks = tunnel.asking("rex", true).unwrap();
+        assert_eq!(quiet[..2], ["-o", "BatchMode=yes"]);
+        assert_eq!(quiet[2..], asks[..]);
+        assert!(!asks.iter().any(|arg| arg.contains("BatchMode")));
+    }
+
+    #[test]
     fn the_client_forwards_and_does_nothing_else() {
         let tunnel = tunnel("ssh://build/run/rex/server.sock");
         let forwarding = tunnel
-            .forwarding(&Local::Port(50123), "/run/rex/server.sock")
+            .forwarding(&Local::Port(50123), "/run/rex/server.sock", false)
             .unwrap();
         let end = &forwarding[forwarding.len() - 5..];
         assert_eq!(
@@ -639,7 +756,7 @@ mod tests {
             named(Some("-l"), "host"),
             named(Some("a\nb"), "host"),
         ] {
-            let refused = tunnel.asking("rex").unwrap_err();
+            let refused = tunnel.asking("rex", true).unwrap_err();
             assert_eq!(refused.code(), "unsupported");
         }
     }

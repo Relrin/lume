@@ -186,6 +186,21 @@ pub const PLANNED_CELL_WIDTH_EM: f64 = 0.6;
 /// one over SSH may take two logins.
 pub const REX_CONNECT_WAIT: Duration = Duration::from_secs(90);
 
+/// How long the connections to Rex servers may take to end when the application does.
+pub const REX_END_WAIT: Duration = Duration::from_secs(2);
+
+/// How long the user may take to answer one question of the SSH client's. The server that
+/// is signed in to closes the connection at about this time.
+pub const ASKPASS_QUESTION_LIMIT: Duration = Duration::from_secs(120);
+/// How many questions one attempt at connecting may put.
+pub const ASKPASS_QUESTIONS_MAX: u64 = 20;
+/// How long the words of a question may be, in bytes.
+pub const ASKPASS_WORDS_MAX: usize = 4096;
+/// How long a page that went is waited for before a question is put in another window.
+pub const ASKPASS_PAGE_WAIT: Duration = Duration::from_secs(3);
+/// How often a limit that does not count an open question is looked at.
+pub const ASKPASS_POLL: Duration = Duration::from_millis(100);
+
 /// How long something that lists Rex servers is taken to be on show after it last said
 /// so, and how often it is to say so again.
 pub const REX_LEASE: Duration = Duration::from_secs(30);

@@ -323,6 +323,18 @@ fn pipe_writer(
     }
 }
 
+/// Something the page is being asked, which is forgotten when it is dropped.
+struct Asked<'a> {
+    link: &'a Link,
+    id: u64,
+}
+
+impl Drop for Asked<'_> {
+    fn drop(&mut self) {
+        self.link.state().asked.remove(&self.id);
+    }
+}
+
 fn page_gone() -> AppError {
     AppError::new(codes::NO_WINDOW, "the page that was asked has gone")
 }
@@ -635,30 +647,23 @@ impl Link {
             state.asked.insert(id, answer);
             id
         };
+        // However this ends, and also when whoever asks waits no longer.
+        let _forgotten = Asked { link: self, id };
         let mut frames = Vec::new();
-        let sent = PageRequest { id, body }
+        PageRequest { id, body }
             .encode(&mut frames)
-            .map_err(|error| AppError::new(codes::BAD_REQUEST, error.to_string()))
-            .and_then(|()| {
-                self.outgoing
-                    .send(Queued::Control(frames))
-                    .map_err(|_| page_gone())
-            });
-        if let Err(error) = sent {
-            self.state().asked.remove(&id);
-            return Err(error);
-        }
+            .map_err(|error| AppError::new(codes::BAD_REQUEST, error.to_string()))?;
+        self.outgoing
+            .send(Queued::Control(frames))
+            .map_err(|_| page_gone())?;
         match tokio::time::timeout(limit, answered).await {
             Ok(Ok(answer)) => answer,
             // The link was retired, which dropped the other end.
             Ok(Err(_)) => Err(page_gone()),
-            Err(_) => {
-                self.state().asked.remove(&id);
-                Err(AppError::new(
-                    codes::TIMEOUT,
-                    "the page did not answer in time",
-                ))
-            }
+            Err(_) => Err(AppError::new(
+                codes::TIMEOUT,
+                "the page did not answer in time",
+            )),
         }
     }
 

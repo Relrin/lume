@@ -14,8 +14,10 @@ import type { CoreClient } from "../core/client.ts";
 import type { PaneId } from "../layout/types.ts";
 import type { PaletteStore } from "../palette/store.ts";
 import type { PaneViews } from "../panes/views.ts";
+import { GIVEN_UP } from "../rex/model.ts";
 import type { SearchController } from "../search/controller.ts";
 import type { TerminalAction } from "../terminal/keymap.ts";
+import type { Answered } from "../terminal/prompts.ts";
 import type { TerminalView } from "../terminal/view.ts";
 import { CommandError } from "../transport/types.ts";
 import { FONT_ZOOM_STEP_PX } from "../tuning.ts";
@@ -53,12 +55,14 @@ export interface CommandServices {
   /** Shows the dialog that opens a folder as a workspace. */
   openFolder(): void;
   /** Shows the dialog that adds a connection. */
-  addConnection(kind: ConnectionKind): void;
+  addConnection(kind: ConnectionKind, address: string): void;
+  /** The id of the Rex server that is meant by an id, a label or an address. */
+  rexHost(named: string): string | null;
   /**
    * Answers the question on show as its buttons would: going ahead (with the item of a
    * choice), or not. Says whether there was one.
    */
-  answerPrompt(proceed: boolean, item?: string): boolean;
+  answerPrompt(proceed: boolean, item?: string): Answered;
   /** Tells the user that a command they ran could not be carried out. */
   failed(message: string): void;
 }
@@ -76,6 +80,13 @@ function tabOf(args: unknown): string | undefined {
 function queryOf(args: unknown): string | undefined {
   if (typeof args !== "object" || args === null || !("query" in args)) return undefined;
   return typeof args.query === "string" ? args.query : undefined;
+}
+
+/** An argument that is text. */
+function textOf(args: unknown, name: string): string | null {
+  if (typeof args !== "object" || args === null) return null;
+  const value = (args as Record<string, unknown>)[name];
+  return typeof value === "string" ? value : null;
 }
 
 function kindOf(args: unknown): ConnectionKind {
@@ -108,8 +119,11 @@ export class Commands {
       }
       return;
     }
-    const report = (error: unknown) =>
+    const report = (error: unknown) => {
+      // The user knows what they did not sign in to.
+      if (error instanceof CommandError && error.code === GIVEN_UP) return;
       failed(error instanceof Error ? error.message : String(error));
+    };
     // The user may want to be asked before a pane with a program in it is closed.
     this.#services
       .mayRun(id, args)
@@ -172,7 +186,11 @@ export class Commands {
         return;
       case "lume.connect.open":
         palette.getState().close();
-        connect.getState().toggle();
+        {
+          const named = textOf(args, "host");
+          if (named === null) connect.getState().toggle();
+          else connect.getState().open("rex", this.#services.rexHost(named));
+        }
         return;
       case "lume.session.detached":
         palette.getState().close();
@@ -215,15 +233,23 @@ export class Commands {
       case "lume.connection.add":
         palette.getState().close();
         connect.getState().close();
-        this.#services.addConnection(kindOf(args));
+        this.#services.addConnection(kindOf(args), textOf(args, "address") ?? "");
         return;
       case "lume.window.answer": {
         const fields =
           typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
         const proceed = fields["proceed"] === true;
         const item = typeof fields["item"] === "string" ? fields["item"] : undefined;
-        if (!this.#services.answerPrompt(proceed, item)) {
-          throw new CommandError("not_found", "there is no question on show");
+        switch (this.#services.answerPrompt(proceed, item)) {
+          case "answered":
+            return;
+          case "none":
+            throw new CommandError("not_found", "there is no question on show");
+          case "refused":
+            throw new CommandError(
+              "forbidden",
+              "what SSH asks is answered by the user, in the window",
+            );
         }
         return;
       }

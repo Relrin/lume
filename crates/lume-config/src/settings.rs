@@ -383,7 +383,7 @@ pub fn pages() -> [Page; 5] {
             icon: "hosts",
             group: WORKSPACE,
             blurb: "Machines Lume can open sessions on.",
-            groups: &["This computer"],
+            groups: &["Startup", "This computer"],
         },
         Page {
             id: "notifications",
@@ -585,6 +585,7 @@ mod tests {
                     "shells",
                     "workspaces",
                     "profiles",
+                    "rex-hosts",
                 ];
                 assert!(known.contains(&list.as_str().unwrap()), "{path:?}");
             }

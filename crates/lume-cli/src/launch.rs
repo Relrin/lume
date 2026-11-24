@@ -4,8 +4,8 @@
 //! the console `lume` was typed in, and `lume` returns once the application answers on
 //! its control endpoint, so a command that follows finds it running.
 //!
-//! A workspace to show and a program to run in a tab go to the application either
-//! way: as a request if it is running, on its command line if it is started here.
+//! A workspace to show, a Rex server to show a session of and a program to run in a tab
+//! go to the application either way: as a request if it is running, on its command line if it is started here.
 
 use std::io;
 use std::path::PathBuf;
@@ -50,6 +50,8 @@ pub struct Start {
     pub endpoint: Option<String>,
     /// The workspace to show.
     pub workspace: Option<String>,
+    /// The Rex server to show a session of; empty for the one of this machine.
+    pub rex: Option<String>,
     /// A program to run in a new tab, and its arguments. Empty for none.
     pub exec: Vec<String>,
 }
@@ -70,6 +72,11 @@ fn arguments(start: &Start, cwd: Option<&str>) -> Vec<String> {
     }
     if let Some(workspace) = &start.workspace {
         arguments.push(format!("--workspace={workspace}"));
+    }
+    match start.rex.as_deref() {
+        None => {}
+        Some("") => arguments.push("--rex".to_owned()),
+        Some(server) => arguments.push(format!("--rex={server}")),
     }
     if !start.exec.is_empty() {
         if let Some(cwd) = cwd {
@@ -119,6 +126,7 @@ pub async fn start(start: Start) -> Result<(), String> {
             workspace: start.workspace.clone(),
             exec: start.exec.clone(),
             cwd: cwd.clone(),
+            rex: start.rex.clone(),
         };
         client.ask(request, ANSWER_TIMEOUT).await.map(drop)
     };
@@ -162,6 +170,7 @@ mod tests {
         let start = Start {
             endpoint: Some("trial".to_owned()),
             workspace: Some("site v2".to_owned()),
+            rex: None,
             exec: vec!["htop".to_owned(), "--delay".to_owned(), "5".to_owned()],
         };
         assert_eq!(
@@ -185,5 +194,12 @@ mod tests {
             arguments(&start, Some("/work")),
             ["--endpoint=trial", "--workspace=site v2"]
         );
+        for (rex, argument) in [("", "--rex"), ("-odd name", "--rex=-odd name")] {
+            let start = Start {
+                rex: Some(rex.to_owned()),
+                ..Start::default()
+            };
+            assert_eq!(arguments(&start, None), [argument]);
+        }
     }
 }

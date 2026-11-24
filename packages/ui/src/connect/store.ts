@@ -14,8 +14,10 @@ export interface ConnectState {
   readonly opening: number;
   /** The filter it opened with. */
   readonly filter: ConnectFilter;
+  /** The id of the Rex server that is marked to begin with. */
+  readonly host: string | null;
   /** Shows the palette, with one kind of thing listed if a filter is named. */
-  open(filter?: ConnectFilter): void;
+  open(filter?: ConnectFilter, host?: string | null): void;
   /** Puts the palette away. */
   close(): void;
   /** Shows the palette, or puts it away if it is on show. */
@@ -31,7 +33,9 @@ export function createConnectStore(): ConnectStore {
     shown: false,
     opening: 0,
     filter: "all",
-    open: (filter = "all") => set({ shown: true, opening: get().opening + 1, filter }),
+    host: null,
+    open: (filter = "all", host = null) =>
+      set({ shown: true, opening: get().opening + 1, filter, host }),
     close: () => {
       if (get().shown) set({ shown: false });
     },

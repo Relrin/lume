@@ -82,12 +82,19 @@ pub struct RexSession {
 #[async_trait]
 pub trait Dialer: Send + Sync + 'static {
     async fn dial(&self) -> Result<Dialed, RexError>;
+
+    /// Ends whatever the streams run through. None is made after this.
+    fn close(&self) {}
 }
 
 #[async_trait]
 impl Dialer for Reach {
     async fn dial(&self) -> Result<Dialed, RexError> {
         Reach::dial(self).await
+    }
+
+    fn close(&self) {
+        Reach::close(self);
     }
 }
 
@@ -251,6 +258,7 @@ impl Drop for RexBackend {
         if let Some(control) = self.shared.state().control.take() {
             control.close();
         }
+        self.shared.dialer.close();
     }
 }
 
@@ -467,6 +475,9 @@ impl RexBackend {
         if let Some(control) = self.shared.state().control.take() {
             control.close();
         }
+        // Not left to whoever lets go of the backend last: an SSH client that nobody
+        // uses would go on running.
+        self.shared.dialer.close();
         self.shared.link.send_replace(Link::Closed);
     }
 

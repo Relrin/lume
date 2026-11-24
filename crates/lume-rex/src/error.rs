@@ -28,13 +28,13 @@ pub enum RexError {
     /// The server's certificate does not show that it is the server its address names.
     #[error("the Rex server at {endpoint} could not be shown to be that server: {reason}")]
     Untrusted { endpoint: String, reason: String },
-    /// The SSH client could not log in to the server's machine without asking the user
-    /// something: who they are, or whether the machine is the one they mean.
-    #[error(
-        "the Rex server at {endpoint} could not be reached over SSH: {reason}. Connecting to \
-         the machine once with `ssh` in a terminal settles what it asks"
-    )]
+    /// The SSH client could not sign in to the server's machine: it was not let in, or the
+    /// machine was not shown to be the one the user means.
+    #[error("the machine of the Rex server at {endpoint} was not signed in to: {reason}")]
     Ssh { endpoint: String, reason: String },
+    /// The user did not answer what signing in to the server's machine needs.
+    #[error("signing in to the machine of the Rex server at {endpoint} was given up")]
+    GivenUp { endpoint: String },
     /// No server answered at the address.
     #[error("no Rex server could be reached at {endpoint}: {source}")]
     Unreachable {
@@ -85,6 +85,7 @@ impl RexError {
             RexError::Unconfirmed { .. } => "confirmation_required",
             RexError::Untrusted { .. } => "untrusted",
             RexError::Ssh { .. } => "ssh",
+            RexError::GivenUp { .. } => "given_up",
             RexError::Unreachable { .. } => "unreachable",
             RexError::Refused { .. } => "forbidden",
             RexError::Revision(_) => "version_mismatch",
@@ -120,7 +121,8 @@ impl From<RexError> for SessionError {
             | RexError::NotInstalled { .. }
             | RexError::Unconfirmed { .. }
             | RexError::Untrusted { .. }
-            | RexError::Ssh { .. } => ErrorCode::Unsupported,
+            | RexError::Ssh { .. }
+            | RexError::GivenUp { .. } => ErrorCode::Unsupported,
             RexError::Revision(_) => ErrorCode::VersionMismatch,
             RexError::Timeout(_) => ErrorCode::Timeout,
             RexError::Rejected(reason) => match reason {

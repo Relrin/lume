@@ -176,8 +176,10 @@ pub struct Reach {
 }
 
 impl Reach {
-    pub fn new(endpoint: Endpoint, options: Options) -> Self {
+    pub fn new(endpoint: Endpoint, mut options: Options) -> Self {
         let name = endpoint.to_string();
+        // Handed to what asks, and held nowhere beside it.
+        let ssh = std::mem::take(&mut options.ssh);
         let tunnel = match &endpoint {
             Endpoint::Ssh {
                 user,
@@ -190,7 +192,7 @@ impl Reach {
                 host.clone(),
                 *port,
                 socket.clone(),
-                options.ssh.clone(),
+                ssh,
             )),
             _ => None,
         };
@@ -201,6 +203,13 @@ impl Reach {
             options,
             tls: OnceLock::new(),
             proved: Mutex::new(None),
+        }
+    }
+
+    /// Ends what the streams run through, if anything does. None is opened after this.
+    pub fn close(&self) {
+        if let Some(tunnel) = &self.tunnel {
+            tunnel.close();
         }
     }
 

@@ -8,7 +8,8 @@ use lume_proto::{Launcher, SessionId, TermSize};
 
 /// What the arguments may be, shown on request and when they are not understood.
 pub const USAGE: &str = "\
-usage: lume [--endpoint <name>] [--workspace <name>] [-e <program> [<arg>...]]
+usage: lume [--endpoint <name>] [--workspace <name>] [--rex [<server>] |
+            -e <program> [<arg>...]]
        lume ctl [--endpoint <name>] [--timeout <seconds>] <command>
        lume config schema | path | check [<file>]
        lume keymap [--platform windows|macos|linux] [--workspace <name>] [--json]
@@ -21,8 +22,10 @@ usage: lume [--endpoint <name>] [--workspace <name>] [-e <program> [<arg>...]]
 
 Without a command, lume starts the application, or brings its window to the front if
 it is running. --workspace shows that workspace, beginning it if there is none of that
-name. -e runs a program in a new tab, started in the directory lume was typed in;
-everything after the program is the program's own.
+name. --rex shows a session of a Rex server, named by its label or its address: the one
+last shown there, else the first. With no server named it is the one of this computer.
+-e runs a program in a new tab, started in the directory lume was typed in; everything
+after the program is the program's own.
 
 Commands of lume ctl, which drive the running application:
   status                         what the application is and how far its start has come
@@ -166,6 +169,8 @@ pub enum Command {
         endpoint: Option<String>,
         /// The workspace to show.
         workspace: Option<String>,
+        /// The Rex server to show a session of; empty for the one of this machine.
+        rex: Option<String>,
         /// A program to run in a new tab, and its arguments. Empty for none.
         exec: Vec<String>,
     },
@@ -814,6 +819,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
     let mut words: Words = args.into_iter().collect::<Vec<_>>().into_iter().peekable();
     let mut endpoint = None;
     let mut workspace = None;
+    let mut rex = None;
     let mut exec = Vec::new();
     while let Some(word) = words.next() {
         match word.as_str() {
@@ -822,6 +828,17 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
             "--endpoint" => endpoint = Some(value(&mut words, "--endpoint", "a name")?),
             "--workspace" => {
                 workspace = Some(value(&mut words, "--workspace", "a workspace's name")?);
+            }
+            "--rex" => {
+                let named = words.next_if(|word| !word.starts_with('-'));
+                rex = Some(named.unwrap_or_default());
+            }
+            joined if joined.starts_with("--rex=") => {
+                let named = joined["--rex=".len()..].to_owned();
+                if named.is_empty() {
+                    return Err("--rex= needs a server".to_owned());
+                }
+                rex = Some(named);
             }
             // Everything after this is the program and what it is given, whatever it
             // looks like.
@@ -854,9 +871,13 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
             other => return Err(format!("{other} is not something lume knows")),
         }
     }
+    if rex.is_some() && !exec.is_empty() {
+        return Err("--rex and -e cannot be used together".to_owned());
+    }
     Ok(Command::Start {
         endpoint,
         workspace,
+        rex,
         exec,
     })
 }
@@ -946,11 +967,44 @@ mod tests {
     }
 
     #[test]
+    fn a_rex_server_is_named_or_is_the_one_of_this_machine() {
+        let start = |workspace: Option<&str>, rex: &str| {
+            Ok(Command::Start {
+                endpoint: None,
+                workspace: workspace.map(str::to_owned),
+                rex: Some(rex.to_owned()),
+                exec: Vec::new(),
+            })
+        };
+        assert_eq!(parsed(&["--rex"]), start(None, ""));
+        assert_eq!(parsed(&["--rex", "Build box"]), start(None, "Build box"));
+        assert_eq!(parsed(&["--rex=ssh://build"]), start(None, "ssh://build"));
+        // Whatever the word is, and whatever comes after it.
+        assert_eq!(parsed(&["--rex", "ctl"]), start(None, "ctl"));
+        assert_eq!(
+            parsed(&["--rex", "--workspace", "site"]),
+            start(Some("site"), "")
+        );
+        assert_eq!(
+            parsed(&["--workspace", "site", "--rex", "build"]),
+            start(Some("site"), "build")
+        );
+        for wrong in [
+            &["--rex="][..],
+            &["--rex", "build", "-e", "htop"],
+            &["--rex", "-e", "htop"],
+        ] {
+            assert!(parsed(wrong).is_err(), "{wrong:?} was understood");
+        }
+    }
+
+    #[test]
     fn no_arguments_start_the_application() {
         let start = |endpoint: Option<&str>, workspace: Option<&str>, exec: &[&str]| {
             Ok(Command::Start {
                 endpoint: endpoint.map(str::to_owned),
                 workspace: workspace.map(str::to_owned),
+                rex: None,
                 exec: exec.iter().map(|word| (*word).to_owned()).collect(),
             })
         };

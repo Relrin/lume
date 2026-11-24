@@ -2582,6 +2582,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
@@ -2597,6 +2598,7 @@ dependencies = [
  "static_vcruntime",
  "tokio",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
@@ -2698,6 +2700,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "zeroize",
 ]
 
 [[package]]

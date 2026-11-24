@@ -17,7 +17,8 @@ a Pi coding agent approach and allowing to adapt software to user's workflows.
 
 - The application and core libraries are implemented with Rustlang
 - Made on the top of libghostty & WebGPU
-- An ability to run in a standalone mode and/or with [Rex server](https://www.superlogical.com/) (optional)
+- An ability to run in a standalone mode and/or with [Rex server](https://www.superlogical.com/) (optional): on this
+  computer, over SSH or over HTTPS. `lume --rex [server]` starts on one
 - No built-in coding agents or other tools: a user decides what to use
 - Supports addons in TypeScript / JavaScript
 - Supports Windows, Linux and macOS

@@ -238,6 +238,21 @@ describe("the settings as pages of rows", () => {
     ]);
   });
 
+  it("lists the Rex servers there are to start on, by the address that is written", () => {
+    const held = view({ config: { ...view().config, rex: { "start-on": "" } } });
+    const start = row(settingsPages(SCHEMA, held, LISTS), "rex.start-on");
+    expect(start.choices).toEqual([
+      { value: null, label: "Your workspace" },
+      { value: "ssh://devbox", label: "devbox" },
+    ]);
+    expect(chosenIndex(start)).toBe(0);
+    expect(writeChoice(start, start.choices[1]!)).toEqual({
+      op: "set",
+      path: "rex.start-on",
+      value: "ssh://devbox",
+    });
+  });
+
   it("shows a setting that can be left out and is empty as left out", () => {
     // The configuration in use carries every setting, an empty one as nothing at all.
     const empty = view({ config: { ...view().config, "default-profile": "" } });
@@ -419,7 +434,7 @@ describe("searching the settings", () => {
       "appearance.background-image",
     );
     expect(searchSettings(pages, "cursor").count).toBe(2);
-    expect(searchSettings(pages, "terminal").count).toBe(6);
+    expect(searchSettings(pages, "terminal").count).toBe(7);
   });
 
   it("finds nothing for nothing typed, and counts nothing it does not show", () => {

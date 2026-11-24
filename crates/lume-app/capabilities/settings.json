@@ -29,6 +29,7 @@
     "allow-rex-host-remove",
     "allow-ssh-reach",
     "allow-ssh-try",
+    "allow-try-end",
     "allow-ssh-profile-put",
     "allow-profile-remove",
     "allow-profiles-listed",

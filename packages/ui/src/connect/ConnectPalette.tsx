@@ -69,10 +69,14 @@ function optionId(index: number): string {
 }
 
 /** Tells one row from the others, whatever else the list holds. */
+function hostKey(id: string): string {
+  return `host:${id}`;
+}
+
 function keyOf(row: ConnectRow): string {
   switch (row.type) {
     case "host":
-      return `host:${row.entry.host.id}`;
+      return hostKey(row.entry.host.id);
     case "profile":
       return `profile:${row.entry.profile.id}`;
     case "session":
@@ -345,7 +349,8 @@ function ConnectDialog() {
   const [filter, setFilter] = useState<ConnectFilter>(opened);
   // The marked row, by what it is: servers come and go while the palette is open, and
   // the mark stays on what it was on. Nothing means the first row.
-  const [selected, setSelected] = useState<string | null>(null);
+  const begun = useStore(app.connect, (state) => state.host);
+  const [selected, setSelected] = useState<string | null>(begun === null ? null : hostKey(begun));
   // The sessions no pane shows: `null` until the core has said, and if it could not.
   const [detached, setDetached] = useState<readonly DetachedSession[] | null>(null);
   const [detachedProblem, setDetachedProblem] = useState<string | null>(null);

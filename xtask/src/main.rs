@@ -4,6 +4,7 @@
 //! builds with `cargo xtask setup && cargo xtask build` on Windows, Linux and macOS.
 
 mod bench;
+mod boundaries;
 mod compat;
 mod dist;
 mod fetch;
@@ -206,6 +207,7 @@ fn test() -> Result<()> {
 }
 
 fn lint() -> Result<()> {
+    boundaries::check()?;
     vt::native(false)?;
     run::cargo(&["fmt", "--all", "--check"])?;
     run::cargo(&[

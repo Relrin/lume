@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio::task::JoinSet;
 
-use super::hosts::command_error;
+use super::hosts::{SshAsks, command_error};
 use crate::error::CommandError;
 use crate::host_probe::{self, Probe};
 use crate::tuning::{HOST_PROBE_TIMEOUT, REX_CONNECT_WAIT};
@@ -115,13 +115,18 @@ impl Drop for Ends {
 }
 
 /// Connects to the server at an address, to learn what it is, and lets go of it again.
-/// `agreed` is whether the user agreed to a connection that is not encrypted.
-pub async fn attempt(endpoint: Endpoint, agreed: bool) -> Result<Value, CommandError> {
+/// `agreed` is whether the user agreed to a connection that is not encrypted, and `asks`
+/// what the SSH client may ask them.
+pub async fn attempt(
+    endpoint: Endpoint,
+    agreed: bool,
+    asks: SshAsks,
+) -> Result<Value, CommandError> {
     let backend = RexBackend::connect_with(
         BackendId(format!("rex-attempt:{endpoint}")),
         endpoint,
         ClientInfo::app("Lume", env!("CARGO_PKG_VERSION")),
-        Options::new().plain_http_agreed(agreed),
+        Options::new().plain_http_agreed(agreed).ssh(asks.options),
     );
     let ends = Ends(Arc::clone(&backend));
     let mut link = backend.link();
@@ -143,9 +148,11 @@ pub async fn attempt(endpoint: Endpoint, agreed: bool) -> Result<Value, CommandE
             }
         }
     };
-    let version = tokio::time::timeout(REX_CONNECT_WAIT, standing)
+    let version = asks
+        .waited
+        .within(REX_CONNECT_WAIT, standing)
         .await
-        .unwrap_or_else(|_| {
+        .unwrap_or_else(|| {
             Err(CommandError::new(
                 "timeout",
                 "the server did not answer in time",

@@ -187,10 +187,16 @@ export class CoreClient {
 
   /**
    * Connects to the server at an address, to see what it is, and lets go of it again.
-   * `agreed` is whether the user agreed to a connection that is not encrypted.
+   * `agreed` is whether the user agreed to a connection that is not encrypted, and
+   * `attempt` a number to end it by.
    */
-  rexTry(address: string, agreed: boolean): Promise<RexTried> {
-    return this.transport.command("rex_try", { address, agreed });
+  rexTry(address: string, agreed: boolean, attempt: number): Promise<RexTried> {
+    return this.transport.command("rex_try", { address, agreed, attempt });
+  }
+
+  /** Ends a try that nobody waits for any more. */
+  tryEnd(attempt: number): Promise<void> {
+    return this.transport.command("try_end", { attempt });
   }
 
   /** Writes a Rex server into the user's file, in place of the one called `was` if any. */
@@ -208,9 +214,12 @@ export class CoreClient {
     return this.transport.command("ssh_reach", { host });
   }
 
-  /** Signs in to a machine over SSH and leaves again. It fails with the reason it could not. */
-  sshTry(host: SshHost): Promise<void> {
-    return this.transport.command("ssh_try", { host });
+  /**
+   * Signs in to a machine over SSH and leaves again. It fails with the reason it could
+   * not. `attempt` is a number to end it by.
+   */
+  sshTry(host: SshHost, attempt: number): Promise<void> {
+    return this.transport.command("ssh_try", { host, attempt });
   }
 
   /** Writes a profile for a machine reached over SSH, in place of the one whose id is

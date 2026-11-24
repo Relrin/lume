@@ -15,19 +15,23 @@
 //! with the reason, until the user tries it. One that was made and is lost is made again
 //! by the backend, for as long as that could work.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use lume_config::{Config, RexHostEntry};
-use lume_proto::BackendId;
-use lume_rex::{ClientInfo, Endpoint, Link, Options, RexBackend, RexError, RexSession};
+use lume_layout::WindowId;
+use lume_proto::app::{AppError, codes};
+use lume_proto::{BackendId, Secret};
+use lume_rex::{ClientInfo, Endpoint, Link, Options, RexBackend, RexError, RexSession, SshOptions};
 use lume_session::SessionBackend as _;
 use serde_json::{Value, json};
 use tokio::sync::watch;
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
+use super::asking::{Asking, Attempt, Waited};
+use super::remembered::Remembered;
 use super::{attempt, installed};
 use crate::configsvc::ConfigService;
 use crate::error::CommandError;
@@ -38,6 +42,8 @@ use crate::tuning::{REX_CONNECT_WAIT, REX_LEASE, REX_LOOK_EVERY};
 /// What the server of this machine is called, where the user has not called it
 /// anything.
 const LOCAL_LABEL: &str = "Local Rex";
+/// What a connection fails with when the user was asked to sign in and did not.
+pub const GIVEN_UP: &str = "given_up";
 /// What the ids of these backends begin with.
 const ID_PREFIX: &str = "rex:";
 
@@ -76,6 +82,22 @@ struct Failure {
     error: String,
 }
 
+/// How the SSH client is run for one connection.
+pub(super) struct SshAsks {
+    pub(super) options: SshOptions,
+    /// How long the user is asked things.
+    pub(super) waited: Arc<Waited>,
+}
+
+/// The SSH client to run in place of the system's, for tests of the application.
+fn test_client() -> Option<std::path::PathBuf> {
+    if cfg!(debug_assertions) {
+        std::env::var_os("LUME_TEST_SSH_CLIENT").map(Into::into)
+    } else {
+        None
+    }
+}
+
 /// A connection that was asked for and has not failed.
 struct Connection {
     backend: Arc<RexBackend>,
@@ -92,6 +114,8 @@ struct Connection {
     showing: Option<String>,
     /// Whether there was anything in that session while it was on show.
     filled: bool,
+    /// How long the user was asked things while it was first made.
+    waited: Arc<Waited>,
 }
 
 #[derive(Default)]
@@ -100,8 +124,10 @@ struct Inner {
     unusable: Vec<Unusable>,
     connections: HashMap<BackendId, Connection>,
     failures: HashMap<BackendId, Failure>,
-    /// The session last put on show, by server.
-    last: HashMap<BackendId, String>,
+    /// The servers the user was asked about and did not sign in to after all.
+    given_up: HashSet<BackendId>,
+    /// The session last put on show on each server.
+    last: Remembered,
     /// Whether something answered as the server of this machine when last looked.
     local_there: bool,
     /// Whether a server is installed here, so that one that does not run is listed.
@@ -117,6 +143,8 @@ pub struct Hosts {
     config: Arc<ConfigService>,
     state: Weak<AppState>,
     panes: Weak<Panes>,
+    /// How the SSH client asks the user, if it can.
+    asking: Option<Arc<Asking>>,
     inner: Mutex<Inner>,
     /// What pages were last told.
     told: Mutex<Value>,
@@ -203,15 +231,18 @@ impl Hosts {
         config: &Arc<ConfigService>,
         state: &Arc<AppState>,
         panes: &Arc<Panes>,
+        asking: Option<Arc<Asking>>,
     ) -> Arc<Self> {
         let (hosts, unusable) = hosts_of(&config.current().config);
         let this = Arc::new(Self {
             config: Arc::clone(config),
             state: Arc::downgrade(state),
             panes: Arc::downgrade(panes),
+            asking,
             inner: Mutex::new(Inner {
                 hosts,
                 unusable,
+                last: Remembered::load(config.dirs()),
                 ..Inner::default()
             }),
             told: Mutex::new(Value::Null),
@@ -377,10 +408,12 @@ impl Hosts {
                 hosts,
                 connections,
                 failures,
+                given_up,
                 ..
             } = &mut *inner;
             let named = |id: &BackendId| hosts.iter().any(|host| host.id == *id);
             failures.retain(|id, _| named(id));
+            given_up.retain(|id| named(id));
             connections
                 .keys()
                 .filter(|id| !named(id))
@@ -424,7 +457,7 @@ impl Hosts {
             };
             // One that refused is not asked again by itself.
             if there && !connected && !failed {
-                self.begin(&local, false, false);
+                self.begin(&local, false, false, None);
             }
         }
         let connected: Vec<(BackendId, Arc<RexBackend>)> = self
@@ -533,9 +566,61 @@ impl Hosts {
         )))
     }
 
+    /// An attempt at signing in to a machine, in which the SSH client may ask the user.
+    ///
+    /// Only one that somebody makes in a window may, because only they know why they are
+    /// asked.
+    pub fn attempt(
+        &self,
+        host: &str,
+        address: &str,
+        window: Option<WindowId>,
+    ) -> Option<Arc<Attempt>> {
+        let asking = self.asking.as_ref()?;
+        Some(asking.attempt(&self.state, window?, host, address))
+    }
+
+    /// How the SSH client is run for a server, and what it may ask.
+    pub(super) fn ssh_options(
+        &self,
+        host: &str,
+        address: &str,
+        window: Option<WindowId>,
+    ) -> SshAsks {
+        let attempt = self.attempt(host, address, window);
+        SshAsks {
+            waited: attempt
+                .as_ref()
+                .map(|attempt| attempt.clock())
+                .unwrap_or_default(),
+            options: SshOptions {
+                client: test_client(),
+                prompter: attempt.map(|attempt| attempt as Arc<dyn lume_rex::Prompter>),
+                ..SshOptions::default()
+            },
+        }
+    }
+
+    /// Answers what a run of the SSH client asks.
+    pub async fn askpass(
+        &self,
+        token: &Secret,
+        words: &str,
+        hint: Option<&str>,
+    ) -> Result<Option<Secret>, AppError> {
+        match &self.asking {
+            Some(asking) => asking.answer(token, words, hint).await,
+            None => Err(AppError::new(
+                codes::UNSUPPORTED,
+                "the application asks nothing for the SSH client",
+            )),
+        }
+    }
+
     /// Starts a connection to a server, in place of one that has failed. `agreed` is
-    /// whether the user agreed to one that is not encrypted.
-    fn begin(self: &Arc<Self>, host: &Host, agreed: bool, kept: bool) {
+    /// whether the user agreed to one that is not encrypted, and `window` where they are
+    /// asked what it takes to sign in.
+    fn begin(self: &Arc<Self>, host: &Host, agreed: bool, kept: bool, window: Option<WindowId>) {
         let Some(state) = self.state.upgrade() else {
             return;
         };
@@ -545,11 +630,13 @@ impl Hosts {
             return;
         }
         inner.failures.remove(&host.id);
+        inner.given_up.remove(&host.id);
+        let asks = self.ssh_options(&host.label, &host.address, window);
         let backend = RexBackend::connect_with(
             host.id.clone(),
             host.endpoint.clone(),
             ClientInfo::app("Lume", env!("CARGO_PKG_VERSION")),
-            Options::new().plain_http_agreed(agreed),
+            Options::new().plain_http_agreed(agreed).ssh(asks.options),
         );
         state.router().insert(host.id.clone(), backend.clone());
         let watcher = state
@@ -571,6 +658,7 @@ impl Hosts {
                 latency_ms: None,
                 showing: None,
                 filled: false,
+                waited: asks.waited,
             },
         );
         drop(inner);
@@ -615,9 +703,14 @@ impl Hosts {
     }
 
     /// Connects to a server if it is not connected, and waits until it is.
-    pub async fn connect(self: &Arc<Self>, host: &str, agreed: bool) -> Result<(), CommandError> {
+    pub async fn connect(
+        self: &Arc<Self>,
+        host: &str,
+        agreed: bool,
+        window: Option<WindowId>,
+    ) -> Result<(), CommandError> {
         let host = self.find(host)?;
-        self.connected(&host, agreed, true).await.map(drop)
+        self.connected(&host, agreed, true, window).await.map(drop)
     }
 
     /// The connection to a server, once it is made. `keep` is whether it stays when
@@ -627,13 +720,18 @@ impl Hosts {
         host: &Host,
         agreed: bool,
         keep: bool,
+        window: Option<WindowId>,
     ) -> Result<Arc<RexBackend>, CommandError> {
         // Subscribed first, so that nothing is missed between a look and the wait.
         let mut ticks = self.ticks.subscribe();
-        self.begin(host, agreed, keep);
-        if let Some(connection) = self.inner().connections.get_mut(&host.id) {
-            connection.kept |= keep;
-        }
+        self.begin(host, agreed, keep, window);
+        let waited = match self.inner().connections.get_mut(&host.id) {
+            Some(connection) => {
+                connection.kept |= keep;
+                Arc::clone(&connection.waited)
+            }
+            None => Arc::default(),
+        };
         let waiting = async {
             loop {
                 ticks.borrow_and_update();
@@ -646,6 +744,12 @@ impl Hosts {
                         ));
                     }
                     let Some(connection) = inner.connections.get(&host.id) else {
+                        if inner.given_up.contains(&host.id) {
+                            return Err(CommandError::new(
+                                GIVEN_UP,
+                                format!("signing in to {} was given up", host.label),
+                            ));
+                        }
                         if host.is_local() {
                             return Err(CommandError::new(
                                 "unreachable",
@@ -671,9 +775,10 @@ impl Hosts {
                 }
             }
         };
-        tokio::time::timeout(REX_CONNECT_WAIT, waiting)
+        waited
+            .within(REX_CONNECT_WAIT, waiting)
             .await
-            .unwrap_or_else(|_| {
+            .unwrap_or_else(|| {
                 Err(CommandError::new(
                     "timeout",
                     format!("{} did not answer in time", host.label),
@@ -696,15 +801,18 @@ impl Hosts {
         host: &str,
         session: Option<&str>,
         agreed: bool,
+        window: Option<WindowId>,
     ) -> Result<(), CommandError> {
         let host = self.find(host)?;
         let _one_at_a_time = self.opening.lock().await;
-        let backend = self.connected(&host, agreed, !host.is_local()).await?;
+        let backend = self
+            .connected(&host, agreed, !host.is_local(), window)
+            .await?;
         let sessions = backend.sessions();
         let chosen = match session.map(str::trim).filter(|session| !session.is_empty()) {
             Some(wanted) => session_of(&host, &sessions, wanted)?,
             None => {
-                let last = self.inner().last.get(&host.id).cloned();
+                let last = self.inner().last.of(&host.id).map(str::to_owned);
                 sessions
                     .iter()
                     .find(|session| Some(&session.id) == last.as_ref())
@@ -726,10 +834,13 @@ impl Hosts {
         host: &str,
         label: Option<&str>,
         agreed: bool,
+        window: Option<WindowId>,
     ) -> Result<(), CommandError> {
         let host = self.find(host)?;
         let _one_at_a_time = self.opening.lock().await;
-        let backend = self.connected(&host, agreed, !host.is_local()).await?;
+        let backend = self
+            .connected(&host, agreed, !host.is_local(), window)
+            .await?;
         let made = backend
             .create_session(label)
             .await
@@ -798,9 +909,7 @@ impl Hosts {
             .map_err(|error| command_error(&error))?;
         let shown = {
             let mut inner = self.inner();
-            if inner.last.get(&host.id) == Some(&session.id) {
-                inner.last.remove(&host.id);
-            }
+            inner.last.forget(&host.id, &session.id);
             inner
                 .connections
                 .get_mut(&host.id)
@@ -817,8 +926,16 @@ impl Hosts {
             }
             backend.show_nothing();
         }
+        self.remember().await;
         self.touch();
         Ok(())
+    }
+
+    /// Keeps what was last on show for the next run.
+    async fn remember(&self) {
+        let (last, dirs) = (self.inner().last.clone(), self.config.dirs().clone());
+        // The caller waits for it and holds `opening`, so what is newer is written later.
+        let _ = tokio::task::spawn_blocking(move || last.keep(&dirs)).await;
     }
 
     /// Puts a session on show. The caller holds `opening`.
@@ -851,7 +968,7 @@ impl Hosts {
         }
         {
             let mut inner = self.inner();
-            inner.last.insert(host.id.clone(), session.to_owned());
+            inner.last.put(&host.id, session);
             if let Some(connection) = inner.connections.get_mut(&host.id) {
                 connection.filled = backend
                     .view(session)
@@ -867,6 +984,7 @@ impl Hosts {
             tracing::debug!(%error, "a session that is no longer on show was not let go of");
         }
         // The session of another server that was on show is let go of by its watcher.
+        self.remember().await;
         self.touch();
         Ok(())
     }
@@ -884,7 +1002,10 @@ impl Hosts {
             // connected to is simply not there.
             let gone = connection.local && !connection.kept && failure.code == "unreachable";
             inner.local_there &= !connection.local;
-            if !gone {
+            if failure.code == GIVEN_UP {
+                // The user knows: the server stands as it did before they tried.
+                inner.given_up.insert(id.clone());
+            } else if !gone {
                 inner.failures.insert(id.clone(), failure.clone());
             }
             let label = inner
@@ -1021,6 +1142,11 @@ impl Hosts {
         true
     }
 
+    /// Comes back once nothing that was started for a connection runs any more.
+    pub async fn ended() {
+        lume_rex::ssh_clients_ended().await;
+    }
+
     /// Ends every connection: the application is closing.
     pub fn shutdown(&self) {
         let ids: Vec<BackendId> = {
@@ -1091,6 +1217,7 @@ mod naming {
         Config {
             rex: RexConfig {
                 local,
+                start_on: String::new(),
                 hosts: hosts
                     .iter()
                     .map(|(label, address)| RexHostEntry {

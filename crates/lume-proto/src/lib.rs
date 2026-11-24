@@ -19,6 +19,7 @@ mod event;
 mod flow;
 mod frame;
 mod payload;
+mod secret;
 pub mod tuning;
 mod types;
 
@@ -38,6 +39,7 @@ pub use frame::{
     encode_control_json,
 };
 pub use payload::HydratePayload;
+pub use secret::Secret;
 pub use types::{
     BackendCaps, BackendId, CellPx, ClientFacts, ColorScheme, ExitStatus, HydrateKinds,
     InvalidSize, Launcher, Palette, Responder, Rgb, SessionId, SessionInfo, SessionStats,

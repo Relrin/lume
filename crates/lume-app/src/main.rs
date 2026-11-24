@@ -21,7 +21,7 @@
 //! There is one application for each user. It serves a control endpoint, and a copy
 //! that finds the endpoint already served hands what it was started for to the first:
 //! its window comes to the front, the workspace named is shown and the program named
-//! is run in a tab. Then the copy exits.
+//! is run in a tab, or a session of the Rex server named is shown. Then the copy exits.
 
 // A release build on Windows is a GUI-subsystem program and opens no console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -67,6 +67,7 @@ mod state;
 mod synthetic;
 #[cfg(test)]
 mod testing;
+mod tries;
 mod tuning;
 mod verbs;
 mod window;
@@ -80,6 +81,7 @@ use lume_config::schema::{Confirm, HostMode, HostSettings};
 use lume_config::{ColorScheme, Dirs};
 use lume_ipc::Listener;
 use lume_layout::{Intent, Store};
+use lume_proto::app::ENDPOINT_NAME;
 use lume_session::{BackendId, Daemon, HostConfig, LocalBackend, Router};
 use tauri::webview::PageLoadEvent;
 use tauri::{Manager, RunEvent, WindowEvent};
@@ -201,14 +203,18 @@ struct Terminals {
     /// the program and the directory to start it in. In a workspace that is begun by
     /// this start the program has the first pane instead.
     exec: Option<(Vec<String>, Option<String>)>,
+    /// The Rex server to show a session of, and who says so.
+    rex: Option<(String, rex::start::Said)>,
 }
 
-/// What a start asks for besides the window: a workspace to show and a program to run.
+/// What a start asks for besides the window: a workspace to show and a program to run, or
+/// a Rex server to show a session of.
 #[derive(Clone, Debug, Default)]
 struct Launch {
     workspace: Option<String>,
     exec: Vec<String>,
     cwd: Option<String>,
+    rex: Option<String>,
 }
 
 impl Launch {
@@ -227,6 +233,7 @@ impl Launch {
             } else {
                 args.cwd.clone().or_else(here)
             },
+            rex: args.rex.clone(),
         }
     }
 }
@@ -275,10 +282,16 @@ fn terminals(
     state.set_panes(Arc::clone(&panes));
     let exec =
         (!fresh && !launch.exec.is_empty()).then(|| (launch.exec.clone(), launch.cwd.clone()));
+    let rex = rex::start::wanted(
+        launch.rex.as_deref(),
+        launch.workspace.is_none() && launch.exec.is_empty(),
+        &config.current().config.rex.start_on,
+    );
     Ok(Terminals {
         panes,
         config,
         exec,
+        rex,
     })
 }
 
@@ -318,6 +331,7 @@ fn claim_instance(args: &Args, launch: &Launch) -> Result<Instance, String> {
                 launch.workspace.clone(),
                 launch.exec.clone(),
                 launch.cwd.clone(),
+                launch.rex.clone(),
             )
             .await
             .map(|()| Instance::Second)
@@ -437,6 +451,7 @@ fn main() -> ExitCode {
         .as_ref()
         .map(|terminals| Arc::clone(&terminals.config));
 
+    let endpoint = args.endpoint.clone();
     let loading = Arc::clone(&state);
     let serving = Arc::clone(&state);
     // One thread owns the clipboard; pages and plugins reach it through it.
@@ -493,6 +508,7 @@ fn main() -> ExitCode {
         rex::commands::rex_host_remove,
         commands_connections::ssh_reach,
         commands_connections::ssh_try,
+        commands_connections::try_end,
         commands_connections::ssh_profile_put,
         commands_connections::profile_remove,
         commands_connections::profiles_listed,
@@ -532,6 +548,7 @@ fn main() -> ExitCode {
         .manage(Arc::clone(&state))
         .manage(clipboard)
         .manage(Fonts::default())
+        .manage(tries::Tries::default())
         .manage(Arc::clone(&tokens))
         .setup(move |app| {
             marks.setup();
@@ -542,12 +559,22 @@ fn main() -> ExitCode {
                 panes,
                 config,
                 exec,
+                rex: server,
             }) = terminals
             else {
                 window::open(app, mode)?;
                 marks.window();
                 return Ok(());
             };
+            // The SSH client asks through the endpoint, so without one it asks nothing.
+            let asking = listener
+                .is_some()
+                .then(|| {
+                    rex::Asking::beside_this_program(
+                        endpoint.as_deref().unwrap_or(ENDPOINT_NAME),
+                    )
+                })
+                .flatten();
             let windows = WindowShell::new(
                 app.handle().clone(),
                 Arc::clone(&serving),
@@ -573,7 +600,7 @@ fn main() -> ExitCode {
                 Arc::clone(&config),
             );
             let services = Arc::new(Services {
-                rex: rex::Hosts::new(&config, &serving, &panes),
+                rex: rex::Hosts::new(&config, &serving, &panes, asking),
                 state: Arc::clone(&serving),
                 panes,
                 config,
@@ -642,6 +669,9 @@ fn main() -> ExitCode {
                     }
                 });
             }
+            if let Some((server, said)) = server {
+                rex::start::begin(&services, server, said, tuning::PAGE_START_TIMEOUT);
+            }
             if let Some(listener) = listener {
                 let control = Control::new(services, tuning::PAGE_START_TIMEOUT);
                 tauri::async_runtime::spawn(control::serve(listener, control));
@@ -661,6 +691,7 @@ fn main() -> ExitCode {
             // token of its own.
             PageLoadEvent::Started => {
                 starting.page_started(webview.label());
+                webview.state::<tries::Tries>().end_of(webview.label());
                 loading.retire(webview.label());
             }
             PageLoadEvent::Finished => loading.marks().page(),
@@ -685,6 +716,7 @@ fn main() -> ExitCode {
             match event {
                 WindowEvent::Destroyed => {
                     state.retire(&label);
+                    app.state::<tries::Tries>().end_of(&label);
                     if let Some(tokens) = app.try_state::<Arc<frame_token::FrameTokens>>() {
                         tokens.forget(&label);
                     }
@@ -818,8 +850,13 @@ fn main() -> ExitCode {
             // Plugins' code hears that it is stopping.
             if let Some(services) = app.try_state::<Arc<Services>>() {
                 services.plugins.shutdown();
-                // Its servers go on running; only the connections to them end.
+                // Its servers go on running; only the connections to them end, and the
+                // programs that carry those before this process does.
                 services.rex.shutdown();
+                let ended = tokio::time::timeout(tuning::REX_END_WAIT, rex::Hosts::ended());
+                if tauri::async_runtime::block_on(ended).is_err() {
+                    tracing::warn!("a connection to a Rex server did not end in time");
+                }
             }
             // A program in a terminal can outlive a process that exits without closing
             // the terminal, so a host in this process ends its sessions before the

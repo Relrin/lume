@@ -12,6 +12,7 @@
 //! pane that has the keyboard. A request that arrives while the application is still
 //! starting waits a while for what it needs: a page, a session in the pane.
 
+use std::future::Future;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,14 +26,16 @@ use lume_proto::app::{
 };
 use lume_proto::{
     Body, BytesKind, ClientFacts, ClientKind, ColorScheme, ControlDecoder, ErrorCode, FrameDecoder,
-    HydratePayload, Message, Palette, Responder, Role, SessionEvent, SessionId, TermSize, encode,
-    encode_bytes, negotiate,
+    HydratePayload, Message, Palette, Responder, Role, Secret, SessionEvent, SessionId, TermSize,
+    encode, encode_bytes, negotiate,
 };
 use lume_session::{Attachment, Hydrate, InputSink, OutputFrame, SessionBackend, SessionError};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::broadcast::error::RecvError;
+use zeroize::Zeroizing;
 
 use crate::carrier::{Link, SessionKey};
+use crate::rex;
 use crate::services::{Asker, Services};
 use crate::sessions::News;
 use crate::tuning::{ATTACH_CELL_PX, PAGE_ANSWER_TIMEOUT, PAGE_OPEN_TIMEOUT, WAIT_MAX, WAIT_SLACK};
@@ -707,6 +710,21 @@ impl Control {
         }
     }
 
+    /// Puts a question of the SSH client's to the user.
+    async fn askpass(
+        &self,
+        token: &Secret,
+        prompt: &str,
+        hint: Option<&str>,
+    ) -> Result<AppReply, AppError> {
+        let secret = self.services.rex.askpass(token, prompt, hint).await?;
+        let effect = match secret {
+            Some(_) => "answered",
+            None => "there is no answer",
+        };
+        reply(effect, AppReplyBody::Secret { secret })
+    }
+
     async fn carry_out(&self, body: AppRequestBody) -> Result<AppReply, AppError> {
         let Services {
             state,
@@ -724,7 +742,14 @@ impl Control {
                 workspace,
                 exec,
                 cwd,
+                rex,
             } => {
+                if rex.is_some() && !exec.is_empty() {
+                    return Err(AppError::new(
+                        codes::BAD_REQUEST,
+                        "a program is run or a Rex server is shown, not both",
+                    ));
+                }
                 let pane = self
                     .services
                     .launch(workspace.as_deref(), &exec, cwd, self.page_wait)
@@ -736,6 +761,10 @@ impl Control {
                 }
                 if let Some(pane) = pane {
                     effect.push_str(&format!(", and started the program in pane {pane}"));
+                }
+                if let Some((server, said)) = rex::start::wanted(rex.as_deref(), false, "") {
+                    effect.push_str(&format!(", and shows the Rex server {server}"));
+                    rex::start::begin(&self.services, server, said, self.page_wait);
                 }
                 reply(
                     effect,
@@ -1135,6 +1164,11 @@ impl Control {
                 codes::INTERNAL,
                 "a request that goes on after its answer was handled as a plain request",
             )),
+            // Answered before it gets here, for as long as its client is there.
+            AppRequestBody::Askpass { .. } => Err(AppError::new(
+                codes::INTERNAL,
+                "a question of the SSH client's was handled as a plain request",
+            )),
             AppRequestBody::Commands {} => {
                 let commands = registry.list();
                 let count = commands.len();
@@ -1353,12 +1387,7 @@ pub async fn serve(mut listener: Listener, control: Arc<Control>) {
 }
 
 async fn write_event<S: AsyncWrite + Unpin>(io: &mut S, event: AppEvent) -> io::Result<()> {
-    let mut frames = Vec::new();
-    AppMessage::Event(event)
-        .encode(&mut frames)
-        .map_err(io::Error::other)?;
-    io.write_all(&frames).await?;
-    io.flush().await
+    write_message(io, &AppMessage::Event(event)).await
 }
 
 async fn write_response<S: AsyncWrite + Unpin>(
@@ -1366,12 +1395,7 @@ async fn write_response<S: AsyncWrite + Unpin>(
     id: u64,
     result: Result<AppReply, AppError>,
 ) -> io::Result<()> {
-    let mut frames = Vec::new();
-    AppMessage::Response(AppResponse { id, result })
-        .encode(&mut frames)
-        .map_err(io::Error::other)?;
-    io.write_all(&frames).await?;
-    io.flush().await
+    write_message(io, &AppMessage::Response(AppResponse { id, result })).await
 }
 
 /// Answers the first request, which must be `hello` and must share a version with us.
@@ -1410,7 +1434,12 @@ fn greet(body: &AppRequestBody) -> Result<(AppReply, ClientKind), AppError> {
 async fn write_message<S: AsyncWrite + Unpin>(io: &mut S, message: &AppMessage) -> io::Result<()> {
     let mut bytes = Vec::new();
     message.encode(&mut bytes).map_err(io::Error::other)?;
-    io.write_all(&bytes).await?;
+    if message.holds_secret() {
+        let bytes = Zeroizing::new(bytes);
+        io.write_all(&bytes).await?;
+    } else {
+        io.write_all(&bytes).await?;
+    }
     io.flush().await
 }
 
@@ -1426,6 +1455,33 @@ async fn write_step<S: AsyncWrite + Unpin>(io: &mut S, step: &Step) -> io::Resul
         }
     }
     Ok(())
+}
+
+/// Does something for a client for as long as the client is there. What it sends
+/// meanwhile is kept for later.
+async fn until_gone<S, T>(
+    io: &mut S,
+    decoder: &mut ControlDecoder,
+    work: impl Future<Output = T>,
+) -> Option<T>
+where
+    S: AsyncRead + Unpin,
+{
+    let mut work = std::pin::pin!(work);
+    let mut chunk = [0; 1024];
+    let mut sent = 0;
+    loop {
+        tokio::select! {
+            done = &mut work => return Some(done),
+            read = io.read(&mut chunk) => match read {
+                Ok(read) if read > 0 && sent < READ_CHUNK => {
+                    sent += read;
+                    decoder.push(&chunk[..read]);
+                }
+                _ => return None,
+            },
+        }
+    }
 }
 
 /// Serves one client until it disconnects or breaks the rules.
@@ -1475,7 +1531,21 @@ where
             continue;
         }
 
-        let (result, then) = control.handle(body).await;
+        let (result, then) = match body {
+            AppRequestBody::Askpass {
+                token,
+                prompt,
+                hint,
+            } => {
+                let asked = control.askpass(&token, &prompt, hint.as_deref());
+                match until_gone(&mut io, &mut decoder, asked).await {
+                    Some(result) => (result, Then::Carry),
+                    // The client left, and the question with it.
+                    None => return Ok(()),
+                }
+            }
+            body => control.handle(body).await,
+        };
         write_response(&mut io, id, result).await?;
         match then {
             Then::Carry => {}
@@ -1495,12 +1565,13 @@ where
 
 /// Hands what this copy of the application was started for to the copy already
 /// serving `endpoint`: it brings its window to the front, shows the workspace named and
-/// runs the program named.
+/// runs the program named, or shows a session of the Rex server named.
 pub async fn launch_running(
     endpoint: &Endpoint,
     workspace: Option<String>,
     exec: Vec<String>,
     cwd: Option<String>,
+    rex: Option<String>,
 ) -> io::Result<()> {
     let mut io = lume_ipc::connect(endpoint).await?;
     let requests = [
@@ -1513,6 +1584,7 @@ pub async fn launch_running(
             workspace,
             exec,
             cwd,
+            rex,
         },
     ];
     let mut decoder = ControlDecoder::new();
@@ -1707,7 +1779,7 @@ mod tests {
             Arc::clone(&config),
         );
         let services = Arc::new(Services {
-            rex: crate::rex::Hosts::new(&config, &state, &panes),
+            rex: crate::rex::Hosts::new(&config, &state, &panes, None),
             state,
             panes,
             config,
@@ -1867,6 +1939,7 @@ mod tests {
                 workspace: None,
                 exec: Vec::new(),
                 cwd: None,
+                rex: None,
             })
             .await
             .unwrap();
@@ -2294,6 +2367,7 @@ mod tests {
                 workspace: Some("play".to_owned()),
                 exec: vec![program.to_owned(), args.to_owned()],
                 cwd: None,
+                rex: None,
             })
             .await
             .unwrap();

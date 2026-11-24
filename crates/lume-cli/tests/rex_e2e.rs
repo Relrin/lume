@@ -359,6 +359,24 @@ fn application_with_pages(server: &Server) -> (App, Option<Pages>) {
 /// Starts the application, with more of a configuration, so that its page can be looked
 /// into and driven.
 fn application_to_drive(more: &str) -> (App, Pages) {
+    application_to_drive_with(more, &[])
+}
+
+/// The same, with these variables added to the application's environment.
+fn application_to_drive_with(more: &str, environment: &[(&str, String)]) -> (App, Pages) {
+    let (app, pages) = application_started("", more, environment, &[]);
+    app.status_with_session();
+    (app, pages)
+}
+
+/// The same, with these settings of Rex and these arguments added to the application's,
+/// whatever it shows then.
+fn application_started(
+    rex: &str,
+    more: &str,
+    environment: &[(&str, String)],
+    arguments: &[&str],
+) -> (App, Pages) {
     let number = NEXT.fetch_add(1, Ordering::Relaxed);
     let endpoint = format!("e2e-{}-{number}", std::process::id());
     let home = std::env::temp_dir().join(format!("lume-{endpoint}"));
@@ -366,26 +384,23 @@ fn application_to_drive(more: &str) -> (App, Pages) {
     std::fs::create_dir_all(home.join("config")).unwrap();
     std::fs::write(
         home.join("config").join("config.toml"),
-        configuration() + IN_PROCESS_HOST + more,
+        // What the tests' applications are set to ends with the settings of Rex.
+        configuration() + rex + IN_PROCESS_HOST + more,
     )
     .unwrap();
     let pages = Pages { port: free_port() };
-    let app = App::start_on_with(
-        home.clone(),
-        false,
-        endpoint,
-        &[
-            (
-                "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-                format!("--remote-debugging-port={}", pages.port),
-            ),
-            (
-                "WEBVIEW2_USER_DATA_FOLDER",
-                home.join("webview").display().to_string(),
-            ),
-        ],
-    );
-    app.status_with_session();
+    let mut variables = vec![
+        (
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            format!("--remote-debugging-port={}", pages.port),
+        ),
+        (
+            "WEBVIEW2_USER_DATA_FOLDER",
+            home.join("webview").display().to_string(),
+        ),
+    ];
+    variables.extend_from_slice(environment);
+    let app = App::start_as(home.clone(), false, endpoint, &variables, arguments);
     (app, pages)
 }
 
@@ -1737,5 +1752,507 @@ fn a_machine_reached_over_ssh_is_added_and_is_listed_with_the_profiles() {
     assert!(text.contains("[[profile]]\nid = \"127.0.0.1\"\n"), "{text}");
     assert!(text.contains("user = \"nobody\"\n"), "{text}");
     press(&pages, &["Escape"]);
+    app.quit();
+}
+
+/// The question an account with a password is asked.
+const ASKS: &str = "me@127.0.0.1's password: ";
+const PASSWORD: &str = "correct horse 7351";
+
+/// A machine that is signed in to with a password and has the server of a test: the SSH
+/// client that reaches it is the stand-in for it.
+struct Machine {
+    folder: PathBuf,
+    port: u16,
+    _bridge: tokio::runtime::Runtime,
+}
+
+impl Machine {
+    fn of(server: &Server) -> Self {
+        let number = NEXT.fetch_add(1, Ordering::Relaxed);
+        let folder = std::env::temp_dir().join(format!("lume-ssh-{}-{number}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let bridge = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        // What the client forwards to is a port; the server of the test listens elsewhere.
+        let address = server.address.clone();
+        let port = bridge.block_on(async move {
+            let door = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = door.local_addr().unwrap().port();
+            tokio::spawn(async move {
+                while let Ok((mut near, _)) = door.accept().await {
+                    let address = address.clone();
+                    tokio::spawn(async move {
+                        #[cfg(windows)]
+                        let far = tokio::net::windows::named_pipe::ClientOptions::new()
+                            .open(address.trim_start_matches("npipe://").replace('/', "\\"));
+                        #[cfg(unix)]
+                        let far =
+                            tokio::net::UnixStream::connect(address.trim_start_matches("unix://"))
+                                .await;
+                        let _ = tokio::io::copy_bidirectional(&mut near, &mut far.unwrap()).await;
+                    });
+                }
+            });
+            port
+        });
+        let script = json!({
+            "asks": [{
+                "words": ASKS,
+                "right": PASSWORD,
+                "tries": 3,
+                "again": "Permission denied, please try again.",
+                "failure": "me@127.0.0.1: Permission denied (publickey,password).",
+            }],
+            "status": r#"{"endpoint":"unix:///run/rex/server.sock"}"#,
+            "target": format!("127.0.0.1:{port}"),
+            "cut": folder.join("cut"),
+            "alive": folder.join("alive"),
+            "log": folder.join("log"),
+        });
+        std::fs::write(folder.join("script"), script.to_string()).unwrap();
+        Self {
+            folder,
+            port,
+            _bridge: bridge,
+        }
+    }
+
+    fn address(&self) -> String {
+        format!("ssh://me@127.0.0.1:{}", self.port)
+    }
+
+    fn settings(&self) -> String {
+        format!(
+            "\n[[rex.host]]\nlabel = '{HOST}'\naddress = '{}'\n",
+            self.address()
+        )
+    }
+
+    /// What has an application use the stand-in for its SSH client.
+    fn environment(&self) -> Vec<(&'static str, String)> {
+        let name = format!("stand_in_ssh{}", std::env::consts::EXE_SUFFIX);
+        let client = application().with_file_name("examples").join(name);
+        assert!(client.is_file(), "{} is not there", client.display());
+        let script = self.folder.join("script");
+        vec![
+            ("LUME_TEST_SSH_CLIENT", client.display().to_string()),
+            ("STAND_IN_SSH", script.display().to_string()),
+        ]
+    }
+
+    /// The application, with the stand-in for its SSH client.
+    fn application(&self, more: &str) -> (App, Pages) {
+        application_to_drive_with(more, &self.environment())
+    }
+
+    /// What happened to the client so far.
+    fn log(&self) -> Vec<String> {
+        std::fs::read_to_string(self.folder.join("log"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+impl Drop for Machine {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.folder);
+    }
+}
+
+/// Waits until the SSH client that forwards has been ended.
+fn until_ended(machine: &Machine) {
+    let alive = machine.folder.join("alive");
+    until("the SSH client to end", || {
+        let _ = std::fs::remove_file(&alive);
+        std::thread::sleep(Duration::from_millis(400));
+        (!alive.exists()).then_some(())
+    });
+}
+
+/// Waits until the window asks what the SSH client wants to know, with the keyboard in it.
+fn until_asked(pages: &Pages, again: bool) {
+    until_page(
+        pages,
+        "the question to have the keyboard",
+        &format!(
+            "document.activeElement?.matches('dialog.sign-in[open] input') === true \
+             && (document.querySelector('.sign-in .prompt-warning') !== null) === {again}"
+        ),
+    );
+}
+
+fn until_not_asked(pages: &Pages) {
+    until_page(
+        pages,
+        "the question to be gone",
+        "document.querySelector('dialog.sign-in') === null",
+    );
+}
+
+/// What is asserted of an application that was told the password: that it wrote it
+/// nowhere.
+fn wrote_nothing_down(app: &App) {
+    let log = std::fs::read_to_string(&app.log).unwrap();
+    assert!(!log.contains(PASSWORD), "the password is in the log");
+    assert!(
+        !log.contains("LUME_ASKPASS"),
+        "the environment is in the log"
+    );
+    let mut folders = vec![app.home.join("config"), app.home.join("state")];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(folder).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                let held = bytes
+                    .windows(PASSWORD.len())
+                    .any(|part| part == PASSWORD.as_bytes());
+                assert!(!held, "the password is in {}", path.display());
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn a_machine_that_takes_a_password_is_signed_in_to_in_the_window() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    server.session("alpha");
+    let machine = Machine::of(&server);
+    let (app, pages) = machine.application(&machine.settings());
+    connect_palette(&app, &pages, HOST);
+    press(&pages, &["Enter"]);
+    until_asked(&pages, false);
+    assert_eq!(texts(&pages, ".sign-in h2"), [format!("Sign in to {HOST}")]);
+    assert_eq!(texts(&pages, ".sign-in pre"), [ASKS.trim()]);
+    assert_eq!(texts(&pages, ".sign-in-address"), [machine.address()]);
+
+    // Nobody answers for the user.
+    for proceed in [true, false] {
+        let answered = command(&app, "lume.window.answer", json!({ "proceed": proceed }));
+        assert_eq!(answered.json["code"], "forbidden", "{}", answered.json);
+    }
+    // Keys do not reach what is behind.
+    press(&pages, &["Tab", "Tab", "Tab", "Tab", "Tab"]);
+    assert_eq!(
+        page(
+            &pages,
+            "document.activeElement === document.body \
+             || document.activeElement?.closest('dialog.sign-in') !== null"
+        ),
+        true
+    );
+    page(
+        &pages,
+        "(() => { document.querySelector('.sign-in input').focus(); return true; })()",
+    );
+    press(&pages, &["text:wrong horse", "Enter"]);
+    until_asked(&pages, true);
+    press(&pages, &[&format!("text:{PASSWORD}"), "Enter"]);
+    until_not_asked(&pages);
+    // The palette stayed, lists the sessions and has the keyboard again.
+    until_texts(&pages, ".connect-session-name", &["alpha"]);
+    until_page(
+        &pages,
+        "the palette to have the keyboard",
+        "document.activeElement?.className === 'connect-input'",
+    );
+    // The second login was not asked for.
+    assert_eq!(
+        machine.log(),
+        [
+            "may ask", "asks", "wrong", "asks", "right", "told", "may ask", "asks", "right",
+            "forwards"
+        ]
+    );
+    press(&pages, &["Enter"]);
+    until_on_show(&app, "alpha");
+
+    // The connection is lost, and cannot be made again without asking.
+    std::fs::write(machine.folder.join("cut"), "").unwrap();
+    until_texts(&pages, ".notice-action", &["Connect again"]);
+    assert_eq!(host(&app)["state"]["code"], "ssh");
+    assert!(machine.log().contains(&"quiet".to_owned()));
+    std::fs::remove_file(machine.folder.join("cut")).unwrap();
+    page(
+        &pages,
+        "(() => { document.querySelector('.notice-action').click(); return true; })()",
+    );
+    until_asked(&pages, false);
+    press(&pages, &[&format!("text:{PASSWORD}"), "Enter"]);
+    until("the session to be on show again", || {
+        (host(&app)["on_show"].is_string() && host(&app)["state"]["kind"] == "connected")
+            .then_some(())
+    });
+    wrote_nothing_down(&app);
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn a_sign_in_that_is_put_away_tries_nothing_and_is_not_held_against_the_server() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    server.session("alpha");
+    let machine = Machine::of(&server);
+    let (app, pages) = machine.application(&machine.settings());
+
+    // Asked for from outside the window, it asks nobody.
+    let refused = command(&app, "lume.rex.connect", json!({ "host": HOST }));
+    assert_eq!(refused.json["code"], "ssh", "{}", refused.json);
+    assert_eq!(machine.log(), ["quiet", "refused"]);
+    std::fs::remove_file(machine.folder.join("log")).unwrap();
+
+    connect_palette(&app, &pages, HOST);
+    press(&pages, &["Enter"]);
+    until_asked(&pages, false);
+    press(&pages, &["Escape"]);
+    until_not_asked(&pages);
+    until("the server to stand as before", || {
+        (host(&app)["state"]["kind"] == "idle").then_some(())
+    });
+    until_texts(&pages, ".connect-row-line", &["Not connected"]);
+    until_page(
+        &pages,
+        "the palette to have the keyboard",
+        "document.activeElement?.className === 'connect-input'",
+    );
+    // The client was ended before it could take that for an empty password.
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(machine.log(), ["may ask", "asks"]);
+    assert_eq!(texts(&pages, ".notice"), Vec::<String>::new());
+
+    // Disconnected while it is asked, the question is taken back.
+    press(&pages, &["Enter"]);
+    until_asked(&pages, false);
+    command(&app, "lume.rex.disconnect", json!({ "host": HOST })).ok("disconnect");
+    until_not_asked(&pages);
+    assert_eq!(host(&app)["state"]["kind"], "idle");
+
+    // Three wrong ones are the machine's own no.
+    press(&pages, &["Enter"]);
+    for again in [false, true, true] {
+        until_asked(&pages, again);
+        press(&pages, &["text:wrong horse", "Enter"]);
+        // The next question is one of its own.
+        until_page(
+            &pages,
+            "the field to be another",
+            "!document.querySelector('.sign-in input')?.value",
+        );
+    }
+    until_texts(&pages, ".connect-row-line", &["SSH failed"]);
+    let why = texts(&pages, ".connect-call");
+    assert!(why[0].contains("Permission denied"), "{why:?}");
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn a_test_of_a_connection_asks_and_stops_asking_when_nobody_waits_for_it() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    let machine = Machine::of(&server);
+    let (app, pages) = machine.application("");
+    let dialog = || {
+        app.ctl(&["command", "lume.connection.add"]).ok("dialog");
+        until_page(
+            &pages,
+            "the dialog to have the keyboard",
+            "document.activeElement?.id === 'connection-address'",
+        );
+        press(&pages, &[&format!("text:{}", machine.address())]);
+        until_page(&pages, "Test", &pressing(".connection-foot", "Test"));
+        until_asked(&pages, false);
+        assert_eq!(texts(&pages, ".sign-in h2"), ["Sign in to 127.0.0.1"]);
+    };
+    dialog();
+    press(&pages, &["Escape"]);
+    until_not_asked(&pages);
+    until_texts(&pages, ".connection-status", &["You did not sign in"]);
+    until_page(
+        &pages,
+        "the dialog to be there",
+        "document.querySelector('.connection') !== null",
+    );
+    until_page(&pages, "Test", &pressing(".connection-foot", "Test"));
+    until_asked(&pages, false);
+    press(&pages, &[&format!("text:{PASSWORD}"), "Enter"]);
+    until_texts(&pages, ".connection-status", &["Connection works"]);
+
+    // The dialog goes while the question is on show: so does the question.
+    until_page(&pages, "Test", &pressing(".connection-foot", "Test"));
+    until_asked(&pages, false);
+    page(
+        &pages,
+        "(() => { document.querySelector('.connection-scrim').dispatchEvent(\
+         new PointerEvent('pointerdown', { bubbles: true })); return true; })()",
+    );
+    until_not_asked(&pages);
+    assert_eq!(
+        page(&pages, "document.querySelector('.connection') === null"),
+        true
+    );
+    assert!(!machine.log().contains(&"empty".to_owned()));
+    wrote_nothing_down(&app);
+    app.quit();
+}
+
+/// Starts `lume` as the user would in a console, for an application that runs.
+fn lume_with(app: &App, arguments: &[&str]) {
+    let status = Command::new(lume())
+        .args(["--endpoint", &app.endpoint])
+        .args(arguments)
+        .stdin(Stdio::null())
+        .status()
+        .expect("lume runs");
+    assert!(status.success(), "lume {arguments:?}: {status}");
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn the_application_is_started_on_a_server_and_is_handed_one_while_it_runs() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let mut server = Server::start();
+    server.session("alpha");
+    server.session("beta");
+    let (app, pages) =
+        application_started("", &settings(&server), &[], &[&format!("--rex={HOST}")]);
+    until_on_show(&app, "alpha");
+    until_button(&pages, HOST, "alpha");
+    open(&app, "beta");
+    command(&app, "lume.workspace.switch", json!({ "name": "default" })).ok("switch");
+    until("the own workspace to be on show", || {
+        own_workspace_on_show(&app).then_some(())
+    });
+    // The session last shown is the one a start shows.
+    lume_with(&app, &["--rex", HOST]);
+    until_on_show(&app, "beta");
+    command(&app, "lume.workspace.switch", json!({ "name": "default" })).ok("switch");
+    command(&app, "lume.rex.disconnect", json!({ "host": HOST })).ok("disconnect");
+
+    // With the server gone it is said, and can be tried again.
+    server.stop();
+    lume_with(&app, &["--rex", &server.address]);
+    until_texts(&pages, ".notice-action", &["Try again"]);
+    assert!(own_workspace_on_show(&app));
+    server.run();
+    page(
+        &pages,
+        "(() => { document.querySelector('.notice-action').click(); return true; })()",
+    );
+    until("a session to be on show", || {
+        (!own_workspace_on_show(&app)).then_some(())
+    });
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn a_start_on_a_server_without_sessions_or_that_is_not_listed_offers_what_can_be_done() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    let (app, pages) =
+        application_started("", &settings(&server), &[], &[&format!("--rex={HOST}")]);
+    until_page(
+        &pages,
+        "the palette to mark the server",
+        &format!(
+            "document.querySelector('.connect-row[aria-selected=true] .connect-row-name')\
+             ?.textContent === {}",
+            json!(HOST)
+        ),
+    );
+    assert!(own_workspace_on_show(&app));
+    press(&pages, &["Escape"]);
+    until_page(
+        &pages,
+        "the palette to be gone",
+        "document.querySelector('.connect') === null",
+    );
+
+    lume_with(&app, &["--rex", "nobody"]);
+    until_texts(
+        &pages,
+        ".notice-message",
+        &["There is no Rex server called nobody."],
+    );
+    lume_with(&app, &["--rex=ssh://me@nas.example"]);
+    until_page(
+        &pages,
+        "the dialog to hold the address",
+        "document.querySelector('#connection-address')?.value === 'ssh://me@nas.example'",
+    );
+    press(&pages, &["Escape"]);
+    app.quit();
+}
+
+#[test]
+#[ignore = "needs a Rex server; run with `cargo xtask rex-e2e`"]
+fn the_settings_start_the_application_on_a_server_unless_it_is_started_for_something() {
+    if !cfg!(windows) {
+        println!("skipped: the page is driven on Windows only");
+        return;
+    }
+    let server = Server::start();
+    server.session("alpha");
+    let machine = Machine::of(&server);
+    let rex = format!("start-on = '{}'\n", machine.address());
+    let more = machine.settings();
+    let environment = machine.environment();
+    let started = |arguments: &[&str]| application_started(&rex, &more, &environment, arguments);
+    let (app, pages) = started(&[]);
+    until_asked(&pages, false);
+    press(&pages, &["Escape"]);
+    until_not_asked(&pages);
+    until("the server to stand as before", || {
+        (host(&app)["state"]["kind"] == "idle").then_some(())
+    });
+    assert!(own_workspace_on_show(&app));
+    assert_eq!(texts(&pages, ".notice"), Vec::<String>::new());
+    until_page(
+        &pages,
+        "the terminal to have the keyboard",
+        "document.activeElement?.classList.contains('terminal-input') === true",
+    );
+    app.quit();
+
+    let (app, pages) = started(&[]);
+    until_asked(&pages, false);
+    press(&pages, &[&format!("text:{PASSWORD}"), "Enter"]);
+    until_on_show(&app, "alpha");
+    // What carries the connection ends with the application.
+    assert!(machine.folder.join("alive").exists());
+    app.quit();
+    until_ended(&machine);
+
+    let (app, pages) = started(&["--workspace", "site"]);
+    app.status_with_session();
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(host(&app)["state"]["kind"], "idle");
+    until_not_asked(&pages);
     app.quit();
 }

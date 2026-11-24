@@ -136,10 +136,22 @@ impl App {
         endpoint: String,
         environment: &[(&str, String)],
     ) -> Self {
+        Self::start_as(home, keep_home, endpoint, environment, &[])
+    }
+
+    /// The same, with these arguments added to the application's.
+    pub fn start_as(
+        home: PathBuf,
+        keep_home: bool,
+        endpoint: String,
+        environment: &[(&str, String)],
+        arguments: &[&str],
+    ) -> Self {
         let log = std::env::temp_dir().join(format!("lume-{endpoint}.log"));
         let _ = std::fs::remove_file(&log);
         let child = Command::new(application())
             .args(["--endpoint", &endpoint])
+            .args(arguments)
             .env("LUME_LOG", "trace")
             .env("LUME_LOG_FILE", &log)
             .env("LUME_CONFIG_DIR", home.join("config"))

@@ -9,11 +9,20 @@ import {
   type RemoteTarget,
   type Screen,
 } from "../src/terminal/remote.ts";
-import { PromptStore, type PluginAsk } from "../src/terminal/prompts.ts";
+import { PromptStore, type PluginAsk, type SignIn } from "../src/terminal/prompts.ts";
 import { CommandError, type TermSize } from "../src/transport/types.ts";
 
 const SESSION = "00000000000000ab";
 const PANE = "p3";
+
+const SIGN_IN: SignIn = {
+  ask: 1,
+  kind: "password",
+  host: "Build box",
+  address: "ssh://me@build",
+  words: "me@build's password:",
+  again: false,
+};
 
 /** A target that records what it was asked and answers from a script. */
 class FakeTarget implements RemoteTarget {
@@ -55,6 +64,11 @@ class FakeTarget implements RemoteTarget {
     if (this.fail) return Promise.reject(this.fail);
     return Promise.resolve(size);
   }
+  signIn(signIn: SignIn): Promise<string | null> {
+    this.calls.push(["signIn", signIn]);
+    return Promise.resolve(signIn.again ? null : "hunter2");
+  }
+
   ask(ask: PluginAsk): Promise<Record<string, unknown>> {
     this.calls.push(["ask", ask]);
     return Promise.resolve({ allow: true });
@@ -243,7 +257,7 @@ describe("a plugin's question", () => {
       place: null,
     });
     expect(prompts.current()?.kind).toBe("plugin");
-    expect(prompts.answerCurrent(true)).toBe(true);
+    expect(prompts.answerCurrent(true)).toBe("answered");
     await expect(asked).resolves.toEqual({ allow: true });
 
     const items = [
@@ -268,7 +282,54 @@ describe("a plugin's question", () => {
     });
     prompts.answerCurrent(false);
     await expect(confirmed).resolves.toEqual({ ok: false });
-    expect(prompts.answerCurrent(true)).toBe(false);
+    expect(prompts.answerCurrent(true)).toBe("none");
+  });
+
+  it("passes on what the SSH client asks and what the user answers", async () => {
+    const target = new FakeTarget();
+    const type = "sign_in";
+    const answer = await answerRequest(target, request(11, { type, ...SIGN_IN }));
+    expect(answer).toEqual({ id: 11, result: { ok: { type: "secret", secret: "hunter2" } } });
+    expect(target.calls).toEqual([["signIn", SIGN_IN]]);
+    const given = await answerRequest(target, request(12, { type, ...SIGN_IN, again: true }));
+    expect(given).toEqual({ id: 12, result: { ok: { type: "secret", secret: null } } });
+    for (const wrong of [
+      { kind: "pin" },
+      { ask: "1" },
+      { host: 1 },
+      { address: null },
+      { words: undefined },
+      { again: "no" },
+    ]) {
+      const bad = await answerRequest(target, request(13, { type, ...SIGN_IN, ...wrong }));
+      expect(bad).toMatchObject({ id: 13, result: { err: { code: "bad_request" } } });
+    }
+  });
+
+  it("puts what the SSH client asks before the rest, and lets nobody else answer it", async () => {
+    const prompts = new PromptStore();
+    prompts.notice("something else");
+    const first = prompts.signIn(SIGN_IN);
+    const second = prompts.signIn({ ...SIGN_IN, ask: 2 });
+    const third = prompts.signIn({ ...SIGN_IN, ask: 3 });
+    const shown = () => {
+      const prompt = prompts.current();
+      return prompt?.kind === "sign-in" ? prompt.signIn.ask : prompt?.kind;
+    };
+    expect(shown()).toBe(1);
+    expect(prompts.answerCurrent(true)).toBe("refused");
+    expect(prompts.answerCurrent(false)).toBe("refused");
+    expect(shown()).toBe(1);
+    prompts.withdraw(2);
+    prompts.withdraw(99);
+    await expect(second).resolves.toBeNull();
+    const current = prompts.current();
+    if (current?.kind === "sign-in") current.answer(true, "hunter2");
+    await expect(first).resolves.toBe("hunter2");
+    expect(shown()).toBe(3);
+    prompts.withdraw(3);
+    await expect(third).resolves.toBeNull();
+    expect(shown()).toBe("notice");
   });
 
   it("shows the keys of text to be typed, so that one that runs a command is seen to", () => {

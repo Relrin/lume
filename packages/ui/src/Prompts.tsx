@@ -12,6 +12,9 @@ import { closingText, closingTitle } from "./shell/closing.ts";
 import { CloseQuestion } from "./shell/CloseQuestion.tsx";
 import type { PluginQuestion, Prompt, PromptStore } from "./terminal/prompts.ts";
 
+// What the SSH client asks is asked rarely, and loaded when it first is.
+const SignIn = lazy(() => import("./SignIn.tsx").then((loaded) => ({ default: loaded.SignIn })));
+
 // The list a plugin asks the user to choose from is loaded when one first does.
 const PluginPickDialog = lazy(() =>
   import("./plugins/Pick.tsx").then((loaded) => ({ default: loaded.PluginPickDialog })),
@@ -37,6 +40,13 @@ export function Prompts({ store }: { store: PromptStore }) {
     return (
       <Suspense fallback={null}>
         <PluginPickDialog key={numberOf(prompt)} prompt={prompt} />
+      </Suspense>
+    );
+  }
+  if (prompt.kind === "sign-in") {
+    return (
+      <Suspense fallback={null}>
+        <SignIn key={numberOf(prompt)} prompt={prompt} />
       </Suspense>
     );
   }
@@ -132,6 +142,9 @@ function describePlugin(ask: PluginQuestion): Described {
   }
 }
 
+/** A prompt of a few words, drawn here. */
+type PlainPrompt = Exclude<Prompt, { kind: "pick" } | { kind: "sign-in" }>;
+
 interface Described {
   title: string;
   body: React.ReactNode;
@@ -142,7 +155,7 @@ interface Described {
   dismiss: string;
 }
 
-function describe(prompt: Exclude<Prompt, { kind: "pick" }>): Described {
+function describe(prompt: PlainPrompt): Described {
   switch (prompt.kind) {
     case "paste": {
       const { lines, truncated, text } = prompt.preview;
@@ -192,7 +205,7 @@ function describe(prompt: Exclude<Prompt, { kind: "pick" }>): Described {
   }
 }
 
-function PromptDialog({ prompt }: { prompt: Exclude<Prompt, { kind: "pick" }> }) {
+function PromptDialog({ prompt }: { prompt: PlainPrompt }) {
   const { title, body, proceed, danger, dismiss } = describe(prompt);
   const cautious = useRef<HTMLButtonElement>(null);
 

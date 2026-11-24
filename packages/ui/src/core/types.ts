@@ -772,7 +772,9 @@ export type Notice =
       readonly message: string;
       /** What the user may do about it, as a button beside the message. */
       readonly action?: NoticeAction;
-    };
+    }
+  /** What the SSH client asked is not waited for any more. */
+  | { readonly type: "sign_in_withdrawn"; readonly ask: number };
 
 /**
  * What the core may ask a page. A request about a screen names a pane, a session, or
@@ -798,7 +800,17 @@ export type PageRequestBody =
       readonly size: TermSize;
     }
   /** Put a plugin's question to the user: drawn by the page, under the plugin's name. */
-  | { readonly type: "plugin_ask"; readonly ask: unknown };
+  | { readonly type: "plugin_ask"; readonly ask: unknown }
+  /** Put a question of the SSH client's to the user. */
+  | {
+      readonly type: "sign_in";
+      readonly ask: number;
+      readonly kind: string;
+      readonly host: string;
+      readonly address: string;
+      readonly words: string;
+      readonly again: boolean;
+    };
 
 /** A control message from the core: a notice, or a request to be answered. */
 export type ControlMessage =

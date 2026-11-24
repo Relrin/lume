@@ -9,6 +9,7 @@ import type { RexHost } from "../core/types.ts";
 import { useShell } from "../shell/context.ts";
 import { sentence } from "../shell/notices.ts";
 import { CommandError } from "../transport/types.ts";
+import { GIVEN_UP } from "./model.ts";
 import { REX_LOOK_EVERY_MS } from "./tuning.ts";
 
 /**
@@ -46,8 +47,8 @@ export interface RexActions {
   problem(host: RexHost): string | null;
 }
 
-/** The codes of a connect that was given up, which the user did themselves. */
-const GIVEN_UP: readonly string[] = ["disconnected"];
+/** The codes of a connect that was ended, which the user did themselves. */
+const ENDED: readonly string[] = ["disconnected", GIVEN_UP];
 
 /** Carries out what a page does with servers, and keeps what went wrong. */
 export function useRexActions(): RexActions {
@@ -71,7 +72,7 @@ export function useRexActions(): RexActions {
     });
   };
   return {
-    connect: (host, agreed) => run("lume.rex.connect", host, { confirmed: agreed }, GIVEN_UP),
+    connect: (host, agreed) => run("lume.rex.connect", host, { confirmed: agreed }, ENDED),
     disconnect: (host) => run("lume.rex.disconnect", host, {}),
     rename: (host, session, label) => run("lume.rex.rename-session", host, { session, label }),
     // Why a connection was not made is how the server stands.

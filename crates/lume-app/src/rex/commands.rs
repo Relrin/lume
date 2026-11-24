@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use lume_config::RexHostEntry;
 use lume_layout::WindowId;
+use lume_rex::Endpoint;
 use serde_json::Value;
-use tauri::State;
+use tauri::{State, Webview};
 
 use super::attempt;
 use super::hosts::endpoint_of;
@@ -14,6 +15,8 @@ use crate::error::CommandError;
 use crate::host::{Question, ask_first};
 use crate::host_probe::Probe;
 use crate::services::{Asker, Services};
+use crate::tries::Tries;
+use crate::window::window_of;
 
 type Shared<'a> = State<'a, Arc<Services>>;
 
@@ -53,10 +56,26 @@ pub async fn rex_reach(address: String) -> Result<Probe, CommandError> {
 }
 
 /// Connects to the server at an address, says what it is, and lets go of it again. A
-/// connection that would not be encrypted is made only if the user agreed to it.
+/// connection that would not be encrypted is made only if the user agreed to it. What it
+/// takes to sign in is asked in the window, if it is one of terminals.
 #[tauri::command]
-pub async fn rex_try(address: String, agreed: bool) -> Result<Value, CommandError> {
-    attempt::attempt(endpoint_of(&address)?, agreed).await
+pub async fn rex_try(
+    webview: Webview,
+    services: Shared<'_>,
+    tries: State<'_, Tries>,
+    address: String,
+    agreed: bool,
+    attempt: u32,
+) -> Result<Value, CommandError> {
+    let endpoint = endpoint_of(&address)?;
+    let window = window_of(webview.label());
+    let host = match &endpoint {
+        Endpoint::Ssh { host, .. } => host,
+        _ => &address,
+    };
+    let asks = services.rex.ssh_options(host, &address, window);
+    let trying = attempt::attempt(endpoint, agreed, asks);
+    tries.run(webview.label(), attempt, trying).await
 }
 
 /// Writes a server into the user's file: a new one, or one in place of what it was.
@@ -118,10 +137,16 @@ pub async fn run(
     let confirmed = args.get("confirmed").and_then(Value::as_bool);
     let agreed = confirmed == Some(true);
     let rex = &services.rex;
+    // What it takes to sign in is asked in the window it was asked for in, and of nobody
+    // when it was asked for from outside.
+    let asked = (asker == Asker::Page).then_some(window);
     let done = match id {
-        "lume.rex.open" => rex.open(host, text(args, "session")?, agreed).await,
-        "lume.rex.new-session" => rex.new_session(host, text(args, "label")?, agreed).await,
-        "lume.rex.connect" => rex.connect(host, agreed).await,
+        "lume.rex.open" => rex.open(host, text(args, "session")?, agreed, asked).await,
+        "lume.rex.new-session" => {
+            rex.new_session(host, text(args, "label")?, agreed, asked)
+                .await
+        }
+        "lume.rex.connect" => rex.connect(host, agreed, asked).await,
         "lume.rex.disconnect" => rex.disconnect(host).await,
         "lume.rex.rename-session" => {
             let session = needed(args, "session", "which session")?;

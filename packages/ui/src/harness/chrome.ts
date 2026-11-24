@@ -38,8 +38,10 @@ import { readReference, saveFile, type HarnessInfo } from "./host.ts";
 import { CONNECT_SCENES } from "./connect-scenes.ts";
 import { PANE_SCENES } from "./pane-scenes.ts";
 import { CONNECTION_SCENES, HOSTS_WINDOW } from "./connection-scenes.ts";
+import { covered } from "./reach.ts";
 import { REX_SCENES } from "./rex-scenes.ts";
 import { PLUGIN_SCENES, PLUGIN_SETTINGS_SCENES } from "./plugin-scenes.ts";
+import { SIGN_IN_SCENES } from "./sign-in-scenes.ts";
 import { TAB_SCENES } from "./tab-scenes.ts";
 import type { Scene } from "./scene.ts";
 import { describePage, differences, plainColor, recordText, type Part } from "./structure.ts";
@@ -177,6 +179,7 @@ const SCENES: readonly Scene[] = [
   ...CONNECT_SCENES,
   ...REX_SCENES,
   ...CONNECTION_SCENES,
+  ...SIGN_IN_SCENES,
   ...TAB_SCENES,
   ...PLUGIN_SCENES,
 ];
@@ -504,6 +507,7 @@ async function writeScene(
   const dark = lookOf(page);
   const found = audit(page as unknown as AuditNode);
   for (const problem of found) problems.push(`${name}: ${problem}`);
+  for (const problem of covered(document.body)) problems.push(`${name}: ${problem}`);
 
   core.setScheme("light");
   await until("the light look", CHROME_START_TIMEOUT_MS, () => {

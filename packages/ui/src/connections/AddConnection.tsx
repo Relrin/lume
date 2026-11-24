@@ -72,6 +72,9 @@ const KINDS: readonly {
   { kind: "wsl", label: "WSL", line: "Linux distros on this PC" },
 ];
 
+/** A number for each try of a machine, to end it by. */
+let tries = 0;
+
 function said(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -129,7 +132,7 @@ export function AddConnection({
   const edit = asked.edit;
   const box = useRef<HTMLDivElement>(null);
   const [kind, setKind] = useState<ConnectionKind>(asked.kind);
-  const [address, setAddress] = useState(edit?.kind === "rex" ? edit.address : "");
+  const [address, setAddress] = useState(asked.address);
   // How the address that was asked about last came out, and which that was.
   const [answer, setAnswer] = useState<{ typed: string; read: AddressRead } | null>(null);
   const [ssh, setSsh] = useState<SshForm>(() =>
@@ -145,6 +148,8 @@ export function AddConnection({
   // Counts what was typed and the tests begun: an answer to an earlier one is passed over.
   const asking = useRef(0);
   const testing = useRef(0);
+  // The try that the core is at, if it is at one.
+  const trying = useRef<number | null>(null);
 
   const was = edit?.kind === "rex" ? edit.label : null;
   const before = distroRows(profiles);
@@ -180,9 +185,34 @@ export function AddConnection({
     box.current?.querySelector<HTMLElement>("[data-first]")?.focus();
   }, [kind]);
 
+  // Nothing is asked of the user for a test that they do not wait for any more.
+  const endTry = () => {
+    const attempt = trying.current;
+    trying.current = null;
+    // One that is over has nothing to end.
+    if (attempt !== null) client.tryEnd(attempt).catch(() => undefined);
+  };
+  useEffect(
+    () => () => {
+      testing.current++;
+      endTry();
+    },
+    // Only as the dialog goes.
+    [],
+  );
+  /** Tries a machine, with a number that says which try it is. */
+  const begin = <T,>(run: (attempt: number) => Promise<T>): Promise<T> => {
+    endTry();
+    const attempt = ++tries;
+    trying.current = attempt;
+    return run(attempt).finally(() => {
+      if (trying.current === attempt) trying.current = null;
+    });
+  };
   // A test of what is no longer typed is forgotten.
   const forget = () => {
     testing.current++;
+    endTry();
     setTest(null);
     setProblem(null);
   };
@@ -241,7 +271,7 @@ export function AddConnection({
         const how = reached.ms === null ? (reached.note ?? "") : `${reached.ms} ms`;
         const near = target.kind === "local" || target.kind === "pipe" || target.kind === "unix";
         show(testGoesOn(going, 1, [near ? "" : how]));
-        client.rexTry(address, agreed).then(
+        begin((attempt) => client.rexTry(address, agreed, attempt)).then(
           (tried) => {
             if (!current()) return;
             const steps = going.steps.length;
@@ -280,7 +310,7 @@ export function AddConnection({
         show(
           testGoesOn(going, 1, [reached.ms === null ? (reached.note ?? "") : `${reached.ms} ms`]),
         );
-        client.sshTry(machine).then(
+        begin((attempt) => client.sshTry(machine, attempt)).then(
           () => {
             if (current()) {
               show(

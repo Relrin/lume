@@ -17,8 +17,22 @@ export type RexNext =
   /** It can be connected only without encryption, which the user has to agree to. */
   | { readonly kind: "agree"; readonly label: string };
 
+/** The core's code for a server the user was asked to sign in to and did not. */
+export const GIVEN_UP = "given_up";
+
 /** What an id begins with that stands for an address nothing can be reached at. */
 const UNUSABLE = "rex:?";
+
+/** The id of the server that is meant by its id, its label or its address. */
+export function rexHostNamed(list: RexHosts | null, named: string): string | null {
+  const lower = named.trim().toLowerCase();
+  const hosts = list?.hosts ?? [];
+  const found =
+    hosts.find((host) => host.id === named) ??
+    hosts.find((host) => host.label.toLowerCase() === lower) ??
+    hosts.find((host) => host.address === named.trim());
+  return found?.id ?? null;
+}
 
 /** Whether a server's address is one that can be reached at all. */
 export function usable(host: Pick<RexHost, "id">): boolean {
@@ -127,6 +141,14 @@ function ended(message: string): string {
   return /[.!?…]$/.test(whole) ? whole : `${whole}.`;
 }
 
+/** What can be done about a machine SSH does not sign in to, by its words. */
+export function sshAdvice(error: string): string {
+  return /host key|host identification/i.test(error)
+    ? "If SSH does not ask about the machine when you try again, its key has changed: find " +
+        "out why, then take the old one out with ssh-keygen -R."
+    : "Try again to be asked for what SSH needs.";
+}
+
 /** What a connection without encryption means, as it is put to the user. */
 export const UNENCRYPTED =
   "The connection would not be encrypted. Whoever is on the network between could read " +
@@ -165,7 +187,7 @@ export function reason(host: Pick<RexHost, "id" | "state">): string | null {
     case "not_installed":
       return `${ended(state.error)} Install it there, and try again.`;
     case "ssh":
-      return `${ended(state.error)} Connecting once in a terminal shows what SSH asks for.`;
+      return `${ended(state.error)} ${sshAdvice(state.error)}`;
     default:
       return ended(state.error);
   }

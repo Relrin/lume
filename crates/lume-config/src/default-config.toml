@@ -177,6 +177,9 @@
 # Look for the Rex server of your account on this computer, where servers are listed.
 # One that runs is listed; none is ever started.
 # local = true
+# The server a session of which is shown when Lume starts: its address, or its label.
+# Signing in may be asked for; if that is put away, your workspace stays.
+# start-on = ""
 # Rex servers elsewhere are [[rex.host]] tables. An address is "https://HOST[:PORT]",
 # "http://HOST[:PORT]", "tailnet://HOST:PORT", "ssh://[USER@]HOST[:PORT]" or a host
 # alone, which is tried the safest way first:

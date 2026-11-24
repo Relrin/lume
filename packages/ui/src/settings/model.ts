@@ -16,8 +16,9 @@
 import type { ComponentType } from "react";
 
 import { describeProblem } from "../config/apply.ts";
-import type { ConfigView, Profile, ShellEntry, ThemeEntry } from "../core/types.ts";
+import type { ConfigView, Profile, RexHost, ShellEntry, ThemeEntry } from "../core/types.ts";
 import { profileChoices } from "../palette/choices.ts";
+import { usable } from "../rex/model.ts";
 import { parseHex } from "../shell/color-picker.ts";
 
 /** What a setting is set to. */
@@ -28,7 +29,7 @@ export type SettingControl = "switch" | "select" | "segmented" | "text" | "numbe
 
 /** The lists a setting's choices may be taken from. */
 export type SettingList =
-  "themes" | "fonts" | "interface-fonts" | "shells" | "workspaces" | "profiles";
+  "themes" | "fonts" | "interface-fonts" | "shells" | "workspaces" | "profiles" | "rex-hosts";
 
 /** What the schema says of a setting a person is shown: the keyword `x-lume-settings`. */
 export interface SettingAnnotation {
@@ -188,6 +189,7 @@ export interface SettingsLists {
   readonly shells: readonly ShellEntry[];
   readonly workspaces: readonly string[];
   readonly profiles: readonly Profile[];
+  readonly rexHosts: readonly RexHost[];
 }
 
 /** No lists: what a window has before the core has sent any. */
@@ -198,6 +200,7 @@ export const NO_LISTS: SettingsLists = {
   shells: [],
   workspaces: [],
   profiles: [],
+  rexHosts: [],
 };
 
 /** A change to the user's file that a row asks for. */
@@ -298,6 +301,7 @@ const LISTS: readonly SettingList[] = [
   "shells",
   "workspaces",
   "profiles",
+  "rex-hosts",
 ];
 
 /** What the schema says of a setting, if it says it in the form this reads. */
@@ -480,6 +484,10 @@ function listed(list: SettingList, lists: SettingsLists): SettingChoice[] {
       return lists.workspaces.map((name) => ({ value: name, label: name }));
     case "profiles":
       return profileChoices(lists);
+    case "rex-hosts":
+      return lists.rexHosts
+        .filter((host) => usable(host))
+        .map((host) => ({ value: host.address, label: host.label }));
   }
 }
 

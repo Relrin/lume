@@ -72,6 +72,7 @@ url = "2"
 windows-sys = "0.61"
 x11rb = { version = "0.13", default-features = false }
 zbus-secret-service-keyring-store = "1"
+zeroize = "=1.9.1"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
