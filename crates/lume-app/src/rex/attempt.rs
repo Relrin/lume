@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio::task::JoinSet;
 
-use super::hosts::{SshAsks, command_error};
+use super::hosts::{SshAsks, command_error, refusal};
 use crate::error::CommandError;
 use crate::host_probe::{self, Probe};
 use crate::tuning::{HOST_PROBE_TIMEOUT, REX_CONNECT_WAIT};
@@ -124,7 +124,7 @@ pub async fn attempt(
 ) -> Result<Value, CommandError> {
     let backend = RexBackend::connect_with(
         BackendId(format!("rex-attempt:{endpoint}")),
-        endpoint,
+        endpoint.clone(),
         ClientInfo::app("Lume", env!("CARGO_PKG_VERSION")),
         Options::new().plain_http_agreed(agreed).ssh(asks.options),
     );
@@ -139,7 +139,9 @@ pub async fn attempt(
                 Link::Waiting { error, .. } => {
                     return Err(CommandError::new("unreachable", error));
                 }
-                Link::Refused { code, error } => return Err(CommandError::new(code, error)),
+                Link::Refused { code, error } => {
+                    return Err(CommandError::new(refusal(&endpoint, code), error));
+                }
                 Link::Closed => return Err(CommandError::new("disconnected", "it was ended")),
                 Link::Connecting => {}
             }

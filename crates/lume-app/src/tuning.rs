@@ -61,6 +61,15 @@ pub const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// How long a server is waited for when the sessions of every backend are listed.
 pub const SERVER_LIST_WAIT: Duration = Duration::from_secs(6);
 
+/// The most copies of a server's layout shown in [`SERVED_WINDOW`]. A server that
+/// changes it more often is shown as it stands when the window ends.
+pub const SERVED_COPIES_PER_WINDOW: u32 = 30;
+pub const SERVED_WINDOW: Duration = Duration::from_secs(1);
+
+/// How long after the user was told that a server's layout cannot be shown they are told
+/// again, if it still happens.
+pub const UNSOUND_NOTICE_EVERY: Duration = Duration::from_secs(5 * 60);
+
 /// How many sessions' exit statuses are remembered after the sessions are gone.
 pub const EXITS_KEPT: usize = 256;
 
@@ -207,6 +216,9 @@ pub const ASKPASS_POLL: Duration = Duration::from_millis(100);
 /// How long something that lists Rex servers is taken to be on show after it last said
 /// so, and how often it is to say so again.
 pub const REX_LEASE: Duration = Duration::from_secs(30);
+
+/// How often the pages are told at most how the Rex servers stand.
+pub const REX_TELL_EVERY: Duration = Duration::from_millis(100);
 
 /// How often a connection to a Rex server is looked at when nothing about it changes:
 /// whether it is still wanted.

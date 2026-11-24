@@ -813,6 +813,22 @@ impl Panes {
             .collect()
     }
 
+    /// Forgets what the sessions of a server reported that no pane shows.
+    pub(crate) fn forget_unshown(&self, backend: &BackendId) {
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        let shown: HashSet<SessionId> = self
+            .workspace()
+            .panes()
+            .into_iter()
+            .filter_map(terminal_of)
+            .filter(|terminal| self.backend_of(terminal) == *backend)
+            .filter_map(|terminal| terminal.session)
+            .collect();
+        state.reports().keep_of(backend, &shown);
+    }
+
     /// Whether something runs in a pane that closing it would end.
     pub fn busy(&self, pane: PaneId) -> bool {
         let Some(state) = self.state.upgrade() else {
@@ -2906,6 +2922,7 @@ mod tests {
         let event = lume_session::SessionEvent::Cwd {
             url: url.to_owned(),
         };
+        app.state.reports().shown(key);
         app.state.reports().on_event(key, &event);
     }
 

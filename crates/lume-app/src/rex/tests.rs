@@ -31,6 +31,9 @@ use crate::testing::{FakeShell, RecordingCarrier, STEP, TempDir, size};
 use crate::tuning::WORKSPACE_NAME;
 use crate::window::label_of;
 
+#[path = "hostile_tests.rs"]
+mod hostile;
+
 const HOST: &str = "Build box";
 
 /// The server as it is run for a test: each control connection it takes, in order.
@@ -90,6 +93,7 @@ struct Running {
     /// The id of the page's carrier.
     page: u32,
     asking: Arc<Asking>,
+    shell: Arc<FakeShell>,
     dir: TempDir,
 }
 
@@ -137,7 +141,7 @@ impl Running {
             panes,
             config,
             registry,
-            shell,
+            shell: shell.clone(),
             plugins,
         });
         Self {
@@ -145,6 +149,7 @@ impl Running {
             carrier,
             page,
             asking,
+            shell,
             dir,
         }
     }

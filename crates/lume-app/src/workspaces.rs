@@ -427,8 +427,11 @@ impl Panes {
         // The settings of the workspace are in effect before its panes are, so the
         // sessions of its panes start where it says.
         self.config.set_workspace(Some(&name));
-        self.leave_server();
+        let left = self.leave_server();
         self.layout.replace(opened.workspace);
+        if let Some(left) = left {
+            self.forget_unshown(&left);
+        }
         remember_workspace(self.config.dirs(), &name);
         if let Some(warning) = opened.warning {
             self.notice("warning", warning);

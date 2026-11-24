@@ -9,13 +9,13 @@
 //! Nothing here is more than what a program printed. The one use the application makes
 //! of it, a directory to start in, goes through the check in `lume_session::cwd`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use lume_proto::app::SessionNews;
 use lume_session::{
-    CommandState, ExitStatus, Foreground, Launcher, SessionEvent, SessionState, is_shell_program,
-    program_stem,
+    BackendId, CommandState, ExitStatus, Foreground, Launcher, SessionEvent, SessionId,
+    SessionState, is_shell_program, program_stem,
 };
 use tokio::sync::broadcast;
 
@@ -157,6 +157,11 @@ impl SessionStates {
         known.profile = profile;
     }
 
+    /// Notes that a session is being shown: what it reports from now on is kept.
+    pub fn shown(&self, key: &SessionKey) {
+        self.sessions().entry(key.clone()).or_default();
+    }
+
     /// What the application started a session to run, if it started it.
     pub fn launched(&self, key: &SessionKey) -> Option<Launched> {
         let sessions = self.sessions();
@@ -186,11 +191,10 @@ impl SessionStates {
         }
     }
 
-    /// Takes in a report on its way to the page.
+    /// Takes in a report on its way to the page. One of a session that was forgotten
+    /// meanwhile is not kept: nothing would forget it again.
     pub fn on_event(&self, key: &SessionKey, event: &SessionEvent) {
-        {
-            let mut sessions = self.sessions();
-            let known = sessions.entry(key.clone()).or_default();
+        if let Some(known) = self.sessions().get_mut(key) {
             known.state.apply(event);
             known.note_foreground();
         }
@@ -213,6 +217,12 @@ impl SessionStates {
     /// Forgets a session that is gone.
     pub fn forget(&self, key: &SessionKey) {
         self.sessions().remove(key);
+    }
+
+    /// Forgets every session of a backend but these.
+    pub fn keep_of(&self, backend: &BackendId, kept: &HashSet<SessionId>) {
+        self.sessions()
+            .retain(|key, _| key.backend != *backend || kept.contains(&key.session));
     }
 
     /// What a session's reports add up to so far.
@@ -249,8 +259,6 @@ impl SessionStates {
 
 #[cfg(test)]
 mod tests {
-    use lume_session::{BackendId, SessionId};
-
     use super::*;
 
     fn key(raw: u64) -> SessionKey {
@@ -258,6 +266,15 @@ mod tests {
             backend: BackendId("local".to_owned()),
             session: SessionId::new(raw).unwrap(),
         }
+    }
+
+    /// Sessions that are shown: these, of the one backend.
+    fn states(raws: &[u64]) -> Arc<SessionStates> {
+        let states = SessionStates::new();
+        for raw in raws {
+            states.shown(&key(*raw));
+        }
+        states
     }
 
     fn cwd(url: &str) -> SessionEvent {
@@ -276,8 +293,8 @@ mod tests {
 
     #[test]
     fn reports_add_up_to_a_state_per_session() {
-        let states = SessionStates::new();
-        assert_eq!(states.state(&key(1)), None);
+        let states = states(&[1, 2]);
+        assert_eq!(states.state(&key(3)), None);
         states.on_event(&key(1), &cwd("file://box/a"));
         states.on_event(&key(1), &cwd("file://box/b"));
         states.on_event(&key(2), &SessionEvent::Bell);
@@ -290,11 +307,32 @@ mod tests {
         states.forget(&key(1));
         assert_eq!(states.state(&key(1)), None);
         assert_eq!(states.len(), 1);
+        // A report that was on its way brings nothing back.
+        states.on_event(&key(1), &cwd("file://box/c"));
+        assert_eq!(states.state(&key(1)), None);
+    }
+
+    #[test]
+    fn the_sessions_of_one_backend_are_forgotten_but_for_those_that_are_kept() {
+        let states = SessionStates::new();
+        let server = |raw: u64| SessionKey {
+            backend: BackendId("server".to_owned()),
+            session: SessionId::new(raw).unwrap(),
+        };
+        for known in [key(1), key(2), server(1), server(2)] {
+            states.shown(&known);
+            states.on_event(&known, &cwd("file://box/a"));
+        }
+        let kept = HashSet::from([SessionId::new(2).unwrap()]);
+        states.keep_of(&server(1).backend, &kept);
+        let known = |key: SessionKey| states.state(&key).is_some();
+        assert!(known(key(1)) && known(key(2)) && known(server(2)));
+        assert!(!known(server(1)));
     }
 
     #[test]
     fn a_directory_is_only_known_with_what_the_session_runs() {
-        let states = SessionStates::new();
+        let states = states(&[1]);
         states.on_event(&key(1), &cwd("file://box/a"));
         // A session the application did not start: nothing says what it runs.
         assert_eq!(states.reported_dir(&key(1)), None);
@@ -519,7 +557,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_follower_gets_the_states_so_far_and_then_every_report() {
-        let states = SessionStates::new();
+        let states = states(&[1, 2]);
         states.on_event(&key(1), &cwd("file://box/a"));
         states.on_event(&key(2), &SessionEvent::Bell);
         let (so_far, mut news) = states.follow();

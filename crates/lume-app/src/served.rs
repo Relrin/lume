@@ -14,9 +14,11 @@ use lume_layout::{
 };
 use lume_proto::BackendId;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
 use crate::error::CommandError;
 use crate::panes::Panes;
+use crate::tuning::{SERVED_COPIES_PER_WINDOW, SERVED_WINDOW, UNSOUND_NOTICE_EVERY};
 use crate::workspaces::{self, Find};
 
 /// The server whose layout is on show.
@@ -31,6 +33,46 @@ impl Drop for Served {
     fn drop(&mut self) {
         self.follower.abort();
     }
+}
+
+/// How many copies of a server's layout were made lately.
+struct Pace {
+    began: Instant,
+    made: u32,
+}
+
+impl Pace {
+    fn new() -> Self {
+        Self {
+            began: Instant::now(),
+            made: 0,
+        }
+    }
+
+    /// Counts one more copy, or says until when it has to wait.
+    fn next(&mut self) -> Option<Instant> {
+        if self.began.elapsed() >= SERVED_WINDOW {
+            *self = Self::new();
+        }
+        if self.made >= SERVED_COPIES_PER_WINDOW {
+            return Some(self.began + SERVED_WINDOW);
+        }
+        self.made += 1;
+        None
+    }
+}
+
+/// Takes the changes that have come already.
+async fn passed_over(changes: &mut ChangeStream) {
+    // Taking one that is there needs no waiting. What comes meanwhile is taken too, for
+    // as long as a window is, and no longer.
+    let until = Instant::now() + SERVED_WINDOW;
+    while Instant::now() < until
+        && matches!(
+            tokio::time::timeout(std::time::Duration::ZERO, changes.next()).await,
+            Ok(Some(_))
+        )
+    {}
 }
 
 fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -137,10 +179,11 @@ impl Panes {
         }
     }
 
-    /// Stops following a server's layout. The copy stays on show until another
-    /// workspace takes its place.
-    pub(crate) fn leave_server(&self) {
-        lock(&self.served).take();
+    /// Stops following a server's layout, and says which server's. The copy stays on show
+    /// until another workspace takes its place.
+    pub(crate) fn leave_server(&self) -> Option<BackendId> {
+        let left = lock(&self.served).take();
+        left.map(|served| served.backend.clone())
     }
 
     /// Shows the layout that a backend's server keeps, in place of the workspace on
@@ -166,12 +209,15 @@ impl Panes {
 
         // What becomes of its programs is the say of the workspace being put away.
         let keep = self.config.current().config.workspace.on_switch == OnSwitch::Keep;
-        self.leave_server();
+        let left = self.leave_server();
         // A copy of a server's layout is not written; a workspace of the application's is.
         self.save().await;
         // The settings of a workspace of this application do not apply to a server's.
         self.config.set_workspace(None);
         self.layout.replace(made);
+        if let Some(left) = left {
+            self.forget_unshown(&left);
+        }
         self.end_sessions_put_away(&old, keep);
 
         let this = state
@@ -199,15 +245,28 @@ impl Panes {
         authority: Arc<dyn LayoutAuthority>,
         mut changes: ChangeStream,
     ) {
-        // Said once, not at every change that follows.
-        let mut complained = false;
+        // Said once in a while, not at every change that follows.
+        let mut complained: Option<Instant> = None;
+        let mut pace = Pace::new();
         while let Some(event) = changes.next().await {
-            let served = match event {
-                LayoutEvent::Reset(snapshot) => snapshot.workspace,
+            let mut reset = match event {
+                LayoutEvent::Reset(snapshot) => Some(snapshot.workspace),
+                LayoutEvent::Changed { .. } => None,
+            };
+            // Every copy goes to every page whole or in part. A server that changes its
+            // layout without end does not fill them with it: what it passes through is
+            // left out.
+            while let Some(until) = pace.next() {
+                tokio::time::sleep_until(until).await;
+                passed_over(&mut changes).await;
+                reset = None;
+            }
+            let served = match reset {
+                Some(served) => served,
                 // The changes are to the server's layout, not to the copy, which also
                 // holds what is the application's own. The copy is made again from the
                 // whole, and its followers are sent what differs.
-                LayoutEvent::Changed { .. } => match authority.view().await {
+                None => match authority.view().await {
                     Ok(snapshot) => snapshot.workspace,
                     Err(error) => {
                         tracing::debug!(%backend, %error, "a server's layout could not be read");
@@ -232,15 +291,16 @@ impl Panes {
             match refused {
                 Some(violations) => {
                     tracing::warn!(%backend, ?violations, "a server sent a layout that is not sound");
-                    if !complained {
-                        complained = true;
+                    let due = complained.is_none_or(|at| at.elapsed() >= UNSOUND_NOTICE_EVERY);
+                    if due {
+                        complained = Some(Instant::now());
                         self.notice(
                             "warning",
                             "The server sent a layout that cannot be shown. The layout stays as it was.",
                         );
                     }
                 }
-                None => complained = false,
+                None => self.forget_unshown(&backend),
             }
         }
         // The copy stays on show as it was. Whoever keeps the connection to the server

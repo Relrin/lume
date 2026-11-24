@@ -26,7 +26,7 @@ use lume_proto::{BackendId, Secret};
 use lume_rex::{ClientInfo, Endpoint, Link, Options, RexBackend, RexError, RexSession, SshOptions};
 use lume_session::SessionBackend as _;
 use serde_json::{Value, json};
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
@@ -37,13 +37,17 @@ use crate::configsvc::ConfigService;
 use crate::error::CommandError;
 use crate::panes::Panes;
 use crate::state::AppState;
-use crate::tuning::{REX_CONNECT_WAIT, REX_LEASE, REX_LOOK_EVERY};
+use crate::tuning::{REX_CONNECT_WAIT, REX_LEASE, REX_LOOK_EVERY, REX_TELL_EVERY};
 
 /// What the server of this machine is called, where the user has not called it
 /// anything.
 const LOCAL_LABEL: &str = "Local Rex";
+/// What a connection fails with that would not be encrypted and was not agreed to.
+pub(super) const UNCONFIRMED: &str = "confirmation_required";
 /// What a connection fails with when the user was asked to sign in and did not.
 pub const GIVEN_UP: &str = "given_up";
+/// The revision of how the servers stand at the start.
+const FIRST_REVISION: u64 = 1;
 /// What the ids of these backends begin with.
 const ID_PREFIX: &str = "rex:";
 
@@ -146,9 +150,13 @@ pub struct Hosts {
     /// How the SSH client asks the user, if it can.
     asking: Option<Arc<Asking>>,
     inner: Mutex<Inner>,
-    /// What pages were last told.
+    /// How the servers stood when that was last looked at.
     told: Mutex<Value>,
+    /// Goes up with each time that was otherwise than before.
     revision: AtomicU64,
+    /// Wakes the task that tells the pages.
+    to_tell: Arc<Notify>,
+    teller: AbortHandle,
     /// Goes up whenever how a server stands changes.
     ticks: watch::Sender<u64>,
     /// One session is put on show at a time.
@@ -221,6 +229,21 @@ fn id_of(endpoint: &Endpoint) -> BackendId {
     BackendId(format!("{ID_PREFIX}{endpoint}"))
 }
 
+/// Whether a server can be reached over a connection that is not encrypted, so that the
+/// user may have to agree to one.
+fn may_be_plain(endpoint: &Endpoint) -> bool {
+    matches!(endpoint, Endpoint::Http { .. } | Endpoint::Host { .. })
+}
+
+/// The name of a failure to connect. There is nothing to agree to where a connection is
+/// never unencrypted, whatever is said to have failed.
+pub(super) fn refusal(endpoint: &Endpoint, code: String) -> String {
+    if code == UNCONFIRMED && !may_be_plain(endpoint) {
+        return "refused".to_owned();
+    }
+    code
+}
+
 pub(super) fn command_error(error: &RexError) -> CommandError {
     CommandError::new(error.code().to_owned(), error.to_string())
 }
@@ -234,7 +257,13 @@ impl Hosts {
         asking: Option<Arc<Asking>>,
     ) -> Arc<Self> {
         let (hosts, unusable) = hosts_of(&config.current().config);
-        let this = Arc::new(Self {
+        let to_tell = Arc::new(Notify::new());
+        let this = Arc::new_cyclic(|this| Self {
+            teller: state
+                .runtime()
+                .spawn(tell(this.clone(), Arc::clone(&to_tell)))
+                .abort_handle(),
+            to_tell,
             config: Arc::clone(config),
             state: Arc::downgrade(state),
             panes: Arc::downgrade(panes),
@@ -246,7 +275,7 @@ impl Hosts {
                 ..Inner::default()
             }),
             told: Mutex::new(Value::Null),
-            revision: AtomicU64::new(1),
+            revision: AtomicU64::new(FIRST_REVISION),
             ticks: watch::Sender::new(0),
             opening: tokio::sync::Mutex::new(()),
         });
@@ -356,38 +385,54 @@ impl Hosts {
 
     /// How every server stands, as a page or the command line is told.
     pub fn view(&self) -> Value {
-        self.announce();
-        let mut view = self.told().clone();
+        let (view, changed) = self.look_again();
+        if changed {
+            // The others are told as well.
+            self.announce();
+        }
+        view
+    }
+
+    /// How every server stands now with the revision of that, and whether it is otherwise
+    /// than when it was last looked at.
+    fn look_again(&self) -> (Value, bool) {
+        // Under one lock, so that the highest revision is what is so.
+        let mut told = self.told();
+        let body = self.body();
+        let changed = *told != body;
+        if changed {
+            *told = body;
+            self.revision.fetch_add(1, Ordering::Relaxed);
+        }
+        let mut view = told.clone();
         if let Some(view) = view.as_object_mut() {
             view.insert(
                 "revision".to_owned(),
                 json!(self.revision.load(Ordering::Relaxed)),
             );
         }
-        view
+        (view, changed)
     }
 
-    /// Tells the pages if how the servers stand is not what they were last told.
+    /// Has the pages told how the servers stand, soon, if that is not what they were
+    /// last told.
     fn announce(&self) {
-        let notice = {
-            // Read and told under one lock, so that what is told last is what is so.
-            let mut told = self.told();
-            let body = self.body();
-            if *told == body {
-                return;
-            }
-            *told = body;
-            let revision = self.revision.fetch_add(1, Ordering::Relaxed) + 1;
-            let mut notice = told.clone();
-            if let Some(notice) = notice.as_object_mut() {
-                notice.insert("type".to_owned(), json!("rex_hosts_changed"));
-                notice.insert("revision".to_owned(), json!(revision));
-            }
-            notice
-        };
+        self.to_tell.notify_one();
+    }
+
+    /// Tells the pages how the servers stand if they were last told another revision.
+    /// Returns the revision they know.
+    fn tell_pages(&self, known: u64) -> u64 {
+        let (mut notice, _) = self.look_again();
+        let revision = notice["revision"].as_u64().unwrap_or_default();
+        if revision == known {
+            return known;
+        }
+        notice["type"] = json!("rex_hosts_changed");
         if let Some(state) = self.state.upgrade() {
             state.broadcast(&notice);
         }
+        revision
     }
 
     /// Something about a server changed.
@@ -675,10 +720,15 @@ impl Hosts {
 
     /// Ends a connection that has been taken out.
     fn let_go(&self, id: &BackendId, connection: &Connection) {
-        if let Some(state) = self.state.upgrade() {
+        let state = self.state.upgrade();
+        if let Some(state) = &state {
             state.router().remove(id);
         }
         connection.backend.shutdown();
+        if let Some(state) = state {
+            // Its sessions are known by other numbers if it is ever connected to again.
+            state.reports().keep_of(id, &HashSet::new());
+        }
     }
 
     /// Ends the connection to a server, if there is one. If a session of it is on show,
@@ -858,6 +908,19 @@ impl Hosts {
             .ok_or_else(|| {
                 CommandError::new("disconnected", format!("{} is not connected", host.label))
             })
+    }
+
+    /// Where a server is reached.
+    fn endpoint(&self, id: &BackendId) -> Option<Endpoint> {
+        let inner = self.inner();
+        let host = inner.hosts.iter().find(|host| host.id == *id)?;
+        Some(host.endpoint.clone())
+    }
+
+    /// Whether the user may have to agree to a connection to a server.
+    pub fn may_be_plain(&self, host: &str) -> bool {
+        self.find(host)
+            .is_ok_and(|host| may_be_plain(&host.endpoint))
     }
 
     /// What a server is called, which somebody means by its id, label or address.
@@ -1103,6 +1166,10 @@ impl Hosts {
                 return false;
             }
             Link::Refused { code, error } => {
+                let code = match self.endpoint(id) {
+                    Some(endpoint) => refusal(&endpoint, code),
+                    None => code,
+                };
                 self.failed(id, Failure { code, error });
                 return false;
             }
@@ -1159,6 +1226,26 @@ impl Hosts {
                 connection.watcher.abort();
             }
         }
+    }
+}
+
+impl Drop for Hosts {
+    fn drop(&mut self) {
+        self.teller.abort();
+    }
+}
+
+/// Tells the pages how the servers stand whenever that is to be told, and then nothing
+/// for a while: a server can be otherwise as often as it likes.
+async fn tell(hosts: Weak<Hosts>, to_tell: Arc<Notify>) {
+    let mut known = FIRST_REVISION;
+    loop {
+        to_tell.notified().await;
+        match hosts.upgrade() {
+            Some(hosts) => known = hosts.tell_pages(known),
+            None => return,
+        }
+        tokio::time::sleep(REX_TELL_EVERY).await;
     }
 }
 

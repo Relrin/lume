@@ -167,6 +167,11 @@ impl Dialer for Streams {
 }
 
 impl Listener {
+    /// The server's side of the next stream, however long it takes to come.
+    pub async fn next(&mut self) -> Option<DuplexStream> {
+        self.servers.recv().await
+    }
+
     /// The server's side of the next stream.
     pub async fn stream(&mut self) -> DuplexStream {
         tokio::time::timeout(std::time::Duration::from_secs(20), self.servers.recv())
@@ -514,6 +519,9 @@ impl DataSide {
     }
 }
 
+/// What calls of a method are refused with, if they are: a code, a status and a message.
+pub type Refusing = Arc<dyn Fn(&str) -> Option<(String, u16, String)> + Send + Sync>;
+
 /// Makes an answer to a method into another, or into none.
 pub type Twist = Arc<dyn Fn(&str, Value) -> Option<Value> + Send + Sync>;
 
@@ -539,6 +547,8 @@ pub struct World {
     pub quiet: bool,
     /// What such calls are refused with, instead: a code, a status and a message.
     pub refuse: Option<(String, u16, String)>,
+    /// What every call is refused with, before anything else is made of it.
+    pub refusing: Option<Refusing>,
     /// What every answer is made into before it is given. A request it leaves without
     /// an answer is never answered.
     pub twist: Option<Twist>,
@@ -589,6 +599,7 @@ impl World {
             extra: HashMap::new(),
             quiet: false,
             refuse: None,
+            refusing: None,
             twist: None,
         }
     }
@@ -693,6 +704,14 @@ impl World {
 
     /// Answers one request as a server holding this would.
     pub async fn answer(&mut self, conn: &mut Conn, asked: &Asked) {
+        let refused = self
+            .refusing
+            .as_ref()
+            .and_then(|refuse| refuse(&asked.method));
+        if let Some((code, status, message)) = refused {
+            conn.fail(&asked.id, &code, status, &message).await;
+            return;
+        }
         if self.change(conn, asked).await {
             return;
         }

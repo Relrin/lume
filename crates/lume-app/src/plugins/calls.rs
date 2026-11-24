@@ -834,6 +834,7 @@ mod tests {
         let event = SessionEvent::Cwd {
             url: url.to_owned(),
         };
+        services.state.reports().shown(key);
         services.state.reports().on_event(key, &event);
     }
 

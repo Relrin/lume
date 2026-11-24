@@ -5,7 +5,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use lume_layout::{
     Area, Dir, LayoutSnapshot, LocalLayout, NewContent, PaneId, SpawnFailure, SpawnRequest,
-    Spawner, Started, Store, Window, WindowId, Workspace, WorkspaceId,
+    Spawner, Started, Store, TabId, Window, WindowId, Workspace, WorkspaceId,
 };
 use lume_proto::{
     BackendCaps, ClientFacts, HydrateKinds, Responder, SessionId, SessionInfo, SpawnSpec,
@@ -18,7 +18,7 @@ use super::*;
 use crate::configsvc::ConfigService;
 use crate::marks::Marks;
 use crate::state::AppState;
-use crate::testing::{FakeShell, STEP, TempDir};
+use crate::testing::{FakeShell, RecordingCarrier, STEP, TempDir};
 use crate::tuning::WORKSPACE_NAME;
 use crate::window::label_of;
 use crate::workspaces::Find;
@@ -440,6 +440,133 @@ async fn a_workspace_of_the_applications_own_takes_the_servers_place_again() {
         .await
         .unwrap();
     assert_eq!(app.server.asked().len(), asked);
+    app.state.shutdown().await;
+}
+
+/// What a page that shows the server's layout was told, of one type.
+fn told(carrier: &RecordingCarrier, kind: &str) -> usize {
+    carrier
+        .requests()
+        .iter()
+        .filter(|sent| sent["notify"]["type"] == kind)
+        .count()
+}
+
+/// The server changes what its first pane is called.
+fn call_it(app: &Running, title: &str) {
+    app.server.layout.update(|shown| {
+        let mut next = shown.clone();
+        let pane = next.panes()[0].id;
+        next.pane_mut(pane).unwrap().title = Some(title.to_owned());
+        Some(next)
+    });
+}
+
+#[tokio::test]
+async fn a_server_that_keeps_sending_layouts_that_cannot_be_shown_is_complained_of_once() {
+    let app = running("served-alternating", 1).await;
+    let carrier = RecordingCarrier::new();
+    app.state
+        .open(&label_of(WindowId::new(1)), carrier.clone())
+        .await;
+    app.panes.show_served(&server_id()).await.unwrap();
+    let sound = app.server.layout.workspace();
+    for round in 0..6 {
+        // Two tabs with one pane.
+        app.server.layout.update(|shown| {
+            let mut broken = shown.clone();
+            let mut tab = broken.windows[0].centre.tabs[0].clone();
+            tab.id = TabId::new(99);
+            broken.windows[0].centre.tabs.push(tab);
+            Some(broken)
+        });
+        until("it is told", || told(&carrier, "notice") == 1).await;
+        sleep(Duration::from_millis(20)).await;
+        app.server.layout.update(|_| Some(sound.clone()));
+        let title = format!("sound {round}");
+        call_it(&app, &title);
+        until("the sound one is shown", || {
+            app.panes.workspace().panes()[0].title.as_ref() == Some(&title)
+        })
+        .await;
+    }
+    assert_eq!(told(&carrier, "notice"), 1);
+    app.state.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_layout_changed_more_often_than_it_is_shown_comes_to_stand_as_the_server_has_it() {
+    let app = running("served-often", 1).await;
+    let carrier = RecordingCarrier::new();
+    app.state
+        .open(&label_of(WindowId::new(1)), carrier.clone())
+        .await;
+    app.panes.show_served(&server_id()).await.unwrap();
+    let began = Instant::now();
+    for nth in 0..1_000 {
+        call_it(&app, &format!("title {nth}"));
+        tokio::task::yield_now().await;
+        if nth % 10 == 0 {
+            sleep(Duration::from_millis(1)).await;
+        }
+    }
+    until("the last is shown", || {
+        app.panes.workspace().panes()[0].title.as_deref() == Some("title 999")
+    })
+    .await;
+    let windows = u32::try_from(began.elapsed().as_secs()).unwrap() + 1;
+    let most = windows * SERVED_COPIES_PER_WINDOW;
+    let copies = told(&carrier, "layout_changed") + told(&carrier, "layout_reset");
+    // One is of the server's layout being put on show.
+    assert!(copies <= most as usize + 1, "{copies} of {most}");
+
+    // Afterwards a change is shown at once again.
+    sleep(SERVED_WINDOW).await;
+    let began = Instant::now();
+    call_it(&app, "at once");
+    until("it is shown", || {
+        app.panes.workspace().panes()[0].title.as_deref() == Some("at once")
+    })
+    .await;
+    assert!(began.elapsed() < Duration::from_millis(500));
+    app.state.shutdown().await;
+}
+
+#[tokio::test]
+async fn what_a_servers_session_reported_goes_when_nothing_shows_it() {
+    let app = running("served-reports", 1).await;
+    app.panes.show_served(&server_id()).await.unwrap();
+    let first = app.server.panes()[0];
+    let made = app
+        .panes
+        .apply(split(first, Dir::Right))
+        .await
+        .unwrap()
+        .created
+        .pane
+        .unwrap();
+    until("the copy has the new pane", || {
+        app.panes.workspace().pane(made).is_some()
+    })
+    .await;
+    let reports = app.state.reports();
+    let keys = [first, made].map(|pane| app.panes.session_of(pane).unwrap());
+    for key in &keys {
+        reports.shown(key);
+    }
+    let known = |nth: usize| reports.state(&keys[nth]).is_some();
+    app.server
+        .layout
+        .apply(Intent::Close { pane: made })
+        .await
+        .unwrap();
+    until("the one that is gone is forgotten", || !known(1)).await;
+    assert!(known(0));
+    app.panes
+        .switch(WORKSPACE_NAME, Find::Existing)
+        .await
+        .unwrap();
+    assert!(!known(0));
     app.state.shutdown().await;
 }
 

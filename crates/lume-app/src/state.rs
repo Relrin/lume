@@ -470,6 +470,7 @@ impl AppState {
         let backend_id = backend;
         let backend = self.router.get(backend_id)?;
         let attachment = backend.attach(session, facts).await?;
+        self.reports.shown(&key);
         let launched = self.reports.launched(&key);
         let attached = Attached {
             size: attachment.size,

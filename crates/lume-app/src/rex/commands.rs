@@ -9,7 +9,7 @@ use serde_json::Value;
 use tauri::{State, Webview};
 
 use super::attempt;
-use super::hosts::endpoint_of;
+use super::hosts::{UNCONFIRMED, endpoint_of};
 use crate::commands_connections::write;
 use crate::error::CommandError;
 use crate::host::{Question, ask_first};
@@ -160,7 +160,7 @@ pub async fn run(
                 rex.end_session(host, session).await
             } else {
                 Err(CommandError::new(
-                    "confirmation_required",
+                    UNCONFIRMED,
                     format!("ending `{label}` ends what runs in it"),
                 ))
             }
@@ -171,9 +171,17 @@ pub async fn run(
             )));
         }
     };
+    // What there is to agree to is this application's to say, and follows from what was
+    // asked of it: to end a session, or to connect where that may be unencrypted.
+    let to_agree = match id {
+        "lume.rex.end-session" => true,
+        "lume.rex.open" | "lume.rex.new-session" | "lume.rex.connect" => rex.may_be_plain(host),
+        _ => false,
+    };
     match done {
         Err(error)
-            if error.code == "confirmation_required"
+            if error.code == UNCONFIRMED
+                && to_agree
                 && asker == Asker::Page
                 && confirmed.is_none() =>
         {
