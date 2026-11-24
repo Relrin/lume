@@ -32,9 +32,10 @@ use lume_proto::{
     CellPx, ClientFacts, ExitStatus, SessionEvent, SessionId, SessionState, TermSize,
 };
 use lume_session::{Attachment, FrameStream, Hydrate, InputSink, OutputFrame, SessionError, Sink};
-use lume_vt::Terminal;
+use lume_vt::{Limits, Terminal};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::Instant;
 
 use crate::api::{BlobPart, Formatted, Ticketed};
 use crate::backend::{Link, Shared, backoff};
@@ -46,9 +47,10 @@ use crate::ids::BlockRef;
 use crate::input::{self, Input};
 use crate::stream::{Note, Opening, Piece, Splitter};
 use crate::tuning::{
-    DATA_CLOSE_TIMEOUT, PENDING_MAX_BYTES, REPLAY_PART_BYTES, RESTART_ATTEMPTS_MAX,
-    SNAPSHOT_MAX_BYTES, STREAM_NOTE_MAX_BYTES, STREAM_OPEN_TIMEOUT, TERMINAL_DATA_REF,
-    TERMINAL_SUBPROTOCOL,
+    CELLS_MAX, COPY_WEIGHT_MAX, DATA_CLOSE_TIMEOUT, PENDING_MAX_BYTES, REPLAY_PART_BYTES,
+    REPORT_WINDOW, REPORTS_PER_WINDOW_MAX, RESTART_ATTEMPTS_MAX, SNAPSHOT_MAX_BYTES,
+    STREAM_NOTE_MAX_BYTES, STREAM_OPEN_TIMEOUT, STREAM_PACE_MOST, STREAM_SETTLED,
+    TERMINAL_DATA_REF, TERMINAL_SUBPROTOCOL,
 };
 
 /// A stream that is open: its connection, and where the stream stands.
@@ -95,14 +97,21 @@ fn exit_of(exit_code: i64) -> ExitStatus {
         .unwrap_or(ExitStatus::Unknown)
 }
 
+/// What a copy of a terminal may take to be loaded, here and in the page that is given
+/// the same bytes.
+const COPY_LIMITS: Limits = Limits {
+    cells: CELLS_MAX,
+    bytes: COPY_WEIGHT_MAX,
+};
+
 /// Loads a copy of a terminal in this application's engine, off the threads that must
 /// not wait. Returns the copy, and what followed it in the same bytes: the engine knows
 /// where a copy ends. Fails if the engine cannot load it, as when a server's engine is
-/// of another version.
+/// of another version, and if it would take too much.
 async fn load(mut copy: Vec<u8>) -> Result<(Vec<u8>, Vec<u8>), String> {
     let loading = tokio::task::spawn_blocking(move || {
-        let (_, length) =
-            Terminal::from_snapshot_prefix(&copy).map_err(|error| error.to_string())?;
+        let (_, length) = Terminal::from_foreign_snapshot(&copy, COPY_LIMITS)
+            .map_err(|error| error.to_string())?;
         let after = copy.split_off(length.min(copy.len()));
         Ok((copy, after))
     });
@@ -454,6 +463,25 @@ struct Feed {
     begun_with: Vec<Piece>,
     /// Views that left last, to be told when the stream is closed.
     leaving: Vec<oneshot::Sender<()>>,
+    /// What the terminal's reports add up to.
+    seen: SessionState,
+    /// How many reports and sizes were passed on since when, and when the views are
+    /// told of those that were not.
+    window_start: Instant,
+    window_count: u32,
+    told_at: Option<Instant>,
+    /// When the stream began or was continued last, and how often in a row its server
+    /// ended it soon after.
+    began: Instant,
+    short_lived: u32,
+}
+
+/// Waits until a moment, or without end when there is none.
+async fn at(moment: Option<Instant>) {
+    match moment {
+        Some(moment) => tokio::time::sleep_until(moment).await,
+        None => pending().await,
+    }
 }
 
 impl Feed {
@@ -505,6 +533,35 @@ impl Feed {
         }
     }
 
+    /// Whether one more report, or size, may be passed on now. When too many were in
+    /// the time they are counted in, what is left out is told once that time is over.
+    fn may_tell(&mut self) -> bool {
+        let now = Instant::now();
+        if now.duration_since(self.window_start) >= REPORT_WINDOW {
+            self.window_start = now;
+            self.window_count = 0;
+        }
+        if self.window_count >= REPORTS_PER_WINDOW_MAX {
+            self.told_at
+                .get_or_insert(self.window_start + REPORT_WINDOW);
+            return false;
+        }
+        self.window_count += 1;
+        true
+    }
+
+    /// Tells the views how things stand, after some of it had to be left out.
+    fn tell_all(&mut self) {
+        self.told_at = None;
+        let whole = self.seen.whole();
+        for view in self.views.values_mut() {
+            if let Some(size) = self.size {
+                view.tell_size(size);
+            }
+            view.frame(OutputFrame::Event(whole.clone()));
+        }
+    }
+
     /// Puts what the stream held in line for the views. Output goes to the views that
     /// follow the stream; sizes and the program's end go to all.
     fn take(&mut self, pieces: Vec<Piece>) {
@@ -536,9 +593,11 @@ impl Feed {
                     }
                 }
                 Piece::Note(Note::Resize { size, .. }) => {
-                    self.size = Some(size);
-                    for view in self.views.values_mut() {
-                        view.tell_size(size);
+                    let other = self.size.replace(size) != Some(size);
+                    if other && self.may_tell() {
+                        for view in self.views.values_mut() {
+                            view.tell_size(size);
+                        }
                     }
                 }
                 Piece::Note(Note::ChildExited { exit_code }) => {
@@ -593,6 +652,7 @@ impl Feed {
     /// old stream and the new one is in the copy and nowhere else.
     fn begun(&mut self, started: Started, also: Option<u64>) -> Hydrate {
         self.size = Some(started.size);
+        self.began = Instant::now();
         for (id, view) in &mut self.views {
             if view.standing == Standing::Following || Some(*id) == also {
                 view.start_again(started.size, started.hydrate.clone());
@@ -702,22 +762,37 @@ impl Feed {
             return;
         };
         let state = events::state_of(&control, &self.block).await;
-        if state != SessionState::default()
+        if !state.is_empty()
             && let Some(view) = self.views.get_mut(&id)
         {
-            view.frame(OutputFrame::Event(SessionEvent::State { state }));
+            view.frame(OutputFrame::Event(state.whole()));
         }
+        self.seen = state;
     }
 
     /// Acts on the end of a connection.
     async fn ended(&mut self, end: DataEnd) {
+        // A server that ends a stream as soon as it has begun is gone along with, more
+        // and more slowly: each beginning is a whole copy of the terminal.
+        if !matches!(end, DataEnd::BlockClosed) {
+            if self.began.elapsed() >= STREAM_SETTLED {
+                self.short_lived = 0;
+            }
+            if self.short_lived > 0 {
+                tokio::time::sleep(backoff(self.short_lived).min(STREAM_PACE_MOST)).await;
+            }
+            self.short_lived = self.short_lived.saturating_add(1);
+        }
         match end {
             DataEnd::Dropped => {
                 let Some(lost) = self.live.take() else {
                     return;
                 };
                 match resume(&self.shared, lost).await {
-                    Ok(live) => self.live = Some(live),
+                    Ok(live) => {
+                        self.live = Some(live);
+                        self.began = Instant::now();
+                    }
                     Err(error) => {
                         tracing::debug!(server = %self.shared.name, %error, "a terminal's stream could not be continued");
                         self.restart_for(None).await;
@@ -772,9 +847,12 @@ impl Feed {
                 }
             }
             Command::Report(events) => {
-                for view in self.views.values_mut() {
-                    for event in &events {
-                        view.frame(OutputFrame::Event(event.clone()));
+                for event in events {
+                    self.seen.apply(&event);
+                    if self.may_tell() {
+                        for view in self.views.values_mut() {
+                            view.frame(OutputFrame::Event(event.clone()));
+                        }
                     }
                 }
             }
@@ -803,6 +881,7 @@ impl Feed {
                     }
                     Err(end) => self.ended(end).await,
                 },
+                () = at(self.told_at) => self.tell_all(),
             }
             let begun_with = std::mem::take(&mut self.begun_with);
             self.take(begun_with);
@@ -847,6 +926,12 @@ impl FeedRef {
             size: None,
             begun_with: Vec::new(),
             leaving: Vec::new(),
+            seen: SessionState::default(),
+            window_start: Instant::now(),
+            window_count: 0,
+            told_at: None,
+            began: Instant::now(),
+            short_lived: 0,
         };
         tokio::spawn(async move {
             feed.run().await;

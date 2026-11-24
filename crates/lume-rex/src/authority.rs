@@ -364,10 +364,12 @@ impl RexLayout {
 fn refusal(error: RexError) -> LayoutError {
     match error {
         RexError::Disconnected | RexError::Closed { .. } => LayoutError::Closed,
-        RexError::Call { code, message, .. } => LayoutError::Refused { code, message },
-        other => LayoutError::Refused {
-            code: other.code().to_owned(),
-            message: other.to_string(),
+        error => LayoutError::Refused {
+            code: error.code().to_owned(),
+            message: match error {
+                RexError::Call { message, .. } => message,
+                error => error.to_string(),
+            },
         },
     }
 }

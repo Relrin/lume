@@ -24,9 +24,10 @@ use tokio_tungstenite::tungstenite::error::ProtocolError;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
-use crate::api::{ApiRevisions, ClientInfo, Hello, Secret, Welcome, WireWelcome, cut};
+use crate::api::{ApiRevisions, ClientInfo, Hello, Secret, Welcome, WireWelcome};
 use crate::error::RexError;
 use crate::pulse::{Beat, Pulse};
+use crate::text::{cut, plain};
 use crate::transport::{Io, LOCAL_AUTHORITY};
 use crate::tuning::{
     API_MIN_REVISION, API_REVISION, CALL_TIMEOUT, CONTROL_PATH, CONTROL_SUBPROTOCOL, EVENT_BACKLOG,
@@ -116,28 +117,27 @@ struct Incoming {
     kind: String,
 }
 
-/// A text field of a message, cut to size, or nothing if it is not there as text.
+/// A text field of a message as it may be shown, or nothing if it is not there as text.
 fn text_of(message: &Value, field: &str) -> String {
-    let mut text = message
-        .get(field)
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    cut(&mut text, TEXT_MAX_BYTES);
-    text
+    plain(
+        message
+            .get(field)
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    )
 }
 
-fn protocol(what: impl Into<String>) -> RexError {
-    RexError::Protocol(what.into())
+/// What broke the protocol. What was sent in place of something else may be quoted in
+/// it, and is as long as the server made it.
+fn protocol(what: impl AsRef<str>) -> RexError {
+    RexError::Protocol(plain(what.as_ref()))
 }
 
-/// What a close frame says, cut to size.
+/// What a close frame says.
 fn closed(code: CloseCode, reason: &str) -> Ended {
-    let mut reason = reason.to_owned();
-    cut(&mut reason, TEXT_MAX_BYTES);
     Ended::Closed {
         code: u16::from(code),
-        reason,
+        reason: plain(reason),
     }
 }
 
@@ -413,7 +413,7 @@ fn ended_by(error: &WsError) -> Ended {
         WsError::Protocol(_) | WsError::Utf8(_) => {
             Ended::Protocol("the server broke the WebSocket protocol".to_owned())
         }
-        other => Ended::Protocol(other.to_string()),
+        other => Ended::Protocol(plain(&other.to_string())),
     }
 }
 
@@ -427,6 +427,20 @@ struct Running {
 }
 
 impl Running {
+    /// Notes a request that was sent. What nobody waits for any more is let go of: a
+    /// server need not answer everything it is asked.
+    fn wait_for(
+        &mut self,
+        id: String,
+        method: String,
+        reply: oneshot::Sender<Result<Response, RexError>>,
+    ) {
+        if self.waiting.len() >= REQUEST_BACKLOG {
+            self.waiting.retain(|_, (_, reply)| !reply.is_closed());
+        }
+        self.waiting.insert(id, (method, reply));
+    }
+
     /// Acts on one message from the server. An error ends the connection.
     ///
     /// A text that is not a message at all ends it, and so does an event out of turn,
@@ -551,7 +565,7 @@ async fn run<S: Io>(
                     }));
                     continue;
                 }
-                running.waiting.insert(id, (request.method, request.reply));
+                running.wait_for(id, request.method, request.reply);
                 if let Err(error) = socket.send(Message::text(text)).await {
                     break ended_by(&error);
                 }
@@ -598,6 +612,29 @@ async fn run<S: Io>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn requests_a_server_never_answers_are_not_kept_for_ever() {
+        let (events, _taken) = mpsc::channel(1);
+        let mut running = Running {
+            waiting: HashMap::new(),
+            next_id: 1,
+            last_seq: 0,
+            events,
+        };
+        let (reply, mut answer) = oneshot::channel();
+        running.wait_for("first".to_owned(), "m".to_owned(), reply);
+        for nth in 0..10 * REQUEST_BACKLOG {
+            // Whoever asked has given up.
+            let (reply, _) = oneshot::channel();
+            running.wait_for(nth.to_string(), "m".to_owned(), reply);
+        }
+        assert!(running.waiting.len() <= REQUEST_BACKLOG + 1);
+        // One that is still waited for is answered.
+        let text = json!({ "type": "response", "id": "first", "seq": 0, "payload": 7 });
+        assert!(running.take(&text.to_string()).is_ok());
+        assert_eq!(answer.try_recv().unwrap().unwrap().payload, json!(7));
+    }
 
     #[test]
     fn a_hello_is_kept_short_enough_to_be_taken() {

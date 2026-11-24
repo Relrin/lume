@@ -26,3 +26,8 @@ pub const MAX_HYDRATE: usize = 64 * 1024 * 1024;
 /// The most status records kept for one session. A program may report a record for
 /// each of its jobs; beyond this the record reported longest ago is forgotten.
 pub const STATUS_RECORDS_MAX: usize = 64;
+
+/// The most the status records in a session's whole state may come to when the state
+/// is sent in one piece, which has to fit one frame with room for the rest of the
+/// state. A state with more goes without its oldest records.
+pub const STATE_STATUSES_MAX_BYTES: usize = 32 * 1024;

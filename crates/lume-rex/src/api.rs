@@ -12,20 +12,10 @@ use lume_proto::SessionEvent;
 
 use crate::error::RexError;
 use crate::events;
+use crate::text::{cut, make_plain, plain};
 use crate::tuning::{
     BLOCKS_MAX, CLIENT_TEXT_MAX_BYTES, LAYERS_MAX, SPLIT_DEPTH_MAX, TEXT_MAX_BYTES, WINDOWS_MAX,
 };
-
-/// Cuts a string to at most `max` bytes, at a character's edge.
-pub(crate) fn cut(text: &mut String, max: usize) {
-    if text.len() > max {
-        let mut end = max;
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        text.truncate(end);
-    }
-}
 
 /// A list that a server may write as `null` when it is empty.
 fn or_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
@@ -172,10 +162,10 @@ pub struct ServerVersion {
 
 impl ServerVersion {
     pub(crate) fn cut(mut self) -> Self {
-        cut(&mut self.rex_version, TEXT_MAX_BYTES);
-        cut(&mut self.platform, TEXT_MAX_BYTES);
+        make_plain(&mut self.rex_version);
+        make_plain(&mut self.platform);
         if let Some(commit) = &mut self.commit {
-            cut(commit, TEXT_MAX_BYTES);
+            make_plain(commit);
         }
         self
     }
@@ -191,7 +181,7 @@ pub struct SessionSummary {
 impl SessionSummary {
     pub(crate) fn cut(mut self) -> Self {
         cut(&mut self.session_id, TEXT_MAX_BYTES);
-        cut(&mut self.label, TEXT_MAX_BYTES);
+        make_plain(&mut self.label);
         self
     }
 }
@@ -352,7 +342,7 @@ impl View {
     pub(crate) fn check(mut self) -> Result<Self, RexError> {
         cut_id(&mut self.session_id);
         cut_id(&mut self.active_window_id);
-        cut(&mut self.label, TEXT_MAX_BYTES);
+        make_plain(&mut self.label);
         if self.windows.len() > WINDOWS_MAX {
             return Err(RexError::Protocol("a view has too many windows".to_owned()));
         }
@@ -361,7 +351,7 @@ impl View {
             cut_id(&mut window.window_id);
             cut_id(&mut window.focused_block_id);
             cut_id(&mut window.zoomed_block_id);
-            cut(&mut window.label, TEXT_MAX_BYTES);
+            make_plain(&mut window.label);
             if window.layers.len() > LAYERS_MAX {
                 return Err(RexError::Protocol(
                     "a window has too many layers".to_owned(),
@@ -379,7 +369,7 @@ impl View {
                 for block in &mut layer.blocks {
                     cut_id(&mut block.block_id);
                     cut_id(&mut block.owner);
-                    cut(&mut block.label, TEXT_MAX_BYTES);
+                    make_plain(&mut block.label);
                     cut(&mut block.creator_name, TEXT_MAX_BYTES);
                     cut(&mut block.flavor, TEXT_MAX_BYTES);
                 }
@@ -529,12 +519,13 @@ impl ServerEvent {
             cut(&mut text, TEXT_MAX_BYTES);
             Some(text)
         };
+        let label = |value: &serde_json::Value| Some(plain(value.get("label")?.as_str()?));
         Some(match name {
             "session_created" => {
                 let session = payload.get("session")?;
                 ServerEvent::SessionCreated(SessionSummary {
                     session_id: text(session, "session_id")?,
-                    label: text(session, "label")?,
+                    label: label(session)?,
                 })
             }
             "session_destroyed" => ServerEvent::SessionDestroyed {
@@ -553,7 +544,7 @@ impl ServerEvent {
                 match inner.name.as_str() {
                     "session_label_changed" => ServerEvent::SessionLabel {
                         session_id,
-                        label: text(&inner.payload, "label")?,
+                        label: label(&inner.payload)?,
                     },
                     "session_view_changed" => ServerEvent::ViewChanged {
                         session_id,
@@ -669,20 +660,14 @@ mod tests {
     }
 
     #[test]
-    fn what_is_too_long_is_cut_at_a_characters_edge() {
-        let mut text = "é".repeat(TEXT_MAX_BYTES);
-        cut(&mut text, TEXT_MAX_BYTES);
-        assert_eq!(text.len(), TEXT_MAX_BYTES);
-        let mut odd = format!("a{}", "é".repeat(TEXT_MAX_BYTES));
-        cut(&mut odd, TEXT_MAX_BYTES);
-        assert_eq!(odd.len(), TEXT_MAX_BYTES - 1);
-
+    fn a_sessions_id_is_cut_and_its_label_made_plain() {
         let summary = SessionSummary {
             session_id: "s".repeat(TEXT_MAX_BYTES * 2),
-            label: "work".to_owned(),
+            label: "work\u{202e}\n".to_owned(),
         }
         .cut();
         assert_eq!(summary.session_id.len(), TEXT_MAX_BYTES);
+        assert_eq!(summary.label, "work ");
     }
 
     #[test]

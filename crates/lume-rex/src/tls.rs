@@ -13,9 +13,9 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 
-use crate::api::cut;
 use crate::error::RexError;
-use crate::tuning::{DIAL_TIMEOUT, TEXT_MAX_BYTES};
+use crate::text::plain;
+use crate::tuning::DIAL_TIMEOUT;
 
 /// Whose word is taken that a server is the one its address names.
 #[derive(Clone, Debug, Default)]
@@ -64,11 +64,10 @@ fn failure(endpoint: &str, error: io::Error) -> RexError {
         .and_then(|inner| inner.downcast_ref::<rustls::Error>())
         .is_some_and(|inner| matches!(inner, rustls::Error::InvalidCertificate(_)));
     if certificate {
-        let mut reason = error.to_string();
-        cut(&mut reason, TEXT_MAX_BYTES);
         RexError::Untrusted {
             endpoint: endpoint.to_owned(),
-            reason,
+            // A certificate's own names are in it.
+            reason: plain(&error.to_string()),
         }
     } else {
         RexError::Unreachable {

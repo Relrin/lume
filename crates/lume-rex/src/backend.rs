@@ -9,11 +9,12 @@
 //! the connection to it; the terminals among its blocks are what the application calls
 //! sessions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use lume_layout::LayoutAuthority;
 use lume_proto::{
     BackendCaps, BackendId, ClientFacts, ErrorCode, ExitStatus, HydrateKinds, ProtoError,
@@ -37,10 +38,11 @@ use crate::input::type_text;
 use crate::intents::shell_layout;
 use crate::screen;
 use crate::terminal::FeedRef;
+use crate::text::plain;
 use crate::transport::{Dialed, Options, Reach};
 use crate::tuning::{
-    ATTACH_RETRY, ATTACH_TIMEOUT, RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, SCREEN_POLL,
-    SESSIONS_MAX,
+    ATTACH_RETRY, ATTACH_TIMEOUT, DESCRIBE_AT_ONCE, DESCRIBE_COLS, DESCRIBE_ROWS, DESCRIBE_WAIT,
+    RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, SCREEN_POLL, SESSIONS_MAX, TEXT_MAX_BYTES,
 };
 
 /// How a backend stands with its server.
@@ -85,6 +87,12 @@ pub trait Dialer: Send + Sync + 'static {
 
     /// Ends whatever the streams run through. None is made after this.
     fn close(&self) {}
+
+    /// Whether the server is on this machine, so that the processes and folders it
+    /// names are this machine's.
+    fn is_on_this_machine(&self) -> bool {
+        false
+    }
 }
 
 #[async_trait]
@@ -95,6 +103,10 @@ impl Dialer for Reach {
 
     fn close(&self) {
         Reach::close(self);
+    }
+
+    fn is_on_this_machine(&self) -> bool {
+        Reach::is_on_this_machine(self)
     }
 }
 
@@ -111,6 +123,23 @@ struct State {
     feeds: HashMap<SessionId, FeedRef>,
     /// The number of the last feed made.
     serial: u64,
+}
+
+impl State {
+    /// Lets go of the numbers of blocks that no opened session has any more and no view
+    /// shows. Done whenever what is opened, or a view of it, changes.
+    fn forget_blocks(&mut self) {
+        let named: HashSet<&str> = self
+            .opened
+            .values()
+            .flatten()
+            .flat_map(View::blocks)
+            .filter_map(|block| block.block_id.as_deref())
+            .collect();
+        let feeds = &self.feeds;
+        self.ids
+            .keep(|block, id| named.contains(block) || feeds.contains_key(&id));
+    }
 }
 
 /// What a backend holds of a session's view.
@@ -181,6 +210,7 @@ impl Shared {
                 .is_none_or(|held| held.revision < view.revision)
         {
             *held = Some(view);
+            state.forget_blocks();
             drop(state);
             self.touch();
         }
@@ -228,6 +258,7 @@ impl Shared {
             .is_some_and(|feed| feed.serial == serial)
         {
             state.feeds.remove(&id);
+            state.forget_blocks();
         }
     }
 
@@ -416,18 +447,25 @@ impl RexBackend {
     pub async fn open_session(&self, session_id: &str) -> Result<View, RexError> {
         let control = self.shared.control()?;
         let view = attach(&control, session_id).await?;
-        self.shared
-            .state()
-            .opened
-            .insert(session_id.to_owned(), Some(view.clone()));
+        {
+            let mut state = self.shared.state();
+            state
+                .opened
+                .insert(session_id.to_owned(), Some(view.clone()));
+            state.forget_blocks();
+        }
         self.shared.touch();
         Ok(view)
     }
 
     /// Lets go of a session that was opened. The session carries on.
     pub async fn close_session(&self, session_id: &str) -> Result<(), RexError> {
-        if self.shared.state().opened.remove(session_id).is_none() {
-            return Ok(());
+        {
+            let mut state = self.shared.state();
+            if state.opened.remove(session_id).is_none() {
+                return Ok(());
+            }
+            state.forget_blocks();
         }
         self.shared.touch();
         let control = self.shared.control()?;
@@ -504,29 +542,33 @@ impl RexBackend {
         block_id: &str,
     ) -> Result<SessionInfo, RexError> {
         let of_block = || json!({ "session_id": session_id, "block_id": block_id });
-        let (size, _) = control
-            .call_as::<TerminalSize>("com.superlogical.terminal.size", of_block())
-            .await?;
-        let (process, _) = control
-            .call_as::<TerminalProcess>("com.superlogical.terminal.process", of_block())
-            .await?;
+        let (size, process, title) = tokio::join!(
+            control.call_as::<TerminalSize>("com.superlogical.terminal.size", of_block()),
+            control.call_as::<TerminalProcess>("com.superlogical.terminal.process", of_block()),
+            control.call_as::<TerminalTitle>("com.superlogical.terminal.title", of_block()),
+        );
+        let (size, _) = size?;
+        let (process, _) = process?;
         // A terminal that has no title yet, or cannot say, simply has none.
-        let title = control
-            .call_as::<TerminalTitle>("com.superlogical.terminal.title", of_block())
-            .await
+        let title = title
             .ok()
-            .map(|(title, _)| title.title)
+            .map(|(title, _)| plain(&title.title))
             .filter(|title| !title.is_empty());
         let shown = process.foreground.as_ref().or(process.child.as_ref());
+        // A process and a folder mean something to whoever lists sessions only where
+        // they are this machine's: a number or a path of another machine names
+        // something else here.
+        let here = self.shared.dialer.is_on_this_machine();
         let fits = |count: u32| u16::try_from(count).unwrap_or(TermSize::MAX);
         Ok(SessionInfo {
             id,
             program: shown
-                .map(|process| process.name.clone())
+                .map(|process| plain(&process.name))
                 .unwrap_or_default(),
             pid: process
                 .child
                 .as_ref()
+                .filter(|_| here)
                 .and_then(|child| u32::try_from(child.pid).ok()),
             size: TermSize::new(fits(size.columns), fits(size.rows))
                 .map_err(|_| RexError::Protocol("a terminal has no size".to_owned()))?,
@@ -548,8 +590,35 @@ impl RexBackend {
                 paused: false,
             },
             title,
-            cwd: shown.and_then(|process| process.cwd.clone()),
+            cwd: shown
+                .filter(|_| here)
+                .and_then(|process| process.cwd.clone())
+                // A path that is cut, or has something in it that cannot be seen, is
+                // another path.
+                .filter(|path| path.len() <= TEXT_MAX_BYTES && plain(path) == *path),
         })
+    }
+
+    /// A terminal block that has not said what it is: the server has it, and that is
+    /// all there is to list of it.
+    fn undescribed(id: SessionId, label: &str) -> SessionInfo {
+        SessionInfo {
+            id,
+            program: String::new(),
+            pid: None,
+            size: TermSize::new(DESCRIBE_COLS, DESCRIBE_ROWS).expect("a size that is one"),
+            created_unix_ms: 0,
+            attached: false,
+            exit: None,
+            stats: SessionStats {
+                read_bytes: 0,
+                sent_bytes: 0,
+                pending_bytes: 0,
+                paused: false,
+            },
+            title: Some(label.to_owned()).filter(|label| !label.is_empty()),
+            cwd: None,
+        }
     }
 }
 
@@ -577,10 +646,11 @@ impl SessionBackend for RexBackend {
         }
     }
 
-    /// The terminal blocks of the sessions that were opened here.
+    /// The terminal blocks of the sessions that were opened here. A block that does not
+    /// say in time what it is, or says something that is no answer, is listed without.
     async fn list(&self) -> lume_session::Result<Vec<SessionInfo>> {
         let control = self.shared.control()?;
-        let blocks: Vec<(SessionId, String, String)> = {
+        let blocks: Vec<(SessionId, String, String, String)> = {
             let mut state = self.shared.state();
             let State { opened, ids, .. } = &mut *state;
             let mut blocks = Vec::new();
@@ -594,21 +664,53 @@ impl SessionBackend for RexBackend {
                         ids.of(session_id, block_id),
                         session_id.clone(),
                         block_id.clone(),
+                        block.label.clone(),
                     ));
                 }
             }
             blocks
         };
-        let mut listed = Vec::with_capacity(blocks.len());
-        for (id, session_id, block_id) in blocks {
-            match self.describe(&control, id, &session_id, &block_id).await {
-                Ok(info) => listed.push(info),
-                // The block closed between the view and now.
-                Err(RexError::Call { status: 404, .. }) => {}
-                Err(error) => return Err(error.into()),
+        let mut listed: HashMap<SessionId, Option<SessionInfo>> = HashMap::new();
+        {
+            let control = &control;
+            let mut asking = futures_util::stream::iter(blocks.clone())
+                .map(|(id, session_id, block_id, _)| async move {
+                    let described = self.describe(control, id, &session_id, &block_id).await;
+                    (id, described)
+                })
+                .buffer_unordered(DESCRIBE_AT_ONCE);
+            let until = tokio::time::Instant::now() + DESCRIBE_WAIT;
+            while let Ok(Some((id, described))) =
+                tokio::time::timeout_at(until, asking.next()).await
+            {
+                match described {
+                    Ok(info) => {
+                        listed.insert(id, Some(info));
+                    }
+                    // The block closed between the view and now.
+                    Err(RexError::Call { status: 404, .. }) => {
+                        listed.insert(id, None);
+                    }
+                    Err(error @ (RexError::Disconnected | RexError::Closed { .. })) => {
+                        return Err(error.into());
+                    }
+                    Err(error) => {
+                        tracing::debug!(server = %self.shared.name, %error, "a terminal does not say what it is");
+                    }
+                }
             }
         }
+        let mut listed: Vec<SessionInfo> = blocks
+            .iter()
+            .filter_map(|(id, _, _, label)| {
+                listed
+                    .remove(id)
+                    .unwrap_or_else(|| Some(Self::undescribed(*id, label)))
+            })
+            .collect();
         listed.sort_by_key(|info| info.id);
+        // A view may name a block twice, and a terminal is listed once.
+        listed.dedup_by_key(|info| info.id);
         Ok(listed)
     }
 
@@ -765,6 +867,7 @@ async fn open(shared: &Shared) -> Result<Opened, RexError> {
     let mut state = shared.state();
     state.sessions = sessions;
     state.opened = views;
+    state.forget_blocks();
     state.control = Some(Arc::clone(&control));
     Ok(Opened {
         control,
@@ -794,6 +897,7 @@ fn apply(shared: &Shared, event: ServerEvent) -> Option<String> {
                 .sessions
                 .retain(|session| session.session_id != session_id);
             state.opened.remove(&session_id);
+            state.forget_blocks();
         }
         ServerEvent::SessionMoved { session_id, before } => {
             let from = state
@@ -871,6 +975,7 @@ async fn read_sessions(shared: &Shared, control: &Control) {
         .opened
         .retain(|opened, _| sessions.iter().any(|session| &session.session_id == opened));
     state.sessions = sessions;
+    state.forget_blocks();
     drop(state);
     shared.touch();
 }

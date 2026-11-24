@@ -35,6 +35,7 @@ use lume_proto::{BackendId, SessionId};
 
 use crate::api::{View, ViewBlock, ViewLayer, ViewNode, ViewWindow};
 use crate::error::RexError;
+use crate::text::plain;
 use crate::tuning::SPLIT_DEPTH_MAX;
 
 /// The number of the one window a server's layout is shown in. It is the number the
@@ -635,7 +636,7 @@ fn unit_rect(rect: &[f64; 4]) -> UnitRect {
 /// A name as it may be shown: without control characters, trimmed, no longer than a
 /// name may be. Nothing if nothing is left.
 fn named(text: &str) -> Option<String> {
-    let clean: String = text.chars().filter(|c| !c.is_control()).collect();
+    let clean = plain(text);
     let name: String = clean.trim().chars().take(TITLE_MAX_CHARS).collect();
     let name = name.trim_end();
     (!name.is_empty()).then(|| name.to_owned())
@@ -718,6 +719,7 @@ mod tests {
     fn names_are_cleaned_and_cut() {
         assert_eq!(named("  build\u{7}\n "), Some("build".to_owned()));
         assert_eq!(named(" \t\u{1b} "), None);
+        assert_eq!(named("\u{202e}dorp\u{200b}"), Some("dorp".to_owned()));
         assert_eq!(
             named(&"é".repeat(400)).unwrap().chars().count(),
             TITLE_MAX_CHARS

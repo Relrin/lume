@@ -85,6 +85,23 @@ pub const APPLY_SETTLE: Duration = Duration::from_secs(1);
 pub const SPLIT_DEPTH_MAX: usize = 64;
 /// The longest id or label taken from a server, in bytes. Longer ones are cut.
 pub const TEXT_MAX_BYTES: usize = 1024;
+/// The most marks and joiners shown on one character of a text from a server.
+pub const MARKS_MAX: usize = 4;
+
+/// How many terminals are asked at once what they are when a server's are listed, and
+/// how long all of them together are waited for.
+pub const DESCRIBE_AT_ONCE: usize = 16;
+pub const DESCRIBE_WAIT: Duration = Duration::from_secs(5);
+/// The size a terminal is listed at that does not say its own in time.
+pub const DESCRIBE_COLS: u16 = 80;
+pub const DESCRIBE_ROWS: u16 = 24;
+
+/// The most cells of a terminal's screen. A larger one is shown as large as fits: each
+/// cell costs the page about a hundred bytes.
+pub const CELLS_MAX: u32 = 512 * 1024;
+/// The most memory a copy of a terminal may ask for when it is loaded. A copy can ask
+/// for far more than its own length.
+pub const COPY_WEIGHT_MAX: u64 = 256 * 1024 * 1024;
 
 /// The path of a data connection.
 pub const DATA_PATH: &str = "/api/data";
@@ -118,6 +135,16 @@ pub const REPLAY_PART_BYTES: usize = 900_000;
 /// How many times in a row beginning a stream again may fail before its terminal is
 /// given up.
 pub const RESTART_ATTEMPTS_MAX: u32 = 8;
+/// How long a stream has to go on for its server not to be one that keeps ending it.
+/// One that does is gone along with a little later each time, up to the most.
+pub const STREAM_SETTLED: Duration = Duration::from_secs(10);
+pub const STREAM_PACE_MOST: Duration = Duration::from_secs(8);
+
+/// The most reports, and sizes, of a terminal passed on in [`REPORT_WINDOW`]. Beyond
+/// it they are left out, and when the window ends the views are told what they add up
+/// to.
+pub const REPORTS_PER_WINDOW_MAX: u32 = 200;
+pub const REPORT_WINDOW: Duration = Duration::from_secs(1);
 
 /// How long attaching waits for a terminal whose last view is just going, and how
 /// often it looks whether the way is free.

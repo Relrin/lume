@@ -32,6 +32,7 @@ use tokio::task::JoinSet;
 
 use crate::error::RexError;
 use crate::prompter::{Asking, Cut, PromptRun, Prompter};
+use crate::text::plain;
 use crate::transport::Dialed;
 use crate::tuning::{
     SSH_ASK_TIMEOUT, SSH_CONNECT_SECONDS, SSH_PORT_TRIES, SSH_READY_POLL, SSH_REST_WAIT,
@@ -406,6 +407,8 @@ impl Tunnel {
         let detail = ended
             .detail
             .unwrap_or_else(|| format!("the SSH client ended with {status}"));
+        // The other machine has a say in what its client prints.
+        let detail = plain(&detail);
         match ended.reason {
             DisconnectReason::AuthFailed | DisconnectReason::HostKey => RexError::Ssh {
                 endpoint: self.name.clone(),

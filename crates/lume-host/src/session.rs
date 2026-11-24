@@ -51,7 +51,7 @@ use crate::tuning::{
     ACTIVITY_INTERVAL, ATTACHMENT_QUEUE_MAX, ATTACHMENTS_PER_SESSION_MAX, COALESCE_MAX_BYTES,
     COMMAND_QUEUE, EVENT_WINDOW, EVENTS_PER_WINDOW_MAX, EXIT_DRAIN_TIMEOUT, EXITED_UNSEEN_LINGER,
     FOREGROUND_SETTLE, INPUT_BACKLOG_MAX, READ_CHUNK, READ_QUEUE_CHUNKS, SEND_BATCH_BYTES,
-    STATE_STATUSES_MAX_BYTES, UNATTACHED_EXIT_LINGER,
+    UNATTACHED_EXIT_LINGER,
 };
 
 /// Identifies one attachment of a session. A frame from a client names the attachment
@@ -494,24 +494,6 @@ fn sooner(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
     }
 }
 
-/// Roughly how many bytes a status record takes when it is sent. Text may need
-/// escaping, which at worst doubles it.
-fn weight(status: &ProgramStatus) -> usize {
-    let len = |text: &Option<String>| text.as_ref().map_or(0, String::len);
-    64 + len(&status.id) + len(&status.app) + 2 * (len(&status.title) + len(&status.message))
-}
-
-/// A session's whole state as one event. A state with more status records than one
-/// event can carry goes without the ones reported longest ago.
-fn whole(state: &SessionState) -> SessionEvent {
-    let mut state = state.clone();
-    let mut total: usize = state.statuses.iter().map(weight).sum();
-    while total > STATE_STATUSES_MAX_BYTES && !state.statuses.is_empty() {
-        total -= weight(&state.statuses.remove(0));
-    }
-    SessionEvent::State { state }
-}
-
 /// Resolves at `deadline`, or never if there is none.
 async fn at(deadline: Option<Instant>) {
     match deadline {
@@ -749,7 +731,7 @@ impl Session {
                 };
                 if self.seen.statuses.iter().any(unfinished) {
                     self.seen.statuses.retain(|status| !unfinished(status));
-                    self.emit(whole(&self.seen), now);
+                    self.emit(self.seen.whole(), now);
                 }
                 self.poll_soon(now);
             }
@@ -789,7 +771,7 @@ impl Session {
     /// Tells the clients the whole state, after reports had to be left out.
     async fn resync(&mut self) {
         self.resync_at = None;
-        self.push_event(&whole(&self.seen));
+        self.push_event(&self.seen.whole());
         self.flush().await;
     }
 
@@ -1204,7 +1186,7 @@ impl Session {
         if !self.seen.is_empty() {
             append(
                 &mut start,
-                &Message::new(stream, Body::Event(whole(&self.seen))),
+                &Message::new(stream, Body::Event(self.seen.whole())),
             );
         }
         if !start.is_empty() && !outbox.frames(start).await {

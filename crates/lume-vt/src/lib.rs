@@ -12,8 +12,10 @@
 
 pub mod corpus;
 mod saved;
+mod weigh;
 
 pub use saved::{Format, Formatted, color_scheme_report, focus_report};
+pub use weigh::Limits;
 
 use std::cell::{Cell as StdCell, RefCell};
 use std::ffi::{CStr, c_void};

@@ -2,8 +2,9 @@
 //!
 //! The application names a session by a number. A Rex server names a block by a long
 //! text, and a block belongs to a session of the server's. A block is given a number the
-//! first time it is seen and keeps it for as long as its backend lives, so a view that
-//! holds the number finds the same block after a reconnect.
+//! first time it is seen and keeps it for as long as something here knows the block, so
+//! a view that holds the number finds the same block after a reconnect. Numbers only go
+//! up: one that was let go of is never another block's.
 //!
 //! The numbers of two backends are not the same ones: whoever is given a number finds
 //! one terminal by it, whichever server runs it.
@@ -71,6 +72,21 @@ impl Ids {
         self.by_block.get(block_id).copied()
     }
 
+    /// Lets go of the numbers of the blocks `known` says nothing knows any more. A
+    /// server can name new blocks for as long as it likes.
+    pub(crate) fn keep(&mut self, known: impl Fn(&str, SessionId) -> bool) {
+        self.by_block.retain(|block, id| known(block, *id));
+        let by_block = &self.by_block;
+        self.by_id
+            .retain(|id, block| by_block.get(&block.block_id) == Some(id));
+    }
+
+    /// How many blocks have numbers.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.by_block.len()
+    }
+
     /// The block a number names, if it names one.
     pub(crate) fn block(&self, id: SessionId) -> Option<&BlockRef> {
         self.by_id.get(&id)
@@ -96,6 +112,16 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(ids.of("session:1", "block:a"), a);
         assert_eq!(ids.block(b).unwrap().block_id, "block:b");
+
+        // Let go of, its number is nobody's, and the next one is another.
+        let mut kept = Ids::default();
+        let gone = kept.of("session:1", "block:gone");
+        let held = kept.of("session:1", "block:held");
+        kept.keep(|block, _| block == "block:held");
+        assert_eq!((kept.len(), kept.known("block:held")), (1, Some(held)));
+        assert!(kept.block(gone).is_none());
+        let again = kept.of("session:1", "block:gone");
+        assert!(again != gone && again != held);
 
         // Moved to another session, it is the same block.
         assert_eq!(ids.of("session:2", "block:a"), a);

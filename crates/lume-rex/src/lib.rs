@@ -34,6 +34,7 @@ mod screen;
 mod ssh;
 mod stream;
 mod terminal;
+mod text;
 mod tls;
 mod transport;
 pub mod tuning;

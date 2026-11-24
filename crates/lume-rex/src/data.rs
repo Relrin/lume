@@ -20,13 +20,13 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
-use crate::api::cut;
 use crate::error::RexError;
 use crate::pulse::{Beat, Pulse};
+use crate::text::plain;
 use crate::transport::{Io, LOCAL_AUTHORITY};
 use crate::tuning::{
     DATA_ANSWER_TIMEOUT, DATA_CLOSE_TIMEOUT, DATA_MESSAGE_MAX_BYTES, DATA_PATH,
-    TERMINAL_SUBPROTOCOL, TEXT_MAX_BYTES,
+    TERMINAL_SUBPROTOCOL,
 };
 use crate::ws;
 
@@ -257,8 +257,7 @@ fn end_of_close(frame: Option<CloseFrame>) -> DataEnd {
         (1013, _) => DataEnd::Restart,
         (4000, _) => DataEnd::BlockClosed,
         _ => {
-            let mut reason = reason.to_owned();
-            cut(&mut reason, TEXT_MAX_BYTES);
+            let reason = plain(reason);
             DataEnd::Failed(RexError::Closed { code, reason })
         }
     }

@@ -176,6 +176,11 @@ pub struct Reach {
 }
 
 impl Reach {
+    /// Whether the server is on this machine, reached without a network.
+    pub(crate) fn is_on_this_machine(&self) -> bool {
+        self.endpoint.is_on_this_machine()
+    }
+
     pub fn new(endpoint: Endpoint, mut options: Options) -> Self {
         let name = endpoint.to_string();
         // Handed to what asks, and held nowhere beside it.

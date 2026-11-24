@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::tuning::STATUS_RECORDS_MAX;
+use crate::tuning::{STATE_STATUSES_MAX_BYTES, STATUS_RECORDS_MAX};
 
 /// Something a session reports besides its output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,6 +102,13 @@ pub struct ProgramStatus {
 }
 
 impl ProgramStatus {
+    /// Roughly how many bytes a record takes when it is sent. Text may need escaping,
+    /// which at worst doubles it.
+    fn weight(&self) -> usize {
+        let len = |text: &Option<String>| text.as_ref().map_or(0, String::len);
+        64 + len(&self.id) + len(&self.app) + 2 * (len(&self.title) + len(&self.message))
+    }
+
     /// A report that says only what state the record named is in.
     pub fn new(state: ProgramState, id: Option<String>) -> Self {
         Self {
@@ -239,6 +246,17 @@ impl SessionState {
             self.statuses.remove(0);
         }
         self.statuses.push(status.clone());
+    }
+
+    /// The whole state as one event. A state with more status records than one event
+    /// can carry goes without the ones reported longest ago.
+    pub fn whole(&self) -> SessionEvent {
+        let mut state = self.clone();
+        let mut total: usize = state.statuses.iter().map(ProgramStatus::weight).sum();
+        while total > STATE_STATUSES_MAX_BYTES && !state.statuses.is_empty() {
+            total -= state.statuses.remove(0).weight();
+        }
+        SessionEvent::State { state }
     }
 
     /// Whether a command line is running, as far as the shell has said.

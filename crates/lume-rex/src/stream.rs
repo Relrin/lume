@@ -13,8 +13,8 @@
 use lume_proto::{CellPx, ColorScheme, Rgb, TermSize};
 use serde::Deserialize;
 
-use crate::api::cut;
-use crate::tuning::{SNAPSHOT_MAX_BYTES, STREAM_NOTE_MAX_BYTES, TEXT_MAX_BYTES};
+use crate::text::cut;
+use crate::tuning::{CELLS_MAX, SNAPSHOT_MAX_BYTES, STREAM_NOTE_MAX_BYTES, TEXT_MAX_BYTES};
 
 const ESC: u8 = 0x1b;
 
@@ -112,6 +112,18 @@ fn colour(text: &str) -> Option<Rgb> {
     Some(Rgb([part(0)?, part(2)?, part(4)?]))
 }
 
+/// A size with no more cells than are shown: the longer side gives way.
+fn within(cols: u16, rows: u16) -> (u16, u16) {
+    let most = |other: u16| u16::try_from(CELLS_MAX / u32::from(other.max(1))).unwrap_or(u16::MAX);
+    if u32::from(cols) * u32::from(rows) <= CELLS_MAX {
+        (cols, rows)
+    } else if rows > cols {
+        (cols, most(cols))
+    } else {
+        (most(rows), rows)
+    }
+}
+
 /// Reads the JSON of one message. `None` for one this client does not know or cannot
 /// make sense of: it is passed over.
 fn read_note(json: &[u8]) -> Option<Note> {
@@ -132,7 +144,8 @@ fn read_note(json: &[u8]) -> Option<Note> {
         } => {
             // A terminal larger than this application shows is shown as large as it can.
             let fits = |count: u64| u16::try_from(count).unwrap_or(u16::MAX).min(TermSize::MAX);
-            let size = TermSize::new(fits(cols), fits(rows)).ok()?;
+            let (cols, rows) = within(fits(cols), fits(rows));
+            let size = TermSize::new(cols, rows).ok()?;
             let px = |count: u64| u16::try_from(count).unwrap_or(0);
             Some(Note::Resize {
                 size,
@@ -514,8 +527,24 @@ mod tests {
         else {
             panic!("not a size");
         };
-        assert_eq!((size.cols(), size.rows()), (TermSize::MAX, TermSize::MAX));
+        assert_eq!((size.cols(), size.rows()), (128, TermSize::MAX));
         assert_eq!(owner.as_ref().unwrap().len(), TEXT_MAX_BYTES);
+    }
+
+    #[test]
+    fn a_size_has_no_more_cells_than_are_shown() {
+        for (said, shown) in [
+            ((200, 60), (200, 60)),
+            ((1024, 512), (1024, 512)),
+            ((4096, 128), (4096, 128)),
+            ((4096, 129), (4064, 129)),
+            ((129, 4096), (129, 4064)),
+            ((4096, 4096), (128, 4096)),
+            ((0, 4096), (0, 4096)),
+        ] {
+            assert_eq!(within(said.0, said.1), shown);
+            assert!(u32::from(shown.0) * u32::from(shown.1) <= CELLS_MAX);
+        }
     }
 
     #[test]

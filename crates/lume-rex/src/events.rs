@@ -7,23 +7,29 @@
 //! is asked for when a view arrives.
 //!
 //! Everything in them comes from programs in the terminal by way of the server: it is
-//! cut to size and shown, and nothing else.
+//! made plain and shown, and nothing else.
 
 use lume_proto::tuning::STATUS_RECORDS_MAX;
 use lume_proto::{BlockKind, Foreground, ProgramState, ProgramStatus, SessionEvent, SessionState};
 use serde_json::Value;
 
-use crate::api::cut;
 use crate::control::Control;
 use crate::ids::BlockRef;
 use crate::input::of_block;
+use crate::text::{cut, plain};
 use crate::tuning::TEXT_MAX_BYTES;
 
-/// A text field, cut to size. Nothing for one that is missing, not text, or empty.
+/// A text field as it may be shown. Nothing for one that is missing, not text, or empty.
 fn text(value: &Value, field: &str) -> Option<String> {
-    let mut text = value.get(field)?.as_str()?.to_owned();
-    cut(&mut text, TEXT_MAX_BYTES);
-    Some(text).filter(|text| !text.is_empty())
+    Some(plain(value.get(field)?.as_str()?)).filter(|text| !text.is_empty())
+}
+
+/// The name of a record, which other records are found by: cut to size and otherwise as
+/// it is.
+fn id_of(text: &str) -> Option<String> {
+    let mut id = text.to_owned();
+    cut(&mut id, TEXT_MAX_BYTES);
+    Some(id).filter(|id| !id.is_empty())
 }
 
 /// The program in the foreground, as a server describes a process.
@@ -88,7 +94,7 @@ pub(crate) fn read(name: &str, payload: &Value) -> Vec<SessionEvent> {
             .map(SessionEvent::Foreground)),
         "program_status_changed" => one(payload
             .get("record")
-            .and_then(|record| status_of(text(payload, "id"), record))
+            .and_then(|record| status_of(payload["id"].as_str().and_then(id_of), record))
             .map(SessionEvent::ProgramStatus)),
         "program_status_removed" => payload
             .get("ids")
@@ -98,10 +104,10 @@ pub(crate) fn read(name: &str, payload: &Value) -> Vec<SessionEvent> {
                     .take(STATUS_RECORDS_MAX)
                     .filter_map(Value::as_str)
                     .map(|id| {
-                        let mut id = id.to_owned();
-                        cut(&mut id, TEXT_MAX_BYTES);
-                        let id = Some(id).filter(|id| !id.is_empty());
-                        SessionEvent::ProgramStatus(ProgramStatus::new(ProgramState::Clear, id))
+                        SessionEvent::ProgramStatus(ProgramStatus::new(
+                            ProgramState::Clear,
+                            id_of(id),
+                        ))
                     })
                     .collect()
             })
@@ -134,7 +140,7 @@ pub(crate) async fn state_of(control: &Control, block: &BlockRef) -> SessionStat
     };
     let records = statuses.get("records").and_then(Value::as_array);
     for record in records.into_iter().flatten().take(STATUS_RECORDS_MAX) {
-        if let Some(status) = status_of(text(record, "id"), record) {
+        if let Some(status) = status_of(record["id"].as_str().and_then(id_of), record) {
             state.apply(&SessionEvent::ProgramStatus(status));
         }
     }

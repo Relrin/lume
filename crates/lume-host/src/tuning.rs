@@ -145,11 +145,6 @@ pub const EVENTS_PENDING_MAX: usize = 256;
 pub const EVENTS_PER_WINDOW_MAX: u32 = 200;
 pub const EVENT_WINDOW: Duration = Duration::from_secs(1);
 
-/// The most the status records in a session's whole state may come to when the state
-/// is sent in one piece, which has to fit one frame with room for the rest of the
-/// state. A state with more goes without its oldest records.
-pub const STATE_STATUSES_MAX_BYTES: usize = 32 * 1024;
-
 /// How often a session that prints while its view does not have the keyboard says so.
 pub const ACTIVITY_INTERVAL: Duration = Duration::from_secs(1);
 

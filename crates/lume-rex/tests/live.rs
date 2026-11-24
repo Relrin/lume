@@ -431,7 +431,8 @@ async fn the_backend_follows_a_real_server() {
 
     // What the server refuses comes back as it said it.
     let refused = other.call("no.such_method", Value::Null).await.unwrap_err();
-    assert_eq!(refused.code(), "method_not_found");
+    assert!(matches!(&refused, RexError::Call { code, .. } if code == "method_not_found"));
+    assert_eq!(refused.code(), "not_found");
     backend.shutdown();
 }
 

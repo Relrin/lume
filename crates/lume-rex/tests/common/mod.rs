@@ -8,6 +8,7 @@
 
 #![allow(dead_code)]
 
+pub mod hostile;
 pub mod secure;
 pub mod views;
 
@@ -123,6 +124,8 @@ pub struct Streams {
     pub dialled: Arc<AtomicUsize>,
     /// While set, there is no server to reach.
     pub down: Arc<Mutex<bool>>,
+    /// Whether the server is on this machine.
+    pub here: bool,
 }
 
 /// The server's sides of the streams a backend opened, in order.
@@ -137,6 +140,7 @@ pub fn streams() -> (Streams, Listener) {
             servers,
             dialled: Arc::new(AtomicUsize::new(0)),
             down: Arc::new(Mutex::new(false)),
+            here: false,
         },
         Listener { servers: taken },
     )
@@ -155,6 +159,10 @@ impl Dialer for Streams {
         let (client, server) = tokio::io::duplex(STREAM_BYTES);
         let _ = self.servers.send(server);
         Ok(Dialed::local(client))
+    }
+
+    fn is_on_this_machine(&self) -> bool {
+        self.here
     }
 }
 
@@ -358,6 +366,18 @@ impl Conn {
     }
 }
 
+/// Looks at what a new connection asks for, before its handshake. Says whether that is
+/// the control connection, and gives the stream with nothing taken from it.
+pub async fn asks_for_control(mut stream: DuplexStream) -> Option<(bool, DuplexStream)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut first = [0; 24];
+    stream.read_exact(&mut first).await.ok()?;
+    let (mut near, far) = tokio::io::duplex(STREAM_BYTES);
+    near.write_all(&first).await.ok()?;
+    tokio::spawn(async move { tokio::io::copy_bidirectional(&mut stream, &mut near).await });
+    Some((first.starts_with(b"GET /api/control "), far))
+}
+
 /// The server's side of one data connection.
 pub struct DataSide {
     pub socket: WebSocketStream<DuplexStream>,
@@ -494,6 +514,9 @@ impl DataSide {
     }
 }
 
+/// Makes an answer to a method into another, or into none.
+pub type Twist = Arc<dyn Fn(&str, Value) -> Option<Value> + Send + Sync>;
+
 /// What a pretend server holds: its sessions in order, and each one's view.
 #[derive(Clone)]
 pub struct World {
@@ -516,6 +539,9 @@ pub struct World {
     pub quiet: bool,
     /// What such calls are refused with, instead: a code, a status and a message.
     pub refuse: Option<(String, u16, String)>,
+    /// What every answer is made into before it is given. A request it leaves without
+    /// an answer is never answered.
+    pub twist: Option<Twist>,
 }
 
 /// The calls that change a session's layout.
@@ -563,6 +589,7 @@ impl World {
             extra: HashMap::new(),
             quiet: false,
             refuse: None,
+            twist: None,
         }
     }
 
@@ -763,7 +790,15 @@ impl World {
             }
         };
         match reply {
-            Some(payload) => conn.respond(&asked.id, payload).await,
+            Some(payload) => {
+                let given = match &self.twist {
+                    Some(twist) => twist(&asked.method, payload),
+                    None => Some(payload),
+                };
+                if let Some(payload) = given {
+                    conn.respond(&asked.id, payload).await;
+                }
+            }
             None => {
                 conn.fail(&asked.id, "session_not_found", 404, "session not found")
                     .await;

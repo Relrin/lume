@@ -130,7 +130,8 @@ async fn an_error_from_the_server_keeps_its_code_and_the_connection() {
         }
         other => panic!("{other:?}"),
     }
-    assert_eq!(refused.code(), "session_not_found");
+    // By this client's own name for it, whatever the server called it.
+    assert_eq!(refused.code(), "not_found");
     assert!(control.call("session.list", Value::Null).await.is_ok());
     drop(server.await.unwrap());
 }

@@ -77,7 +77,11 @@ pub enum RexError {
 
 impl RexError {
     /// A short, stable name for the kind of failure, for whoever reads it by program.
-    pub fn code(&self) -> &str {
+    ///
+    /// The names are this client's own, and some of them decide what the user is asked.
+    /// What a server calls a failure of its own is never one of them: it goes by the
+    /// status that comes with it, and the server's word is in the failure itself.
+    pub fn code(&self) -> &'static str {
         match self {
             RexError::BadEndpoint(_) => "bad_request",
             RexError::Unsupported { .. } => "unsupported",
@@ -90,7 +94,14 @@ impl RexError {
             RexError::Refused { .. } => "forbidden",
             RexError::Revision(_) => "version_mismatch",
             RexError::Protocol(_) => "protocol_error",
-            RexError::Call { code, .. } => code,
+            RexError::Call { status, .. } => match status {
+                400 => "bad_request",
+                404 => "not_found",
+                409 => "conflict",
+                413 => "too_large",
+                504 => "timeout",
+                _ => "refused",
+            },
             RexError::Rejected(_) => "rejected",
             RexError::Closed { .. } | RexError::Disconnected => "disconnected",
             RexError::Timeout(_) => "timeout",

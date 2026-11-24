@@ -9,10 +9,10 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{WebSocketStream, client_async_with_config};
 
-use crate::api::cut;
 use crate::error::RexError;
+use crate::text::plain;
 use crate::transport::Io;
-use crate::tuning::{CONNECT_TIMEOUT, TEXT_MAX_BYTES};
+use crate::tuning::CONNECT_TIMEOUT;
 
 /// Shakes hands for a WebSocket at `path` over a stream to a server. `endpoint` names
 /// the server in what is said of failures, and `authority` is what the server is asked
@@ -71,8 +71,7 @@ fn handshake_error(endpoint: &str, error: WsError) -> RexError {
                 .as_deref()
                 .and_then(|body| serde_json::from_slice::<Value>(body).ok())
                 .and_then(|body| body.get("error")?.as_str().map(str::to_owned));
-            let mut reason = said.unwrap_or_else(|| format!("status {status}"));
-            cut(&mut reason, TEXT_MAX_BYTES);
+            let reason = plain(&said.unwrap_or_else(|| format!("status {status}")));
             if status == 403 {
                 RexError::Refused {
                     endpoint: endpoint.to_owned(),
@@ -86,6 +85,6 @@ fn handshake_error(endpoint: &str, error: WsError) -> RexError {
             endpoint: endpoint.to_owned(),
             source,
         },
-        other => RexError::Protocol(format!("the handshake failed: {other}")),
+        other => RexError::Protocol(plain(&format!("the handshake failed: {other}"))),
     }
 }

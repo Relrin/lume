@@ -207,7 +207,8 @@ async fn events_the_list_already_holds_are_not_applied_again() {
 
 #[tokio::test]
 async fn an_opened_sessions_terminals_are_listed_as_a_server_describes_them() {
-    let (dialer, mut listener) = streams();
+    let (mut dialer, mut listener) = streams();
+    dialer.here = true;
     let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
     let mut world = World::recorded();
     // Something that is not a terminal, beside the two that are.
@@ -246,7 +247,7 @@ async fn an_opened_sessions_terminals_are_listed_as_a_server_describes_them() {
 
     // A session the server does not have cannot be opened.
     let missing = backend.open_session("session:none").await.unwrap_err();
-    assert_eq!(missing.code(), "session_not_found");
+    assert_eq!(missing.code(), "not_found");
 }
 
 #[tokio::test]
