@@ -54,6 +54,20 @@ async fn a_backend_connects_and_knows_the_servers_sessions() {
 }
 
 #[tokio::test]
+async fn a_connection_whose_server_does_not_say_what_it_has_is_let_go_of() {
+    let (dialer, mut listener) = streams();
+    let _backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
+    let mut conn = listener.accept().await;
+    let asked = conn.asked().await.unwrap();
+    assert_eq!(asked.method, "server.version");
+    conn.fail(&asked.id, "internal", 500, "not now").await;
+    let gone = tokio::time::timeout(Duration::from_secs(20), conn.asked()).await;
+    assert!(gone.expect("it is held on to").is_none());
+    // And made again.
+    listener.accept().await;
+}
+
+#[tokio::test]
 async fn a_session_is_made_and_can_be_opened() {
     let (dialer, mut listener) = streams();
     let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());

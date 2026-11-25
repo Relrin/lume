@@ -159,6 +159,36 @@ pub const INPUT_PENDING_MAX_BYTES: usize = 1024 * 1024;
 /// How often a terminal's screen is read while text is waited for on it.
 pub const SCREEN_POLL: Duration = Duration::from_millis(200);
 
+/// What a server asks of this client and is not answered yet. A server lets no more wait.
+pub const PERFORMS_WAITING: usize = 16;
+/// How many programs run on a server at once, and how many more there are whose output
+/// is read as it comes. Each has at most one request to this client waiting.
+pub const RUNS_AT_ONCE: usize = 8;
+pub const RUN_STREAMS_AT_ONCE: usize = 4;
+/// How long what runs a program may take to ask what it is to run, once it was started.
+pub const RUN_CAME_WAIT: Duration = Duration::from_secs(15);
+/// How long it may be silent after that. It says every few seconds that it is there.
+pub const RUN_SILENT: Duration = Duration::from_secs(30);
+/// How long after its time a program is ended from here, if the server has not.
+pub const RUN_GRACE: Duration = Duration::from_secs(10);
+/// How long after that its output may take to arrive.
+pub const RUN_SEND_MOST: Duration = Duration::from_secs(5 * 60);
+/// How often a run is looked at for that.
+pub const RUN_LOOK: Duration = Duration::from_millis(500);
+/// How much of a program's input or output one message holds. Written as JSON a byte
+/// takes up to six, and a message holds a mebibyte; where a server takes less, so does
+/// a part.
+pub const RUN_PART_BYTES: usize = 128 * 1024;
+pub const RUN_PART_SHARE: usize = 8;
+/// The most a program's name, arguments and variables take together, and its input.
+pub const RUN_JOB_MAX_BYTES: usize = 512 * 1024;
+pub const RUN_INPUT_MAX_BYTES: usize = 16 * 1024 * 1024;
+/// The most blocks that were made to run programs in and are to be closed once there is
+/// a connection again.
+pub const RUN_BLOCKS_MAX: usize = 256;
+/// How much output that nobody has read yet has the program wait.
+pub const RUN_HOLD_BYTES: usize = 1024 * 1024;
+
 /// How long to wait before connecting again after a connection was lost: this long the
 /// first time, twice as long each time after, up to the most.
 pub const RECONNECT_FIRST: Duration = Duration::from_millis(250);

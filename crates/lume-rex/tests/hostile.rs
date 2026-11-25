@@ -9,6 +9,7 @@ use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 
 use common::hostile::{self, CODES, NAMES, Numbers, OWN_CODES, is_plain};
+use common::programs::{self, Played, Programs, SCRIPT};
 use common::views::{layer, leaf, tiled, view, window};
 use common::{
     DataSide, Listener, NONCE, Recorded, SESSION, Served, Tell, World, client, note_bytes, serve,
@@ -17,8 +18,10 @@ use common::{
 use lume_proto::{
     CellPx, ClientFacts, ColorScheme, ErrorCode, Palette, SessionEvent, SessionId, TermSize,
 };
-use lume_rex::tuning::{CELLS_MAX, DESCRIBE_WAIT, REPORTS_PER_WINDOW_MAX, SESSIONS_MAX};
-use lume_rex::{Link, RexBackend, RexError};
+use lume_rex::tuning::{
+    CELLS_MAX, DESCRIBE_WAIT, REPORTS_PER_WINDOW_MAX, RUN_HOLD_BYTES, RUN_PART_BYTES, SESSIONS_MAX,
+};
+use lume_rex::{Link, Ran, RexBackend, RexError, RunAsked, RunError, RunLimits};
 use lume_session::{Attachment, Hydrate, OutputFrame, SessionBackend, SessionError};
 use serde_json::{Value, json};
 use tokio::time::timeout;
@@ -755,5 +758,328 @@ async fn a_copy_that_asks_for_too_much_gives_way_to_the_screen_written_out() {
         attachment.hydrate,
         Hydrate::VtReplay(b"written out".to_vec())
     );
+    nothing_panicked();
+}
+
+/// A server on which programs are run, whose scripts ask only what the test has them ask.
+async fn with_runs(programs: &Programs) -> Setup {
+    Setup::opened(World::recorded().running(programs)).await
+}
+
+fn some_program() -> (RunAsked, RunLimits) {
+    let asked = RunAsked {
+        program: "git".to_owned(),
+        ..RunAsked::default()
+    };
+    let limits = RunLimits {
+        stdin: Vec::new(),
+        timeout: SOON,
+        max_output: 10,
+    };
+    (asked, limits)
+}
+
+impl Setup {
+    fn perform(&self, payload: Value) {
+        let event = Tell::Event("client_perform_requested".to_owned(), payload);
+        self.served.tell(event);
+    }
+
+    /// Has some client ask this one for something, and gives what it is answered.
+    async fn asks(&self, call: &str, client: &str, action: &str, args: Value) -> Value {
+        let action = format!("lume.run.{action}");
+        self.perform(programs::request(call, client, &action, args));
+        let replied = || {
+            let replies = self.served.asked("client.reply");
+            replies.into_iter().find(|reply| reply["call_id"] == call)
+        };
+        until("it is answered", || replied().is_some()).await;
+        replied().unwrap()
+    }
+
+    /// Asks for a program that writes at most ten bytes, and gives the run with the secret
+    /// of its block.
+    async fn begins(
+        &self,
+        programs: &Programs,
+    ) -> (tokio::task::JoinHandle<Result<Ran, RunError>>, String) {
+        let before = programs.seen(|seen| seen.blocks.len());
+        let backend = Arc::clone(&self.backend);
+        let run = tokio::spawn(async move {
+            let (asked, limits) = some_program();
+            backend.run(&asked, limits).await
+        });
+        until("a block is made", || {
+            programs.seen(|seen| seen.blocks.len()) > before
+        })
+        .await;
+        (run, programs.seen(|seen| seen.secret(before)))
+    }
+}
+
+/// Programs whose scripts do nothing of their own.
+fn unplayed() -> Programs {
+    let mut programs = Programs::new(|_| Played::code(0));
+    programs.comes = false;
+    programs
+}
+
+#[tokio::test]
+async fn nobody_but_a_runs_own_script_is_told_of_it_or_believed() {
+    let programs = unplayed();
+    let setup = with_runs(&programs).await;
+    let (run, secret) = setup.begins(&programs).await;
+    let (other, theirs) = setup.begins(&programs).await;
+    let refused = |reply: &Value| reply["error"]["code"] == "refused";
+    for (nth, args) in [
+        json!({}),
+        json!({ "secret": "" }),
+        json!({ "secret": null }),
+        json!({ "secret": secret.to_uppercase() + "0" }),
+        json!({ "secret": &secret[..31] }),
+        json!({ "secret": [secret] }),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for action in ["job", "in", "out", "alive", "done"] {
+            let call = format!("wrong-{nth}-{action}");
+            let reply = setup.asks(&call, "client:one", action, args.clone()).await;
+            assert!(refused(&reply), "{action} {args}: {reply}");
+        }
+    }
+    let shown = || json!({ "secret": secret });
+    let reply = setup.asks("no-client", "", "job", shown()).await;
+    assert!(refused(&reply), "{reply}");
+
+    // The first that shows the secret is the script.
+    let reply = setup.asks("job", "client:one", "job", shown()).await;
+    assert_eq!(reply["result"]["argv"], json!(["git"]));
+    for (nth, action) in ["job", "in", "out", "alive", "done"]
+        .into_iter()
+        .enumerate()
+    {
+        let args = json!({ "secret": secret, "code": 9, "to": "out", "data": "lies" });
+        let call = format!("other-{nth}");
+        let reply = setup.asks(&call, "client:two", action, args).await;
+        assert!(refused(&reply), "{action}: {reply}");
+    }
+    // Nor is one run's script told of another by its own secret.
+    let args = json!({ "secret": theirs });
+    let reply = setup.asks("cross", "client:three", "job", args).await;
+    assert!(reply.get("result").is_some());
+    let args = json!({ "secret": secret, "to": "out", "data": "truth" });
+    setup.asks("out", "client:one", "out", args).await;
+    let args = || json!({ "secret": secret, "code": 1 });
+    setup.asks("done", "client:one", "done", args()).await;
+    let ran = timeout(SOON, run).await.unwrap().unwrap().unwrap();
+    assert_eq!((ran.code, ran.stdout), (Some(1), b"truth".to_vec()));
+    let reply = setup.asks("again", "client:one", "done", args()).await;
+    assert!(refused(&reply), "{reply}");
+    assert!(!other.is_finished());
+    other.abort();
+    nothing_panicked();
+}
+
+#[tokio::test]
+async fn a_script_that_does_otherwise_than_it_was_asked_ends_its_run() {
+    let programs = unplayed();
+    let setup = with_runs(&programs).await;
+    let cases = [
+        ("job", json!({})),
+        ("out", json!({})),
+        ("out", json!({ "to": "out" })),
+        ("out", json!({ "to": "out", "data": "" })),
+        ("out", json!({ "to": "out", "data": 7 })),
+        ("out", json!({ "to": "out", "data": ["x"] })),
+        ("out", json!({ "to": "out", "data": "\u{100}" })),
+        ("out", json!({ "to": "err", "data": "twelve bytes" })),
+        (
+            "out",
+            json!({ "to": "out", "data": "x".repeat(200 * 1024) }),
+        ),
+        ("out", json!({ "to": "both", "data": "x" })),
+        ("out", json!({ "data": "x" })),
+        ("began", json!({})),
+    ];
+    for (nth, (action, args)) in cases.into_iter().enumerate() {
+        let (run, secret) = setup.begins(&programs).await;
+        let with = |mut args: Value| {
+            args["secret"] = json!(secret);
+            args
+        };
+        let call = |what: &str| format!("{nth}-{what}");
+        let job = with(json!({}));
+        setup.asks(&call("job"), SCRIPT, "job", job).await;
+        let bad = with(args.clone());
+        let reply = setup.asks(&call("bad"), SCRIPT, action, bad).await;
+        assert_eq!(reply["error"]["code"], "refused", "{action}");
+        let ended = timeout(SOON, run).await.unwrap().unwrap();
+        assert!(matches!(ended, Err(RunError::Failed(_))), "{ended:?}");
+        let block = format!("block:run-{nth}");
+        until("its block is closed", || {
+            programs.seen(|seen| seen.closed.contains(&block))
+        })
+        .await;
+    }
+    // Nor is one that says something before it asked what it is to run.
+    let (run, secret) = setup.begins(&programs).await;
+    let early = json!({ "secret": secret, "code": 0 });
+    setup.asks("early", SCRIPT, "done", early).await;
+    let ended = timeout(SOON, run).await.unwrap().unwrap();
+    assert!(matches!(ended, Err(RunError::Failed(_))), "{ended:?}");
+    nothing_panicked();
+}
+
+#[tokio::test]
+async fn output_handed_on_without_waiting_ends_a_program_that_is_read() {
+    let programs = unplayed();
+    let setup = with_runs(&programs).await;
+    let backend = Arc::clone(&setup.backend);
+    let starting = tokio::spawn(async move { backend.start(&some_program().0).await });
+    until("a block is made", || {
+        programs.seen(|seen| seen.blocks.len()) == 1
+    })
+    .await;
+    let secret = programs.seen(|seen| seen.secret(0));
+    let with = |mut args: Value| {
+        args["secret"] = json!(secret);
+        args
+    };
+    setup.asks("job", SCRIPT, "job", with(json!({}))).await;
+    setup.asks("began", SCRIPT, "began", with(json!({}))).await;
+    let started = timeout(SOON, starting).await.unwrap().unwrap().unwrap();
+    let mut taken = 0;
+    for nth in 0..1_000 {
+        let data = "x".repeat(100 * 1024);
+        taken += data.len();
+        let part = with(json!({ "to": "out", "data": data }));
+        let call = format!("out-{nth}");
+        let reply = setup.asks(&call, SCRIPT, "out", part).await;
+        if reply.get("error").is_some() {
+            break;
+        }
+    }
+    assert!(taken <= RUN_HOLD_BYTES + 2 * RUN_PART_BYTES, "{taken}");
+    until("it has ended", || started.run.try_wait() == Some(None)).await;
+    until("its block is closed", || {
+        programs.seen(|seen| seen.closed.len()) == 1
+    })
+    .await;
+    nothing_panicked();
+}
+
+#[tokio::test]
+async fn whatever_is_changed_in_what_a_script_asks_its_run_ends_and_others_are_run() {
+    let programs = unplayed();
+    let setup = with_runs(&programs).await;
+    let like = |action: &str, secret: &str| {
+        let args = match action {
+            "out" => json!({ "secret": secret, "to": "out", "data": "hello" }),
+            "done" => json!({ "secret": secret, "code": 0, "signal": null, "timed_out": false }),
+            _ => json!({ "secret": secret }),
+        };
+        let mut asked = programs::request("like", SCRIPT, &format!("lume.run.{action}"), args);
+        // Nothing is made of what else is said of who asks.
+        asked["requester"] = json!({ "client_id": SCRIPT });
+        asked
+    };
+    for action in ["job", "out", "done"] {
+        let changes = hostile::changed(&like(action, "secret")).len();
+        for nth in 0..changes {
+            let (run, secret) = setup.begins(&programs).await;
+            if action != "job" {
+                setup.perform(like("job", &secret));
+            }
+            let (what, payload) = hostile::changed(&like(action, &secret)).swap_remove(nth);
+            setup.perform(payload);
+            // However that was taken, it is over with these.
+            setup.perform(like("job", &secret));
+            setup.perform(like("done", &secret));
+            if what.contains("client_id =") && action == "job" {
+                // Another showed the secret first, and is the script.
+                run.abort();
+                continue;
+            }
+            let ended = timeout(SOON, run).await;
+            let ended = ended.unwrap_or_else(|_| panic!("{action} {what}"));
+            if let Ok(ran) = ended.unwrap() {
+                assert!(ran.stdout.len() <= 10, "{action} {what}");
+            }
+        }
+    }
+    let (run, secret) = setup.begins(&programs).await;
+    for action in ["job", "out", "done"] {
+        setup.perform(like(action, &secret));
+    }
+    let ran = timeout(SOON, run).await.unwrap().unwrap().unwrap();
+    assert_eq!(ran.stdout, b"hello");
+    assert!(matches!(
+        &*setup.backend.link().borrow(),
+        Link::Connected(_)
+    ));
+    nothing_panicked();
+}
+
+#[tokio::test]
+async fn a_flood_of_requests_holds_up_nothing() {
+    let programs = Programs::new(|_| Played::says("sound"));
+    let setup = with_runs(&programs).await;
+    let big = "x".repeat(2_000);
+    for nth in 0..3_000 {
+        let action = ["lume.run.job", "lume.run.done", "pane.zoom"][nth % 3];
+        let args = json!({ "secret": big, "more": big });
+        let call = nth.to_string();
+        setup.perform(programs::request(&call, "client:x", action, args));
+    }
+    // Events go on behind it.
+    setup.served.tell(Tell::Event(
+        "session_created".to_owned(),
+        json!({ "session": { "session_id": "session:b", "label": "behind" } }),
+    ));
+    until("what came behind it is known", || {
+        setup.backend.sessions().len() == 2
+    })
+    .await;
+    // Whoever sent it is answered no more than it waited for.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(setup.served.asked("client.reply").len() <= 3_000);
+    let (asked, limits) = some_program();
+    let ran = timeout(SOON, setup.backend.run(&asked, limits)).await;
+    assert_eq!(ran.unwrap().unwrap().stdout, b"sound");
+    nothing_panicked();
+}
+
+#[tokio::test]
+async fn a_server_that_makes_no_block_or_says_nonsense_of_one_runs_nothing() {
+    let sound = |method: &str| match method {
+        "server.status" => json!({ "listeners": [{ "endpoint": "x", "primary": true }] }),
+        _ => json!({ "block_id": "block:1" }),
+    };
+    for method in ["server.status", "session.new_block"] {
+        for code in CODES {
+            let mut world = World::recorded().running(&unplayed());
+            world.refusing = Some(Arc::new(move |called| {
+                (called == method).then(|| (code.to_owned(), 409, "\u{202e}no\n".to_owned()))
+            }));
+            let setup = Setup::opened(world).await;
+            let (asked, limits) = some_program();
+            let ended = timeout(Duration::from_secs(5), setup.backend.run(&asked, limits)).await;
+            let error = ended.expect("it is waited for").unwrap_err();
+            assert!(is_plain(&error.to_string()), "{error:?}");
+        }
+        for (what, answer) in hostile::changed(&sound(method)) {
+            let mut programs = unplayed();
+            programs.answers = Some((method.to_owned(), answer));
+            let setup = with_runs(&programs).await;
+            let (asked, limits) = some_program();
+            let running = setup.backend.run(&asked, limits);
+            // One that says it made a block goes on to be a run that never comes.
+            if let Ok(ended) = timeout(Duration::from_millis(50), running).await {
+                let error = ended.unwrap_err();
+                assert!(is_plain(&error.to_string()), "{what}: {error:?}");
+            }
+        }
+    }
     nothing_panicked();
 }

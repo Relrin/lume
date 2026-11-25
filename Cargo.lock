@@ -2720,6 +2720,7 @@ dependencies = [
  "async-trait",
  "data-encoding",
  "futures-util",
+ "getrandom 0.3.4",
  "lume-ipc",
  "lume-layout",
  "lume-proto",

@@ -12,6 +12,7 @@ publish.workspace = true
 async-trait.workspace = true
 data-encoding.workspace = true
 futures-util.workspace = true
+getrandom.workspace = true
 lume-layout.workspace = true
 lume-proto.workspace = true
 lume-session.workspace = true

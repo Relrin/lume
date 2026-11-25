@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 pub mod hostile;
+pub mod programs;
 pub mod secure;
 pub mod views;
 
@@ -552,6 +553,8 @@ pub struct World {
     /// What every answer is made into before it is given. A request it leaves without
     /// an answer is never answered.
     pub twist: Option<Twist>,
+    /// The programs it runs, if it runs any.
+    pub programs: Option<Box<programs::Programs>>,
 }
 
 /// The calls that change a session's layout.
@@ -601,7 +604,14 @@ impl World {
             refuse: None,
             refusing: None,
             twist: None,
+            programs: None,
         }
+    }
+
+    /// The same server, running programs.
+    pub fn running(mut self, programs: &programs::Programs) -> Self {
+        self.programs = Some(Box::new(programs.clone()));
+        self
     }
 
     /// The same server, answering the calls that change a layout.
@@ -710,6 +720,11 @@ impl World {
             .and_then(|refuse| refuse(&asked.method));
         if let Some((code, status, message)) = refused {
             conn.fail(&asked.id, &code, status, &message).await;
+            return;
+        }
+        if let Some(programs) = self.programs.clone()
+            && programs.answer(conn, asked).await
+        {
             return;
         }
         if self.change(conn, asked).await {

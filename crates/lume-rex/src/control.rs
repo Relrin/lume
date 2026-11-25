@@ -31,8 +31,8 @@ use crate::text::{cut, plain};
 use crate::transport::{Io, LOCAL_AUTHORITY};
 use crate::tuning::{
     API_MIN_REVISION, API_REVISION, CALL_TIMEOUT, CONTROL_PATH, CONTROL_SUBPROTOCOL, EVENT_BACKLOG,
-    HELLO_MAX_BYTES, MESSAGE_FLOOR_BYTES, MESSAGE_MAX_BYTES, REQUEST_BACKLOG, TEXT_MAX_BYTES,
-    WELCOME_TIMEOUT,
+    HELLO_MAX_BYTES, MESSAGE_FLOOR_BYTES, MESSAGE_MAX_BYTES, PERFORMS_WAITING, REQUEST_BACKLOG,
+    TEXT_MAX_BYTES, WELCOME_TIMEOUT,
 };
 use crate::ws;
 
@@ -57,15 +57,27 @@ pub struct Event {
     pub payload: Value,
 }
 
+/// The event by which a server asks this client to do something.
+const PERFORM: &str = "client_perform_requested";
+
 /// The events of a control connection, in the order the server sent them.
 pub struct Events {
     events: mpsc::Receiver<Event>,
+    /// What the server asked this client to do, beside the others: an answer is waited
+    /// for, and following the rest may take its time.
+    performs: Option<mpsc::Receiver<Value>>,
 }
 
 impl Events {
     /// The next event, or `None` once the connection has ended.
     pub async fn next(&mut self) -> Option<Event> {
         self.events.recv().await
+    }
+
+    /// The requests that this client do something, each as its event's fields. They are
+    /// not among the events. Given once.
+    pub(crate) fn performs(&mut self) -> Option<mpsc::Receiver<Value>> {
+        self.performs.take()
     }
 }
 
@@ -298,12 +310,13 @@ impl Control {
 
         let (requests, queued) = mpsc::channel(REQUEST_BACKLOG);
         let (events, taken) = mpsc::channel(EVENT_BACKLOG);
+        let (performs, to_perform) = mpsc::channel(PERFORMS_WAITING);
         let (ended, watched) = watch::channel(None);
         let (closing, close) = oneshot::channel();
         tokio::spawn(run(
             socket,
             queued,
-            events,
+            (events, performs),
             ended,
             close,
             welcome.max_message_bytes,
@@ -316,7 +329,10 @@ impl Control {
                 ended: watched,
                 closing: Arc::new(Mutex::new(Some(closing))),
             },
-            Events { events: taken },
+            Events {
+                events: taken,
+                performs: Some(to_perform),
+            },
         ))
     }
 
@@ -372,6 +388,17 @@ impl Control {
         }
     }
 
+    /// Calls a method and does not wait for what comes of it.
+    pub(crate) async fn post(&self, method: &str, payload: Value) {
+        let (reply, _) = oneshot::channel();
+        let request = Request {
+            method: method.to_owned(),
+            payload,
+            reply,
+        };
+        let _ = self.requests.send(request).await;
+    }
+
     /// Calls a method and reads its result as `T`. The number of the last event the
     /// result already holds comes with it.
     pub async fn call_as<T: DeserializeOwned>(
@@ -424,6 +451,7 @@ struct Running {
     /// The number of the last event taken.
     last_seq: u64,
     events: mpsc::Sender<Event>,
+    performs: mpsc::Sender<Value>,
 }
 
 impl Running {
@@ -503,6 +531,12 @@ impl Running {
                     ),
                     None => (String::new(), Value::Null),
                 };
+                if name == PERFORM {
+                    // One more than may wait is nothing a server sends, and its sender
+                    // hears that nobody answers.
+                    let _ = self.performs.try_send(payload);
+                    return Ok(());
+                }
                 let event = Event { seq, name, payload };
                 match self.events.try_send(event) {
                     Ok(()) => Ok(()),
@@ -528,7 +562,7 @@ impl Running {
 async fn run<S: Io>(
     mut socket: WebSocketStream<S>,
     mut requests: mpsc::Receiver<Request>,
-    events: mpsc::Sender<Event>,
+    (events, performs): (mpsc::Sender<Event>, mpsc::Sender<Value>),
     ended: watch::Sender<Option<Ended>>,
     mut close: oneshot::Receiver<()>,
     max_message_bytes: usize,
@@ -538,6 +572,7 @@ async fn run<S: Io>(
         next_id: 1,
         last_seq: 0,
         events,
+        performs,
     };
     let mut pulse = Pulse::new();
     let why = loop {
@@ -616,11 +651,13 @@ mod tests {
     #[test]
     fn requests_a_server_never_answers_are_not_kept_for_ever() {
         let (events, _taken) = mpsc::channel(1);
+        let (performs, _) = mpsc::channel(1);
         let mut running = Running {
             waiting: HashMap::new(),
             next_id: 1,
             last_seq: 0,
             events,
+            performs,
         };
         let (reply, mut answer) = oneshot::channel();
         running.wait_for("first".to_owned(), "m".to_owned(), reply);
@@ -634,6 +671,34 @@ mod tests {
         let text = json!({ "type": "response", "id": "first", "seq": 0, "payload": 7 });
         assert!(running.take(&text.to_string()).is_ok());
         assert_eq!(answer.try_recv().unwrap().unwrap().payload, json!(7));
+    }
+
+    #[test]
+    fn what_is_asked_of_this_client_waits_for_no_event_and_holds_none_up() {
+        let (events, mut taken) = mpsc::channel(1);
+        let (performs, mut asked) = mpsc::channel(2);
+        let mut running = Running {
+            waiting: HashMap::new(),
+            next_id: 1,
+            last_seq: 0,
+            events,
+            performs,
+        };
+        let mut event = |seq: u64, name: &str| {
+            let payload = json!({ "type": name, "payload": { "call_id": seq.to_string() } });
+            let text = json!({ "type": "event", "seq": seq, "payload": payload }).to_string();
+            running.take(&text).is_ok()
+        };
+        // The one place for events is taken from here on.
+        assert!(event(1, "keymap_changed"));
+        for seq in 2..10 {
+            assert!(event(seq, PERFORM), "{seq}");
+        }
+        assert!(!event(10, "keymap_changed"));
+        assert_eq!(taken.try_recv().unwrap().name, "keymap_changed");
+        assert_eq!(asked.try_recv().unwrap()["call_id"], "2");
+        assert_eq!(asked.try_recv().unwrap()["call_id"], "3");
+        assert!(asked.try_recv().is_err(), "only so many wait");
     }
 
     #[test]

@@ -37,13 +37,15 @@ use crate::error::RexError;
 use crate::ids::{BlockRef, Ids};
 use crate::input::type_text;
 use crate::intents::shell_layout;
+use crate::runner::{self, Runs, Turns};
 use crate::screen;
 use crate::terminal::FeedRef;
 use crate::text::plain;
 use crate::transport::{Dialed, Options, Reach};
 use crate::tuning::{
     ATTACH_RETRY, ATTACH_TIMEOUT, DESCRIBE_AT_ONCE, DESCRIBE_COLS, DESCRIBE_ROWS, DESCRIBE_WAIT,
-    RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, SCREEN_POLL, SESSIONS_MAX, TEXT_MAX_BYTES,
+    RECONNECT_FIRST, RECONNECT_MOST, RESUME_WINDOW, RUN_BLOCKS_MAX, SCREEN_POLL, SESSIONS_MAX,
+    TEXT_MAX_BYTES,
 };
 
 /// How a backend stands with its server.
@@ -124,6 +126,11 @@ struct State {
     feeds: HashMap<SessionId, FeedRef>,
     /// The number of the last feed made.
     serial: u64,
+    /// The programs run over the connection there is.
+    runs: Option<Arc<Runs>>,
+    /// The blocks that were made to run programs and have not closed, each with its
+    /// session.
+    made: HashMap<String, String>,
 }
 
 impl State {
@@ -263,6 +270,36 @@ impl Shared {
         }
     }
 
+    /// The connection there is, with the programs run over it.
+    pub(crate) fn line(&self) -> Result<(Arc<Control>, Arc<Runs>), RexError> {
+        let state = self.state();
+        match (&state.control, &state.runs) {
+            (Some(control), Some(runs)) => Ok((Arc::clone(control), Arc::clone(runs))),
+            _ => Err(RexError::Disconnected),
+        }
+    }
+
+    /// The sessions opened here, in no order.
+    pub(crate) fn opened(&self) -> Vec<String> {
+        self.state().opened.keys().cloned().collect()
+    }
+
+    /// Notes that a block was made to run a program in. A server that never says that one
+    /// closed has only so many noted.
+    pub(crate) fn note_made(&self, block_id: &str, session_id: &str) {
+        let mut state = self.state();
+        if state.made.len() < RUN_BLOCKS_MAX {
+            state
+                .made
+                .insert(block_id.to_owned(), session_id.to_owned());
+        }
+    }
+
+    /// Whether the server's machine runs Windows.
+    pub(crate) fn on_windows(&self) -> bool {
+        matches!(&*self.link.borrow(), Link::Connected(version) if version.platform.starts_with("windows"))
+    }
+
     /// Ends every view of every terminal: the backend is going.
     fn end_attachments(&self) {
         for feed in self.state().feeds.values() {
@@ -279,6 +316,8 @@ pub struct RexBackend {
     /// The layout of the session on show, and what keeps it level with the server.
     layout: Arc<RexLayout>,
     layout_keeper: JoinHandle<()>,
+    /// What lets only so many programs run at once.
+    pub(crate) turns: Turns,
 }
 
 impl Drop for RexBackend {
@@ -343,7 +382,12 @@ impl RexBackend {
             keeper,
             layout,
             layout_keeper,
+            turns: Turns::default(),
         })
+    }
+
+    pub(crate) fn shared(&self) -> &Arc<Shared> {
+        &self.shared
     }
 
     /// What the application knows this backend as.
@@ -829,7 +873,7 @@ async fn open(shared: &Shared) -> Result<Opened, RexError> {
             .map(|(token, _)| token)
     };
     let dialed = shared.dialer.dial().await?;
-    let (control, events) = Control::open_at(
+    let (control, mut events) = Control::open_at(
         dialed.io,
         &shared.name,
         &dialed.authority,
@@ -838,6 +882,15 @@ async fn open(shared: &Shared) -> Result<Opened, RexError> {
     )
     .await?;
     let control = Arc::new(control);
+    let runs = Arc::new(Runs::new(control.welcome()));
+    if let Some(performs) = events.performs() {
+        // It ends with the connection.
+        tokio::spawn(runner::serve(
+            Arc::downgrade(&control),
+            Arc::clone(&runs),
+            performs,
+        ));
+    }
     let (version, _) = control
         .call_as::<ServerVersion>("server.version", Value::Null)
         .await?;
@@ -871,6 +924,14 @@ async fn open(shared: &Shared) -> Result<Opened, RexError> {
     state.opened = views;
     state.forget_blocks();
     state.control = Some(Arc::clone(&control));
+    state.runs = Some(runs);
+    // What ran in them ended with the connection, and a server that was stopped meanwhile
+    // has made plain shells of them that nothing shows.
+    let left = std::mem::take(&mut state.made);
+    drop(state);
+    if !left.is_empty() {
+        tokio::spawn(runner::close_blocks(Arc::clone(&control), left));
+    }
     Ok(Opened {
         control,
         events,
@@ -942,6 +1003,13 @@ fn apply(shared: &Shared, event: ServerEvent) -> Option<String> {
                 .and_then(|id| state.feeds.get(&id));
             if let Some(feed) = feed {
                 feed.report(events);
+            }
+            return None;
+        }
+        ServerEvent::BlockClosed { block_id } => {
+            state.made.remove(&block_id);
+            if let Some(runs) = &state.runs {
+                runs.block_closed(&block_id);
             }
             return None;
         }
@@ -1041,6 +1109,7 @@ async fn keep(shared: Arc<Shared>) {
                 let error = follow(&shared, opened).await;
                 let mut state = shared.state();
                 state.control = None;
+                state.runs = None;
                 state.resume = control
                     .reconnect_token()
                     .map(|token| (token.to_owned(), Instant::now()));

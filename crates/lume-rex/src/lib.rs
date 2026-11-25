@@ -11,7 +11,8 @@
 //!   call and every event.
 //! - [`DataConn`] is a data connection: one WebSocket that carries what one terminal
 //!   prints. [`Opening`] and [`Splitter`] take such a stream apart.
-//! - [`RexBackend`] is a server as the application sees any place sessions run.
+//! - [`RexBackend`] is a server as the application sees any place sessions run. It also
+//!   runs programs on the server's machine.
 //!
 //! What a server sends is not trusted. Everything read from it is bounded and checked
 //! before it is used, and nothing it sends can do more than be shown.
@@ -30,6 +31,7 @@ mod intents;
 pub mod layout;
 mod prompter;
 mod pulse;
+mod runner;
 mod screen;
 mod ssh;
 mod stream;
@@ -53,6 +55,7 @@ pub use data::{
 pub use endpoint::{Endpoint, HTTPS_PORT, REX_PORT};
 pub use error::RexError;
 pub use prompter::{PromptRun, Prompter};
+pub use runner::{Ran, RunAsked, RunError, RunLimits, RunReader, RunStarted, StartedRun};
 pub use ssh::{SshOptions, clients_ended as ssh_clients_ended};
 pub use stream::{Note, Opened, Opening, Piece, Splitter, Theme};
 pub use tls::Trust;

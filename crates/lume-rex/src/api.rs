@@ -199,6 +199,28 @@ pub(crate) struct SessionCreated {
     pub session_id: String,
 }
 
+/// What `server.status` returns, as far as it is read.
+#[derive(Deserialize)]
+pub(crate) struct ServerStatus {
+    #[serde(default, deserialize_with = "or_empty")]
+    pub listeners: Vec<Listens>,
+}
+
+/// One endpoint a server listens at.
+#[derive(Deserialize)]
+pub(crate) struct Listens {
+    pub endpoint: String,
+    /// Whether it is the one the server's own program is to use.
+    #[serde(default)]
+    pub primary: bool,
+}
+
+/// What `session.new_block` returns, as far as it is read.
+#[derive(Deserialize)]
+pub(crate) struct BlockMade {
+    pub block_id: String,
+}
+
 /// What `session.attach` returns.
 #[derive(Deserialize)]
 pub(crate) struct Attached {
@@ -493,6 +515,10 @@ pub(crate) enum ServerEvent {
         /// What it reported, as reports of a session.
         events: Vec<SessionEvent>,
     },
+    /// A block closed and left its session.
+    BlockClosed {
+        block_id: String,
+    },
     /// An event this client does nothing with.
     Other,
 }
@@ -549,6 +575,9 @@ impl ServerEvent {
                     "session_view_changed" => ServerEvent::ViewChanged {
                         session_id,
                         revision: inner.payload.get("revision")?.as_u64()?,
+                    },
+                    "block_closed" => ServerEvent::BlockClosed {
+                        block_id: text(&inner.payload, "block_id")?,
                     },
                     "block_event" => {
                         let block = &inner.payload;
