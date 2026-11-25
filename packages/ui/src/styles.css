@@ -6351,12 +6351,19 @@
   }
 
   .prompt h2 {
+    /* A title may name something called as much as there is: its answers stay in view. */
+    flex-shrink: 0;
+    max-height: 5lh;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
     font-size: 16px;
     font-weight: 600;
   }
 
   .prompt p {
     @apply text-ink-muted;
+    min-height: 1lh;
+    overflow-y: auto;
     overflow-wrap: anywhere;
     user-select: text;
   }
@@ -8093,6 +8100,56 @@
   }
 
   /* What the window shows when it cannot start, or is asked only to report on the webview. */
+
+  /* A part of the window that could not be drawn, in its place. */
+  .part-failed {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
+    min-width: 0;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  .part-failed-text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .part-failed-again {
+    @apply text-ink;
+    flex-shrink: 0;
+    padding: 1px 8px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: min(6px, var(--lume-radius-control));
+    cursor: pointer;
+  }
+
+  .part-failed-again:hover {
+    @apply bg-control-hover;
+  }
+
+  /* Where a pane or all of them would be, it is in the middle. */
+  .tab-area > .part-failed,
+  .pane-card > .part-failed {
+    flex: 1;
+    justify-content: center;
+    height: 100%;
+  }
+
+  .window-failed .start-failure {
+    flex: 1;
+    width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .window-failed-ways {
+    display: flex;
+    gap: 8px;
+  }
 
   .start-failure,
   .hello {

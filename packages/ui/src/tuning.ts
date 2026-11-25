@@ -232,6 +232,14 @@ export const SEARCH_MATCHES_MAX = 10_000;
 export const SEARCH_CLEAR_ROWS = 2;
 
 /**
+ * How long a part of the window that could not be drawn waits before something that has
+ * changed has it drawn again: the first time, and the longest after it failed again and
+ * again.
+ */
+export const PART_RETRY_MIN_MS = 1_000;
+export const PART_RETRY_MAX_MS = 30_000;
+
+/**
  * How long after the pointer pressed something among the tabs a change of them is
  * taken to be its doing, and moves. Changes made from the keyboard jump.
  */

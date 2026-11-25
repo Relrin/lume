@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
 
+import { ErrorBoundary } from "../ErrorBoundary.tsx";
 import { leaveSlot, useSlotMotion } from "../motion/slots.ts";
 import { NOTICES_MAX } from "../tuning.ts";
 import { CloseIcon } from "./icons.tsx";
@@ -99,11 +100,13 @@ export function Notices({ store, run }: { store: NoticeStore; run?: RunAction })
     (notice: ShownNotice) => {
       toast.custom(
         (id) => (
-          <Notice
-            notice={notice}
-            dismiss={() => toast.dismiss(id)}
-            run={offered ? (command, args) => running.current?.(command, args) : undefined}
-          />
+          <ErrorBoundary fallback={() => null}>
+            <Notice
+              notice={notice}
+              dismiss={() => toast.dismiss(id)}
+              run={offered ? (command, args) => running.current?.(command, args) : undefined}
+            />
+          </ErrorBoundary>
         ),
         { id: notice.key, duration: notice.stays },
       );

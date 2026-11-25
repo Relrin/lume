@@ -22,6 +22,7 @@ import { FloatingLayer } from "./FloatingLayer.tsx";
 import { useKeyHint } from "./hints.ts";
 import { MinimisedTray } from "./MinimisedTray.tsx";
 import { PaneCard } from "./PaneCard.tsx";
+import { Part } from "./Part.tsx";
 import { PlusIcon } from "./icons.tsx";
 
 /** One gap between two children of a split. */
@@ -159,8 +160,12 @@ export function TabArea() {
           parked={!shown.includes(pane)}
         />
       ))}
-      <FloatingLayer />
-      <MinimisedTray />
+      <Part what="The floating panes" quiet>
+        <FloatingLayer />
+      </Part>
+      <Part what="The panes that are put away">
+        <MinimisedTray />
+      </Part>
     </main>
   );
 }

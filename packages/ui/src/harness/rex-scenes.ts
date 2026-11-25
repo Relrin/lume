@@ -14,7 +14,7 @@ import { CHROME_START_TIMEOUT_MS } from "./tuning.ts";
 /** How often a scene looks again for what it waits for. */
 const POLL_MS = 20;
 
-const DEVBOX: RexHost = {
+export const DEVBOX: RexHost = {
   id: "rex:ssh://devbox-01.example",
   label: "devbox-01",
   address: "ssh://mira@devbox-01.example",
@@ -35,7 +35,7 @@ const DEVBOX: RexHost = {
   latency_ms: 12,
 };
 
-const NAS: RexHost = {
+export const NAS: RexHost = {
   ...DEVBOX,
   id: "rex:https://home-nas.example",
   label: "home-nas",
@@ -45,7 +45,7 @@ const NAS: RexHost = {
   latency_ms: null,
 };
 
-const CI: RexHost = {
+export const CI: RexHost = {
   ...NAS,
   id: "rex:https://dev-ci.example",
   label: "dev-ci-runner",
@@ -53,7 +53,7 @@ const CI: RexHost = {
   state: { kind: "failed", code: "unreachable", error: "the host did not answer in time" },
 };
 
-const LAB: RexHost = {
+export const LAB: RexHost = {
   ...NAS,
   id: "rex:http://192.0.2.7:7297",
   label: "lab",
@@ -67,7 +67,7 @@ const LAB: RexHost = {
 
 const HOSTS: Omit<RexHosts, "revision"> = { local: true, hosts: [DEVBOX, NAS, CI, LAB] };
 
-const WINDOW = {
+export const WINDOW = {
   tabs: [2],
   commands: [...FIXTURE_COMMANDS, ...HOST_COMMANDS],
   bindings: FIXTURE_BINDINGS,
@@ -84,7 +84,7 @@ const WINDOW = {
 } as const satisfies FakeCoreOptions;
 
 /** A window that shows the session "acme" of the first server. */
-const SERVED = {
+export const SERVED = {
   ...WINDOW,
   served: { backend: DEVBOX.id, name: "acme" },
   rexHosts: { ...HOSTS, hosts: [{ ...DEVBOX, on_show: "session:1" }, NAS, CI, LAB] },
@@ -112,7 +112,7 @@ const CROWDED = {
   },
 } as const satisfies FakeCoreOptions;
 
-async function until<T>(what: string, find: () => T | null | undefined): Promise<T> {
+export async function until<T>(what: string, find: () => T | null | undefined): Promise<T> {
   const deadline = performance.now() + CHROME_START_TIMEOUT_MS;
   for (;;) {
     const found = find();
@@ -123,7 +123,7 @@ async function until<T>(what: string, find: () => T | null | undefined): Promise
 }
 
 /** Types into a field the way a user would, so that the component hears of it. */
-function typeInto(field: HTMLInputElement, text: string): void {
+export function typeInto(field: HTMLInputElement, text: string): void {
   const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
   set?.call(field, text);
   field.dispatchEvent(new Event("input", { bubbles: true }));
@@ -184,11 +184,11 @@ async function lookAt(host: string): Promise<void> {
   );
 }
 
-function texts(page: ParentNode, selector: string): string[] {
+export function texts(page: ParentNode, selector: string): string[] {
   return [...page.querySelectorAll(selector)].map((found) => found.textContent ?? "");
 }
 
-function wanted(what: string, is: unknown, should: unknown): string[] {
+export function wanted(what: string, is: unknown, should: unknown): string[] {
   return JSON.stringify(is) === JSON.stringify(should)
     ? []
     : [`${what}: ${JSON.stringify(is)}, not ${JSON.stringify(should)}`];

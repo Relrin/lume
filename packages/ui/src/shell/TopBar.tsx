@@ -11,6 +11,9 @@
  * part of it that is not a control drags the window, and a double press makes the
  * window fill the screen or puts it back.
  *
+ * Each part of the bar that cannot be drawn says so in its place; the window's buttons are
+ * outside all of them.
+ *
  * With the keyboard in the bar, Tab goes from one of its parts to the next and Escape
  * goes back to the terminal.
  */
@@ -24,6 +27,7 @@ import { StatusSlotItems } from "../status/StatusItem.tsx";
 import { TRAFFIC_LIGHTS_INSET_PX } from "../tuning.ts";
 import { AppMenu } from "./AppMenu.tsx";
 import { useShell } from "./context.ts";
+import { Part } from "./Part.tsx";
 import { TabStrip } from "./TabStrip.tsx";
 import { TopTools } from "./TopTools.tsx";
 import { WindowControls } from "./WindowControls.tsx";
@@ -77,18 +81,40 @@ export function TopBar() {
       }}
     >
       <div className="top-left">
-        <AppMenu />
-        <WorkspaceSwitcher />
-        {has("topbar.left") && <StatusSlotItems store={app.status} slot="topbar.left" />}
+        <Part what="The menu">
+          <AppMenu />
+        </Part>
+        <Part what="What is on show">
+          <WorkspaceSwitcher />
+        </Part>
+        {has("topbar.left") && (
+          <Part what="The items here">
+            <StatusSlotItems store={app.status} slot="topbar.left" />
+          </Part>
+        )}
       </div>
       {!tabsAtSide && <span className="top-divider" />}
       <div className="top-centre">
-        {!tabsAtSide && <TabStrip />}
-        {has("topbar.center") && <StatusSlotItems store={app.status} slot="topbar.center" />}
+        {!tabsAtSide && (
+          <Part what="The tabs">
+            <TabStrip />
+          </Part>
+        )}
+        {has("topbar.center") && (
+          <Part what="The items here">
+            <StatusSlotItems store={app.status} slot="topbar.center" />
+          </Part>
+        )}
       </div>
       <div className="top-right">
-        {has("topbar.right") && <StatusSlotItems store={app.status} slot="topbar.right" />}
-        <TopTools />
+        {has("topbar.right") && (
+          <Part what="The items here">
+            <StatusSlotItems store={app.status} slot="topbar.right" />
+          </Part>
+        )}
+        <Part what="The tools">
+          <TopTools />
+        </Part>
         {custom && !mac && <WindowControls />}
       </div>
     </header>

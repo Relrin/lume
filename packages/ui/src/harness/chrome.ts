@@ -36,6 +36,7 @@ import { FakeCore, FIXTURE_TABS, type FakeCoreOptions } from "./fake-core.ts";
 import { FIXTURE_BINDINGS, FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import { readReference, saveFile, type HarnessInfo } from "./host.ts";
 import { CONNECT_SCENES } from "./connect-scenes.ts";
+import { FAILURE_SCENES } from "./failure-scenes.ts";
 import { PANE_SCENES } from "./pane-scenes.ts";
 import { CONNECTION_SCENES, HOSTS_WINDOW } from "./connection-scenes.ts";
 import { covered } from "./reach.ts";
@@ -178,6 +179,7 @@ const SCENES: readonly Scene[] = [
   ...PANE_SCENES,
   ...CONNECT_SCENES,
   ...REX_SCENES,
+  ...FAILURE_SCENES,
   ...CONNECTION_SCENES,
   ...SIGN_IN_SCENES,
   ...TAB_SCENES,

@@ -25,6 +25,7 @@ import { useStore } from "zustand";
 
 import type { PaneDescription } from "../events/describe.ts";
 import type { PaneIcon } from "../events/programs.ts";
+import { ErrorBoundary, type Failure } from "../ErrorBoundary.tsx";
 import { FLOAT_EDGES } from "../layout/floats.ts";
 import { selectFocus } from "../layout/selectors.ts";
 import type { PaneContent, PaneId } from "../layout/types.ts";
@@ -38,6 +39,7 @@ import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
 import { describeNow, followPane, mark } from "./describing.ts";
 import { useKeyHint } from "./hints.ts";
+import { FailedPart } from "./Part.tsx";
 import { PluginViewPlaceholder } from "./PluginViewPlaceholder.tsx";
 import { anchorOf } from "./tab-ui.ts";
 import {
@@ -332,18 +334,15 @@ function RenameField({ pane, shown }: { pane: PaneId; shown: string }) {
   );
 }
 
-function PaneHeader({
-  pane,
-  focused,
-  floating,
-  dev = false,
-}: {
-  pane: PaneId;
-  focused: boolean;
-  floating: boolean;
+interface HeaderProps {
+  readonly pane: PaneId;
+  readonly focused: boolean;
+  readonly floating: boolean;
   /** Whether the pane shows the view of a plugin that is being worked on. */
-  dev?: boolean;
-}) {
+  readonly dev?: boolean;
+}
+
+function PaneHeaderBody({ pane, focused, floating, dev = false }: HeaderProps) {
   const app = useShell();
   const header = useRef<HTMLElement>(null);
   const name = useRef<HTMLSpanElement>(null);
@@ -476,17 +475,56 @@ function PaneHeader({
  * pane that shows a plugin's view is ever rendered so, to keep the view's frame for a
  * while after its tab was left.
  */
-export function PaneCard({
-  pane,
-  header,
-  floating = false,
-  parked = false,
-}: {
-  pane: PaneId;
-  header: boolean;
-  floating?: boolean;
-  parked?: boolean;
-}) {
+export function PaneCard(props: CardProps) {
+  return (
+    <ErrorBoundary
+      fallback={(failure) =>
+        props.parked ? null : <FailedPaneCard pane={props.pane} failure={failure} />
+      }
+    >
+      <PaneCardBody {...props} />
+    </ErrorBoundary>
+  );
+}
+
+interface CardProps {
+  readonly pane: PaneId;
+  readonly header: boolean;
+  readonly floating?: boolean;
+  readonly parked?: boolean;
+}
+
+/** What stands in the place of a pane's card that could not be drawn. */
+function FailedPaneCard({ pane, failure }: { pane: PaneId; failure: Failure }) {
+  const app = useShell();
+  const card = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const element = card.current;
+    return element ? app.area.registerPane(pane, element) : undefined;
+  }, [app, pane]);
+  return (
+    <section ref={card} className="pane-card" data-pane={pane} aria-label={`Pane ${pane}`}>
+      <FailedPart what="This pane" failure={failure} />
+    </section>
+  );
+}
+
+/** A pane's header, apart from what the pane shows under it. */
+function PaneHeader(props: HeaderProps) {
+  return (
+    <ErrorBoundary
+      fallback={(failure) => (
+        <header className="pane-header">
+          <FailedPart what="This header" failure={failure} />
+        </header>
+      )}
+    >
+      <PaneHeaderBody {...props} />
+    </ErrorBoundary>
+  );
+}
+
+function PaneCardBody({ pane, header, floating = false, parked = false }: CardProps) {
   const app = useShell();
   const plugin = useStore(app.layout, (state) => {
     const content = state.panes[pane]?.content;
@@ -755,11 +793,18 @@ function TerminalPaneCard({
     if (!elements.scrollThumb || !elements.preedit || !elements.status) return undefined;
     // The card has its place before the view measures what fits in it.
     const release = app.area.registerPane(pane, element);
-    app.views.mount(pane, elements as Parameters<typeof app.views.mount>[1]);
-    return () => {
+    const leave = () => {
       app.views.unmount(pane);
       release();
     };
+    try {
+      app.views.mount(pane, elements as Parameters<typeof app.views.mount>[1]);
+    } catch (error) {
+      // The card is not drawn, and the view is left as one whose card has gone.
+      leave();
+      throw error;
+    }
+    return leave;
     // A header that comes or goes changes the terminal's height, which the view sees
     // for itself; the elements stay the same.
   }, [app, pane]);

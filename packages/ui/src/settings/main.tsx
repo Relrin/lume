@@ -2,6 +2,8 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import "../styles.css";
+import { ErrorBoundary } from "../ErrorBoundary.tsx";
+import { WindowFailed } from "../shell/WindowFailed.tsx";
 import { settingsApp, type SettingsApp } from "./boot.ts";
 import { SettingsWindow } from "./SettingsWindow.tsx";
 
@@ -41,6 +43,12 @@ if (!root) throw new Error("settings.html has no #root element");
 
 createRoot(root).render(
   <StrictMode>
-    <Settings />
+    <ErrorBoundary
+      fallback={(failure) => (
+        <WindowFailed title="The settings could not be drawn" failure={failure} />
+      )}
+    >
+      <Settings />
+    </ErrorBoundary>
   </StrictMode>,
 );

@@ -15,6 +15,7 @@ import type { ShellApp } from "./boot.ts";
 import { useShell } from "./context.ts";
 import { useKeyHint } from "./hints.ts";
 import { AttentionIcon, CommandIcon, DoneIcon, EyeIcon, PlusIcon } from "./icons.tsx";
+import { Overlay } from "./Part.tsx";
 import { windowWork, type PaneWork } from "./work.ts";
 
 /** How long ago something happened, or how long it has run, said shortly. */
@@ -255,15 +256,23 @@ export function TopTools() {
         <PlusIcon size={15} />
       </button>
       {open && (
-        <ActivityList
-          app={app}
-          work={work}
-          since={since}
+        <Overlay
+          what="The Activity list"
           close={() => {
-            setSeenAt(Date.now());
             setOpen(false);
+            app.views.focus();
           }}
-        />
+        >
+          <ActivityList
+            app={app}
+            work={work}
+            since={since}
+            close={() => {
+              setSeenAt(Date.now());
+              setOpen(false);
+            }}
+          />
+        </Overlay>
       )}
     </div>
   );

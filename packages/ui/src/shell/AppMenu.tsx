@@ -36,6 +36,7 @@ import { menuKey } from "./hints.ts";
 import { GroupGlyph, MenuIcon } from "./icons.tsx";
 import { Menu, type MenuItem } from "./Menu.tsx";
 import { menuRows, nodesOf, type MenuName, type MenuParts } from "./menus.ts";
+import { Overlay } from "./Part.tsx";
 import { tabColorValue, tabCount, UNNAMED_GROUP } from "./tab-looks.ts";
 
 /** What each of the application's own menus is called, and the menu its items are in. */
@@ -175,6 +176,23 @@ interface BarMenu {
   readonly key: string;
   readonly label: string;
   readonly items: () => MenuItem[];
+}
+
+/** One of the menus of the bar, open. */
+function OpenMenu({
+  menu,
+  close,
+  side,
+}: {
+  menu: BarMenu;
+  close: () => void;
+  side: (by: number) => void;
+}) {
+  return (
+    <div className="app-menu-drop" data-menu={menu.key}>
+      <Menu key={menu.key} label={menu.label} items={menu.items()} close={close} side={side} />
+    </div>
+  );
 }
 
 /** The button that opens the application's menu, and the menu. */
@@ -354,15 +372,9 @@ export function AppMenu() {
         </div>
       </div>
       {showing && (
-        <div className="app-menu-drop" data-menu={showing.key}>
-          <Menu
-            key={showing.key}
-            label={showing.label}
-            items={showing.items()}
-            close={close}
-            side={step}
-          />
-        </div>
+        <Overlay what="The menu" close={close}>
+          <OpenMenu menu={showing} close={close} side={step} />
+        </Overlay>
       )}
     </div>
   );

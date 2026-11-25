@@ -22,6 +22,7 @@ import {
 import { useStore } from "zustand";
 
 import type { KeyBinding } from "../core/types.ts";
+import { ErrorBoundary } from "../ErrorBoundary.tsx";
 import { Glyph } from "../icons/Glyph.tsx";
 import { chordOf } from "../keys/chord.ts";
 import {
@@ -36,6 +37,7 @@ import { Notices } from "../shell/Notices.tsx";
 import { sentence } from "../shell/notices.ts";
 import { roveWithin } from "../shell/roving.ts";
 import { WindowButtons } from "../shell/WindowControls.tsx";
+import { WindowFailed } from "../shell/WindowFailed.tsx";
 import { currentPlatform, KeyLayout } from "../terminal/keyboard.ts";
 import { TRAFFIC_LIGHTS_INSET_PX } from "../tuning.ts";
 import { AboutPage } from "./About.tsx";
@@ -159,6 +161,29 @@ function Group({ label, children }: { label: string; children: ReactNode }) {
 
 /** The whole of the settings window. `app` is what was started for the page. */
 export function SettingsWindow({ app }: { app: SettingsApp }) {
+  return (
+    <ErrorBoundary
+      fallback={(failure) => (
+        <WindowFailed
+          title="The settings could not be drawn"
+          failure={failure}
+          bar={<BareTitleBar app={app} />}
+        />
+      )}
+    >
+      <Window app={app} />
+    </ErrorBoundary>
+  );
+}
+
+/** The bar of a settings window of which nothing else can be drawn. */
+function BareTitleBar({ app }: { app: SettingsApp }) {
+  const custom = useStore(app.config, (state) => state.view?.title_bar === "custom");
+  const mac = useStore(app.config, (state) => state.view?.platform === "macos");
+  return custom ? <TitleBar app={app} mac={mac} /> : null;
+}
+
+function Window({ app }: { app: SettingsApp }) {
   const view = useStore(app.config, (state) => state.view);
   const lists = useStore(app.lists);
   const asked = useStore(app.shown);

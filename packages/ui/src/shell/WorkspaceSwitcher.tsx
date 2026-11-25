@@ -15,6 +15,7 @@ import { useShell } from "./context.ts";
 import { selectorDoor, selectorLabel } from "./host-selector.ts";
 import { HostSelector } from "./HostSelector.tsx";
 import { ChevronDownIcon } from "./icons.tsx";
+import { Overlay } from "./Part.tsx";
 
 /** The button that names what is on show, and the selector under it. */
 export function WorkspaceSwitcher() {
@@ -79,12 +80,14 @@ export function WorkspaceSwitcher() {
         </span>
       </button>
       {open !== null && (
-        <HostSelector
-          keyboard={open === "keyboard"}
-          browse={browse}
-          close={close}
-          dismiss={dismiss}
-        />
+        <Overlay what="The list of hosts and sessions" close={close}>
+          <HostSelector
+            keyboard={open === "keyboard"}
+            browse={browse}
+            close={close}
+            dismiss={dismiss}
+          />
+        </Overlay>
       )}
     </div>
   );
