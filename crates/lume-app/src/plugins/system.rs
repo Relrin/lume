@@ -147,7 +147,10 @@ pub(super) fn from_service(error: ServiceError) -> ApiError {
         ErrorKind::TimedOut => ErrorCode::TimedOut,
         ErrorKind::Failed => ErrorCode::Failed,
     };
-    api_error(code, error.message)
+    ApiError {
+        kind: error.why.map(str::to_owned),
+        ..api_error(code, error.message)
+    }
 }
 
 /// Runs blocking work away from the async threads.
@@ -156,12 +159,7 @@ async fn blocking<T: Send + 'static>(
 ) -> Result<T, ServiceError> {
     tokio::task::spawn_blocking(work)
         .await
-        .unwrap_or_else(|error| {
-            Err(ServiceError {
-                kind: ErrorKind::Failed,
-                message: error.to_string(),
-            })
-        })
+        .unwrap_or_else(|error| Err(ServiceError::failed(error.to_string())))
 }
 
 /// A command line as the user is shown it to approve: each argument that holds a space

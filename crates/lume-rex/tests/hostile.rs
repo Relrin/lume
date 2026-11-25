@@ -20,6 +20,7 @@ use lume_proto::{
 };
 use lume_rex::tuning::{
     CELLS_MAX, DESCRIBE_WAIT, REPORTS_PER_WINDOW_MAX, RUN_HOLD_BYTES, RUN_PART_BYTES, SESSIONS_MAX,
+    TEXT_MAX_BYTES,
 };
 use lume_rex::{Link, Ran, RexBackend, RexError, RunAsked, RunError, RunLimits};
 use lume_session::{Attachment, Hydrate, OutputFrame, SessionBackend, SessionError};
@@ -463,6 +464,83 @@ async fn whatever_is_changed_in_what_a_server_reports_the_client_goes_on() {
     // What came of it is within bounds, and the terminal is still the terminal.
     assert!(setup.backend.sessions().len() <= SESSIONS_MAX);
     attachment.input.credit(1000).await.unwrap();
+    nothing_panicked();
+}
+
+/// Whether a folder is a path of a Windows machine with nothing unseen in it.
+fn is_sound(path: &str) -> bool {
+    path.starts_with(|c: char| c.is_ascii_alphabetic())
+        && matches!(path.get(1..3), Some(":\\" | ":/"))
+        && path.len() <= TEXT_MAX_BYTES
+        && is_plain(path)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn whatever_a_server_says_of_folders_is_a_path_of_its_machine_or_nothing() {
+    let setup = Setup::opened(World::recorded()).await;
+    let name = block(0);
+    let listed = setup.backend.list().await.unwrap();
+    let ids: Vec<SessionId> = listed.iter().map(|info| info.id).collect();
+    let folders = || ids.iter().filter_map(|id| setup.backend.folder_of(*id));
+    let front = |program: &str, cwd: &str| {
+        let process = json!({ "pid": 7, "name": program, "cwd": cwd });
+        json!({ "foreground": process, "generation": 3 })
+    };
+    let printed =
+        |text: &str, program: &str| json!({ "pwd": text, "owner": { "pid": 7, "name": program } });
+    let mut told: Vec<(&str, Value)> = Vec::new();
+    let mut tell = |name, payload: &Value| {
+        let others = hostile::changed(payload);
+        told.extend(others.into_iter().map(|(_, other)| (name, other)));
+        told.push((name, payload.clone()));
+    };
+    tell("process_changed", &front("cmd.exe", r"C:\Users\me"));
+    tell("process_changed", &front("pwsh.exe", r"C:\Users\me"));
+    tell("pwd_changed", &printed("file://box/C:/Windows", "pwsh.exe"));
+    tell("pwd_changed", &printed(r"C:\Windows", "pwsh.exe"));
+    for name in hostile::NAMES {
+        let path = format!(r"C:\{name}");
+        told.push(("process_changed", front("sh", &path)));
+        told.push(("process_changed", front("pwsh", "")));
+        told.push(("pwd_changed", printed(&path, "pwsh")));
+        told.push(("pwd_changed", printed(&path, name)));
+    }
+    assert!(told.len() > 100, "{}", told.len());
+    let mut found = 0;
+    for (event, payload) in told {
+        let said = payload.to_string();
+        setup.served.tell(block_event(event, payload));
+        setup.backend.round_trip().await.unwrap();
+        for folder in folders() {
+            found += 1;
+            assert!(is_sound(&folder), "{folder:?} of {said}");
+        }
+    }
+    assert!(found > 20, "{found}");
+
+    // However much it says, also of blocks nobody knows, the last is what holds.
+    for nth in 0..3_000 {
+        let payload = front("sh", &format!(r"C:\{nth}"));
+        setup
+            .served
+            .tell(block_event("process_changed", payload.clone()));
+        setup.served.tell(Tell::SessionEvent(
+            SESSION.to_owned(),
+            "block_event".to_owned(),
+            json!({
+                "block_id": format!("{name}-{nth}"),
+                "creator_name": "com.superlogical.terminal",
+                "name": "process_changed", "payload": payload,
+            }),
+        ));
+        if nth % 200 == 0 {
+            setup.backend.round_trip().await.unwrap();
+        }
+    }
+    until("the last is what holds", || {
+        folders().any(|folder| folder == r"C:\2999")
+    })
+    .await;
     nothing_panicked();
 }
 

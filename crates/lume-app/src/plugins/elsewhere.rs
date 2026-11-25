@@ -17,6 +17,7 @@ use lume_plugin::lock::OnMachine;
 use lume_plugin::permissions::{Kind, can_do_anything};
 use lume_plugin_api::types::{MachineEntry, MachinesAllow, SpawnOptions};
 use lume_plugin_api::{ApiError, ErrorCode};
+use lume_services::ServiceError;
 use lume_services::posix::{Asked, Limits};
 use lume_services::process::{RunOutput, Stop};
 use serde_json::{Value, json};
@@ -119,6 +120,19 @@ fn machine_error(
         kind: Some(kind.to_owned()),
         data: Some(json!({ "machine": machine, "label": label })),
         ..api_error(code, message)
+    }
+}
+
+/// Why nothing was run on a machine, as a plugin's code is told it: with the machine,
+/// where what it was has a name.
+fn from_machine(error: ServiceError, machine: &Machine) -> ApiError {
+    let error = from_service(error);
+    ApiError {
+        data: error
+            .kind
+            .as_ref()
+            .map(|_| json!({ "machine": machine.id, "label": machine.shown() })),
+        ..error
     }
 }
 
@@ -343,8 +357,11 @@ impl Plugins {
             .elsewhere
             .machines
             .runner(&machine)
-            .map_err(from_service)?;
-        runner.run(asked, limits).await.map_err(from_service)
+            .map_err(|error| from_machine(error, &machine))?;
+        runner
+            .run(asked, limits)
+            .await
+            .map_err(|error| from_machine(error, &machine))
     }
 
     /// Starts a program on a machine.
@@ -362,12 +379,12 @@ impl Plugins {
             .elsewhere
             .machines
             .runner(&machine)
-            .map_err(from_service)?;
+            .map_err(|error| from_machine(error, &machine))?;
         let asked = asked_of(program, args, options.cwd, options.env);
         let begun = runner
             .spawn(asked, Arc::clone(&stop))
             .await
-            .map_err(from_service)?;
+            .map_err(|error| from_machine(error, &machine))?;
         // Nobody waits for it any more.
         if stop.asked() {
             let _ = begun.child.kill();
@@ -432,7 +449,6 @@ mod tests {
     use lume_plugin_api::types::SessionEntry;
     use lume_proto::SessionEvent;
     use lume_proto::app::SessionNews;
-    use lume_services::ServiceError;
     use lume_session::Launcher;
     use lume_session::cwd::machine_name;
 
@@ -460,7 +476,11 @@ mod tests {
     impl Runner for Noted {
         async fn run(&self, asked: Asked, limits: Limits) -> Result<RunOutput, ServiceError> {
             let waits = asked.args.iter().any(|arg| arg == "wait");
+            let fails = asked.args.iter().any(|arg| arg == "fail");
             lock(&self.asked).push(asked);
+            if fails {
+                return Err(ServiceError::not_found("no such folder").because("folder_missing"));
+            }
             let now = self.running.fetch_add(1, Ordering::SeqCst) + 1;
             self.most.fetch_max(now, Ordering::SeqCst);
             while waits && !limits.stop.asked() && !self.go_on.load(Ordering::SeqCst) {
@@ -595,6 +615,13 @@ mod tests {
                 env: Vec::new(),
             }]
         );
+        let failed = git(&["fail"], Some(UBUNTU));
+        let error = run(&services, failed).await.unwrap_err();
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert_eq!(error.kind.as_deref(), Some("folder_missing"));
+        let data = json!({ "machine": UBUNTU, "label": "Ubuntu (WSL)" });
+        assert_eq!(error.data, Some(data));
+        lock(&noted.asked).pop();
         // Another program, though the user once agreed to it there.
         allow(&services, &["git", "curl"]);
         let curl = json!({ "program": "curl", "options": { "machine": UBUNTU } });

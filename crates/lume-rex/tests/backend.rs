@@ -3,6 +3,7 @@
 
 mod common;
 
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -262,6 +263,111 @@ async fn an_opened_sessions_terminals_are_listed_as_a_server_describes_them() {
     // A session the server does not have cannot be opened.
     let missing = backend.open_session("session:none").await.unwrap_err();
     assert_eq!(missing.code(), "not_found");
+}
+
+/// A server whose terminals all have `front` as the process in front and `pwd` as what
+/// was printed.
+fn somewhere(front: Value, pwd: Value) -> World {
+    let mut world = World::recorded();
+    world.twist = Some(Arc::new(move |method, mut answer| {
+        match method {
+            "com.superlogical.terminal.process" => answer["foreground"] = front.clone(),
+            "com.superlogical.terminal.pwd" => answer = pwd.clone(),
+            _ => {}
+        }
+        Some(answer)
+    }));
+    world
+}
+
+fn block_event(block: &str, name: &str, payload: Value) -> Tell {
+    Tell::SessionEvent(
+        SESSION.to_owned(),
+        "block_event".to_owned(),
+        json!({
+            "block_id": block, "creator_name": "com.superlogical.terminal",
+            "name": name, "payload": payload,
+        }),
+    )
+}
+
+#[tokio::test]
+async fn a_terminals_folder_is_the_servers_word_and_follows_it() {
+    let (dialer, mut listener) = streams();
+    let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
+    let cmd = |cwd: &str| json!({ "pid": 7, "name": "cmd.exe", "cwd": cwd });
+    let printed = json!({ "pwd": r"C:\Printed", "owner": { "pid": 7, "name": "cmd.exe" } });
+    let world = somewhere(cmd(r"C:\Users\me"), printed.clone());
+    let served = serve(listener.accept().await, world);
+    backend.ready().await.unwrap();
+    assert!(backend.on_windows() && !backend.is_on_this_machine());
+    let view = backend.open_session(SESSION).await.unwrap();
+    let blocks: Vec<String> = view.blocks().filter_map(|b| b.block_id.clone()).collect();
+    let listed = backend.list().await.unwrap();
+    // It is no folder of this machine.
+    assert!(listed.iter().all(|info| info.cwd.is_none()));
+    let ids = [listed[0].id, listed[1].id];
+    let folders = || ids.map(|id| backend.folder_of(id));
+    let all = |folder: &str| [Some(folder.to_owned()), Some(folder.to_owned())];
+    assert_eq!(folders(), all(r"C:\Users\me"));
+    // Nobody is asked what was printed where it would not count.
+    assert!(served.asked("com.superlogical.terminal.pwd").is_empty());
+
+    let moved = json!({ "foreground": cmd(r"D:\code"), "generation": 2 });
+    served.tell(block_event(&blocks[0], "process_changed", moved));
+    served.tell(block_event(&blocks[0], "pwd_changed", printed));
+    backend.round_trip().await.unwrap();
+    until("one of them has moved", || {
+        let moved = folders()
+            .into_iter()
+            .filter(|folder| folder.as_deref() == Some(r"D:\code"));
+        moved.count() == 1
+    })
+    .await;
+    assert!(folders().contains(&Some(r"C:\Users\me".to_owned())));
+
+    // What a connection told goes with it.
+    served.tell(Tell::Drop);
+    served.over().await;
+    until("the connection is lost", || {
+        !matches!(&*backend.link().borrow(), Link::Connected(_))
+    })
+    .await;
+    assert_eq!(folders(), [None, None]);
+    let world = somewhere(cmd(r"E:\"), Value::Null);
+    let _again = serve(listener.accept().await, world);
+    backend.ready().await.unwrap();
+    assert_eq!(folders(), [None, None]);
+    backend.list().await.unwrap();
+    assert_eq!(folders(), all(r"E:\"));
+
+    backend.close_session(SESSION).await.unwrap();
+    assert_eq!(folders(), [None, None]);
+}
+
+#[tokio::test]
+async fn of_a_powershell_the_server_is_asked_what_it_printed_itself() {
+    let front = json!({ "pid": 7, "name": "powershell.exe", "cwd": r"C:\Users\me" });
+    let printed = |pid: i64| {
+        let owner = json!({ "pid": pid, "name": "powershell.exe" });
+        json!({ "pwd": "file://box/C:/Windows", "owner": owner })
+    };
+    for (pwd, found) in [
+        (printed(7), Some(r"C:\Windows")),
+        (printed(8), None),
+        (json!({}), None),
+        (json!("C:/Windows"), None),
+    ] {
+        let (dialer, mut listener) = streams();
+        let backend = RexBackend::over(common::backend_id(), "test".to_owned(), dialer, client());
+        let world = somewhere(front.clone(), pwd);
+        let _served = serve(listener.accept().await, world);
+        backend.ready().await.unwrap();
+        backend.open_session(SESSION).await.unwrap();
+        let listed = backend.list().await.unwrap();
+        assert_eq!(listed[0].program, "powershell.exe");
+        assert_eq!(backend.folder_of(listed[0].id).as_deref(), found);
+    }
 }
 
 #[tokio::test]

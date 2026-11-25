@@ -168,7 +168,37 @@ impl Door {
     }
 }
 
-/// A program to be run on the other side.
+/// What a run fails for, beside what fails for anything: its folder is not there, or no
+/// such program is.
+pub const FOLDER_MISSING: &str = "folder_missing";
+pub const PROGRAM_MISSING: &str = "program_missing";
+
+/// How a machine spells its paths.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Spelling {
+    Posix,
+    Windows,
+}
+
+impl Spelling {
+    /// Whether a path begins at the root, or at a drive. A share of a network is neither:
+    /// it is another machine's again.
+    fn is_absolute(self, path: &str) -> bool {
+        match self {
+            Self::Posix => path.starts_with('/'),
+            Self::Windows => {
+                let mut chars = path.chars();
+                chars
+                    .next()
+                    .is_some_and(|drive| drive.is_ascii_alphabetic())
+                    && chars.next() == Some(':')
+                    && matches!(chars.next(), Some('\\' | '/'))
+            }
+        }
+    }
+}
+
+/// A program to be run on another machine.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Asked {
     /// Its name alone, which the other side looks up on its own path.
@@ -180,13 +210,14 @@ pub struct Asked {
 }
 
 impl Asked {
-    fn check(&self) -> Result<(), ServiceError> {
+    /// Whether it can be run at all on a machine that spells its paths so.
+    pub fn check(&self, spelling: Spelling) -> Result<(), ServiceError> {
         check_program(&self.program).map_err(ServiceError::invalid)?;
         if self.args.iter().any(|arg| arg.contains('\0')) {
             return Err(ServiceError::invalid("an argument holds a NUL character"));
         }
         if let Some(folder) = &self.folder
-            && (!folder.starts_with('/') || folder.contains('\0'))
+            && (!spelling.is_absolute(folder) || folder.contains('\0'))
         {
             return Err(ServiceError::invalid(format!(
                 "`{folder}` is not an absolute path"
@@ -240,9 +271,11 @@ impl Asked {
             "folder" => ServiceError::not_found(format!(
                 "the folder `{}` does not exist on {label}",
                 self.folder.as_deref().unwrap_or("~")
-            )),
+            ))
+            .because(FOLDER_MISSING),
             "program" => {
                 ServiceError::not_found(format!("`{}` was not found on {label}", self.program))
+                    .because(PROGRAM_MISSING)
             }
             _ => ServiceError::failed(format!("{label} could not run `{}`", self.program)),
         }
@@ -722,13 +755,13 @@ impl Shell {
     /// Runs a program to its end, or until its time is up or it is told to stop, and
     /// gives what it wrote. It waits, so it belongs on a thread that may.
     pub fn run(&self, asked: &Asked, limits: Limits) -> Result<RunOutput, ServiceError> {
-        asked.check()?;
+        asked.check(Spelling::Posix)?;
         self.line(&limits.stop)?.run(asked, limits)
     }
 
     /// Starts a program and gives its output as it comes. It reads nothing.
     pub fn spawn(&self, asked: &Asked, stop: &Stop) -> Result<Started, ServiceError> {
-        asked.check()?;
+        asked.check(Spelling::Posix)?;
         let script = format!(
             "{}echo \"{STARTED} \"\n{}",
             asked.script(|why| format!("echo \"{NOT_STARTED} {why}\"")),
@@ -873,6 +906,49 @@ mod tests {
             .map(|_| ())
             .unwrap_err();
         assert_eq!(error.kind, crate::ErrorKind::Unavailable);
+    }
+
+    #[test]
+    fn a_folder_is_absolute_as_its_machine_spells_paths() {
+        let checked = |spelling, folder: &str| {
+            let asked = Asked {
+                program: "git".to_owned(),
+                folder: Some(folder.to_owned()),
+                ..Asked::default()
+            };
+            asked.check(spelling).is_ok()
+        };
+        for (folder, posix, windows) in [
+            ("/home/me", true, false),
+            ("/", true, false),
+            (r"C:\Users", false, true),
+            ("d:/code", false, true),
+            ("C:", false, false),
+            (r"C:code", false, false),
+            (r"1:\code", false, false),
+            (r"\\server\share", false, false),
+            (r"\\?\C:\code", false, false),
+            (r"\code", false, false),
+            ("${home}", false, false),
+            ("", false, false),
+            ("/a\0", false, false),
+            ("C:/a\0", false, false),
+        ] {
+            assert_eq!(checked(Spelling::Posix, folder), posix, "{folder:?}");
+            assert_eq!(checked(Spelling::Windows, folder), windows, "{folder:?}");
+        }
+    }
+
+    #[test]
+    fn why_a_program_was_not_run_has_a_name_of_its_own() {
+        let asked = Asked {
+            program: "git".to_owned(),
+            ..Asked::default()
+        };
+        let why = |word: &str| asked.failed(word, "box").why;
+        assert_eq!(why("folder"), Some("folder_missing"));
+        assert_eq!(why("program"), Some("program_missing"));
+        assert_eq!(why("something else"), None);
     }
 
     #[test]

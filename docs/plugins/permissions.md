@@ -148,7 +148,8 @@ for (const session of await lume.sessions.list()) {
 | --------------------- | --------------------------------------------------------- | -------------------- |
 | `machine_not_allowed` | The user has not allowed the plugin there.                | `{ machine, label }` |
 | `not_connected`       | No session is on that machine.                            | `{ machine, label }` |
-| `not_found`           | The program or the folder is not there.                   |                      |
+| `folder_missing`      | The folder is not there. Nothing was run.                 | `{ machine, label }` |
+| `program_missing`     | The program is not there.                                 | `{ machine, label }` |
 | `unavailable`         | The machine could not be reached, or the way to it broke. |                      |
 
 ### Servers: `net`

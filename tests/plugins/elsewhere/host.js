@@ -27,6 +27,7 @@ lume.commands.register("work", async (args) => {
     input: await run("cat", [], { stdin: "åäö 'quoted' $HOME" }),
     folder: await run("sh", ["-c", "pwd; echo err >&2; exit 3"], { cwd: "/tmp" }),
     nowhere: await run("uname", [], { cwd: "/no such folder" }),
+    missing: await run("lume-no-such-program"),
     local: await run("uname", [], { cwd: "${home}" }),
     other: await run("git", ["--version"]),
     here: await lume.process.run("uname").then(() => "ran", why),

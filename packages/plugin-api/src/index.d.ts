@@ -1446,7 +1446,8 @@ export interface LumeCalls {
      *  back how it ended and what it wrote. Where the permission says so, the user is
      *  asked first, shown the command. With `machine` it runs on that machine, which the
      *  user must have allowed: until then this fails as `machine_not_allowed`, and as
-     *  `not_connected` while no session is there.
+     *  `not_connected` while no session is there. There it fails as `folder_missing` or
+     *  `program_missing` where it does as `not_found` here.
      *
      * Needs the `process.run` permission.
      */

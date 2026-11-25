@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lume_services::posix::{Asked, Door, Limits, Shell};
+use lume_services::posix::{Asked, Door, FOLDER_MISSING, Limits, PROGRAM_MISSING, Shell};
 use lume_services::process::{RunOutput, Running, Stop};
 use lume_services::{ErrorKind, ServiceError};
 
@@ -193,13 +193,19 @@ fn a_program_runs_in_its_folder_or_not_at_all() {
         assert!(String::from_utf8_lossy(&output.stdout).ends_with("/å 'x\" $y\n"));
         shell.run(&asked("rm", &["-r", &made]), limits()).unwrap();
         let gone = shell.run(&within, limits()).unwrap_err();
-        assert_eq!(gone.kind, ErrorKind::NotFound);
+        assert_eq!(
+            (gone.kind, gone.why),
+            (ErrorKind::NotFound, Some(FOLDER_MISSING))
+        );
         assert!(gone.message.contains("folder"), "{gone}");
         let gone = shell
             .spawn(&within, &Stop::default())
             .map(|_| ())
             .unwrap_err();
-        assert_eq!(gone.kind, ErrorKind::NotFound);
+        assert_eq!(
+            (gone.kind, gone.why),
+            (ErrorKind::NotFound, Some(FOLDER_MISSING))
+        );
         assert!(gone.message.contains("folder"), "{gone}");
         // The home folder, when none is named.
         let home = Asked {
@@ -210,7 +216,10 @@ fn a_program_runs_in_its_folder_or_not_at_all() {
 
         let missing = asked("lume-no-such-program", &[]);
         let error = shell.run(&missing, limits()).unwrap_err();
-        assert_eq!(error.kind, ErrorKind::NotFound);
+        assert_eq!(
+            (error.kind, error.why),
+            (ErrorKind::NotFound, Some(PROGRAM_MISSING))
+        );
         assert!(error.message.contains("was not found on box"), "{error}");
         let error = shell
             .spawn(&missing, &Stop::default())

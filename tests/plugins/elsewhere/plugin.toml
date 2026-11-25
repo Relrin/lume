@@ -12,7 +12,7 @@ activation = ["onCommand:look", "onCommand:allow", "onCommand:work"]
 
 [permissions]
 "workspace.read" = true
-"process.run-elsewhere" = ["cat", "sh", "uname"]
+"process.run-elsewhere" = ["cat", "lume-no-such-program", "sh", "uname"]
 
 [[contributes.commands]]
 id = "look"

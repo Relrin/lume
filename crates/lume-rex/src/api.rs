@@ -12,6 +12,7 @@ use lume_proto::SessionEvent;
 
 use crate::error::RexError;
 use crate::events;
+use crate::folders::Told;
 use crate::text::{cut, make_plain, plain};
 use crate::tuning::{
     BLOCKS_MAX, CLIENT_TEXT_MAX_BYTES, LAYERS_MAX, SPLIT_DEPTH_MAX, TEXT_MAX_BYTES, WINDOWS_MAX,
@@ -514,6 +515,8 @@ pub(crate) enum ServerEvent {
         block_id: String,
         /// What it reported, as reports of a session.
         events: Vec<SessionEvent>,
+        /// What that tells of where the terminal is.
+        told: Option<Told>,
     },
     /// A block closed and left its session.
     BlockClosed {
@@ -584,16 +587,17 @@ impl ServerEvent {
                         if text(block, "creator_name")? != TERMINAL_CREATOR {
                             return None;
                         }
-                        let events = events::read(
-                            &text(block, "name")?,
-                            block.get("payload").unwrap_or(&serde_json::Value::Null),
-                        );
-                        if events.is_empty() {
+                        let name = text(block, "name")?;
+                        let payload = block.get("payload").unwrap_or(&serde_json::Value::Null);
+                        let events = events::read(&name, payload);
+                        let told = Told::read(&name, payload);
+                        if events.is_empty() && told.is_none() {
                             return None;
                         }
                         ServerEvent::Block {
                             block_id: text(block, "block_id")?,
                             events,
+                            told,
                         }
                     }
                     _ => ServerEvent::Other,

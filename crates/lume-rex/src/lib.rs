@@ -25,6 +25,7 @@ mod data;
 mod endpoint;
 mod error;
 mod events;
+mod folders;
 mod ids;
 mod input;
 mod intents;

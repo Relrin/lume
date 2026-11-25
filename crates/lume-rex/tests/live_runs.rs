@@ -19,6 +19,7 @@ use lume_rex::{
     Control, Endpoint, Events, Options, Ran, Reach, RexBackend, RunAsked, RunError, RunLimits,
     RunReader,
 };
+use lume_session::SessionBackend as _;
 use serde_json::{Value, json};
 use tokio::time::{sleep, timeout};
 
@@ -506,26 +507,161 @@ async fn this_side_goes(live: &Live) {
 
 /// Makes a session with nothing of the user's in it.
 async fn session(control: &Control, windows: bool) -> String {
-    let command = if windows {
-        json!(["cmd.exe", "/d"])
+    let command: &[&str] = if windows {
+        &["cmd.exe", "/d"]
     } else {
-        json!(["/bin/cat"])
+        &["/bin/cat"]
     };
+    session_of(control, command).await.unwrap()
+}
+
+/// Makes a session of one terminal with a program in it, if the program is there.
+async fn session_of(control: &Control, command: &[&str]) -> Option<String> {
     let block = json!({
         "flavor": "com.superlogical.terminal.shell",
         "options": { "shell": "none", "command": command },
     });
     let asked = json!({ "label": LABEL, "initial_windows": [{ "layout": { "block": block } }] });
-    let made = control.call("session.create", asked).await.unwrap();
+    let made = control.call("session.create", asked).await.ok()?;
     let session = made.payload["session_id"].as_str().unwrap().to_owned();
     let attach = json!({ "session_id": session });
     control.call("session.attach", attach).await.unwrap();
-    session
+    Some(session)
 }
 
 async fn end(control: &Control, session: &str) {
     let asked = json!({ "session_id": session });
     control.call("session.destroy", asked).await.unwrap();
+}
+
+/// A shell, what is typed into it, and the folder it is in after each, where that is
+/// known. `None` at the start stands for any folder there is.
+type Walk<'a> = (&'a [&'a str], &'a [(&'a str, Option<&'a str>)]);
+
+const OSC_9: &str = r#"function prompt { "$([char]27)]9;9;$($PWD.ProviderPath)$([char]7)> " }"#;
+
+/// What another program prints, with a machine's name as an SSH client would show it.
+const PRINTED_THERE: &str = r#"node -e "process.stdout.write('\x1b]7;file://box/C:/Temp\x07')""#;
+
+fn walks(windows: bool) -> Vec<Walk<'static>> {
+    if !windows {
+        // The shell keeps no history of this.
+        return vec![(
+            &[
+                "/usr/bin/env",
+                "HISTFILE=/dev/null",
+                "/bin/bash",
+                "--norc",
+                "--noprofile",
+            ],
+            &[
+                ("", Some("/root")),
+                ("cd /usr", Some("/usr")),
+                (r"printf '\033]7;file://box/etc\007'", Some("/usr")),
+                ("cd /tmp && sleep 3", Some("/tmp")),
+            ],
+        )];
+    }
+    vec![
+        (
+            &["cmd.exe", "/d"],
+            &[
+                (r"cd /d C:\Windows\System32", Some(r"C:\Windows\System32")),
+                ("ping -n 4 127.0.0.1 >nul", Some(r"C:\Windows\System32")),
+            ],
+        ),
+        (
+            &["powershell.exe", "-NoLogo", "-NoProfile"],
+            &[
+                (r"cd C:\Windows", None),
+                (OSC_9, Some(r"C:\Windows")),
+                (r"cd C:\Windows\System32", Some(r"C:\Windows\System32")),
+                (PRINTED_THERE, Some(r"C:\Windows\System32")),
+                (
+                    r"cmd /d /c 'cd /d C:\ & ping -n 4 127.0.0.1 >nul'",
+                    Some(r"C:\"),
+                ),
+                // It says where it is each time it asks for a line.
+                ("", Some(r"C:\Windows\System32")),
+                (
+                    r"function prompt { '> ' }; cd C:\Users",
+                    Some(r"C:\Windows\System32"),
+                ),
+                // Printed by another, with nothing that says it anew: it is not known.
+                (PRINTED_THERE, None),
+            ],
+        ),
+        (
+            &[
+                r"C:\Program Files\Git\bin\bash.exe",
+                "--norc",
+                "--noprofile",
+            ],
+            &[
+                ("cd /c/Windows", Some(r"C:\Windows")),
+                ("cd /c/", Some(r"C:\")),
+            ],
+        ),
+    ]
+}
+
+async fn walk(backend: &RexBackend, session: &str, (command, steps): Walk<'_>) {
+    backend.open_session(session).await.unwrap();
+    let id = backend.list().await.unwrap()[0].id;
+    sleep(Duration::from_secs(3)).await;
+    for (typed, wanted) in steps {
+        if !typed.is_empty() {
+            backend.send(id, &format!("{typed}\r")).await.unwrap();
+        }
+        let began = Instant::now();
+        // What is not known must stay so, and is looked at late.
+        sleep(Duration::from_millis(if wanted.is_none() {
+            2_500
+        } else {
+            900
+        }))
+        .await;
+        while backend.folder_of(id).as_deref() != *wanted {
+            assert!(
+                began.elapsed() < Duration::from_secs(8),
+                "{command:?}: {typed:?} leaves it in {:?}, not {wanted:?}",
+                backend.folder_of(id)
+            );
+            sleep(Duration::from_millis(100)).await;
+        }
+        // Asked for anew it is the same.
+        let told = backend.folder_of(id);
+        backend.list().await.unwrap();
+        assert_eq!(backend.folder_of(id), told, "{command:?}: {typed:?}");
+    }
+    backend.close_session(session).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a Rex server, named in LUME_REX_LIVE_RUNS"]
+async fn the_folder_a_terminal_is_in_is_followed() {
+    let Ok(address) = std::env::var(ADDRESS) else {
+        eprintln!("skipped: {ADDRESS} is not set");
+        return;
+    };
+    let endpoint = Endpoint::parse(&address).unwrap();
+    let backend = connected(&endpoint).await;
+    let (other, _held) = another(&endpoint).await;
+    let mut failed = Vec::new();
+    for steps in walks(backend.on_windows()) {
+        let Some(session) = session_of(&other, steps.0).await else {
+            println!("not there: {:?}", steps.0);
+            continue;
+        };
+        println!("{:?}", steps.0);
+        let (walking, its) = (Arc::clone(&backend), session.clone());
+        let walked = tokio::spawn(async move { walk(&walking, &its, steps).await }).await;
+        end(&other, &session).await;
+        failed.extend(walked.err());
+    }
+    backend.shutdown();
+    other.close();
+    assert!(failed.is_empty(), "{failed:?}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -34,6 +34,7 @@ use crate::authority::{self, RexLayout};
 use crate::control::{Control, Events};
 use crate::endpoint::Endpoint;
 use crate::error::RexError;
+use crate::folders::{Printed, Program, Told, Whereabouts};
 use crate::ids::{BlockRef, Ids};
 use crate::input::type_text;
 use crate::intents::shell_layout;
@@ -122,6 +123,8 @@ struct State {
     ids: Ids,
     /// What continues the client after a lost connection, and when it was lost.
     resume: Option<(String, Instant)>,
+    /// What is known of where each terminal is, over the connection there is.
+    whereabouts: HashMap<SessionId, Whereabouts>,
     /// The terminals that have views, each with the feed that serves them.
     feeds: HashMap<SessionId, FeedRef>,
     /// The number of the last feed made.
@@ -147,6 +150,8 @@ impl State {
         let feeds = &self.feeds;
         self.ids
             .keep(|block, id| named.contains(block) || feeds.contains_key(&id));
+        let ids = &self.ids;
+        self.whereabouts.retain(|id, _| ids.block(*id).is_some());
     }
 }
 
@@ -279,6 +284,20 @@ impl Shared {
         }
     }
 
+    /// Notes what the server told over a connection of where a terminal is. `seq` is
+    /// the number of the last event it had sent by then.
+    fn note_where(&self, control: &Control, id: SessionId, seq: u64, told: Told) {
+        let mut state = self.state();
+        // An answer that outlived its connection is numbered by another count.
+        let current = state
+            .control
+            .as_ref()
+            .is_some_and(|held| std::ptr::eq(Arc::as_ptr(held), control));
+        if current && state.ids.block(id).is_some() {
+            state.whereabouts.entry(id).or_default().note(seq, told);
+        }
+    }
+
     /// The sessions opened here, in no order.
     pub(crate) fn opened(&self) -> Vec<String> {
         self.state().opened.keys().cloned().collect()
@@ -384,6 +403,26 @@ impl RexBackend {
             layout_keeper,
             turns: Turns::default(),
         })
+    }
+
+    /// Whether the server is on this machine, so that the processes and folders it
+    /// names are this machine's.
+    pub fn is_on_this_machine(&self) -> bool {
+        self.shared.dialer.is_on_this_machine()
+    }
+
+    /// Whether the server's machine runs Windows. It is not known while the backend is
+    /// not connected.
+    pub fn on_windows(&self) -> bool {
+        self.shared.on_windows()
+    }
+
+    /// The folder a terminal is in, as a path of the server's machine, by the server's
+    /// word and as last told. `None` when it is not known, and while the server is not
+    /// connected.
+    pub fn folder_of(&self, id: SessionId) -> Option<String> {
+        let windows = self.shared.on_windows();
+        self.shared.state().whereabouts.get(&id)?.folder(windows)
     }
 
     pub(crate) fn shared(&self) -> &Arc<Shared> {
@@ -593,13 +632,25 @@ impl RexBackend {
             control.call_as::<TerminalTitle>("com.superlogical.terminal.title", of_block()),
         );
         let (size, _) = size?;
-        let (process, _) = process?;
+        let (process, seq) = process?;
         // A terminal that has no title yet, or cannot say, simply has none.
         let title = title
             .ok()
             .map(|(title, _)| plain(&title.title))
             .filter(|title| !title.is_empty());
         let shown = process.foreground.as_ref().or(process.child.as_ref());
+        let front = shown.and_then(Program::of);
+        let stays = front.as_ref().is_some_and(Program::stays);
+        self.shared.note_where(control, id, seq, Told::Front(front));
+        if stays
+            && !self.is_on_this_machine()
+            && let Ok(pwd) = control
+                .call("com.superlogical.terminal.pwd", of_block())
+                .await
+        {
+            let printed = Told::Printed(Printed::read(&pwd.payload));
+            self.shared.note_where(control, id, pwd.seq, printed);
+        }
         // A process and a folder mean something to whoever lists sessions only where
         // they are this machine's: a number or a path of another machine names
         // something else here.
@@ -942,7 +993,7 @@ async fn open(shared: &Shared) -> Result<Opened, RexError> {
 
 /// Applies one event to what is known of the server. Returns the session whose view is
 /// to be read again, if the event calls for that.
-fn apply(shared: &Shared, event: ServerEvent) -> Option<String> {
+fn apply(shared: &Shared, seq: u64, event: ServerEvent) -> Option<String> {
     let mut state = shared.state();
     match event {
         ServerEvent::SessionCreated(session) => {
@@ -996,12 +1047,19 @@ fn apply(shared: &Shared, event: ServerEvent) -> Option<String> {
             return stale.then_some(session_id);
         }
         // A terminal's reports go to the views of the terminal, where it has any.
-        ServerEvent::Block { block_id, events } => {
-            let feed = state
-                .ids
-                .known(&block_id)
-                .and_then(|id| state.feeds.get(&id));
-            if let Some(feed) = feed {
+        ServerEvent::Block {
+            block_id,
+            events,
+            told,
+        } => {
+            let id = state.ids.known(&block_id)?;
+            // Noted first: whoever is given the report may ask where the terminal is.
+            if let Some(told) = told {
+                state.whereabouts.entry(id).or_default().note(seq, told);
+            }
+            if !events.is_empty()
+                && let Some(feed) = state.feeds.get(&id)
+            {
                 feed.report(events);
             }
             return None;
@@ -1075,7 +1133,7 @@ async fn follow(shared: &Shared, opened: Opened) -> RexError {
                     None => continue,
                 }
             }
-            event => match apply(shared, event) {
+            read => match apply(shared, event.seq, read) {
                 Some(session_id) => session_id,
                 None => continue,
             },
@@ -1110,6 +1168,7 @@ async fn keep(shared: Arc<Shared>) {
                 let mut state = shared.state();
                 state.control = None;
                 state.runs = None;
+                state.whereabouts.clear();
                 state.resume = control
                     .reconnect_token()
                     .map(|token| (token.to_owned(), Instant::now()));

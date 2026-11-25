@@ -29,6 +29,9 @@ pub struct ServiceError {
     /// What went wrong, in words. It may name the path, program or address asked for,
     /// never what a file or a message held.
     pub message: String,
+    /// What exactly it was, where the plugin's code may have to know more than its kind
+    /// says. A short name that stays the same.
+    pub why: Option<&'static str>,
 }
 
 /// The kinds of failure, for the plugin's code to tell apart.
@@ -71,6 +74,15 @@ impl ServiceError {
         Self {
             kind,
             message: message.into(),
+            why: None,
+        }
+    }
+
+    /// The same error, saying what exactly it was.
+    pub fn because(self, why: &'static str) -> Self {
+        Self {
+            why: Some(why),
+            ..self
         }
     }
 

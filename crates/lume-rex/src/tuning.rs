@@ -85,6 +85,10 @@ pub const APPLY_SETTLE: Duration = Duration::from_secs(1);
 pub const SPLIT_DEPTH_MAX: usize = 64;
 /// The longest id or label taken from a server, in bytes. Longer ones are cut.
 pub const TEXT_MAX_BYTES: usize = 1024;
+
+/// How much a program may print of the folder it is in: the longest path there may be,
+/// each of its bytes written as three, and a machine's name.
+pub const FOLDER_PRINTED_MAX_BYTES: usize = 3 * TEXT_MAX_BYTES + 256;
 /// The most marks and joiners shown on one character of a text from a server.
 pub const MARKS_MAX: usize = 4;
 
