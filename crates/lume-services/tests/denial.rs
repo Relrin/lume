@@ -690,6 +690,7 @@ fn a_batch_file_needs_the_cmd_grant() {
             stdin: None,
             timeout: Duration::from_secs(10),
             max_output: 4096,
+            stop: Default::default(),
         },
     )
     .unwrap();
@@ -711,6 +712,7 @@ fn a_batch_file_needs_the_cmd_grant() {
             stdin: None,
             timeout: Duration::from_secs(10),
             max_output: 4096,
+            stop: Default::default(),
         },
     );
     assert_eq!(kind(refused), ErrorKind::Invalid);

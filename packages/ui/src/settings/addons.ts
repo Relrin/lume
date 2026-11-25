@@ -26,6 +26,14 @@ export interface AddonDependency {
   readonly rebound: boolean;
 }
 
+/** Another machine a plugin may run programs on. */
+export interface AddonMachine {
+  readonly id: string;
+  /** What the machine is called, as the user was asked of it. */
+  readonly label: string;
+  readonly programs: readonly string[];
+}
+
 /** One line of the audit log: what a plugin did that needed a permission, and how it went. */
 export interface AuditEntry {
   readonly time: string;
@@ -61,6 +69,8 @@ export interface AddonEntry {
   readonly permissions: readonly AddonPermission[];
   /** What it may ask for while it runs. */
   readonly later: readonly string[];
+  /** The other machines it may run programs on, as the user agreed. */
+  readonly machines: readonly AddonMachine[];
   /** The view it is set up in, which its page here shows: one of its pane views. */
   readonly settingsView?: {
     readonly view: string;

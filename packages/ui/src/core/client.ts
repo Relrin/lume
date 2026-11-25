@@ -330,6 +330,11 @@ export class CoreClient {
     return this.transport.command("addon_remove", { id });
   }
 
+  /** Takes back what a plugin may run on another machine. */
+  addonRevokeMachine(id: string, machine: string): Promise<void> {
+    return this.transport.command("addon_revoke_machine", { id, machine });
+  }
+
   /** Moves a plugin one place earlier or later in the order plugins load in. */
   addonMove(id: string, earlier: boolean): Promise<void> {
     return this.transport.command("addon_move", { id, earlier });

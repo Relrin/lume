@@ -920,6 +920,7 @@ export class FakeCore implements Carrier {
         return answer({ plugins: this.#options.addons ?? [] });
       case "addon_set_enabled":
       case "addon_remove":
+      case "addon_revoke_machine":
       case "addon_move":
       case "addon_cancel":
         this.ran.push({ id: name, args });

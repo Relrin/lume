@@ -122,6 +122,18 @@
           },
           {
             "role": "heading",
+            "name": "Other machines"
+          },
+          {
+            "role": "button",
+            "name": "Revoke what Tools may run on Ubuntu (WSL)"
+          },
+          {
+            "role": "button",
+            "name": "Revoke what Tools may run on root@Debian (WSL)"
+          },
+          {
+            "role": "heading",
             "name": "Health"
           },
           {

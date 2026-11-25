@@ -299,6 +299,10 @@
   Object.assign(namespace(["layout"]), {
     apply: (intent) => request("layout.apply", { intent }),
   });
+  Object.assign(namespace(["machines"]), {
+    list: () => request("machines.list", {}),
+    allow: (machine, reason) => request("machines.allow", { machine, reason }),
+  });
   Object.assign(namespace(["metrics"]), {
     snapshot: () => request("metrics.snapshot", {}),
   });

@@ -85,7 +85,7 @@ export type PluginQuestion =
       readonly permission: string;
       /** The command that would run, or the text that would be typed, whole. */
       readonly text: string;
-      /** Where the text would be typed. */
+      /** Where the text would be typed, or the machine the command would run on. */
       readonly place?: string | null;
     }
   | {

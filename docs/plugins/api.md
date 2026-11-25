@@ -184,6 +184,32 @@ Needs the `layout.write` permission.
 
 Gives `Json`.
 
+## lume.machines
+
+### `lume.machines.list()`
+
+The other machines that sessions are on, where plugins can run programs.
+
+Needs the `workspace.read` permission.
+
+Gives `MachineEntry[]`.
+
+### `lume.machines.allow(machine, reason?)`
+
+Asks the user to let the plugin run its programs on a machine, and says whether
+ they did. Their yes is kept until they take it back. To be called when the user
+ asked for it, as by pressing a button: after a no, it answers no for a minute
+ without asking.
+
+Needs the `process.run-elsewhere` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `machine` | `string` | The machine, by its id. |
+| `reason` | `string` | optional. Why the plugin asks, in a sentence the user is shown as the plugin's words. |
+
+Gives `boolean`.
+
 ## lume.metrics
 
 ### `lume.metrics.snapshot()`
@@ -339,7 +365,9 @@ Gives `Grant[]`.
 
 Runs a program the plugin may run, found once on the system's path, and gives
  back how it ended and what it wrote. Where the permission says so, the user is
- asked first, shown the command.
+ asked first, shown the command. With `machine` it runs on that machine, which the
+ user must have allowed: until then this fails as `machine_not_allowed`, and as
+ `not_connected` while no session is there.
 
 Needs the `process.run` permission.
 
@@ -883,6 +911,30 @@ A permission the plugin holds.
 |---|---|---|
 | `intent` | `Json` | What to change, as the layout's intents are written. |
 
+### `MachineEntry`
+
+A machine that sessions are on, other than this one.
+
+| Field | Type | |
+|---|---|---|
+| `allowed` | `boolean` | Whether the plugin may run its programs there. |
+| `kind` | `MachineKind` |  |
+| `label` | `string` |  |
+| `machine` | `string` |  |
+
+### `MachineKind`
+
+How a machine is reached.
+
+`"rex" \| "ssh" \| "wsl"`
+
+### `MachinesAllow`
+
+| Field | Type | |
+|---|---|---|
+| `machine` | `string` | The machine, by its id. |
+| `reason` | `string` | optional. Why the plugin asks, in a sentence the user is shown as the plugin's words. |
+
 ### `MemoryUsage`
 
 | Field | Type | |
@@ -1071,6 +1123,17 @@ One of the choices of a pick.
 | `placeholder` | `string` | optional. What the field says before anything is typed. |
 | `title` | `string` | optional.  |
 
+### `Place`
+
+Where a session is that is not on this machine.
+
+| Field | Type | |
+|---|---|---|
+| `folder` | `string` | optional. The folder the session is in, as a path of that machine, where it is known. |
+| `kind` | `MachineKind` |  |
+| `label` | `string` | What to call the machine. |
+| `machine` | `string` | The machine's id, for `process.run` and `machines.allow`. It stays the same as long as the machine is reached the same way. |
+
 ### `ProcessExit`
 
 How a program that was started ended.
@@ -1091,9 +1154,10 @@ How a program is run.
 
 | Field | Type | |
 |---|---|---|
-| `cwd` | `string` | optional. The folder it starts in: the plugin's own data folder if left out. |
+| `cwd` | `string` | optional. The folder it starts in: the plugin's own data folder if left out. On another machine it is an absolute path of that machine's, and the user's home folder if left out. |
 | `encoding` | `Encoding` | optional. How its input is given and its output given back. |
 | `env` | `Record<string, string>` | optional. Variables added to its environment. |
+| `machine` | `string` | optional. The machine it runs on, by its id, as a session's `place` gives it; this one if left out. Another machine needs the permission `process.run-elsewhere` in place of `process.run`, and the user's word for that machine. |
 | `maxOutput` | `number` | optional. The most output kept of each of its two streams; 4 MiB if left out. |
 | `stdin` | `string` | optional. What is written to its input before it is closed. |
 | `timeoutMs` | `number` | optional. How long it may run before it is stopped; 30 s if left out, 10 minutes at most. |
@@ -1170,9 +1234,10 @@ A session: a program running in a terminal.
 
 | Field | Type | |
 |---|---|---|
-| `cwd` | `string` | optional. The folder it is in, as a path: of this machine, or inside the Linux distribution it runs in. Left out where the folder is not known or not there, and for a session on another machine. |
+| `cwd` | `string` | optional. The folder it is in, as a path of this machine. Left out where the folder is not known or not there, and for a session on another machine. |
 | `exited` | `boolean` | Whether its program has ended. |
 | `pane` | `string` | optional. The pane that shows it, if one does. |
+| `place` | `Place` | optional. Where it is, if that is another machine that plugins can run programs on. |
 | `program` | `string` |  |
 | `session` | `string` |  |
 | `title` | `string` | optional.  |
@@ -1183,8 +1248,8 @@ Something a session reported, as a plugin hears it.
 
 | Field | Type | |
 |---|---|---|
-| `details` | `Json` | What was reported, as the session reported it. A session on another machine, or one that a server runs, makes no `cwd` report, and its others give no folder and no number of a process. |
-| `kind` | `string` | The kind of report: `title`, `cwd`, `bell`, `command_started`, `command_finished`, `program_status`, `foreground`, `activity`, `disconnected`, `state` or `exit`. |
+| `details` | `Json` | What was reported, as the session reported it. A session on another machine, or one that a server runs, makes no `cwd` report, and its others give no folder and no number of a process. Where its machine is one that plugins can run programs on, it makes a `place` report instead, whose details are a [`Place`]. |
+| `kind` | `string` | The kind of report: `title`, `cwd`, `place`, `bell`, `command_started`, `command_finished`, `program_status`, `foreground`, `activity`, `disconnected`, `state` or `exit`. |
 | `pane` | `string` | optional. The pane that shows it, if one does. |
 | `session` | `string` | The session. |
 
@@ -1220,6 +1285,7 @@ A program that is started and left running.
 |---|---|---|
 | `cwd` | `string` | optional.  |
 | `env` | `Record<string, string>` | optional.  |
+| `machine` | `string` | optional. The machine it runs on, as for `process.run`. A program started on another machine reads nothing: its input is closed. |
 
 ### `SpawnPlace`
 
@@ -1233,7 +1299,7 @@ A program that runs, and the streams of its input and output.
 
 | Field | Type | |
 |---|---|---|
-| `pid` | `number` |  |
+| `pid` | `number` | The system's number of the process; 0 on another machine. |
 | `process` | `number` | The program, for `process.wait` and `process.kill`. |
 | `stderr` | `number` |  |
 | `stdin` | `number` |  |

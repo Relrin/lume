@@ -6,7 +6,7 @@ The Lume project is a focused on bringing an idea of a terminal that built on a 
 a Pi coding agent approach and allowing to adapt software to user's workflows.
 
 > [!NOTE]
-> Lume is a third-party client of the Rex server. It is not made, endorsed or supported by [Superlogical](https://www.superlogical.com/). 
+> Lume is a third-party client of the Rex server. It is not made, endorsed or supported by [Superlogical](https://www.superlogical.com/).
 > None of the logos and icons of Rex and Superlogical are used.
 >
 > Keep in mind that this is an unofficial app that implemented for experimenting with features and cover my own needs.

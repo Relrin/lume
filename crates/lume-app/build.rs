@@ -74,6 +74,7 @@ const COMMANDS: &[&str] = &[
     "addons_list",
     "addon_set_enabled",
     "addon_remove",
+    "addon_revoke_machine",
     "addon_move",
     "addon_inspect",
     "addon_inspect_git",

@@ -37,17 +37,21 @@ export function Button({
   children,
   quiet = false,
   primary = false,
+  label,
   onPress,
 }: {
   children: ReactNode;
   quiet?: boolean;
   primary?: boolean;
+  /** What it does, where its words alone do not tell it from another. */
+  label?: string;
   onPress: () => void;
 }) {
   return (
     <button
       type="button"
       className="settings-button"
+      aria-label={label}
       data-quiet={quiet}
       data-primary={primary}
       onClick={(event) => {

@@ -33,6 +33,8 @@ pub enum Kind {
     FsRead,
     FsWrite,
     ProcessRun,
+    /// Programs run where a session runs, on another machine.
+    ProcessRunElsewhere,
     Net,
     PanesRead,
     PanesWrite,
@@ -61,10 +63,11 @@ pub enum ScopeKind {
 }
 
 impl Kind {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::FsRead,
         Self::FsWrite,
         Self::ProcessRun,
+        Self::ProcessRunElsewhere,
         Self::Net,
         Self::PanesRead,
         Self::PanesWrite,
@@ -83,6 +86,7 @@ impl Kind {
             Self::FsRead => "fs.read",
             Self::FsWrite => "fs.write",
             Self::ProcessRun => "process.run",
+            Self::ProcessRunElsewhere => "process.run-elsewhere",
             Self::Net => "net",
             Self::PanesRead => "panes.read",
             Self::PanesWrite => "panes.write",
@@ -103,7 +107,7 @@ impl Kind {
     pub fn scope(self) -> ScopeKind {
         match self {
             Self::FsRead | Self::FsWrite => ScopeKind::Paths,
-            Self::ProcessRun => ScopeKind::Programs,
+            Self::ProcessRun | Self::ProcessRunElsewhere => ScopeKind::Programs,
             Self::Net => ScopeKind::Hosts,
             Self::ServicesUse => ScopeKind::Plugins,
             _ => ScopeKind::None,
@@ -113,7 +117,10 @@ impl Kind {
     /// Whether a grant of this kind can have the user asked before each use. Only where
     /// what is done can be shown exactly: the text typed, the command run.
     pub fn may_ask_each_time(self) -> bool {
-        matches!(self, Self::PanesWrite | Self::ProcessRun)
+        matches!(
+            self,
+            Self::PanesWrite | Self::ProcessRun | Self::ProcessRunElsewhere
+        )
     }
 }
 
@@ -264,7 +271,8 @@ fn parse_request(key: &str, value: &toml::Value) -> Result<Request, String> {
     };
     if prompt == Prompt::Each && !kind.may_ask_each_time() {
         return Err(format!(
-            "only panes.write and process.run can ask before each use, not {kind}"
+            "only panes.write, process.run and process.run-elsewhere can ask before each use, \
+             not {kind}"
         ));
     }
     let scope = check_scope(kind, scope)?;
@@ -557,6 +565,13 @@ const GENERAL_PROGRAMS: [&str; 22] = [
     "env",
 ];
 
+/// Whether one of these programs can do anything the user can, given the right arguments.
+pub fn can_do_anything(programs: &[String]) -> bool {
+    programs
+        .iter()
+        .any(|program| GENERAL_PROGRAMS.contains(&program.to_ascii_lowercase().as_str()))
+}
+
 /// Whether a path pattern covers the whole home folder or a whole disk.
 fn covers_everything(pattern: &str) -> bool {
     let pattern = pattern.trim_end_matches("/**").trim_end_matches('/');
@@ -599,11 +614,7 @@ pub fn describe(request: &Request) -> Description {
             format!("Create, change and delete files in: {}", list())
         }
         Kind::ProcessRun => {
-            if request
-                .scope
-                .iter()
-                .any(|program| GENERAL_PROGRAMS.contains(&program.to_ascii_lowercase().as_str()))
-            {
+            if can_do_anything(&request.scope) {
                 warning = Some(
                     "A program such as a shell or git can do anything you can, so running it \
                      is close to trusting this plugin with your account."
@@ -612,6 +623,11 @@ pub fn describe(request: &Request) -> Description {
             }
             format!("Run these programs, with any arguments: {}", list())
         }
+        Kind::ProcessRunElsewhere => format!(
+            "On other machines that your terminals are on (servers, SSH, WSL), each once you \
+             have allowed it there: run these programs, with any arguments: {}",
+            list()
+        ),
         Kind::Net => {
             let hosts: Vec<String> = request
                 .scope
@@ -693,6 +709,9 @@ pub fn describe_optional(optional: &Optional) -> String {
             ScopeKind::None => describe(&request).what,
             ScopeKind::Paths if optional.kind == Kind::FsRead => "Read files".to_owned(),
             ScopeKind::Paths => "Create, change and delete files".to_owned(),
+            ScopeKind::Programs if optional.kind == Kind::ProcessRunElsewhere => {
+                "Run programs on other machines that your terminals are on".to_owned()
+            }
             ScopeKind::Programs => "Run programs".to_owned(),
             ScopeKind::Hosts => "Connect to servers".to_owned(),
             ScopeKind::Plugins => "Use what other plugins offer".to_owned(),
@@ -715,6 +734,7 @@ mod tests {
 "system.metrics" = true
 "fs.read" = ["${workspace}/**", '${home}\notes\*.md', "${workspace}/**"]
 "process.run" = { scope = ["git"], prompt = "each" }
+"process.run-elsewhere" = ["git"]
 "net" = ["API.github.com", "localhost:8080", "*.example.org:*", "[::1]:9000"]
 
 [optional]
@@ -723,7 +743,7 @@ mod tests {
 "#,
         ))
         .unwrap();
-        assert_eq!(permissions.required.len(), 4);
+        assert_eq!(permissions.required.len(), 5);
         let fs = permissions
             .required
             .iter()
@@ -771,11 +791,16 @@ mod tests {
             ),
             (r#""fs.read" = ["${workspace}x"]"#, "followed by `/`"),
             (r#""process.run" = ["/usr/bin/git"]"#, "without a folder"),
+            (
+                r#""process.run-elsewhere" = ["../git"]"#,
+                "without a folder",
+            ),
+            (r#""process.run-elsewhere" = true"#, "needs a scope"),
             (r#""net" = ["exa mple.org"]"#, "not a host name"),
             (r#""net" = ["example.org:99999"]"#, "not a port"),
             (
                 r#""clipboard.read" = { prompt = "each" }"#,
-                "only panes.write and process.run",
+                "only panes.write, process.run",
             ),
             (r#""services.use" = ["Acme"]"#, "not a plugin id"),
             (

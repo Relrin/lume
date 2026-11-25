@@ -1,0 +1,27 @@
+# A plugin for the end-to-end tests: it runs programs where a session is, once the user
+# allowed it there.
+schema = 1
+id = "test.elsewhere"
+name = "Elsewhere"
+version = "1.0.0"
+description = "Runs programs where a session is."
+api = "1"
+main = "host.js"
+repository = "https://example.invalid/lume/test-elsewhere"
+activation = ["onCommand:look", "onCommand:allow", "onCommand:work"]
+
+[permissions]
+"workspace.read" = true
+"process.run-elsewhere" = ["cat", "sh", "uname"]
+
+[[contributes.commands]]
+id = "look"
+title = "Say where the sessions are"
+
+[[contributes.commands]]
+id = "allow"
+title = "Ask to run programs there"
+
+[[contributes.commands]]
+id = "work"
+title = "Run programs there"

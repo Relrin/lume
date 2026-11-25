@@ -43,9 +43,10 @@ const DESCRIPTION_MAX_CHARS: usize = 300;
 const LABEL_MAX_CHARS: usize = 64;
 
 /// The kinds of session event a plugin can be started by.
-pub const SESSION_EVENTS: [&str; 11] = [
+pub const SESSION_EVENTS: [&str; 12] = [
     "title",
     "cwd",
+    "place",
     "bell",
     "command_started",
     "command_finished",

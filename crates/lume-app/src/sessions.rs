@@ -172,6 +172,14 @@ impl SessionStates {
         })
     }
 
+    /// What the application started each of its sessions to run.
+    pub fn launchers(&self) -> Vec<Launcher> {
+        self.sessions()
+            .values()
+            .filter_map(|known| known.launcher.clone())
+            .collect()
+    }
+
     /// Notes the process a session started.
     pub fn set_pid(&self, key: &SessionKey, pid: u32) {
         if let Some(known) = self.sessions().get_mut(key) {

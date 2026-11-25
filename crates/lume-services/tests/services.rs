@@ -6,6 +6,7 @@
 mod common;
 
 use std::io::Read as _;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use common::{Layout, Server, answer, get, grants, redirect};
@@ -230,6 +231,7 @@ fn options(timeout: Duration) -> RunOptions {
         stdin: None,
         timeout,
         max_output: 64 * 1024,
+        stop: Arc::default(),
     }
 }
 
@@ -335,6 +337,27 @@ fn a_program_past_its_timeout_is_stopped_with_what_it_started() {
         "{:?}",
         started.elapsed()
     );
+}
+
+#[test]
+fn a_program_that_is_no_longer_wanted_is_stopped_with_what_it_started() {
+    let layout = Layout::new("run-stop");
+    let (program, args) = shell(&layout);
+    let options = options(Duration::from_secs(20));
+    let stop = Arc::clone(&options.stop);
+    let started = Instant::now();
+    let asker = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(500));
+        stop.ask();
+    });
+    let output = process::run(&program, &line(&args, long_line()), options).unwrap();
+    asker.join().unwrap();
+    assert_eq!((output.code, output.timed_out), (None, false));
+    assert!(
+        !output.truncated,
+        "the started program kept the output open"
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
 }
 
 #[test]

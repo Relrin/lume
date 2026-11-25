@@ -26,12 +26,13 @@ pub mod types;
 pub use types::{ApiError, ErrorCode};
 use types::{
     ClipboardWrite, CommandExecute, ContextSet, FetchResult, FetchStreamResult, FsEntry, FsPath,
-    FsRead, FsStat, FsUnwatch, FsWatch, FsWrite, Grant, KvKey, KvSet, LayoutApply, MetricsSample,
-    MetricsSubscribe, MetricsUnsubscribe, NetFetch, Nothing, PaneInfo, PaneRef, PaneStats,
-    PaneWrite, PanelId, PanelsSet, PanelsSetChildren, PermissionsRequest, ProcessExit, ProcessId,
-    ProcessResult, ProcessRun, ProcessSpawn, SecretKey, SecretSet, ServicesCall, SessionEntry,
-    SessionsSpawn, SettingsGet, Spawned, StatusClear, StatusSet, StreamId, StreamRead, StreamWrite,
-    Subscribe, UiConfirm, UiPick, UiToast, ViewInstance, ViewsInstances, ViewsPost, WorkspaceInfo,
+    FsRead, FsStat, FsUnwatch, FsWatch, FsWrite, Grant, KvKey, KvSet, LayoutApply, MachineEntry,
+    MachinesAllow, MetricsSample, MetricsSubscribe, MetricsUnsubscribe, NetFetch, Nothing,
+    PaneInfo, PaneRef, PaneStats, PaneWrite, PanelId, PanelsSet, PanelsSetChildren,
+    PermissionsRequest, ProcessExit, ProcessId, ProcessResult, ProcessRun, ProcessSpawn, SecretKey,
+    SecretSet, ServicesCall, SessionEntry, SessionsSpawn, SettingsGet, Spawned, StatusClear,
+    StatusSet, StreamId, StreamRead, StreamWrite, Subscribe, UiConfirm, UiPick, UiToast,
+    ViewInstance, ViewsInstances, ViewsPost, WorkspaceInfo,
 };
 use types::{OpenedView, StreamGrant, StreamRevoke, UiOpenView};
 
@@ -92,6 +93,9 @@ fn schema_of<T: JsonSchema>(generator: &mut SchemaGenerator) -> Schema {
     generator.subschema_for::<T>()
 }
 
+/// What a program run on another machine needs, in place of what one run here does.
+const RUN_ELSEWHERE: &str = "process.run-elsewhere";
+
 /// Defines the calls. Each row is
 /// `Variant = "name"(js, args): Params => Result [, needs "permission"] [, internal = true];`.
 macro_rules! api {
@@ -129,7 +133,15 @@ macro_rules! api {
 
             /// The permission the call needs, if any.
             pub fn permission(&self) -> Option<&'static str> {
-                method(self.name()).and_then(|method| method.permission)
+                match self {
+                    Self::ProcessRun(run) if run.options.machine.is_some() => {
+                        Some(RUN_ELSEWHERE)
+                    }
+                    Self::ProcessSpawn(spawn) if spawn.options.machine.is_some() => {
+                        Some(RUN_ELSEWHERE)
+                    }
+                    _ => method(self.name()).and_then(|method| method.permission),
+                }
             }
         }
 
@@ -228,11 +240,20 @@ api! {
     StreamsRevoke = "streams.revoke"(grant): StreamRevoke => ();
     /// Runs a program the plugin may run, found once on the system's path, and gives
     /// back how it ended and what it wrote. Where the permission says so, the user is
-    /// asked first, shown the command.
+    /// asked first, shown the command. With `machine` it runs on that machine, which the
+    /// user must have allowed: until then this fails as `machine_not_allowed`, and as
+    /// `not_connected` while no session is there.
     ProcessRun = "process.run"(program, args, options): ProcessRun => ProcessResult, needs "process.run";
     /// Starts a program the plugin may run and leaves it running, with its input and
     /// output as streams.
     ProcessSpawn = "process.spawn"(program, args, options): ProcessSpawn => Spawned, needs "process.run";
+    /// The other machines that sessions are on, where plugins can run programs.
+    MachinesList = "machines.list"(): Nothing => Vec<MachineEntry>, needs "workspace.read";
+    /// Asks the user to let the plugin run its programs on a machine, and says whether
+    /// they did. Their yes is kept until they take it back. To be called when the user
+    /// asked for it, as by pressing a button: after a no, it answers no for a minute
+    /// without asking.
+    MachinesAllow = "machines.allow"(machine, reason): MachinesAllow => bool, needs "process.run-elsewhere";
     /// Waits for a program the plugin started to end.
     ProcessWait = "process.wait"(process): ProcessId => ProcessExit;
     /// Stops a program the plugin started.

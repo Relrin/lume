@@ -181,6 +181,16 @@ pub async fn addon_remove(services: Shared<'_>, id: String) -> Result<(), Comman
     services.plugins.remove_addon(&id).await
 }
 
+/// Takes back what a plugin may run on another machine.
+#[tauri::command]
+pub async fn addon_revoke_machine(
+    services: Shared<'_>,
+    id: String,
+    machine: String,
+) -> Result<(), CommandError> {
+    services.plugins.revoke_machine(&id, &machine).await
+}
+
 /// Moves a plugin one place earlier or later in the order plugins load in.
 #[tauri::command]
 pub async fn addon_move(

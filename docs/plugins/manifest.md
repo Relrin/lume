@@ -87,7 +87,7 @@ The other plugin is named by the id its manifest gives it, whatever id it is ins
 | `onSessionEvent:<kind>` | A session reports something of this kind.                                  |
 | `onService:<name>`      | Another plugin calls one of the plugin's services.                         |
 
-The kinds of session event are `title`, `cwd`, `bell`, `command_started`, `command_finished`,
+The kinds of session event are `title`, `cwd`, `place`, `bell`, `command_started`, `command_finished`,
 `program_status`, `foreground`, `activity`, `disconnected`, `state` and `exit`. A plugin is started
 by a session event only if it holds the `workspace.read` permission.
 

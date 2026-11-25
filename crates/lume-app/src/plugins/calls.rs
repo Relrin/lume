@@ -105,6 +105,8 @@ impl Plugins {
             }
             Call::SessionsSpawn(asked) => self.spawn_session(local, asked).await,
             Call::SessionsList(_) => self.session_list().await,
+            Call::MachinesList(_) => value_of(&self.machines_list(local)),
+            Call::MachinesAllow(asked) => self.allow_machine(local, asked).await.map(Value::Bool),
             Call::WorkspaceCurrent(_) => value_of(&self.workspace_info()?),
             Call::WorkspaceRoot(_) => Ok(json!(self.config.current().workspace.root.clone())),
             Call::LayoutApply(apply) => {
@@ -507,6 +509,15 @@ impl Plugins {
                     session: listed.info.id,
                 };
                 let state = self.state.reports().state(&key);
+                // A folder of another machine is no path of this one.
+                let place = self.state.machine_of(&key).map(|machine| {
+                    let reported = listed
+                        .info
+                        .cwd
+                        .clone()
+                        .or_else(|| state.as_ref().and_then(|state| state.cwd.clone()));
+                    machine.place(reported.as_deref())
+                });
                 SessionEntry {
                     session: listed.info.id.to_string(),
                     pane: services.panes.pane_of(&key).map(|pane| pane.to_string()),
@@ -516,6 +527,7 @@ impl Plugins {
                         .title
                         .or_else(|| state.and_then(|state| state.title)),
                     cwd,
+                    place,
                     exited: listed.info.exit.is_some(),
                 }
             })
@@ -539,6 +551,9 @@ impl Plugins {
             backend: listed.backend.clone(),
             session: listed.info.id,
         };
+        if self.state.machine_of(&key).is_some() {
+            return None;
+        }
         let reports = self.state.reports();
         let launched = reports.launched(&key)?;
         let reported = || reports.state(&key).and_then(|state| state.cwd);
@@ -744,7 +759,7 @@ impl Plugins {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::path::Path;
     use std::time::Duration;
 
@@ -770,7 +785,7 @@ mod tests {
     }
 
     /// The application with a shell of its own running in a pane.
-    async fn running(dir: &TempDir) -> (Arc<Services>, SessionKey) {
+    pub(in crate::plugins) async fn running(dir: &TempDir) -> (Arc<Services>, SessionKey) {
         std::fs::create_dir_all(dir.dirs().config).unwrap();
         let shell = if cfg!(windows) {
             "[terminal]\nshell = \"cmd.exe\"\nshell-args = [\"/d\"]\n"
@@ -830,7 +845,7 @@ mod tests {
         (services, key)
     }
 
-    fn says_it_is_in(services: &Services, key: &SessionKey, url: &str) {
+    pub(in crate::plugins) fn says_it_is_in(services: &Services, key: &SessionKey, url: &str) {
         let event = SessionEvent::Cwd {
             url: url.to_owned(),
         };

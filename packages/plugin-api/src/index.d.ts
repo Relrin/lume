@@ -293,6 +293,47 @@ export interface LayoutApply {
   intent: Json;
 }
 
+/**
+ * A machine that sessions are on, other than this one.
+ */
+export interface MachineEntry {
+  /**
+   * Whether the plugin may run its programs there.
+   */
+  allowed: boolean;
+  kind: MachineKind;
+  label: string;
+  machine: string;
+}
+
+/**
+ * How a machine is reached.
+ */
+export type MachineKind =
+  /**
+   * A server that runs the session.
+   */
+  | "rex"
+  /**
+   * The SSH client.
+   */
+  | "ssh"
+  /**
+   * A Linux distribution of this Windows machine.
+   */
+  | "wsl";
+
+export interface MachinesAllow {
+  /**
+   * The machine, by its id.
+   */
+  machine: string;
+  /**
+   * Why the plugin asks, in a sentence the user is shown as the plugin's words.
+   */
+  reason?: string;
+}
+
 export interface MemoryUsage {
   total: number;
   used: number;
@@ -555,6 +596,26 @@ export interface PickOptions {
 }
 
 /**
+ * Where a session is that is not on this machine.
+ */
+export interface Place {
+  /**
+   * The folder the session is in, as a path of that machine, where it is known.
+   */
+  folder?: string;
+  kind: MachineKind;
+  /**
+   * What to call the machine.
+   */
+  label: string;
+  /**
+   * The machine's id, for `process.run` and `machines.allow`. It stays the same as
+   * long as the machine is reached the same way.
+   */
+  machine: string;
+}
+
+/**
  * How a program that was started ended.
  */
 export interface ProcessExit {
@@ -573,7 +634,9 @@ export interface ProcessId {
  */
 export interface ProcessOptions {
   /**
-   * The folder it starts in: the plugin's own data folder if left out.
+   * The folder it starts in: the plugin's own data folder if left out. On another
+   * machine it is an absolute path of that machine's, and the user's home folder if
+   * left out.
    */
   cwd?: string;
   /**
@@ -584,6 +647,12 @@ export interface ProcessOptions {
    * Variables added to its environment.
    */
   env?: Record<string, string>;
+  /**
+   * The machine it runs on, by its id, as a session's `place` gives it; this one if
+   * left out. Another machine needs the permission `process.run-elsewhere` in place of
+   * `process.run`, and the user's word for that machine.
+   */
+  machine?: string;
   /**
    * The most output kept of each of its two streams; 4 MiB if left out.
    */
@@ -677,9 +746,8 @@ export interface ServicesCall {
  */
 export interface SessionEntry {
   /**
-   * The folder it is in, as a path: of this machine, or inside the Linux distribution
-   * it runs in. Left out where the folder is not known or not there, and for a session
-   * on another machine.
+   * The folder it is in, as a path of this machine. Left out where the folder is not
+   * known or not there, and for a session on another machine.
    */
   cwd?: string;
   /**
@@ -690,6 +758,10 @@ export interface SessionEntry {
    * The pane that shows it, if one does.
    */
   pane?: string;
+  /**
+   * Where it is, if that is another machine that plugins can run programs on.
+   */
+  place?: Place;
   program: string;
   session: string;
   title?: string;
@@ -702,11 +774,12 @@ export interface SessionReport {
   /**
    * What was reported, as the session reported it. A session on another machine, or
    * one that a server runs, makes no `cwd` report, and its others give no folder and
-   * no number of a process.
+   * no number of a process. Where its machine is one that plugins can run programs
+   * on, it makes a `place` report instead, whose details are a [`Place`].
    */
   details: Json;
   /**
-   * The kind of report: `title`, `cwd`, `bell`, `command_started`,
+   * The kind of report: `title`, `cwd`, `place`, `bell`, `command_started`,
    * `command_finished`, `program_status`, `foreground`, `activity`,
    * `disconnected`, `state` or `exit`.
    */
@@ -768,6 +841,11 @@ export interface SettingsGet {
 export interface SpawnOptions {
   cwd?: string;
   env?: Record<string, string>;
+  /**
+   * The machine it runs on, as for `process.run`. A program started on another
+   * machine reads nothing: its input is closed.
+   */
+  machine?: string;
 }
 
 /**
@@ -791,6 +869,9 @@ export type SpawnPlace =
  * A program that runs, and the streams of its input and output.
  */
 export interface Spawned {
+  /**
+   * The system's number of the process; 0 on another machine.
+   */
   pid: number;
   /**
    * The program, for `process.wait` and `process.kill`.
@@ -1261,6 +1342,23 @@ export interface LumeCalls {
      */
     apply(intent: Json): Promise<Json>;
   };
+  readonly machines: {
+    /**
+     * The other machines that sessions are on, where plugins can run programs.
+     *
+     * Needs the `workspace.read` permission.
+     */
+    list(): Promise<MachineEntry[]>;
+    /**
+     * Asks the user to let the plugin run its programs on a machine, and says whether
+     *  they did. Their yes is kept until they take it back. To be called when the user
+     *  asked for it, as by pressing a button: after a no, it answers no for a minute
+     *  without asking.
+     *
+     * Needs the `process.run-elsewhere` permission.
+     */
+    allow(machine: string, reason?: string): Promise<boolean>;
+  };
   readonly metrics: {
     /**
      * The latest reading of the machine, or null before the first: how busy the
@@ -1346,7 +1444,9 @@ export interface LumeCalls {
     /**
      * Runs a program the plugin may run, found once on the system's path, and gives
      *  back how it ended and what it wrote. Where the permission says so, the user is
-     *  asked first, shown the command.
+     *  asked first, shown the command. With `machine` it runs on that machine, which the
+     *  user must have allowed: until then this fails as `machine_not_allowed`, and as
+     *  `not_connected` while no session is there.
      *
      * Needs the `process.run` permission.
      */

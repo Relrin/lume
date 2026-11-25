@@ -79,6 +79,19 @@ pub struct Entry {
     /// again.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub services: BTreeMap<String, String>,
+    /// The other machines it may run programs on, by their ids.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub machines: BTreeMap<String, OnMachine>,
+}
+
+/// What the user agreed to a plugin's running on another machine.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct OnMachine {
+    /// What the machine was called then, for the user.
+    pub label: String,
+    /// The programs.
+    pub programs: Vec<String>,
 }
 
 /// Where a package was installed from.
@@ -263,6 +276,13 @@ mod tests {
             grants: "\"system.metrics\" = true".parse().unwrap(),
             services: BTreeMap::new(),
             bindings: BTreeMap::from([("acme.core".to_owned(), "acme.fork".to_owned())]),
+            machines: BTreeMap::from([(
+                "wsl:Ubuntu".to_owned(),
+                OnMachine {
+                    label: "Ubuntu".to_owned(),
+                    programs: vec!["git".to_owned()],
+                },
+            )]),
         }
     }
 

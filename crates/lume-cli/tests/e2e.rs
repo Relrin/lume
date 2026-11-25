@@ -2406,6 +2406,137 @@ fn a_plugin_asks_while_it_runs_and_the_user_answers_in_the_window() {
     app.quit();
 }
 
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_runs_programs_where_a_session_is_once_the_user_allowed_it_there() {
+    let home = home_with_plugins(&["elsewhere"]);
+    let app = App::start_in(home, false);
+    app.status_with_session();
+    app.until_plugin("test.elsewhere", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    // Runs one of its commands, and gives what it said of it.
+    let marks = std::cell::Cell::new(0);
+    let mark = || {
+        marks.set(marks.get() + 1);
+        format!("mark{}", marks.get())
+    };
+    let args = |mark: &str, machine: &str| {
+        serde_json::json!({ "mark": mark, "machine": machine }).to_string()
+    };
+    let said = |mark: &str| {
+        let line = format!("{mark} {{");
+        let plugin = app.until_plugin("test.elsewhere", "what it says", |plugin| {
+            logged(plugin, &line)
+        });
+        let lines = plugin["log"].as_array().unwrap();
+        let line = lines
+            .iter()
+            .filter_map(Value::as_str)
+            .find_map(|text| text.find(&line).map(|at| &text[at + line.len() - 1..]))
+            .unwrap();
+        serde_json::from_str::<Value>(line).unwrap_or_else(|error| panic!("{error}: {line}"))
+    };
+    let run = |command: &str, machine: &str| {
+        let mark = mark();
+        let command = format!("test.elsewhere.{command}");
+        app.ctl(&["command", &command, &args(&mark, machine)])
+            .ok(&command);
+        said(&mark)
+    };
+    // Sessions of this machine are nowhere else, and nobody is on what is not there.
+    let seen = run("look", "");
+    assert_eq!(seen["places"].as_array().map(Vec::len), Some(0), "{seen}");
+    let nobody = run("work", "wsl:nowhere");
+    assert_eq!(nobody["uname"], "machine_not_allowed", "{nobody}");
+    assert_eq!(run("allow", "wsl:nowhere")["allowed"], "not_connected");
+
+    // A Linux distribution, where there is one. Docker's own has no shell for people.
+    let deadline = Instant::now() + START;
+    let listed = loop {
+        let listed = app.ctl(&["profiles"]).ok("profiles")["profiles"].clone();
+        if listed["looked"] == true {
+            break listed;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the machine was never looked at: {listed}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let Some(profile) = listed["profiles"]
+        .as_array()
+        .expect("profiles")
+        .iter()
+        .filter_map(|profile| profile["id"].as_str())
+        .find(|id| id.starts_with("auto.wsl.") && !id.contains("docker"))
+    else {
+        eprintln!("no Linux distribution here: programs are run on no other machine");
+        app.quit();
+        return;
+    };
+    app.ctl(&["spawn", "--profile", profile])
+        .ok("the distribution's shell");
+    let seen = run("look", "");
+    let place = &seen["places"][0];
+    assert_eq!(place["kind"], "wsl", "{seen}");
+    let id = place["machine"].as_str().expect("a machine").to_owned();
+    assert_eq!(seen["machines"][0]["allowed"], false, "{seen}");
+    let refused = run("work", &id);
+    assert_eq!(refused["uname"], "machine_not_allowed", "{refused}");
+    assert_eq!(refused["other"], "denied", "{refused}");
+
+    let asked = mark();
+    let asking = app.ctl_in_background(&["command", "test.elsewhere.allow", &args(&asked, &id)]);
+    app.answer_prompt(true);
+    asking.join().unwrap().ok("the question");
+    assert_eq!(said(&asked)["allowed"], true);
+    let seen = run("look", "");
+    assert_eq!(seen["machines"][0]["allowed"], true, "{seen}");
+    let lock = std::fs::read_to_string(app.home.join("state/plugins/lock.toml")).unwrap();
+    assert!(lock.contains(&id), "{lock}");
+
+    let done = run("work", &id);
+    for (what, expected) in [
+        ("uname", "0 Linux"),
+        ("input", "0 åäö 'quoted' $HOME"),
+        ("folder", "3 /tmp err"),
+        ("nowhere", "not_found"),
+        ("local", "invalid"),
+        ("other", "denied"),
+        ("here", "denied"),
+        (
+            "pieces", "1
+2
+3
+",
+        ),
+    ] {
+        assert_eq!(done[what], expected, "{what} of {done}");
+    }
+    assert_eq!(
+        (&done["pid"], &done["exit"]),
+        (&0.into(), &4.into()),
+        "{done}"
+    );
+    assert_ne!(done["write"], "written", "{done}");
+    // The audit log has the program and the machine, and nothing of what was sent. It is
+    // written a moment after.
+    let file = app.home.join("state/plugins/audit.log");
+    let used = format!("uname on {id}");
+    let deadline = Instant::now() + START;
+    let audit = loop {
+        let audit = std::fs::read_to_string(&file).unwrap_or_default();
+        if audit.contains(&used) {
+            break audit;
+        }
+        assert!(Instant::now() < deadline, "{audit}");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert!(!audit.contains("quoted"), "{audit}");
+    app.quit();
+}
+
 /// Keeps the first line of every request made to a listener on this machine, from a
 /// thread of its own.
 fn counting_listener() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {

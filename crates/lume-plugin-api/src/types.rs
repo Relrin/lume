@@ -330,13 +330,14 @@ pub struct SessionReport {
     /// The pane that shows it, if one does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane: Option<String>,
-    /// The kind of report: `title`, `cwd`, `bell`, `command_started`,
+    /// The kind of report: `title`, `cwd`, `place`, `bell`, `command_started`,
     /// `command_finished`, `program_status`, `foreground`, `activity`,
     /// `disconnected`, `state` or `exit`.
     pub kind: String,
     /// What was reported, as the session reported it. A session on another machine, or
     /// one that a server runs, makes no `cwd` report, and its others give no folder and
-    /// no number of a process.
+    /// no number of a process. Where its machine is one that plugins can run programs
+    /// on, it makes a `place` report instead, whose details are a [`Place`].
     pub details: Value,
 }
 
@@ -503,9 +504,16 @@ pub struct StreamId {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ProcessOptions {
-    /// The folder it starts in: the plugin's own data folder if left out.
+    /// The folder it starts in: the plugin's own data folder if left out. On another
+    /// machine it is an absolute path of that machine's, and the user's home folder if
+    /// left out.
     #[serde(default)]
     pub cwd: Option<String>,
+    /// The machine it runs on, by its id, as a session's `place` gives it; this one if
+    /// left out. Another machine needs the permission `process.run-elsewhere` in place of
+    /// `process.run`, and the user's word for that machine.
+    #[serde(default)]
+    pub machine: Option<String>,
     /// Variables added to its environment.
     #[serde(default)]
     pub env: Option<std::collections::BTreeMap<String, String>>,
@@ -554,6 +562,10 @@ pub struct ProcessResult {
 pub struct SpawnOptions {
     #[serde(default)]
     pub cwd: Option<String>,
+    /// The machine it runs on, as for `process.run`. A program started on another
+    /// machine reads nothing: its input is closed.
+    #[serde(default)]
+    pub machine: Option<String>,
     #[serde(default)]
     pub env: Option<std::collections::BTreeMap<String, String>>,
 }
@@ -573,6 +585,7 @@ pub struct ProcessSpawn {
 pub struct Spawned {
     /// The program, for `process.wait` and `process.kill`.
     pub process: u64,
+    /// The system's number of the process; 0 on another machine.
     pub pid: u32,
     pub stdin: u64,
     pub stdout: u64,
@@ -756,13 +769,61 @@ pub struct SessionEntry {
     pub program: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// The folder it is in, as a path: of this machine, or inside the Linux distribution
-    /// it runs in. Left out where the folder is not known or not there, and for a session
-    /// on another machine.
+    /// The folder it is in, as a path of this machine. Left out where the folder is not
+    /// known or not there, and for a session on another machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// Where it is, if that is another machine that plugins can run programs on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<Place>,
     /// Whether its program has ended.
     pub exited: bool,
+}
+
+/// Where a session is that is not on this machine.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Place {
+    /// The machine's id, for `process.run` and `machines.allow`. It stays the same as
+    /// long as the machine is reached the same way.
+    pub machine: String,
+    /// What to call the machine.
+    pub label: String,
+    pub kind: MachineKind,
+    /// The folder the session is in, as a path of that machine, where it is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
+/// How a machine is reached.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MachineKind {
+    /// A server that runs the session.
+    Rex,
+    /// The SSH client.
+    Ssh,
+    /// A Linux distribution of this Windows machine.
+    Wsl,
+}
+
+/// A machine that sessions are on, other than this one.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MachineEntry {
+    pub machine: String,
+    pub label: String,
+    pub kind: MachineKind,
+    /// Whether the plugin may run its programs there.
+    pub allowed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MachinesAllow {
+    /// The machine, by its id.
+    pub machine: String,
+    /// Why the plugin asks, in a sentence the user is shown as the plugin's words.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 /// The workspace in use.

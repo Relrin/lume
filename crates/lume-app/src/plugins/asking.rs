@@ -28,7 +28,7 @@ pub(super) const APPROVE_TEXT_MAX: usize = 4000;
 /// How long the words a plugin puts to the user may be, in characters.
 const TITLE_MAX: usize = 80;
 const MESSAGE_MAX: usize = 1000;
-const REASON_MAX: usize = 300;
+pub(super) const REASON_MAX: usize = 300;
 const LABEL_MAX: usize = 120;
 const DETAIL_MAX: usize = 200;
 const PICK_ITEMS_MAX: usize = 500;
@@ -47,7 +47,7 @@ pub(super) fn plain(text: &str, max: usize) -> String {
     out
 }
 
-fn too_long(what: &str, max: usize) -> ApiError {
+pub(super) fn too_long(what: &str, max: usize) -> ApiError {
     api_error(
         ErrorCode::Invalid,
         format!("{what} is longer than {max} characters"),
@@ -57,7 +57,7 @@ fn too_long(what: &str, max: usize) -> ApiError {
 impl Plugins {
     /// Puts a question to the user in the window in front, on behalf of `local`, and
     /// gives back their answer.
-    async fn ask_user(&self, local: &str, mut ask: Value) -> Result<Value, ApiError> {
+    pub(super) async fn ask_user(&self, local: &str, mut ask: Value) -> Result<Value, ApiError> {
         let services = self
             .services()
             .ok_or_else(|| api_error(ErrorCode::Failed, "there is no window to ask in"))?;
@@ -94,7 +94,7 @@ impl Plugins {
 
     /// Has the user approve one use of a permission held with `prompt = "each"`,
     /// showing them `text` whole: the command that would run, or the text that would be
-    /// typed, with `place` saying where. Nothing is asked for a permission held
+    /// typed, with `place` saying where, if not here. Nothing is asked for a permission held
     /// otherwise.
     pub(super) async fn approve_use(
         &self,

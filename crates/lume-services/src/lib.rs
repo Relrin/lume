@@ -2,10 +2,10 @@
 //!
 //! A plugin's code can do nothing by itself; everything it does beyond its own data is
 //! a service of the application's, and each is reached only through the permission
-//! that covers it. The services live here: files ([`fs`]), programs ([`process`]), the
-//! network ([`net`]), the keychain ([`secrets`]), the streams a plugin holds open
-//! ([`streams`]), what a program's processes use ([`procs`]) and how busy the machine is
-//! ([`metrics`]).
+//! that covers it. The services live here: files ([`fs`]), programs ([`process`]), also
+//! on another machine ([`posix`]), the network ([`net`]), the keychain ([`secrets`]), the
+//! streams a plugin holds open ([`streams`]), what a program's processes use ([`procs`])
+//! and how busy the machine is ([`metrics`]).
 //!
 //! Each service is given what was granted and checks the call against it itself, down
 //! to the file actually opened and the address actually connected to. What it gives back
@@ -16,6 +16,7 @@ mod handle;
 pub mod metrics;
 pub mod net;
 mod paths;
+pub mod posix;
 pub mod process;
 pub mod procs;
 pub mod scope;

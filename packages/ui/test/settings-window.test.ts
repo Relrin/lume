@@ -148,6 +148,7 @@ describe("the settings window", () => {
         },
       ],
       later: ["Read what you copy"],
+      machines: [{ id: "wsl:Ubuntu", label: "Ubuntu (WSL)", programs: ["git", "cargo"] }],
       health: { running: true, starts: 2, breaches: 0, lastProblem: null, warnings: [] },
       log: ["info started"],
       audit: [
@@ -218,6 +219,12 @@ describe("the settings window", () => {
     expect(page).toContain("<h2>Permissions</h2>");
     expect(page).toContain("Run these programs, with any arguments: git");
     expect(page).toContain("It may ask you later to:");
+    expect(page).toContain("<h2>Other machines</h2>");
+    expect(page).toContain("It may run there, with any arguments: git, cargo");
+    expect(page).toContain('aria-label="Revoke what Tools may run on Ubuntu (WSL)"');
+    expect(markup(app(view(), "addon:acme.tools", [{ ...tools, machines: [] }]))).not.toContain(
+      "Other machines",
+    );
     expect(page).toContain("<h2>Health</h2>");
     expect(page).toContain("Running");
     expect(page).toContain("<h2>Activity</h2>");

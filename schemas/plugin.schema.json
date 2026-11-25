@@ -1574,6 +1574,19 @@
                 }
               ]
             },
+            "process.run-elsewhere": {
+              "anyOf": [
+                {
+                  "const": true
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              ]
+            },
             "services.use": {
               "anyOf": [
                 {
@@ -1638,6 +1651,37 @@
           ]
         },
         "process.run": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "enum": [
+                    "once",
+                    "each"
+                  ]
+                },
+                "scope": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "scope"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "process.run-elsewhere": {
           "anyOf": [
             {
               "items": {

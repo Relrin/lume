@@ -18,6 +18,7 @@ use std::ffi::OsStr;
 use std::io::{Read, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
@@ -27,6 +28,8 @@ use lume_plugin::permissions::check_program;
 
 use crate::paths::{self, Fence, IGNORE_CASE, Parts};
 use crate::scope::{Places, ServiceError};
+
+pub use std::process::ChildStderr;
 
 /// How long the output of a program that has ended is still read, for what is left in
 /// its pipes. A program it started that keeps them open is not waited for past this.
@@ -202,6 +205,21 @@ pub fn allowed(granted: &[String], program: &Program) -> Option<String> {
         .cloned()
 }
 
+/// Has a run end before its time, as when nobody waits for it any more.
+#[derive(Debug, Default)]
+pub struct Stop(AtomicBool);
+
+impl Stop {
+    /// Ends the run.
+    pub fn ask(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn asked(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
 /// How a program is run to its end.
 #[derive(Clone, Debug)]
 pub struct RunOptions {
@@ -215,13 +233,15 @@ pub struct RunOptions {
     pub timeout: Duration,
     /// How many bytes of its output and of its error output are kept, each.
     pub max_output: usize,
+    /// What has it end before its time.
+    pub stop: Arc<Stop>,
 }
 
 /// What a program did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunOutput {
-    /// Its exit code. `None` when it was stopped (by the timeout, or on Linux and macOS
-    /// by a signal).
+    /// Its exit code. `None` when it was stopped (by the timeout or by [`Stop`], or on
+    /// Linux and macOS by a signal).
     pub code: Option<i32>,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
@@ -361,6 +381,10 @@ pub fn run(
             stop(&mut child, &tree);
             break (None, true);
         }
+        if options.stop.asked() {
+            stop(&mut child, &tree);
+            break (None, false);
+        }
         let wait = pause.min(deadline - now);
         if writing && stdout.ended_within(wait) {
             writing = false;
@@ -480,6 +504,34 @@ pub fn spawn(
             tree,
         },
     })
+}
+
+/// A program that was started and runs alongside, wherever it runs.
+pub trait Running: Send + Sync {
+    /// The system's id of the process; 0 for one that is not of this machine.
+    fn id(&self) -> u32;
+
+    /// `None` while the program runs; once it has ended, its exit code, which is `None`
+    /// when it was stopped or could not be waited for.
+    fn try_wait(&self) -> Option<Option<i32>>;
+
+    /// Stops the program, with everything it started. A program that has ended already
+    /// is left as it is.
+    fn kill(&self) -> Result<(), ServiceError>;
+}
+
+impl Running for Child {
+    fn id(&self) -> u32 {
+        Child::id(self)
+    }
+
+    fn try_wait(&self) -> Option<Option<i32>> {
+        Child::try_wait(self)
+    }
+
+    fn kill(&self) -> Result<(), ServiceError> {
+        Child::kill(self)
+    }
 }
 
 /// A program started with [`spawn`]. It can be waited for on one thread and stopped from

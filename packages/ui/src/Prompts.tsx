@@ -87,7 +87,7 @@ export function visibleKeys(text: string): string {
 
 /** The words of a permission, as the user is asked for it. */
 function permissionWords(permission: string): string {
-  return permission === "process.run" ? "run this command" : "type this";
+  return permission === "panes.write" ? "type this" : "run this command";
 }
 
 /** A plugin's question, drawn under its name. */
@@ -117,13 +117,17 @@ function describePlugin(ask: PluginQuestion): Described {
         title: `Allow ${ask.plugin.name} to ${permissionWords(ask.permission)}?`,
         body: (
           <>
-            {ask.place ? <p>In {ask.place}:</p> : null}
+            {ask.place ? (
+              <p>
+                {ask.permission === "panes.write" ? "In" : "On"} {ask.place}:
+              </p>
+            ) : null}
             <pre className="prompt-preview">
               {ask.permission === "panes.write" ? visibleKeys(ask.text) : ask.text}
             </pre>
           </>
         ),
-        proceed: ask.permission === "process.run" ? "Run" : "Type",
+        proceed: ask.permission === "panes.write" ? "Type" : "Run",
         dismiss: "Don't allow",
       };
     case "confirm":

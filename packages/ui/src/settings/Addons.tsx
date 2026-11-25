@@ -24,6 +24,7 @@ import {
   installHeading,
   sourceWords,
   type AddonEntry,
+  type AddonMachine,
   type AddonPermission,
   type InstallFrom,
   type InstallPreview,
@@ -490,6 +491,35 @@ export function AddonsManager({ app }: { app: SettingsApp }) {
   );
 }
 
+/** A machine a plugin may run programs on, with the way to take it back. */
+function MachineRow({
+  app,
+  addon,
+  machine,
+}: {
+  app: SettingsApp;
+  addon: AddonEntry;
+  machine: AddonMachine;
+}) {
+  const revoke = () => {
+    app.client.addonRevokeMachine(addon.id, machine.id).then(
+      () => app.refreshAddons(),
+      (error: unknown) => app.notices.push("error", sentence(reason(error))),
+    );
+  };
+  return (
+    <div className="settings-row" data-machine={machine.id}>
+      <div className="settings-label">
+        <div>{machine.label}</div>
+        <div>It may run there, with any arguments: {machine.programs.join(", ")}</div>
+      </div>
+      <Button label={`Revoke what ${addon.name} may run on ${machine.label}`} onPress={revoke}>
+        Revoke
+      </Button>
+    </div>
+  );
+}
+
 /** What a plugin's own page shows after its settings: what it may do, how it fares,
  *  and what it did lately. */
 export function AddonSections({ app, id }: { app: SettingsApp; id: string }) {
@@ -517,6 +547,13 @@ export function AddonSections({ app, id }: { app: SettingsApp; id: string }) {
           </Line>
         )}
       </Group>
+      {addon.machines.length > 0 && (
+        <Group label="Other machines">
+          {addon.machines.map((machine) => (
+            <MachineRow key={machine.id} app={app} addon={addon} machine={machine} />
+          ))}
+        </Group>
+      )}
       <Group label="Health">
         <Line label={state}>
           {status !== null && (

@@ -350,6 +350,7 @@ mod tests {
             grants: toml::Table::new(),
             bindings: BTreeMap::new(),
             services: BTreeMap::new(),
+            machines: BTreeMap::new(),
         }
     }
 

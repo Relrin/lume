@@ -24,7 +24,7 @@ use std::time::{Duration, SystemTime};
 use crate::git::{self, GitSource};
 use crate::hash::{self, HashError};
 use crate::id::{check_plugin_id, overlap};
-use crate::lock::{Entry, LOCK_FILE, Lock, LockError, SOURCE_GIT, SOURCE_LINK, Source};
+use crate::lock::{Entry, LOCK_FILE, Lock, LockError, OnMachine, SOURCE_GIT, SOURCE_LINK, Source};
 use crate::manifest::{MANIFEST_FILE, Manifest, Problem};
 use crate::order::{Candidate, Resolution, resolve};
 use crate::package::{self, PackageError, Staged};
@@ -191,6 +191,8 @@ pub struct Prepared {
     manifest_hash: String,
     /// The bindings the install it replaces had.
     bindings: std::collections::BTreeMap<String, String>,
+    /// The machines the install it replaces may run programs on.
+    machines: std::collections::BTreeMap<String, OnMachine>,
     enabled: bool,
     staged: Option<Staged>,
 }
@@ -453,6 +455,7 @@ impl Store {
             unchanged: false,
             manifest_hash: String::new(),
             bindings: std::collections::BTreeMap::new(),
+            machines: std::collections::BTreeMap::new(),
             enabled: true,
             staged: Some(staged),
         };
@@ -562,6 +565,10 @@ impl Store {
                     direction,
                 };
                 prepared.bindings = existing.bindings.clone();
+                // Agreed to for what a linked folder held then, whatever it holds now.
+                if !existing.is_link() {
+                    prepared.machines = existing.machines.clone();
+                }
                 prepared.enabled = existing.enabled;
                 if prepared.name.is_none() {
                     prepared.name = existing.name.clone();
@@ -637,6 +644,7 @@ impl Store {
                     (wanted.clone(), bound.clone())
                 })
                 .collect(),
+            machines: prepared.machines.clone(),
         };
         lock.put(entry.clone());
         if let Err(error) = lock.write(&self.lock_file()) {
@@ -751,6 +759,7 @@ impl Store {
                 .map(|previous| previous.bindings.clone())
                 .unwrap_or_default(),
             services: std::collections::BTreeMap::new(),
+            machines: std::collections::BTreeMap::new(),
         };
         lock.put(entry.clone());
         lock.write(&self.lock_file())?;
@@ -826,6 +835,34 @@ impl Store {
                 .get_mut(local)
                 .ok_or_else(|| StoreError::NotInstalled(local.to_owned()))?;
             entry.services.insert(wanted.to_owned(), bound.to_owned());
+            Ok(())
+        })
+    }
+
+    /// Records that the user agreed to an install's running `programs` on the machine
+    /// with the id `machine`, in place of what they agreed to there before.
+    pub fn allow_on(
+        &self,
+        local: &str,
+        machine: &str,
+        allowed: &OnMachine,
+    ) -> Result<(), StoreError> {
+        self.change(|lock| {
+            let entry = lock
+                .get_mut(local)
+                .ok_or_else(|| StoreError::NotInstalled(local.to_owned()))?;
+            entry.machines.insert(machine.to_owned(), allowed.clone());
+            Ok(())
+        })
+    }
+
+    /// Takes back what an install may run on a machine.
+    pub fn revoke_on(&self, local: &str, machine: &str) -> Result<(), StoreError> {
+        self.change(|lock| {
+            let entry = lock
+                .get_mut(local)
+                .ok_or_else(|| StoreError::NotInstalled(local.to_owned()))?;
+            entry.machines.remove(machine);
             Ok(())
         })
     }
@@ -1784,6 +1821,52 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(text.contains("a picture may hold"), "{text}");
+    }
+
+    #[test]
+    fn what_may_run_on_a_machine_stays_over_an_update_and_goes_when_taken_back() {
+        let dir = TempDir::new("machines");
+        let store = store(&dir);
+        let permissions = "[permissions]\n\"process.run-elsewhere\" = [\"git\"]\n";
+        let install = |folder: &str, version: &str| {
+            let source = package(&dir, folder, "a.x", version, permissions);
+            let prepared = store.prepare(&source, InstallOptions::default()).unwrap();
+            store.commit(prepared).unwrap();
+        };
+        let held = || store.lock().unwrap().get("a.x").unwrap().machines.clone();
+        install("a", "1.0.0");
+        assert!(held().is_empty());
+        let git = |label: &str| OnMachine {
+            label: label.to_owned(),
+            programs: vec!["git".to_owned()],
+        };
+        store.allow_on("a.x", "wsl:Ubuntu", &git("Ubuntu")).unwrap();
+        store.allow_on("a.x", "wsl:Debian", &git("Debian")).unwrap();
+        assert_eq!(held()["wsl:Ubuntu"], git("Ubuntu"));
+        install("b", "1.1.0");
+        assert_eq!(held().len(), 2);
+        store.revoke_on("a.x", "wsl:Ubuntu").unwrap();
+        store.revoke_on("a.x", "wsl:Ubuntu").unwrap();
+        assert_eq!(held().keys().collect::<Vec<_>>(), ["wsl:Debian"]);
+        assert!(matches!(
+            store.allow_on("b.x", "wsl:Ubuntu", &git("Ubuntu")),
+            Err(StoreError::NotInstalled(_))
+        ));
+
+        // A folder that is linked may come to hold anything: what was agreed to for it
+        // does not go over to the package that takes its place.
+        store.remove("a.x", false).unwrap();
+        let linked = package(&dir, "c", "a.x", "1.2.0", permissions);
+        store.link(&linked, InstallOptions::default()).unwrap();
+        assert!(held().is_empty());
+        store.allow_on("a.x", "wsl:Ubuntu", &git("Ubuntu")).unwrap();
+        install("d", "1.3.0");
+        assert!(held().is_empty());
+
+        store.allow_on("a.x", "wsl:Ubuntu", &git("Ubuntu")).unwrap();
+        store.remove("a.x", false).unwrap();
+        install("e", "1.4.0");
+        assert!(held().is_empty());
     }
 
     #[test]

@@ -27,6 +27,7 @@
 
 mod asking;
 mod calls;
+mod elsewhere;
 mod linked;
 mod manage;
 mod openers;
@@ -311,6 +312,8 @@ pub struct Plugins {
     clipboard: OnceLock<ClipboardThread>,
     /// What plugins' code has open on the machine: streams, watches, programs.
     system: system::Held,
+    /// What is kept of their dealings with other machines.
+    elsewhere: elsewhere::Elsewhere,
     /// The plugins' views open in the windows.
     views: views::Views,
     /// The folders of plugins being worked on, which are watched.
@@ -390,6 +393,15 @@ fn report_of(what: &SessionNews, here: bool) -> Option<(String, Value)> {
     Some((kind, details))
 }
 
+/// Where a session that is on another machine says it is, as plugins are told it.
+fn place_report(machine: &crate::machines::Machine, url: &str) -> (String, Value) {
+    let place = machine.place(Some(url));
+    (
+        "place".to_owned(),
+        serde_json::to_value(place).unwrap_or(Value::Null),
+    )
+}
+
 fn api_error(code: ErrorCode, message: impl Into<String>) -> ApiError {
     ApiError::new(code, message)
 }
@@ -421,6 +433,7 @@ impl Plugins {
             sampled: Mutex::new(Some(sampled)),
             clipboard: OnceLock::new(),
             system: system::Held::default(),
+            elsewhere: elsewhere::Elsewhere::default(),
             views: views::Views::default(),
             linked: linked::Linked::default(),
             told_workspace: Mutex::new(None),
@@ -2173,10 +2186,30 @@ impl Plugins {
         if !anyone {
             return;
         }
-        let here = self.state.is_here(&news.key);
-        if let Some((kind, details)) = report_of(&news.what, here) {
+        for (kind, details) in self.reports_of(&news) {
             self.session_report(&news.key, kind, details).await;
         }
+    }
+
+    /// What plugins are told of a session's report. Of one on another machine that
+    /// plugins can run programs on, they are told where it is there.
+    fn reports_of(&self, news: &News) -> Vec<(String, Value)> {
+        use lume_proto::SessionEvent;
+
+        let machine = self.state.machine_of(&news.key);
+        let here = machine.is_none() && self.state.is_here(&news.key);
+        let reported = match &news.what {
+            SessionNews::Event(SessionEvent::Cwd { url }) => Some(url),
+            SessionNews::Event(SessionEvent::State { state }) => state.cwd.as_ref(),
+            _ => None,
+        };
+        let place = machine
+            .zip(reported)
+            .map(|(machine, url)| place_report(&machine, url));
+        report_of(&news.what, here)
+            .into_iter()
+            .chain(place)
+            .collect()
     }
 
     /// Tells the plugins what each of these sessions adds up to, as a `state` report.
@@ -2185,11 +2218,16 @@ impl Plugins {
         sessions: Vec<(crate::carrier::SessionKey, lume_proto::SessionState)>,
     ) {
         for (key, state) in sessions {
+            let machine = self.state.machine_of(&key);
             let mut details = serde_json::to_value(&state).unwrap_or(Value::Null);
-            if !self.state.is_here(&key) {
+            if machine.is_some() || !self.state.is_here(&key) {
                 without_places(&mut details);
             }
             self.session_report(&key, "state".to_owned(), details).await;
+            if let (Some(machine), Some(url)) = (machine, &state.cwd) {
+                let (kind, details) = place_report(&machine, url);
+                self.session_report(&key, kind, details).await;
+            }
         }
     }
 
@@ -2738,6 +2776,7 @@ impl Plugins {
         for local in released {
             self.release(&local);
         }
+        self.elsewhere.machines.close();
         // A moment for their code to hear it is stopping.
         let deadline = Instant::now() + Duration::from_millis(250);
         while Instant::now() < deadline && running.iter().any(|plugin| !plugin.stats().finished) {

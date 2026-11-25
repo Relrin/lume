@@ -90,6 +90,21 @@ pub fn parse_list(bytes: &[u8]) -> Vec<Distro> {
         .collect()
 }
 
+/// `wsl.exe`: the one in the Windows folder and no other, so that a file of that name
+/// somewhere on the path is never run in its place. `None` where WSL is not installed.
+pub fn program() -> Option<std::path::PathBuf> {
+    if cfg!(not(windows)) {
+        return None;
+    }
+    std::env::var_os("SystemRoot")
+        .map(|root| {
+            std::path::PathBuf::from(root)
+                .join("System32")
+                .join("wsl.exe")
+        })
+        .filter(|program| program.is_file())
+}
+
 /// The distributions installed on this machine.
 ///
 /// This starts `wsl.exe` and waits for it, so it is not for an async thread.
@@ -101,7 +116,6 @@ pub fn distros() -> Listing {
 mod platform {
     use std::io::Read;
     use std::os::windows::process::CommandExt;
-    use std::path::PathBuf;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
     use std::time::Instant;
@@ -119,12 +133,7 @@ mod platform {
     }
 
     pub(super) fn distros() -> Listing {
-        // The one in the Windows folder and no other: a file of that name somewhere on
-        // the path is never run in its place.
-        let program = std::env::var_os("SystemRoot")
-            .map(|root| PathBuf::from(root).join("System32").join("wsl.exe"))
-            .filter(|program| program.is_file());
-        let Some(program) = program else {
+        let Some(program) = super::program() else {
             return none("WSL is not installed");
         };
 

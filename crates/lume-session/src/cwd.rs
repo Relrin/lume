@@ -180,6 +180,20 @@ pub fn is_elsewhere(launcher: &Launcher) -> bool {
     }
 }
 
+/// The path a `file:` URL names, if it names this machine. What it is a path of is for
+/// whoever knows the session to say: a shell in a Linux distribution reports the name of
+/// the machine the distribution is on, and a path of its own. Whether there is anything
+/// at it is not looked at.
+pub fn path_here(url: &str) -> Option<String> {
+    let (host, path) = parse_file_url(url)?;
+    let machine = Machine {
+        name: &machine_name()?,
+        windows: cfg!(windows),
+        is_dir: &|_| true,
+    };
+    is_this_machine(&host, &machine).then_some(path)
+}
+
 /// The directory a new terminal may start in, going by what a session that runs
 /// `launcher` reported as its directory. `None` unless the report passes every check
 /// this module's description lists.

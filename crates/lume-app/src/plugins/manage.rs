@@ -43,7 +43,7 @@ fn store_error(error: StoreError) -> CommandError {
     }
 }
 
-fn joined<T>(
+pub(super) fn joined<T>(
     result: Result<Result<T, StoreError>, tokio::task::JoinError>,
 ) -> Result<T, CommandError> {
     result
@@ -207,6 +207,7 @@ impl Plugins {
                     "dependencies": dependencies,
                     "permissions": granted,
                     "later": later,
+                    "machines": Self::machines_shown(entry),
                     "settingsView": settings_view,
                     "health": {
                         "running": loaded.running.is_some(),

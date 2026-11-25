@@ -39,6 +39,7 @@
     "allow-addons-list",
     "allow-addon-set-enabled",
     "allow-addon-remove",
+    "allow-addon-revoke-machine",
     "allow-addon-move",
     "allow-addon-inspect",
     "allow-addon-inspect-git",

@@ -23,12 +23,14 @@ use lume_plugin_api::types::{
 use lume_plugin_api::{ApiError, Call, ErrorCode};
 use lume_services::fs as files;
 use lume_services::net::{self, FetchHead, FetchRequest};
-use lume_services::process::{self, Program, RunOptions, SpawnOptions};
+use lume_services::posix::Limits;
+use lume_services::process::{self, Program, RunOptions, RunOutput, Running, SpawnOptions, Stop};
 use lume_services::secrets::{Keychain, OsKeychain};
 use lume_services::streams::Streams;
 use lume_services::{ErrorKind, Places, ServiceError, procs};
 use serde_json::{Value, json};
 
+use super::elsewhere::{NoInput, asked_of};
 use super::{Plugins, api_error};
 
 /// How many streams a plugin may hold open at once.
@@ -63,7 +65,7 @@ const WAIT_LOOK: Duration = Duration::from_millis(50);
 /// A program a plugin started, and the plugin.
 struct Started {
     local: String,
-    child: Arc<process::Child>,
+    child: Arc<dyn Running>,
 }
 
 /// What plugins' code has open on the machine, and what is kept between its calls.
@@ -71,6 +73,8 @@ pub(super) struct Held {
     streams: Arc<Streams>,
     watches: Mutex<HashMap<u64, (String, files::Watcher)>>,
     programs: Mutex<HashMap<u64, Started>>,
+    /// The programs that are being run to their end, and what has each end before it.
+    runs: Mutex<HashMap<u64, (String, Arc<Stop>)>>,
     keychain: Arc<dyn Keychain>,
     /// For each pane, when its programs' processor time was last read, and what it was.
     cpu: Mutex<HashMap<String, (Instant, Duration)>>,
@@ -83,6 +87,7 @@ impl Default for Held {
             streams: Arc::new(Streams::new(STREAMS_MAX)),
             watches: Mutex::new(HashMap::new()),
             programs: Mutex::new(HashMap::new()),
+            runs: Mutex::new(HashMap::new()),
             keychain: Arc::new(OsKeychain),
             cpu: Mutex::new(HashMap::new()),
             next: AtomicU64::new(1),
@@ -99,6 +104,32 @@ impl Held {
     fn next(&self) -> u64 {
         self.next.fetch_add(1, Ordering::Relaxed)
     }
+
+    /// Notes that a program is being run for a plugin, for as long as what this gives is
+    /// held.
+    fn running(&self, local: &str) -> BeingRun<'_> {
+        let id = self.next();
+        let stop = Arc::new(Stop::default());
+        lock(&self.runs).insert(id, (local.to_owned(), Arc::clone(&stop)));
+        BeingRun {
+            held: self,
+            id,
+            stop,
+        }
+    }
+}
+
+/// A program that is being run to its end.
+struct BeingRun<'a> {
+    held: &'a Held,
+    id: u64,
+    stop: Arc<Stop>,
+}
+
+impl Drop for BeingRun<'_> {
+    fn drop(&mut self) {
+        lock(&self.held.runs).remove(&self.id);
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -106,7 +137,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// A failure of the services, as a plugin's code is told it.
-fn from_service(error: ServiceError) -> ApiError {
+pub(super) fn from_service(error: ServiceError) -> ApiError {
     let code = match error.kind {
         ErrorKind::Denied => ErrorCode::Denied,
         ErrorKind::NotFound => ErrorCode::NotFound,
@@ -135,8 +166,8 @@ async fn blocking<T: Send + 'static>(
 
 /// A command line as the user is shown it to approve: each argument that holds a space
 /// or a quote in double quotes.
-fn command_line(program: &Program, args: &[String]) -> String {
-    let mut line = program.path.display().to_string();
+pub(super) fn command_line(program: &str, args: &[String]) -> String {
+    let mut line = program.to_owned();
     for arg in args {
         line.push(' ');
         if arg.is_empty()
@@ -457,38 +488,46 @@ impl Plugins {
                 Ok(Value::Null)
             }
             Call::ProcessRun(asked) => {
-                let program = self.program(local, &asked.program).await?;
-                self.approve_use(
-                    local,
-                    Kind::ProcessRun,
-                    &command_line(&program, &asked.args),
-                    None,
-                )
-                .await?;
                 let options = asked.options;
                 let encoding = options.encoding.unwrap_or_default();
+                let run = self.system.running(local);
                 let stdin = options
                     .stdin
                     .as_deref()
                     .map(|text| decode(text, encoding))
                     .transpose()?;
-                let run = RunOptions {
-                    cwd: Some(self.start_folder(local, options.cwd)?),
-                    env: options.env.unwrap_or_default().into_iter().collect(),
-                    stdin,
-                    timeout: options
-                        .timeout_ms
-                        .map_or(RUN_DEFAULT, Duration::from_millis)
-                        .min(RUN_MAX),
-                    max_output: usize::try_from(
-                        options.max_output.unwrap_or(OUTPUT_DEFAULT).min(OUTPUT_MAX),
-                    )
-                    .unwrap_or(usize::MAX),
+                let timeout = options
+                    .timeout_ms
+                    .map_or(RUN_DEFAULT, Duration::from_millis)
+                    .min(RUN_MAX);
+                let max_output =
+                    usize::try_from(options.max_output.unwrap_or(OUTPUT_DEFAULT).min(OUTPUT_MAX))
+                        .unwrap_or(usize::MAX);
+                let stop = Arc::clone(&run.stop);
+                let output = match options.machine {
+                    Some(machine) => {
+                        let limits = Limits {
+                            stdin: stdin.unwrap_or_default(),
+                            timeout,
+                            max_output,
+                            stop,
+                        };
+                        let what = asked_of(asked.program, asked.args, options.cwd, options.env);
+                        self.run_on(local, &machine, what, limits).await?
+                    }
+                    None => {
+                        let here = RunOptions {
+                            cwd: options.cwd.map(PathBuf::from),
+                            env: options.env.unwrap_or_default().into_iter().collect(),
+                            stdin,
+                            timeout,
+                            max_output,
+                            stop,
+                        };
+                        self.run_here(local, &asked.program, asked.args, here)
+                            .await?
+                    }
                 };
-                let args = asked.args;
-                let output = blocking(move || process::run(&program, &args, run))
-                    .await
-                    .map_err(from_service)?;
                 // What it wrote may be megabytes: text that is sound is taken as it is,
                 // and handed over without another copy being made of it.
                 let text = |bytes: Vec<u8>| match encoding {
@@ -517,11 +556,32 @@ impl Plugins {
                         format!("a plugin runs {PROGRAMS_MAX} programs at most at once"),
                     ));
                 }
+                if let Some(machine) = asked.options.machine.clone() {
+                    let run = self.system.running(local);
+                    let stop = Arc::clone(&run.stop);
+                    let begun = self
+                        .spawn_on(
+                            local,
+                            &machine,
+                            asked.program,
+                            asked.args,
+                            asked.options,
+                            stop,
+                        )
+                        .await?;
+                    return self.started_program(
+                        local,
+                        Box::new(NoInput),
+                        begun.stdout,
+                        begun.stderr,
+                        begun.child,
+                    );
+                }
                 let program = self.program(local, &asked.program).await?;
                 self.approve_use(
                     local,
                     Kind::ProcessRun,
-                    &command_line(&program, &asked.args),
+                    &command_line(&program.path.display().to_string(), &asked.args),
                     None,
                 )
                 .await?;
@@ -533,46 +593,15 @@ impl Plugins {
                 let spawned = blocking(move || process::spawn(&program, &args, options))
                     .await
                     .map_err(from_service)?;
-                let streams = &self.system.streams;
                 let missing =
                     || api_error(ErrorCode::Failed, "the program's streams were not opened");
-                let stdin = streams
-                    .add(
-                        local,
-                        None,
-                        Some(Box::new(spawned.stdin.ok_or_else(missing)?)),
-                    )
-                    .map_err(from_service)?;
-                let stdout = streams
-                    .add(
-                        local,
-                        Some(Box::new(spawned.stdout.ok_or_else(missing)?)),
-                        None,
-                    )
-                    .map_err(from_service)?;
-                let stderr = streams
-                    .add(
-                        local,
-                        Some(Box::new(spawned.stderr.ok_or_else(missing)?)),
-                        None,
-                    )
-                    .map_err(from_service)?;
-                let pid = spawned.child.id();
-                let id = self.system.next();
-                lock(&self.system.programs).insert(
-                    id,
-                    Started {
-                        local: local.to_owned(),
-                        child: Arc::new(spawned.child),
-                    },
-                );
-                Ok(json!(Spawned {
-                    process: id,
-                    pid,
-                    stdin,
-                    stdout,
-                    stderr,
-                }))
+                self.started_program(
+                    local,
+                    Box::new(spawned.stdin.ok_or_else(missing)?),
+                    Box::new(spawned.stdout.ok_or_else(missing)?),
+                    Box::new(spawned.stderr.ok_or_else(missing)?),
+                    Arc::new(spawned.child),
+                )
             }
             Call::ProcessWait(asked) => {
                 let child = self.started(local, asked.process)?;
@@ -656,6 +685,80 @@ impl Plugins {
         }
     }
 
+    /// Runs a program of this machine's to its end. The folder in `options` is as the
+    /// plugin wrote it.
+    async fn run_here(
+        &self,
+        local: &str,
+        name: &str,
+        args: Vec<String>,
+        mut options: RunOptions,
+    ) -> Result<RunOutput, ApiError> {
+        let program = self.program(local, name).await?;
+        self.approve_use(
+            local,
+            Kind::ProcessRun,
+            &command_line(&program.path.display().to_string(), &args),
+            None,
+        )
+        .await?;
+        let folder = options
+            .cwd
+            .take()
+            .map(|folder| folder.to_string_lossy().into_owned());
+        options.cwd = Some(self.start_folder(local, folder)?);
+        blocking(move || process::run(&program, &args, options))
+            .await
+            .map_err(from_service)
+    }
+
+    /// Takes in a program that was started for a plugin, and gives what its code is
+    /// given of it.
+    fn started_program(
+        &self,
+        local: &str,
+        stdin: Box<dyn std::io::Write + Send>,
+        stdout: Box<dyn std::io::Read + Send>,
+        stderr: Box<dyn std::io::Read + Send>,
+        child: Arc<dyn Running>,
+    ) -> Result<Value, ApiError> {
+        let streams = &self.system.streams;
+        let mut added = Vec::with_capacity(3);
+        for (read, write) in [
+            (None, Some(stdin)),
+            (Some(stdout), None),
+            (Some(stderr), None),
+        ] {
+            match streams.add(local, read, write) {
+                Ok(id) => added.push(id),
+                Err(error) => {
+                    // A program whose streams nobody has is of no use.
+                    for id in added {
+                        let _ = streams.close(local, id);
+                    }
+                    let _ = child.kill();
+                    return Err(from_service(error));
+                }
+            }
+        }
+        let pid = child.id();
+        let process = self.system.next();
+        lock(&self.system.programs).insert(
+            process,
+            Started {
+                local: local.to_owned(),
+                child,
+            },
+        );
+        Ok(json!(Spawned {
+            process,
+            pid,
+            stdin: added[0],
+            stdout: added[1],
+            stderr: added[2],
+        }))
+    }
+
     async fn watch(
         self: &Arc<Self>,
         local: &str,
@@ -712,7 +815,7 @@ impl Plugins {
     }
 
     /// A program the plugin started and has not seen end.
-    fn started(&self, local: &str, id: u64) -> Result<Arc<process::Child>, ApiError> {
+    fn started(&self, local: &str, id: u64) -> Result<Arc<dyn Running>, ApiError> {
         lock(&self.system.programs)
             .get(&id)
             .filter(|started| started.local == local)
@@ -778,7 +881,7 @@ impl Plugins {
     }
 
     /// Lets go of what a plugin had open: its streams close, its watches stop, and the
-    /// programs it started are stopped.
+    /// programs it started or runs are stopped.
     pub(super) fn release(&self, local: &str) {
         // Its stored values are read again from the file when it next runs: the file may
         // change while it does not, as when it is removed with its data.
@@ -787,6 +890,11 @@ impl Plugins {
         self.drop_grants(|granted| granted.local == local);
         self.system.streams.close_all(local);
         lock(&self.system.watches).retain(|_, (owner, _)| owner != local);
+        for (owner, stop) in lock(&self.system.runs).values() {
+            if owner == local {
+                stop.ask();
+            }
+        }
         let ended: Vec<Started> = {
             let mut programs = lock(&self.system.programs);
             let ids: Vec<u64> = programs

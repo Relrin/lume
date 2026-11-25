@@ -20,21 +20,22 @@ that is not covered fails with the code `denied`.
 
 ## The kinds
 
-| Permission        | Scope         | What it allows                                                                                                 |
-| ----------------- | ------------- | -------------------------------------------------------------------------------------------------------------- |
-| `fs.read`         | path patterns | Reading, listing, looking at and watching files and folders.                                                   |
-| `fs.write`        | path patterns | Creating, changing and deleting files.                                                                         |
-| `process.run`     | program names | Running those programs, with any arguments.                                                                    |
-| `net`             | servers       | Connecting to those servers over HTTP and HTTPS.                                                               |
-| `panes.read`      | none          | Reading what the terminals show, their scrollback, and what their programs use of the machine.                 |
-| `panes.write`     | none          | Typing into the terminals.                                                                                     |
-| `sessions.spawn`  | none          | Starting new terminals: from the user's profiles, or running a program that `process.run` covers.              |
-| `workspace.read`  | none          | Seeing the workspace: its windows, tabs and panes, their folders, what runs in them, and what sessions report. |
-| `layout.write`    | none          | Opening, closing, moving and splitting tabs and panes.                                                         |
-| `clipboard.read`  | none          | Reading the clipboard.                                                                                         |
-| `clipboard.write` | none          | Putting text on the clipboard.                                                                                 |
-| `system.metrics`  | none          | Seeing how busy the processor, memory, graphics card and network are.                                          |
-| `services.use`    | plugin ids    | Calling the services those plugins offer.                                                                      |
+| Permission              | Scope         | What it allows                                                                                                 |
+| ----------------------- | ------------- | -------------------------------------------------------------------------------------------------------------- |
+| `fs.read`               | path patterns | Reading, listing, looking at and watching files and folders.                                                   |
+| `fs.write`              | path patterns | Creating, changing and deleting files.                                                                         |
+| `process.run`           | program names | Running those programs, with any arguments.                                                                    |
+| `process.run-elsewhere` | program names | Running those programs where a session is, on machines the user allows.                                        |
+| `net`                   | servers       | Connecting to those servers over HTTP and HTTPS.                                                               |
+| `panes.read`            | none          | Reading what the terminals show, their scrollback, and what their programs use of the machine.                 |
+| `panes.write`           | none          | Typing into the terminals.                                                                                     |
+| `sessions.spawn`        | none          | Starting new terminals: from the user's profiles, or running a program that `process.run` covers.              |
+| `workspace.read`        | none          | Seeing the workspace: its windows, tabs and panes, their folders, what runs in them, and what sessions report. |
+| `layout.write`          | none          | Opening, closing, moving and splitting tabs and panes.                                                         |
+| `clipboard.read`        | none          | Reading the clipboard.                                                                                         |
+| `clipboard.write`       | none          | Putting text on the clipboard.                                                                                 |
+| `system.metrics`        | none          | Seeing how busy the processor, memory, graphics card and network are.                                          |
+| `services.use`          | plugin ids    | Calling the services those plugins offer.                                                                      |
 
 The [API reference](api.md) says which permission each call needs.
 
@@ -103,7 +104,52 @@ found is what runs.
 On Windows a batch file is run by `cmd.exe`. A plugin that runs `npm`, which is `npm.cmd` there,
 needs `cmd` in its scope.
 
-A program is stopped together with everything it started.
+A program is stopped together with everything it started, and at the latest when the plugin stops.
+
+### Programs on other machines: `process.run-elsewhere`
+
+A session need not be on this machine. One that is in a Linux distribution of this Windows machine
+(WSL) has a `place` in `sessions.list()`: the machine, and the folder there. Its `cwd` is left out,
+because that would be a path of this machine. Panes of servers and of SSH profiles will have a
+place in the same way.
+
+`lume.process.run` and `lume.process.spawn` run a program on such a machine when they are given its
+id:
+
+```js
+for (const session of await lume.sessions.list()) {
+  if (session.place?.folder === undefined) continue;
+  const { machine, label, folder } = session.place;
+  try {
+    const result = await lume.process.run("git", ["status"], { machine, cwd: folder });
+    lume.log.info(`${label}: ${result.stdout}`);
+  } catch (error) {
+    // Shown with a button that calls lume.machines.allow(machine).
+    if (error.code === "machine_not_allowed") lume.log.info(`not allowed on ${label}`);
+    else throw error;
+  }
+}
+```
+
+- The permission is its own: `process.run` allows nothing there, and this one nothing here.
+- The user allows each machine. `lume.machines.allow(machine, reason)` asks them, and their yes is
+  kept until they revoke it on the plugin's page in the settings. Call it when the user asked for
+  it, as by pressing a button. After a no it answers no for a minute without asking again.
+- When the plugin comes to ask for more programs, each machine is asked about again.
+- A machine can be used while a session is on it.
+- The folder is an absolute path of that machine; `${home}` and the like stand for nothing there.
+  Left out, it is the user's home folder. In a folder that is not there nothing is run.
+- The program is looked up on that machine's path. It is given its whole input when it starts:
+  `process.spawn` gives a program there no input to write to.
+- A plugin has eight programs at most running on a machine at once; more wait their turn.
+- A program ended by a signal has the code its shell gives it, 128 and the signal's number.
+
+| Code                  | What it means                                             | `error.data`         |
+| --------------------- | --------------------------------------------------------- | -------------------- |
+| `machine_not_allowed` | The user has not allowed the plugin there.                | `{ machine, label }` |
+| `not_connected`       | No session is on that machine.                            | `{ machine, label }` |
+| `not_found`           | The program or the folder is not there.                   |                      |
+| `unavailable`         | The machine could not be reached, or the way to it broke. |                      |
 
 ### Servers: `net`
 
@@ -148,21 +194,22 @@ Some things are refused whatever was granted:
 
 When installing, each permission is put in plain words:
 
-| Permission        | The user reads                                                                        |
-| ----------------- | ------------------------------------------------------------------------------------- |
-| `fs.read`         | Read files in: (the patterns)                                                         |
-| `fs.write`        | Create, change and delete files in: (the patterns)                                    |
-| `process.run`     | Run these programs, with any arguments: (the names)                                   |
-| `net`             | Connect to: (the servers, with their ports)                                           |
-| `panes.read`      | Read what your terminals show, and their scrollback                                   |
-| `panes.write`     | Type into your terminals                                                              |
-| `sessions.spawn`  | Start new terminals, from your profiles or with a program it may run                  |
-| `workspace.read`  | See your workspace: its windows, tabs and panes, their folders, and what runs in them |
-| `layout.write`    | Open, close, move and split your tabs and panes                                       |
-| `clipboard.read`  | Read what you copy                                                                    |
-| `clipboard.write` | Put text on the clipboard                                                             |
-| `system.metrics`  | See how busy the processor, memory, graphics card and network are                     |
-| `services.use`    | Use what these plugins offer: (the ids)                                               |
+| Permission              | The user reads                                                                                                                                             |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fs.read`               | Read files in: (the patterns)                                                                                                                              |
+| `fs.write`              | Create, change and delete files in: (the patterns)                                                                                                         |
+| `process.run`           | Run these programs, with any arguments: (the names)                                                                                                        |
+| `process.run-elsewhere` | On other machines that your terminals are on (servers, SSH, WSL), each once you have allowed it there: run these programs, with any arguments: (the names) |
+| `net`                   | Connect to: (the servers, with their ports)                                                                                                                |
+| `panes.read`            | Read what your terminals show, and their scrollback                                                                                                        |
+| `panes.write`           | Type into your terminals                                                                                                                                   |
+| `sessions.spawn`        | Start new terminals, from your profiles or with a program it may run                                                                                       |
+| `workspace.read`        | See your workspace: its windows, tabs and panes, their folders, and what runs in them                                                                      |
+| `layout.write`          | Open, close, move and split your tabs and panes                                                                                                            |
+| `clipboard.read`        | Read what you copy                                                                                                                                         |
+| `clipboard.write`       | Put text on the clipboard                                                                                                                                  |
+| `system.metrics`        | See how busy the processor, memory, graphics card and network are                                                                                          |
+| `services.use`          | Use what these plugins offer: (the ids)                                                                                                                    |
 
 Three requests come with a warning, because they are close to trusting the plugin with everything:
 
@@ -172,18 +219,22 @@ Three requests come with a warning, because they are close to trusting the plugi
   `node`, `deno`, `bun`, `perl`, `ruby`, `lua`, `git`, `wsl`, `ssh`, `env`;
 - `panes.read`, which includes anything typed or printed in a terminal, passwords and keys too.
 
+`process.run-elsewhere` of such a program comes with the same warning when the user is asked about a
+machine.
+
 Ask for the narrowest scope that does the job. A user who reads `Read files in: ${workspace}/**`
 says yes more readily than one who reads `${home}/**`.
 
 ## Asking before each use
 
 `prompt = "each"` has the user asked before every use, shown exactly what would be done. It is
-offered for the two kinds where that can be shown:
+offered for the kinds where that can be shown:
 
-| Permission    | The user is shown                        |
-| ------------- | ---------------------------------------- |
-| `panes.write` | The text that would be typed, and where. |
-| `process.run` | The command that would be run.           |
+| Permission              | The user is shown                        |
+| ----------------------- | ---------------------------------------- |
+| `panes.write`           | The text that would be typed, and where. |
+| `process.run`           | The command that would be run.           |
+| `process.run-elsewhere` | The command, and the machine.            |
 
 ```toml
 [permissions]

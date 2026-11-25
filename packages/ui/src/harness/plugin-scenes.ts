@@ -1191,6 +1191,7 @@ export const FIXTURE_ADDONS: readonly AddonEntry[] = [
       },
     ],
     later: [],
+    machines: [],
     health: { running: true, starts: 1, breaches: 0, lastProblem: null, warnings: [] },
     log: ["info: reading every 2 s", "info: the graphics card cannot be read here"],
     audit: [
@@ -1223,9 +1224,17 @@ export const FIXTURE_ADDONS: readonly AddonEntry[] = [
         warning:
           "A program such as a shell or git can do anything you can, so running it is close to trusting this plugin with your account.",
       },
+      {
+        what: "On other machines that your terminals are on (servers, SSH, WSL), each once you have allowed it there: run these programs, with any arguments: cargo, git",
+        warning: null,
+      },
       { what: "Read files in: ${workspace}/**", warning: null },
     ],
     later: ["Read what you copy"],
+    machines: [
+      { id: "wsl:Ubuntu", label: "Ubuntu (WSL)", programs: ["git"] },
+      { id: "wsl:root@Debian", label: "root@Debian (WSL)", programs: ["cargo", "git"] },
+    ],
     health: {
       running: false,
       starts: 3,
@@ -1261,6 +1270,7 @@ export const FIXTURE_ADDONS: readonly AddonEntry[] = [
     dependencies: [],
     permissions: [],
     later: [],
+    machines: [],
     health: { running: false, starts: 0, breaches: 0, lastProblem: null, warnings: [] },
     log: [],
     audit: [],

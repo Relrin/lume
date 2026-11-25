@@ -51,6 +51,7 @@ mod harness;
 mod host;
 mod host_probe;
 mod log;
+mod machines;
 mod marks;
 mod opener;
 mod panes;
@@ -524,6 +525,7 @@ fn main() -> ExitCode {
         commands_plugins::addons_list,
         commands_plugins::addon_set_enabled,
         commands_plugins::addon_remove,
+        commands_plugins::addon_revoke_machine,
         commands_plugins::addon_move,
         commands_plugins::addon_inspect,
         commands_plugins::addon_inspect_git,
