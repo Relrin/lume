@@ -12,6 +12,7 @@
 
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 
+import { lookup } from "../lookup.ts";
 import { askColor, startingHex } from "../shell/color-picker.ts";
 import { AgainIcon } from "../shell/icons.tsx";
 import { OwnColorSwatch } from "../shell/OwnColorSwatch.tsx";
@@ -195,7 +196,8 @@ function NumberField({ row, labelled, write }: ControlProps) {
     const typed = field.current?.value ?? "";
     if (typed.trim() !== held) ask(writeNumber(row, typed));
   };
-  const unit = shape.unit === undefined ? undefined : (UNIT_SHORT[shape.unit] ?? shape.unit);
+  const unit =
+    shape.unit === undefined ? undefined : (lookup(UNIT_SHORT, shape.unit) ?? shape.unit);
   const now = typeof row.effective === "number" ? row.effective * shape.scale : undefined;
   return (
     <span className="settings-number-group">

@@ -12,6 +12,7 @@ import type { ConnectStore } from "../connect/store.ts";
 import type { ConnectionKind } from "../connections/model.ts";
 import type { CoreClient } from "../core/client.ts";
 import type { PaneId } from "../layout/types.ts";
+import { lookup } from "../lookup.ts";
 import type { PaletteStore } from "../palette/store.ts";
 import type { PaneViews } from "../panes/views.ts";
 import { GIVEN_UP } from "../rex/model.ts";
@@ -165,7 +166,7 @@ export class Commands {
    */
   runInPage(id: string, args: unknown = null): void {
     const { views, palette, connect, search } = this.#services;
-    const action = TERMINAL_ACTIONS[id];
+    const action = lookup(TERMINAL_ACTIONS, id);
     if (action !== undefined) {
       this.#view(args).perform(action);
       return;

@@ -17,7 +17,7 @@
 
 import type { PaneId } from "../layout/types.ts";
 import { STATUS_RECORDS_MAX } from "../limits.ts";
-import { sanitizeTitle } from "../terminal/title.ts";
+import { plain } from "../text/plain.ts";
 import type {
   CommandState,
   Disconnected,
@@ -78,7 +78,7 @@ function fields<T extends { readonly type: string }>(event: T): Omit<T, "type"> 
 }
 
 function clean(text: string | undefined): string | undefined {
-  return text === undefined ? undefined : sanitizeTitle(text);
+  return text === undefined ? undefined : plain(text);
 }
 
 /** A status record with nothing unsafe left in its strings. */
@@ -86,21 +86,21 @@ function cleanStatus(status: ProgramStatus): ProgramStatus {
   const { app, title, message, ...rest } = status;
   return {
     ...rest,
-    ...(app === undefined ? {} : { app: sanitizeTitle(app) }),
-    ...(title === undefined ? {} : { title: sanitizeTitle(title) }),
-    ...(message === undefined ? {} : { message: sanitizeTitle(message) }),
+    ...(app === undefined ? {} : { app: plain(app) }),
+    ...(title === undefined ? {} : { title: plain(title) }),
+    ...(message === undefined ? {} : { message: plain(message) }),
   };
 }
 
 function cleanCommand(command: CommandState): CommandState {
   if (command.state === "finished" || command.command === undefined) return command;
-  return { state: "running", command: sanitizeTitle(command.command) };
+  return { state: "running", command: plain(command.command) };
 }
 
 function cleanDisconnected(disconnected: Disconnected): Disconnected {
   return disconnected.detail === undefined
     ? { reason: disconnected.reason }
-    : { reason: disconnected.reason, detail: sanitizeTitle(disconnected.detail) };
+    : { reason: disconnected.reason, detail: plain(disconnected.detail) };
 }
 
 /** Whether a status record with `id` is the one `status` names or lies beneath it. */
@@ -137,7 +137,7 @@ function fromState(report: PaneReport, state: SessionState): PaneReport {
     ...(state.command ? { command: cleanCommand(state.command) } : {}),
     statuses: (state.statuses ?? []).slice(-STATUS_RECORDS_MAX).map(cleanStatus),
     ...(state.foreground
-      ? { foreground: { pid: state.foreground.pid, name: sanitizeTitle(state.foreground.name) } }
+      ? { foreground: { pid: state.foreground.pid, name: plain(state.foreground.name) } }
       : {}),
     ...(state.disconnected ? { disconnected: cleanDisconnected(state.disconnected) } : {}),
     ...(exit === undefined ? {} : { exit }),
@@ -153,7 +153,7 @@ function fromState(report: PaneReport, state: SessionState): PaneReport {
 export function applyEvent(report: PaneReport, event: SessionEvent): PaneReport {
   switch (event.type) {
     case "title": {
-      const title = sanitizeTitle(event.title);
+      const title = plain(event.title);
       if (title !== "") return { ...report, title };
       const untitled: Mutable<PaneReport> = { ...report };
       delete untitled.title;
@@ -181,7 +181,7 @@ export function applyEvent(report: PaneReport, event: SessionEvent): PaneReport 
     case "program_status":
       return { ...report, statuses: withStatus(report.statuses, fields(event)) };
     case "foreground":
-      return { ...report, foreground: { pid: event.pid, name: sanitizeTitle(event.name) } };
+      return { ...report, foreground: { pid: event.pid, name: plain(event.name) } };
     case "disconnected":
       return { ...report, disconnected: cleanDisconnected(fields(event)) };
     case "state":

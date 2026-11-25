@@ -91,6 +91,27 @@ const SERVED = {
   workspaces: { ...WINDOW.workspaces, active: "acme" },
 } as const satisfies FakeCoreOptions;
 
+/** The same window, of a server with as many sessions as one may have. */
+const CROWDED = {
+  ...SERVED,
+  rexHosts: {
+    ...HOSTS,
+    hosts: [
+      {
+        ...DEVBOX,
+        sessions: Array.from({ length: 1024 }, (_, at) => ({
+          id: `session:${at}`,
+          label: `run ${at}`,
+        })),
+        on_show: "session:900",
+      },
+      NAS,
+      CI,
+      LAB,
+    ],
+  },
+} as const satisfies FakeCoreOptions;
+
 async function until<T>(what: string, find: () => T | null | undefined): Promise<T> {
   const deadline = performance.now() + CHROME_START_TIMEOUT_MS;
   for (;;) {
@@ -428,6 +449,83 @@ export const REX_SCENES: readonly Scene[] = [
       wanted("what can be done", texts(page, ".selector-side .selector-act-label").slice(0, 1), [
         "Create “nightly” on devbox-01",
       ]),
+  },
+  {
+    // More sessions than anyone reads, in the three places that list them. What is left
+    // on show is what was typed for in the selector.
+    name: "crowded-server",
+    window: CROWDED,
+    prepare: async (app) => {
+      const said = (what: string, is: unknown, should: unknown) => {
+        const problems = wanted(what, is, should);
+        if (problems.length > 0) throw new Error(problems.join("; "));
+      };
+      const gone = (selector: string) =>
+        until("its going", () => (document.querySelector(selector) ? null : true));
+
+      const connect = await connectOn(app, "devbox-01");
+      const listed = () => texts(document, ".connect-session-name");
+      const marked = () =>
+        document.querySelector('.connect-session[aria-selected="true"]')?.textContent;
+      said("the sessions of the column", [listed().length, listed()[198]], [200, "run 198"]);
+      said("what is marked", marked(), "run 900Attached");
+      said("the rest", texts(document, ".connect-sessions .connect-note"), ["and 824 more"]);
+      press(connect, "Tab");
+      await until("the sessions being entered", () =>
+        document.querySelector(".connect-sessions[data-inside]"),
+      );
+      // After the last that is listed comes the first.
+      press(connect, "ArrowDown");
+      await until("the first being marked", () => (marked() === "run 0" ? true : null));
+      press(connect, "ArrowUp");
+      await until("the last being marked", () => (marked() === "run 900Attached" ? true : null));
+      app.connect.getState().close();
+      await gone(".connect");
+
+      app.palette.getState().open();
+      const palette = await until("the palette's field", () =>
+        document.querySelector<HTMLInputElement>(".palette-input"),
+      );
+      typeInto(palette, "#");
+      await until("the hosts being listed", () =>
+        document.querySelectorAll(".palette-row").length === 50 ? true : null,
+      );
+      const rows = texts(document, ".palette-row-text");
+      said("the hosts of the palette", [rows[48], rows[49]], ["run 47", "run 900"]);
+      const chip = Number(
+        document.querySelector('.palette-chip[aria-pressed="true"] .palette-chip-count')
+          ?.textContent,
+      );
+      said("the rest", texts(document, ".palette-more"), [`and ${chip - 50} more`]);
+      if (chip < 1024) throw new Error(`the chip counts ${chip}`);
+      app.palette.getState().close();
+      await gone(".palette");
+
+      const selector = await openSelector(app);
+      await until("the sessions being listed", () =>
+        document.querySelectorAll(".selector-row").length === 200 ? true : null,
+      );
+      said("the rest", texts(document, ".selector-rows .selector-note"), ["and 824 more"]);
+      said(
+        "what is marked",
+        texts(document, '.selector-row[aria-selected="true"] .selector-name'),
+        ["run 900"],
+      );
+      typeInto(selector, "run 102");
+      await until("the list being narrowed", () =>
+        document.querySelectorAll(".selector-row").length === 5 ? true : null,
+      );
+    },
+    check: (page) => [
+      ...wanted("the sessions found", texts(page, ".selector-row .selector-name"), [
+        "run 102",
+        "run 1020",
+        "run 1021",
+        "run 1022",
+        "run 1023",
+      ]),
+      ...wanted("the rest", texts(page, ".selector-rows .selector-note"), []),
+    ],
   },
   {
     // What a server's terminal prints reaches the clipboard only with the keyboard, its

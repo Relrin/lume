@@ -9,18 +9,20 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 
 import type { RexHost, RexHosts, WorkspaceList } from "../core/types.ts";
+import { listed, type Listed } from "../listed.ts";
 import {
   connected,
-  firstMarked,
   hostLine,
   linkOf,
   nearness,
   next,
   sessionName,
   sessionOnShow,
+  UNKNOWN_SERVER,
   usable,
   type RexLink,
 } from "../rex/model.ts";
+import { SESSIONS_LISTED_MAX } from "../rex/tuning.ts";
 
 /** Whether the selector is to be opened, and what is to be looked at in it. */
 export interface SelectorDoorState {
@@ -163,15 +165,15 @@ export function browsedHost(
   query: string,
   wanted: string | null,
 ): SelectorHost | undefined {
-  const listed = selectorHosts(sources, query);
+  const hosts = selectorHosts(sources, query);
   const every = everyHost(sources);
-  const find = (hosts: readonly SelectorHost[], key: string | null) =>
-    hosts.find((host) => host.key === key);
+  const find = (among: readonly SelectorHost[], key: string | null) =>
+    among.find((host) => host.key === key);
   const onShow = sources.backend ?? THIS_PC;
   return (
-    find(listed, wanted) ??
-    find(listed, onShow) ??
-    listed[0] ??
+    find(hosts, wanted) ??
+    find(hosts, onShow) ??
+    hosts[0] ??
     find(every, wanted) ??
     find(every, onShow) ??
     every[0]
@@ -264,12 +266,16 @@ export function selectorActs(
   return acts;
 }
 
-/** Which of a host's rows is marked first: the one on show, else the first. */
-export function firstRow(sources: SelectorSources, host: SelectorHost): number {
-  if (host.rex) return firstMarked(host.rex, sources.backend);
+/** What is listed of a host's rows, the one on show among it. */
+export function listedRows(rows: readonly SelectorRow[]): Listed<SelectorRow> {
+  return listed(rows, SESSIONS_LISTED_MAX, (row) => row.on);
+}
+
+/** Which of the rows listed is marked first: the one on show, else the first. */
+export function firstRow(rows: readonly SelectorRow[]): number {
   return Math.max(
     0,
-    everyRow(sources, host.key).findIndex((row) => row.on),
+    rows.findIndex((row) => row.on),
   );
 }
 
@@ -303,7 +309,7 @@ export function selectorLabel(
       said: hostConnected ? "Session host connected" : "Session host disconnected",
     };
   }
-  if (!server) return { host: "Rex", name, meta: "", link: "down", said: "Not connected" };
+  if (!server) return { host: UNKNOWN_SERVER, name, meta: "", link: "down", said: "Not connected" };
   const link = linkOf(server);
   return {
     host: server.label,

@@ -65,18 +65,15 @@ pub(crate) fn plain_within(text: &str, max: usize) -> String {
             char if char.is_control() || turns(char) || unseen(char) => continue,
             char => char,
         };
-        if marks(char) || joins(char) {
-            piled += 1;
-            if piled > MARKS_MAX {
-                continue;
-            }
-        } else {
-            piled = 0;
-            seen |= !char.is_whitespace();
+        let alone = !(marks(char) || joins(char));
+        piled = if alone { 0 } else { piled + 1 };
+        if piled > MARKS_MAX {
+            continue;
         }
         if out.len() + char.len_utf8() > max {
             break;
         }
+        seen |= alone && !char.is_whitespace();
         out.push(char);
     }
     if seen { out } else { String::new() }
@@ -94,44 +91,82 @@ pub(crate) fn make_plain(text: &mut String) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
+    /// The rule as it is written down for the core and the page alike.
+    #[derive(serde::Deserialize)]
+    struct Rule {
+        max_bytes: usize,
+        marks_max: usize,
+        spaces: Vec<(String, String)>,
+        dropped: Vec<(String, String)>,
+        piled: Vec<(String, String)>,
+        blank: Vec<(String, String)>,
+        cases: Vec<Case>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Case {
+        why: String,
+        text: String,
+        plain: String,
+        max: Option<usize>,
+    }
+
+    fn rule() -> Rule {
+        let written = include_str!("../../../tests/text/plain.json");
+        serde_json::from_str(written).unwrap()
+    }
+
+    /// The characters of some ranges.
+    fn chars(ranges: &[(String, String)]) -> HashSet<char> {
+        let point = |written: &str| u32::from_str_radix(written, 16).unwrap();
+        ranges
+            .iter()
+            .flat_map(|(first, last)| point(first)..=point(last))
+            .filter_map(char::from_u32)
+            .collect()
+    }
+
     #[test]
-    fn what_is_seen_stays_as_it_is() {
-        for text in [
-            "work",
-            "  build box  ",
-            "日本語 العربية עברית",
-            "naïve cafe\u{301}",
-            // Emoji joined and varied, and a script that needs its joiners.
-            "👩\u{200d}💻 ❤\u{fe0f}",
-            "می\u{200c}خواهم",
-        ] {
-            assert_eq!(plain(text), text);
+    fn a_text_is_what_the_rules_cases_say() {
+        let rule = rule();
+        assert_eq!(rule.max_bytes, TEXT_MAX_BYTES);
+        assert!(rule.cases.len() > 20);
+        for case in rule.cases {
+            let shown = plain_within(&case.text, case.max.unwrap_or(TEXT_MAX_BYTES));
+            assert_eq!(shown, case.plain, "{}: {:?}", case.why, case.text);
         }
     }
 
     #[test]
-    fn what_is_not_seen_goes() {
-        assert_eq!(plain("prod\u{202e}gnp.exe"), "prodgnp.exe");
-        assert_eq!(plain("a\u{2066}b\u{2069}c\u{61c}d\u{200f}e"), "abcde");
-        assert_eq!(plain("z\u{200b}e\u{2060}r\u{feff}o\u{ad}"), "zero");
-        assert_eq!(plain("tag\u{e0041}\u{e007f}ged"), "tagged");
-        assert_eq!(plain("\u{1b}[31mred\u{9b}0m\u{7}"), "[31mred0m");
-        assert_eq!(plain("one\ntwo\u{2028}three\tfour"), "one two three four");
-    }
-
-    #[test]
-    fn a_text_of_which_nothing_is_seen_is_empty() {
-        for text in [
-            "",
-            "\u{200d}\u{200d}",
-            " \t\n",
-            "\u{301}\u{301}",
-            "\u{3164}",
-            "\u{fe0f}",
-        ] {
-            assert_eq!(plain(text), "", "{text:?}");
+    fn each_character_there_is_is_held_to_the_rule() {
+        let rule = rule();
+        let spaces = chars(&rule.spaces);
+        let dropped = chars(&rule.dropped);
+        let piled = chars(&rule.piled);
+        let blank = chars(&rule.blank);
+        let times = MARKS_MAX + 2;
+        assert_eq!(rule.marks_max, MARKS_MAX);
+        for char in '\0'..=char::MAX {
+            let one = char.to_string();
+            let within = if spaces.contains(&char) {
+                " ".repeat(times)
+            } else if dropped.contains(&char) {
+                String::new()
+            } else if piled.contains(&char) {
+                one.repeat(MARKS_MAX)
+            } else {
+                one.repeat(times)
+            };
+            let given = format!("a{}b", one.repeat(times));
+            assert_eq!(plain(&given), format!("a{within}b"), "{char:?}");
+            let unseen = [&spaces, &dropped, &piled, &blank]
+                .iter()
+                .any(|of| of.contains(&char));
+            assert_eq!(plain(&one), if unseen { "" } else { &one }, "{char:?}");
         }
     }
 

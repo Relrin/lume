@@ -26,6 +26,8 @@ import { kindOf, lineOf, openCommand } from "../connect/model.ts";
 import type { CommandSpec, Profile } from "../core/types.ts";
 import { Glyph } from "../icons/Glyph.tsx";
 import type { LineGlyphName } from "../icons/glyphs.generated.ts";
+import { listed, moreLine, type Listed } from "../listed.ts";
+import { lookup } from "../lookup.ts";
 import { LinkDot } from "../rex/LinkDot.tsx";
 import { useRexLook } from "../rex/look.ts";
 import type { RexLink } from "../rex/model.ts";
@@ -85,6 +87,8 @@ interface Row {
   readonly link?: RexLink;
   /** A word at the row's end. */
   readonly meta?: string;
+  /** Whether it is what the window shows: it is listed however much there is before it. */
+  readonly on?: boolean;
   /** What choosing a tab or a host does. */
   readonly run?: () => void;
 }
@@ -146,7 +150,7 @@ const CATEGORY_GLYPHS: Readonly<Record<string, LineGlyphName>> = {
 };
 
 function categoryGlyph(category: string): LineGlyphName {
-  return CATEGORY_GLYPHS[category] ?? "chevron-right";
+  return lookup(CATEGORY_GLYPHS, category) ?? "chevron-right";
 }
 
 /** The picture of each scope's chip. */
@@ -202,6 +206,8 @@ function Marked({
     </>
   );
 }
+
+const NOTHING: Listed<Row> = { rows: [], more: 0 };
 
 /** What the palette searches, as the dialog holds it. */
 interface Sources {
@@ -274,6 +280,7 @@ function rexMatches(sources: Sources, query: string): Row[] {
     ),
     sub: match.item.sub,
     link: match.item.link,
+    on: match.item.on,
     ...(match.item.meta === "" ? {} : { meta: match.item.meta }),
     run: () => sources.openRex(match.item),
   }));
@@ -310,6 +317,11 @@ function hostMatches(sources: Sources, query: string): Row[] {
   return query.trim() === "" ? rows : rows.sort((a, b) => b.score - a.score);
 }
 
+/** The rows of a list that is shown whole, as far as it goes. */
+function firstRows(rows: readonly Row[]): Listed<Row> {
+  return listed(rows, PALETTE_RESULTS_MAX, (row) => row.on === true);
+}
+
 /** Rows under another heading. */
 function under(rows: readonly Row[], section: string): Row[] {
   return rows.map((row) => ({ ...row, section }));
@@ -318,9 +330,10 @@ function under(rows: readonly Row[], section: string): Row[] {
 /**
  * The rows of a scope. Commands run lately come first while nothing is typed; under
  * everything with something typed, the best match of any kind stands alone at the top
- * and each kind lists a few of its best after it.
+ * and each kind lists a few of its best after it. How many there are besides is said of
+ * a scope of its own: of everything, the chips say it.
  */
-function scopedRows(sources: Sources, scope: Scope, query: string): Row[] {
+function scopedRows(sources: Sources, scope: Scope, query: string): Listed<Row> {
   const typed = query.trim() !== "";
   const commands = commandMatches(sources, query);
   const recent = (): Row[] => {
@@ -330,27 +343,29 @@ function scopedRows(sources: Sources, scope: Scope, query: string): Row[] {
       ...commands.filter((row) => !sources.recents.includes(row.key)),
     ];
   };
-  if (scope === "commands") return (typed ? commands : recent()).slice(0, PALETTE_RESULTS_MAX);
-  if (scope === "tabs") return tabMatches(sources, query).slice(0, PALETTE_RESULTS_MAX);
-  if (scope === "hosts") return hostMatches(sources, query).slice(0, PALETTE_RESULTS_MAX);
+  if (scope === "commands") return firstRows(typed ? commands : recent());
+  if (scope === "tabs") return firstRows(tabMatches(sources, query));
+  if (scope === "hosts") return firstRows(hostMatches(sources, query));
   const tabs = tabMatches(sources, query);
   const hosts = hostMatches(sources, query);
   if (!typed) {
     const lately = recent();
     const firstCommands = lately.filter((row) => row.section === "Recent");
     const otherCommands = lately.filter((row) => row.section !== "Recent");
-    return [
+    const rows = [
       ...firstCommands,
       ...tabs.slice(0, PER_KIND_MAX),
       ...hosts.slice(0, PER_KIND_MAX),
       ...otherCommands,
-    ].slice(0, PALETTE_RESULTS_MAX);
+    ];
+    return { rows: rows.slice(0, PALETTE_RESULTS_MAX), more: 0 };
   }
   // The sort is stable: of equal matches, commands stay first.
   const best = [...commands, ...tabs, ...hosts].sort((a, b) => b.score - a.score)[0];
-  if (!best) return [];
+  if (!best) return NOTHING;
   const rest = (rows: readonly Row[]) => rows.filter((row) => row !== best).slice(0, PER_KIND_MAX);
-  return [{ ...best, section: "Top hit" }, ...rest(commands), ...rest(tabs), ...rest(hosts)];
+  const rows = [...rest(commands), ...rest(tabs), ...rest(hosts)];
+  return { rows: [{ ...best, section: "Top hit" }, ...rows], more: 0 };
 }
 
 /** How many of each scope match what is typed, for the chips. */
@@ -363,10 +378,9 @@ function scopeCounts(sources: Sources, query: string): Readonly<Record<Scope, nu
   return { all: commands + tabs + hosts, commands, tabs, hosts };
 }
 
-function choiceRows(choices: readonly Choice[], query: string): Row[] {
-  return rank(choices, query, (choice) => choice.label)
-    .slice(0, PALETTE_RESULTS_MAX)
-    .map((match) => ({
+function choiceRows(choices: readonly Choice[], query: string): Listed<Row> {
+  return firstRows(
+    rank(choices, query, (choice) => choice.label).map((match) => ({
       key: match.item.value,
       prefix: "",
       text: match.item.label,
@@ -376,7 +390,8 @@ function choiceRows(choices: readonly Choice[], query: string): Row[] {
       value: match.item.value,
       section: "",
       score: match.score,
-    }));
+    })),
+  );
 }
 
 function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
@@ -484,9 +499,9 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
       openRex: (target) => app.commands.run(target.command, target.args),
     };
   }, [app, commands, recents, view, tabs, profiles, servers, backend]);
-  const rows = useMemo(() => {
+  const { rows, more } = useMemo(() => {
     if (stage.kind === "commands") return scopedRows(sources, scope, query);
-    return choices ? choiceRows(choices, query) : [];
+    return choices ? choiceRows(choices, query) : NOTHING;
   }, [stage.kind, sources, scope, query, choices]);
   const counts = useMemo(() => scopeCounts(sources, query), [sources, query]);
   const pickScope = (next: Scope) => {
@@ -725,6 +740,11 @@ function PaletteDialog({ first }: { first: CommandSpec | undefined }) {
               </Fragment>
             );
           })}
+          {more > 0 && (
+            <div className="palette-more" role="presentation">
+              {moreLine(more)}
+            </div>
+          )}
         </div>
         {rows.length === 0 && (
           <p className="palette-empty">

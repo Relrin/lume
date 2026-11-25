@@ -34,7 +34,8 @@ import { Glyph } from "../icons/Glyph.tsx";
 import { homeShortened } from "../events/where.ts";
 import { LinkDot } from "../rex/LinkDot.tsx";
 import { useRexActions, useRexLook } from "../rex/look.ts";
-import { connected, firstMarked, linkOf, next } from "../rex/model.ts";
+import { moreLine } from "../listed.ts";
+import { connected, firstMarked, linkOf, listedSessions, next } from "../rex/model.ts";
 import { useShell } from "../shell/context.ts";
 import { FileIcon, RefreshIcon, SearchIcon } from "../shell/icons.tsx";
 import { sentence } from "../shell/notices.ts";
@@ -493,16 +494,16 @@ function ConnectDialog() {
     if (row?.type === "host") setPins(togglePin(row.entry.host.id));
   };
   const pin = (entry: ConnectEntry) => pinRow({ type: "profile", entry });
-  /** Which of a server's sessions is marked. */
+  /** Which of a server's listed sessions is marked. */
   const markedSession = (entry: HostEntry): number => {
     const at =
       session?.host === entry.host.id
-        ? entry.host.sessions.findIndex((found) => found.id === session.id)
+        ? listedSessions(entry.host, backend).rows.findIndex((found) => found.id === session.id)
         : -1;
     return at >= 0 ? at : firstMarked(entry.host, backend);
   };
   const markSession = (entry: HostEntry, index: number) => {
-    const found = entry.host.sessions[index];
+    const found = listedSessions(entry.host, backend).rows[index];
     if (found) setSession({ host: entry.host.id, id: found.id });
   };
   const canEnter =
@@ -573,7 +574,7 @@ function ConnectDialog() {
   const acceptHost = (entry: HostEntry, agreed: boolean) => {
     const { host } = entry;
     if (connected(host)) {
-      const chosen = host.sessions[markedSession(entry)];
+      const chosen = listedSessions(host, backend).rows[markedSession(entry)];
       if (chosen) onHost.attach(entry, chosen.id);
       else onHost.newSession(entry);
       return;
@@ -594,7 +595,7 @@ function ConnectDialog() {
   };
   const move = (to: number) => {
     if (moving && markedHostRow) {
-      const count = markedHostRow.host.sessions.length;
+      const count = listedSessions(markedHostRow.host, backend).rows.length;
       const by = to - marked;
       markSession(markedHostRow, (markedSession(markedHostRow) + by + count) % count);
       return;
@@ -885,6 +886,11 @@ function ConnectDialog() {
                     {section.label}
                   </div>
                   {section.rows.map((row) => draw(row, section.key))}
+                  {section.more > 0 && (
+                    <div className="connect-note" role="presentation">
+                      {moreLine(section.more)}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

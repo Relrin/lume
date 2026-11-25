@@ -6,6 +6,10 @@
  */
 
 import type { RexHost, RexHosts, RexSession } from "../core/types.ts";
+import { listed, type Listed } from "../listed.ts";
+import { lookup } from "../lookup.ts";
+import { plain } from "../text/plain.ts";
+import { SESSIONS_LISTED_MAX } from "./tuning.ts";
 
 /** Whether a server can be used: it can, it is on its way, or it cannot. */
 export type RexLink = "up" | "busy" | "down";
@@ -20,6 +24,9 @@ export type RexNext =
 /** The core's code for a server the user was asked to sign in to and did not. */
 export const GIVEN_UP = "given_up";
 
+/** What a server is called whose name is not known. */
+export const UNKNOWN_SERVER = "Rex";
+
 /** What an id begins with that stands for an address nothing can be reached at. */
 const UNUSABLE = "rex:?";
 
@@ -32,6 +39,11 @@ export function rexHostNamed(list: RexHosts | null, named: string): string | nul
     hosts.find((host) => host.label.toLowerCase() === lower) ??
     hosts.find((host) => host.address === named.trim());
   return found?.id ?? null;
+}
+
+/** Whether a backend is a Rex server, by its id. */
+export function isRexBackend(backend: string | null): boolean {
+  return backend?.startsWith("rex:") ?? false;
 }
 
 /** Whether a server's address is one that can be reached at all. */
@@ -91,7 +103,7 @@ export function standing(host: Pick<RexHost, "state" | "sessions">): string {
     case "absent":
       return "Not running";
     case "failed":
-      return FAILURES[host.state.code] ?? "Failed";
+      return lookup(FAILURES, host.state.code) ?? "Failed";
   }
 }
 
@@ -226,8 +238,13 @@ const SYSTEMS: Readonly<Record<string, string>> = {
 
 /** The system a server runs on, as it is called: "Windows" for "windows_amd64". */
 export function systemName(platform: string): string {
-  const name = platform.split("_")[0] ?? "";
-  return SYSTEMS[name.toLowerCase()] ?? (name === "" ? "—" : name);
+  const name = plain(platform).split("_")[0] ?? "";
+  return lookup(SYSTEMS, name.toLowerCase()) ?? (name === "" ? "—" : name);
+}
+
+/** What a server says it is: "Rex 0.4.1 on windows_amd64". */
+export function buildOf(state: Extract<RexHost["state"], { kind: "connected" }>): string {
+  return `Rex ${plain(state.version)} on ${plain(state.platform)}`;
 }
 
 /** The server whose layout is on show, if one is. */
@@ -243,16 +260,23 @@ export function sessionOnShow(host: RexHost, backend: string | null): string | n
   return host.id === backend ? host.on_show : null;
 }
 
-/** Which of a server's sessions is marked first: the one on show, else the first. */
+/** The sessions of a server that are listed, the one on show among them. */
+export function listedSessions(host: RexHost, backend: string | null): Listed<RexSession> {
+  const shown = sessionOnShow(host, backend);
+  return listed(host.sessions, SESSIONS_LISTED_MAX, (session) => session.id === shown);
+}
+
+/** Which of a server's listed sessions is marked first: the one on show, else the first. */
 export function firstMarked(host: RexHost, backend: string | null): number {
   const shown = sessionOnShow(host, backend);
   return Math.max(
     0,
-    host.sessions.findIndex((session) => session.id === shown),
+    listedSessions(host, backend).rows.findIndex((session) => session.id === shown),
   );
 }
 
 /** What a session is called, which its server may have left empty. */
 export function sessionName(session: Pick<RexSession, "label">): string {
-  return session.label.trim() === "" ? "unnamed" : session.label;
+  const label = plain(session.label);
+  return label === "" ? "unnamed" : label;
 }

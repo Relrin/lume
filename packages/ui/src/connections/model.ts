@@ -14,6 +14,7 @@ import type {
   RexTried,
   SshHost,
 } from "../core/types.ts";
+import { lookup } from "../lookup.ts";
 import { sshAdvice, systemName } from "../rex/model.ts";
 
 /** What can be added. */
@@ -232,7 +233,7 @@ export function testFailure(code: string, message: string): TestFailure {
             : ended(message);
   return {
     code,
-    short: SHORT[code] ?? "It did not work",
+    short: lookup(SHORT, code) ?? "It did not work",
     message: text,
     final: FINAL.includes(code),
   };

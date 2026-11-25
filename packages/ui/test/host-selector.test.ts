@@ -5,6 +5,7 @@ import {
   browsedHost,
   creatable,
   firstRow,
+  listedRows,
   selectorActs,
   selectorHosts,
   selectorLabel,
@@ -85,7 +86,7 @@ describe("what a host of the selector holds", () => {
       [false, "delete"],
       [true, null],
     ]);
-    expect(firstRow(OWN, host(OWN, THIS_PC))).toBe(1);
+    expect(firstRow(selectorRows(OWN, host(OWN, THIS_PC), ""))).toBe(1);
   });
 
   it("says no workspace is on show while a session of its name is", () => {
@@ -98,6 +99,20 @@ describe("what a host of the selector holds", () => {
       ["ml-train", false],
     ]);
     expect(sessions.every(({ renames, takes }) => renames && takes === "end")).toBe(true);
+  });
+
+  it("lists so many of a server's sessions, the one on show among them", () => {
+    const sessions = Array.from({ length: 1024 }, (_, at) => ({ id: `s:${at}`, label: `s${at}` }));
+    const many = { ...DEVBOX, sessions, on_show: "s:900" };
+    const sources: SelectorSources = { ...SERVED, servers: rexList(many, NAS) };
+    const rows = selectorRows(sources, host(sources, many.id), "");
+    const listed = listedRows(rows);
+    expect([listed.rows.length, listed.more]).toEqual([200, 824]);
+    expect(listed.rows[firstRow(listed.rows)]?.name).toBe("s900");
+    // One that is not listed is found by its name, and there already.
+    const found = listedRows(selectorRows(sources, host(sources, many.id), "s1023"));
+    expect(found.rows.map(({ name }) => name)).toEqual(["s1023"]);
+    expect(creatable(sources, host(sources, many.id), "s1023")).toBeNull();
   });
 
   it("is narrowed by what is typed, unless it is the host's own name", () => {

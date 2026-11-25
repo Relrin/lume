@@ -6,5 +6,5 @@
 /** How many profiles the new-tab button's menu lists besides the default one. */
 export const NEW_TAB_MENU_MAX = 8;
 
-/** How many profiles one group of the Connect palette lists at most. */
+/** How many rows one group of the Connect palette lists at most. */
 export const CONNECT_GROUP_MAX = 50;

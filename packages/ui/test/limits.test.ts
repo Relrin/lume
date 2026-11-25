@@ -5,48 +5,10 @@ import {
   LINK_SCHEMES_TO_CONFIRM,
   PASTE_MAX_BYTES,
   PASTE_PREVIEW_CHARS,
-  TITLE_MAX_BYTES,
 } from "../src/limits.ts";
 import { pasteDecision, pastePreview, ProgramClipboard } from "../src/terminal/clipboard.ts";
 import { PromptStore } from "../src/terminal/prompts.ts";
-import { sanitizeTitle } from "../src/terminal/title.ts";
 import { DEFAULT_APPEARANCE, palette256 } from "../src/theme.ts";
-
-const bytes = (text: string) => new TextEncoder().encode(text).length;
-
-describe("a title a program set", () => {
-  it("is shown as it is when it is harmless", () => {
-    expect(sanitizeTitle("~/src — vim")).toBe("~/src — vim");
-    expect(sanitizeTitle("")).toBe("");
-  });
-
-  it("loses its control characters", () => {
-    expect(sanitizeTitle("a\x00b\x07c\x1b[31md\x7fe\x9bf")).toBe("abc[31mdef");
-    expect(sanitizeTitle("line one\r\nline two\ttab")).toBe("line oneline twotab");
-  });
-
-  it("loses the characters that reorder or hide the text after them", () => {
-    expect(sanitizeTitle("safe‮gnp.exe")).toBe("safegnp.exe");
-    expect(sanitizeTitle("a⁦b⁩c‎d؜e")).toBe("abcde");
-  });
-
-  it("is cut at the limit", () => {
-    const title = sanitizeTitle("x".repeat(TITLE_MAX_BYTES + 500));
-    expect(title).toBe("x".repeat(TITLE_MAX_BYTES));
-  });
-
-  it("is cut on a character, never inside one", () => {
-    // Each character is three bytes; the limit falls inside one.
-    const title = sanitizeTitle("漢".repeat(TITLE_MAX_BYTES));
-    expect(bytes(title)).toBeLessThanOrEqual(TITLE_MAX_BYTES);
-    expect(bytes(title)).toBeGreaterThan(TITLE_MAX_BYTES - 3);
-    expect([...title].every((character) => character === "漢")).toBe(true);
-    // Two UTF-16 units, four bytes: neither half is left behind.
-    const faces = sanitizeTitle("😀".repeat(TITLE_MAX_BYTES));
-    expect([...faces].every((character) => character === "😀")).toBe(true);
-    expect(bytes(faces)).toBe(TITLE_MAX_BYTES - (TITLE_MAX_BYTES % 4));
-  });
-});
 
 describe("links", () => {
   it("are opened for web addresses and files only, and files only after asking", () => {

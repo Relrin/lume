@@ -24,6 +24,7 @@ import { labelTaken } from "../connections/model.ts";
 import { connectionDialog } from "../connections/store.ts";
 import type { WorkspaceList } from "../core/types.ts";
 import { Glyph } from "../icons/Glyph.tsx";
+import { moreLine } from "../listed.ts";
 import { KeyCaps } from "../palette/KeyCaps.tsx";
 import { LinkDot } from "../rex/LinkDot.tsx";
 import { useRexActions, useRexLook } from "../rex/look.ts";
@@ -32,6 +33,7 @@ import { useShell } from "./context.ts";
 import {
   browsedHost,
   firstRow,
+  listedRows,
   selectorActs,
   selectorHosts,
   selectorRows,
@@ -183,14 +185,15 @@ export function HostSelector({
   const sources: SelectorSources = { workspaces, servers, backend };
   const hosts = selectorHosts(sources, query);
   const host = browsedHost(sources, query, wanted);
-  const rows = host ? selectorRows(sources, host, query) : [];
+  const every = host ? selectorRows(sources, host, query) : [];
+  const { rows, more } = listedRows(every);
   const acts = host ? selectorActs(sources, host, query, (command) => known.has(command)) : [];
   const stops: readonly Stop[] = [
     ...rows.map((row): Stop => ({ kind: "row", key: row.key, row })),
     ...acts.map((act): Stop => ({ kind: "act", key: actKey(act), act })),
   ];
   const found = stops.findIndex((stop) => stop.key === stopAt);
-  const first = host && query.trim() === "" && rows.length > 0 ? firstRow(sources, host) : 0;
+  const first = host && query.trim() === "" && rows.length > 0 ? firstRow(rows) : 0;
   const marked = found >= 0 ? found : Math.min(first, Math.max(0, stops.length - 1));
   const at = stops[marked];
   const hostAt = hosts.findIndex((listed) => listed.key === host?.key);
@@ -410,6 +413,13 @@ export function HostSelector({
   );
   const why = host?.rex ? reason(host.rex) : null;
   const problem = host?.rex ? rex.problem(host.rex) : null;
+  // What is not listed is said after what is, before what can be done. There is always
+  // something that can be done with a host that has so much.
+  const moreNote = more > 0 && (
+    <div className="selector-note" role="presentation">
+      {moreLine(more)}
+    </div>
+  );
   const heading = host ? (host.rex ? host.rex.address : "Workspaces of this computer") : "";
 
   return (
@@ -595,6 +605,7 @@ export function HostSelector({
                     const begins = stops[index - 1]?.kind !== "act";
                     return (
                       <div key={stop.key} role="presentation">
+                        {begins && moreNote}
                         {begins && <div className="selector-separator" role="presentation" />}
                         <div
                           {...common}
@@ -621,7 +632,7 @@ export function HostSelector({
                         <RenameField
                           label={host.rex ? "Session name" : "Workspace name"}
                           value={renaming.value}
-                          taken={rows.some(
+                          taken={every.some(
                             (other) =>
                               other.key !== row.key &&
                               other.name.toLowerCase() === renaming.value.trim().toLowerCase(),

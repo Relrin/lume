@@ -9,6 +9,7 @@
  */
 
 import type { CommandSpec, ConfigPlatform, KeyBinding } from "../core/types.ts";
+import { lookup } from "../lookup.ts";
 import { chordLabel } from "./store.ts";
 
 /** What a command acts on, in the order the groups are listed. */
@@ -47,11 +48,11 @@ const GROUP_OF_COMMAND: Readonly<Record<string, CommandGroup>> = {
 
 /** The group a command is listed under. A plugin's command is the application's to list. */
 export function commandGroup(id: string): CommandGroup {
-  const own = GROUP_OF_COMMAND[id];
+  const own = lookup(GROUP_OF_COMMAND, id);
   if (own) return own;
   const [owner, area] = id.split(".");
   if (owner !== "lume" || area === undefined) return "App";
-  return GROUP_OF_AREA[area] ?? "App";
+  return lookup(GROUP_OF_AREA, area) ?? "App";
 }
 
 /** One command of the list: what it is called, and the keys that run it. */

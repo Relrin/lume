@@ -219,7 +219,7 @@
             "parts": [
               {
                 "role": "tab",
-                "name": "Terminal",
+                "name": "Terminal · devbox-01",
                 "state": {
                   "selected": "true"
                 }
@@ -281,6 +281,9 @@
                     "parts": [
                       {
                         "box": "pane-header",
+                        "state": {
+                          "kind": "rex"
+                        },
                         "at": [9, 45, 626, 34],
                         "parts": [
                           {
@@ -339,6 +342,9 @@
                     "parts": [
                       {
                         "box": "pane-header",
+                        "state": {
+                          "kind": "rex"
+                        },
                         "at": [645, 45, 626, 34],
                         "parts": [
                           {

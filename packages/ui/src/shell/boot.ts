@@ -250,7 +250,9 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
     const id =
       report.session !== null
         ? report.profile
-        : (paneFacts(layout.getState(), pane).profile ?? list?.default ?? undefined);
+        : (paneFacts(layout.getState(), pane, rex.getState().list).profile ??
+          list?.default ??
+          undefined);
     return looks.of(look, findProfile(list, id), list?.looks);
   };
   const panelDrag = createPanelDragStore();

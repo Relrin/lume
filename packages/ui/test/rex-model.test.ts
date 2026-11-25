@@ -6,6 +6,7 @@ import {
   hostLine,
   hostOnShow,
   linkOf,
+  listedSessions,
   nearness,
   next,
   reason,
@@ -18,6 +19,7 @@ import {
   usable,
 } from "../src/rex/model.ts";
 import { createRexStore } from "../src/rex/store.ts";
+import { SESSIONS_LISTED_MAX } from "../src/rex/tuning.ts";
 import { DEVBOX, NAS, rexFailed, rexHost, rexList, UP } from "./rex-fixtures.ts";
 
 describe("the Rex servers a page holds", () => {
@@ -179,6 +181,17 @@ describe("which session of a server is on show", () => {
     expect(firstMarked(shown, shown.id)).toBe(1);
     expect(firstMarked(shown, null)).toBe(0);
     expect(firstMarked(NAS, NAS.id)).toBe(0);
+  });
+
+  it("is among those listed, however many come before it", () => {
+    const sessions = Array.from({ length: 1024 }, (_, at) => ({ id: `s:${at}`, label: `s${at}` }));
+    const many = { ...DEVBOX, sessions, on_show: "s:900" };
+    const { rows, more } = listedSessions(many, many.id);
+    expect([rows.length, more]).toEqual([SESSIONS_LISTED_MAX, 1024 - SESSIONS_LISTED_MAX]);
+    expect(firstMarked(many, many.id)).toBe(SESSIONS_LISTED_MAX - 1);
+    expect(rows[firstMarked(many, many.id)]?.id).toBe("s:900");
+    expect(listedSessions(many, null).rows).toEqual(sessions.slice(0, SESSIONS_LISTED_MAX));
+    expect(listedSessions(DEVBOX, DEVBOX.id)).toEqual({ rows: DEVBOX.sessions, more: 0 });
   });
 
   it("has a name when the server gave it none", () => {

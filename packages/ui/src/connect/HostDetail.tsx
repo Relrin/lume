@@ -4,13 +4,16 @@
  * it. A server that is not connected says why, and how to go on.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import { Glyph } from "../icons/Glyph.tsx";
+import { moreLine } from "../listed.ts";
 import { KeyCaps } from "../palette/KeyCaps.tsx";
 import {
+  buildOf,
   canDisconnect,
   connected,
+  listedSessions,
   nearness,
   next,
   onThisMachine,
@@ -46,7 +49,7 @@ function Act({
   primary = false,
   act,
 }: {
-  label: string;
+  label: ReactNode;
   keys?: string | undefined;
   primary?: boolean;
   act: () => void;
@@ -80,7 +83,7 @@ export function HostDetail({
   entry: HostEntry;
   /** Whose layout the window shows, if a server's. */
   backend: string | null;
-  /** Which of its sessions is marked. */
+  /** Which of its listed sessions is marked. */
   marked: number;
   /** Whether the arrow keys move among the sessions. */
   inside: boolean;
@@ -97,7 +100,8 @@ export function HostDetail({
   const state = host.state;
   const up = connected(host);
   const shown = sessionOnShow(host, backend);
-  const chosen = host.sessions[marked];
+  const sessions = listedSessions(host, backend);
+  const chosen = sessions.rows[marked];
   const why = reason(host);
   const step = next(host);
   useEffect(() => {
@@ -112,7 +116,7 @@ export function HostDetail({
     [
       "Server",
       state.kind === "connected" ? systemName(state.platform) : "—",
-      state.kind === "connected" ? `Rex ${state.version} on ${state.platform}` : undefined,
+      state.kind === "connected" ? buildOf(state) : undefined,
     ],
     ["API rev", state.kind === "connected" ? String(state.api_revision) : "—", undefined],
   ];
@@ -161,14 +165,14 @@ export function HostDetail({
           {host.sessions.length === 0 && (
             <p className="connect-detail-about">None yet. A new one is a shell on the server.</p>
           )}
-          {host.sessions.length > 0 && (
+          {sessions.rows.length > 0 && (
             <div
               ref={list}
               className="connect-sessions-list"
               role="listbox"
               aria-label={`Sessions of ${host.label}`}
             >
-              {host.sessions.map((session, index) => (
+              {sessions.rows.map((session, index) => (
                 <div
                   key={session.id}
                   id={sessionOptionId(index)}
@@ -184,6 +188,11 @@ export function HostDetail({
                   {session.id === shown && <span className="connect-meta">Attached</span>}
                 </div>
               ))}
+              {sessions.more > 0 && (
+                <div className="connect-note" role="presentation">
+                  {moreLine(sessions.more)}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -193,7 +202,12 @@ export function HostDetail({
         {up && chosen && (
           <Act
             primary
-            label={`Attach to ${sessionName(chosen)}`}
+            label={
+              // A name that is read from right to left does not turn the words before it.
+              <>
+                Attach to <bdi>{sessionName(chosen)}</bdi>
+              </>
+            }
             keys="↵"
             act={() => acts.attach(entry, chosen.id)}
           />

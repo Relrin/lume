@@ -75,8 +75,11 @@ export const SERVED_ENGINE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
  */
 export const OSC52_WRITE_MAX_BYTES = 1024 * 1024;
 
-/** The longest window title a program may set, in bytes of UTF-8. The rest is cut off. */
-export const TITLE_MAX_BYTES = 1024;
+/**
+ * The longest text from outside that is shown on one line, such as the title a program
+ * sets, in bytes of UTF-8. The rest is cut off. The core cuts what servers say as short.
+ */
+export const TEXT_MAX_BYTES = 1024;
 
 /**
  * The most status records a pane keeps of its programs. The core keeps as many; a

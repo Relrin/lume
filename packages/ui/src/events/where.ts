@@ -3,10 +3,12 @@
  *
  * A shell reports its directory as a URL, `file://<machine>/<path>`. The page only shows
  * it: the URL is read the way the core reads it, so the two agree on what a report
- * says, and a report the core would not take is not shown either.
+ * says, and a report the core would not take is not shown either. What is shown of it is
+ * only what is seen.
  */
 
 import type { Machine } from "../core/types.ts";
+import { plain } from "../text/plain.ts";
 
 /** The longest machine name the older Windows naming keeps; a longer one is cut to it. */
 const NETBIOS_NAME_MAX_CHARS = 15;
@@ -14,7 +16,7 @@ const NETBIOS_NAME_MAX_CHARS = 15;
 /** A control character: no directory has one in its name. */
 const CONTROL = /\p{Cc}/u;
 
-/** The machine and path a `file:` URL names, the path with its escapes undone. */
+/** The machine and path a `file:` URL names, the path with its escapes undone and safe to show. */
 export function parseFileUrl(url: string): { host: string; path: string } | undefined {
   if (url.slice(0, 7).toLowerCase() !== "file://") return undefined;
   const rest = url.slice(7);
@@ -23,7 +25,7 @@ export function parseFileUrl(url: string): { host: string; path: string } | unde
   const host = rest.slice(0, slash);
   const path = percentDecode(rest.slice(slash));
   if (path === undefined || CONTROL.test(path)) return undefined;
-  return { host, path };
+  return { host, path: plain(path) };
 }
 
 /** The text a percent-encoded path stands for, or nothing when it is not well encoded. */
@@ -89,7 +91,9 @@ export function homeShortened(path: string, home: string | null, windows: boolea
 export function lastFolder(path: string): string {
   if (path === "~" || path === "/") return path;
   const parts = path.split(/[\\/]/).filter((part) => part !== "");
-  return parts.at(-1) ?? path;
+  const last = parts.at(-1) ?? path;
+  // The root of another machine is called by the machine's name. A drive has one letter.
+  return parts.length === 1 && /^[^:]{2,}:$/.test(last) ? last.slice(0, -1) : last;
 }
 
 /** Where a reported directory is, as it is read. */
@@ -112,8 +116,14 @@ export function localPlace(
   const parsed = parseFileUrl(url);
   if (!parsed) return undefined;
   if (!isThisMachine(parsed.host, machine, windows)) {
-    return { elsewhere: parsed.host, path: parsed.path };
+    return { elsewhere: plain(parsed.host), path: parsed.path };
   }
   const path = windows ? windowsPath(parsed.path) : parsed.path;
   return path === undefined ? undefined : { elsewhere: null, path };
+}
+
+/** Where a report from a shell on another machine says it is, in that machine's spelling. */
+export function farPath(url: string): string | undefined {
+  const parsed = parseFileUrl(url);
+  return parsed && (windowsPath(parsed.path) ?? parsed.path);
 }

@@ -4,6 +4,7 @@ import {
   CONNECT_ACTIONS,
   connectGroups,
   connectRows,
+  connectSections,
   describeRun,
   kindOf,
   lineOf,
@@ -158,8 +159,19 @@ describe("what the Connect palette lists", () => {
     const many = Array.from({ length: CONNECT_GROUP_MAX + 5 }, (_, index) =>
       shell(`s${index}`, `Shell ${index}`, "sh"),
     );
-    const groups = connectGroups({ profiles: many, default: null }, "", "all");
-    expect(groups[0]!.entries).toHaveLength(CONNECT_GROUP_MAX);
+    const of = (pinned?: ReadonlySet<string>) =>
+      connectSections(connectGroups({ profiles: many, default: null }, "", "all", pinned));
+    // All of them are counted, and as many as are read are listed.
+    expect(connectGroups({ profiles: many, default: null }, "", "all")[0]!.entries).toHaveLength(
+      many.length,
+    );
+    const [group, actions] = of();
+    expect([group?.rows.length, group?.more]).toEqual([CONNECT_GROUP_MAX, 5]);
+    expect(actions?.more).toBe(0);
+    // What is pinned is listed, wherever its group had it.
+    const [pinned, rest] = of(new Set([many.at(-1)!.id]));
+    expect([pinned?.key, pinned?.rows.length, pinned?.more]).toEqual(["pinned", 1, 0]);
+    expect(rest?.more).toBe(4);
   });
 
   it("moves through the profiles, then the actions", () => {

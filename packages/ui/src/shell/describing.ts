@@ -7,7 +7,7 @@
  * reports never render the component tree.
  */
 
-import type { ConfigView, UiContributions } from "../core/types.ts";
+import type { ConfigView, RexHosts, UiContributions } from "../core/types.ts";
 import { greatest, type Activity } from "../events/activity.ts";
 import {
   describePane,
@@ -21,6 +21,7 @@ import { iconChoices, type PaneIcon, type ProgramIcon } from "../events/programs
 import { isTabMuted, panesOf, selectTitlePane, UNTITLED_TAB } from "../layout/selectors.ts";
 import type { LayoutState } from "../layout/store.ts";
 import type { PaneId, TabId } from "../layout/types.ts";
+import { hostOnShow, isRexBackend, UNKNOWN_SERVER } from "../rex/model.ts";
 import { TAB_ICONS_MAX } from "../tuning.ts";
 import type { ShellApp } from "./boot.ts";
 
@@ -72,8 +73,17 @@ export function describeContext(app: ShellApp): DescribeContext {
   };
 }
 
-/** What the layout says of a pane. */
-export function paneFacts(state: LayoutState, pane: PaneId): PaneFacts {
+/** What the Rex server a backend is of is called, where it is one. */
+function serverOf(backend: string | null, servers: RexHosts | null): string | null {
+  if (!isRexBackend(backend)) return null;
+  return hostOnShow(servers, backend)?.label || UNKNOWN_SERVER;
+}
+
+/**
+ * What the layout says of a pane. `servers` are the Rex servers there are: a terminal of
+ * one is told by the backend its session is on, in whichever workspace it is shown.
+ */
+export function paneFacts(state: LayoutState, pane: PaneId, servers: RexHosts | null): PaneFacts {
   const entry = state.panes[pane] ?? state.scratch?.parked?.pane;
   const content = entry?.id === pane ? entry.content : undefined;
   const terminal = content?.type === "terminal" ? content : undefined;
@@ -88,6 +98,7 @@ export function paneFacts(state: LayoutState, pane: PaneId): PaneFacts {
     launcher: terminal?.launcher ?? null,
     profile: terminal?.profile ?? null,
     icon: entry?.id === pane ? (entry.icon ?? null) : null,
+    server: terminal ? serverOf(terminal.backend, servers) : null,
     view: content?.type === "plugin_view" ? { plugin: content.plugin, view: content.view } : null,
   };
 }
@@ -96,7 +107,7 @@ export function paneFacts(state: LayoutState, pane: PaneId): PaneFacts {
 export function describeNow(app: ShellApp, pane: PaneId): PaneDescription {
   return describePane(
     app.reports.get(pane),
-    paneFacts(app.layout.getState(), pane),
+    paneFacts(app.layout.getState(), pane, app.rex.getState().list),
     describeContext(app),
   );
 }
@@ -126,11 +137,12 @@ export function describeTabNow(app: ShellApp, tab: TabId): TabDescription {
   const panes = entry ? panesOf(entry.root) : [];
   const ordered = named === undefined ? panes : [named, ...panes.filter((pane) => pane !== named)];
   const context = describeContext(app);
+  const servers = app.rex.getState().list;
   const described = ordered.map((pane) =>
-    describePane(app.reports.get(pane), paneFacts(state, pane), context),
+    describePane(app.reports.get(pane), paneFacts(state, pane, servers), context),
   );
   const first = described[0];
-  const own = named === undefined ? null : paneFacts(state, named).name;
+  const own = named === undefined ? null : paneFacts(state, named, servers).name;
   const label = entry?.title || own || (first ? paneLabel(first) : UNTITLED_TAB);
   return {
     label,
@@ -160,9 +172,23 @@ export function followTab(
     app.layout.subscribe(again),
     app.profiles.subscribe(again),
     app.config.subscribe(again),
+    followServers(app, again),
     followPictures(app, again),
   ];
   return () => stops.forEach((stop) => stop());
+}
+
+/** Calls `again` when there are other Rex servers, or one is called something else. */
+function followServers(app: ShellApp, again: () => void): () => void {
+  const names = (list: RexHosts | null) =>
+    JSON.stringify(list?.hosts.map((host) => [host.id, host.label]));
+  let known = names(app.rex.getState().list);
+  return app.rex.subscribe((state) => {
+    const now = names(state.list);
+    if (now === known) return;
+    known = now;
+    again();
+  });
 }
 
 /** Calls `again` when what plugins add, their pictures among it, has changed. */
@@ -191,6 +217,7 @@ export function followPane(
     }),
     app.profiles.subscribe(again),
     app.config.subscribe(again),
+    followServers(app, again),
     followPictures(app, again),
   ];
   return () => stops.forEach((stop) => stop());

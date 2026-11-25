@@ -8,7 +8,8 @@
  */
 
 import type { DetachedSession, Profile, ProfileList, RexHost, RexHosts } from "../core/types.ts";
-import { rank } from "../palette/fuzzy.ts";
+import { listed } from "../listed.ts";
+import { rank, rankAny } from "../palette/fuzzy.ts";
 import { nearness, sessionName, standing } from "../rex/model.ts";
 import type { Launcher } from "../transport/types.ts";
 import { CONNECT_GROUP_MAX } from "./tuning.ts";
@@ -286,7 +287,6 @@ export function connectGroups(
         ...byOther.map((match) => entry(match.item, [])),
       ];
     }
-    entries = entries.slice(0, CONNECT_GROUP_MAX);
     return entries.length === 0 ? [] : [{ kind, label, entries }];
   });
   if (pinned.size === 0) return groups;
@@ -356,7 +356,7 @@ export function detachedEntries(
       ...byOther.map((match) => entry(match.item, [])),
     ];
   }
-  return entries.slice(0, CONNECT_GROUP_MAX);
+  return entries;
 }
 
 /**
@@ -384,17 +384,17 @@ export function hostEntries(
   } else {
     const byName = rank(list.hosts, query, (host) => host.label);
     const named = new Set(byName.map((match) => match.item));
-    const byOther = rank(
+    const byOther = rankAny(
       list.hosts.filter((host) => !named.has(host)),
       query,
-      (host) => [host.address, ...host.sessions.map(sessionName)].join(" "),
+      (host) => [host.address, ...host.sessions.map(sessionName)],
     );
     entries = [
       ...byName.map((match) => entry(match.item, match.indices)),
       ...byOther.map((match) => entry(match.item, [])),
     ];
   }
-  return entries.slice(0, CONNECT_GROUP_MAX);
+  return entries;
 }
 
 /** Rows that stand under one heading. */
@@ -402,11 +402,13 @@ export interface ConnectSection {
   readonly key: string;
   readonly label: string;
   readonly rows: readonly ConnectRow[];
+  /** How many match besides those listed. */
+  readonly more: number;
 }
 
 /**
  * The list as it stands on the page: what is pinned, the Rex servers, the profiles by
- * kind, the detached sessions, and the actions.
+ * kind, the detached sessions, and the actions. Each lists only so many.
  */
 export function connectSections(
   groups: readonly ConnectGroup[],
@@ -416,7 +418,7 @@ export function connectSections(
   const hostRow = (entry: HostEntry): ConnectRow => ({ type: "host", entry });
   const profileRow = (entry: ConnectEntry): ConnectRow => ({ type: "profile", entry });
   const isPinned = (group: ConnectGroup) => group.kind === "pinned";
-  const sections: ConnectSection[] = [
+  const sections = [
     {
       key: "pinned",
       label: "Pinned",
@@ -448,7 +450,9 @@ export function connectSections(
       rows: CONNECT_ACTIONS.map((action): ConnectRow => ({ type: "action", action })),
     },
   ];
-  return sections.filter((section) => section.rows.length > 0);
+  return sections
+    .filter((section) => section.rows.length > 0)
+    .map((section) => ({ ...section, ...listed(section.rows, CONNECT_GROUP_MAX) }));
 }
 
 /** The rows the keyboard moves through, in the order they stand on the page. */

@@ -25,13 +25,16 @@ import {
   type ProgramIcon,
 } from "./programs.ts";
 import type { PaneReport } from "./store.ts";
-import { homeShortened, lastFolder, localPlace, parseFileUrl } from "./where.ts";
+import { farPath, homeShortened, lastFolder, localPlace, parseFileUrl } from "./where.ts";
 
 /** What a pane is called when nothing says what runs in it. */
 export const UNTITLED_PANE = "Terminal";
 
-/** Where a pane's session runs: here, in a Linux distribution here, or on another machine. */
-export type PaneKind = Launcher["type"];
+/**
+ * Where a pane's session runs: here, in a Linux distribution here, on another machine, or
+ * on a Rex server.
+ */
+export type PaneKind = Launcher["type"] | "rex";
 
 /** What the layout says of a pane. */
 export interface PaneFacts {
@@ -48,6 +51,8 @@ export interface PaneFacts {
    * the key of a plugin's picture.
    */
   readonly icon?: string | null;
+  /** What the Rex server the pane's session is on is called, where it is on one. */
+  readonly server?: string | null;
   /** The plugin's view the pane shows, where it shows one. */
   readonly view?: { readonly plugin: string; readonly view: string } | null;
 }
@@ -190,7 +195,7 @@ function localWhere(
 ): { short: string; full: string } {
   const { machine, windows } = context;
   const place = report.cwd === undefined ? undefined : localPlace(report.cwd, machine, windows);
-  if (place?.elsewhere) {
+  if (place && place.elsewhere !== null) {
     const full = `${place.elsewhere}:${place.path}`;
     return { short: full, full };
   }
@@ -233,6 +238,16 @@ function remoteWhere(
   return { short: named ? path : full, full };
 }
 
+/**
+ * Where a shell on a Rex server says it is. However it says it, it is a place of the
+ * server's: none of it is this machine's, whatever machine the report names.
+ */
+function servedWhere(report: PaneReport, server: string): { short: string; full: string } {
+  const path = report.cwd === undefined ? undefined : farPath(report.cwd);
+  const full = path === undefined ? server : `${server}:${path}`;
+  return { short: full, full };
+}
+
 /** What the program a pane runs last said it is, where it said. */
 function appOf(statuses: readonly ProgramStatus[]): string | undefined {
   return statuses.findLast((status) => status.app !== undefined && status.app !== "")?.app;
@@ -241,20 +256,23 @@ function appOf(statuses: readonly ProgramStatus[]): string | undefined {
 /**
  * The tile for what runs in a pane. A program other than a shell is known by what it
  * says it is or by its name, and given a plain tile when neither is known; a shell at
- * its prompt shows where it runs: here, in a distribution, or on another machine.
+ * its prompt shows where it runs: here, in a distribution, or on another machine or a
+ * server.
  */
 function paneIcon(
   program: string | undefined,
   launcher: Launcher | undefined,
+  served: boolean,
   statuses: readonly ProgramStatus[],
   context: DescribeContext,
 ): PaneIcon {
   if (program !== undefined) {
     const shell = isShell(program);
     const known = programIcon(program, context.icons, shell ? undefined : appOf(statuses));
-    if (known) return known;
+    if (known && !(served && shell && known === "terminal")) return known;
     if (!shell) return plainIcon(program);
   }
+  if (served) return "remote";
   if (launcher?.type === "wsl") return distributionIcon(launcher.distro) ?? "terminal";
   return launcher?.type === "ssh" ? "remote" : "terminal";
 }
@@ -281,12 +299,13 @@ export function describePane(
   facts: PaneFacts,
   context: DescribeContext,
 ): PaneDescription {
-  const profile: Profile | undefined = findProfile(
-    context.profiles,
-    report.profile ?? facts.profile,
-  );
-  const launcher = report.launcher ?? facts.launcher ?? profile?.launcher;
-  const kind: PaneKind = launcher?.type ?? "shell";
+  const server = facts.server ?? null;
+  // What a server runs is no profile of this machine's, and nothing started from here.
+  const profile: Profile | undefined =
+    server === null ? findProfile(context.profiles, report.profile ?? facts.profile) : undefined;
+  const launcher =
+    server === null ? (report.launcher ?? facts.launcher ?? profile?.launcher) : undefined;
+  const kind: PaneKind = server === null ? (launcher?.type ?? "shell") : "rex";
   const command = report.command;
   const running = command?.state === "running" && report.exit === undefined;
 
@@ -318,10 +337,12 @@ export function describePane(
     const commanded = onlyShellSeen || scripted ? typed : undefined;
     program = commanded ?? foreground ?? shell;
     name = program ?? profile?.name ?? UNTITLED_PANE;
-    where = localWhere(report, facts, context);
+    where = server === null ? localWhere(report, facts, context) : servedWhere(report, server);
   }
 
-  const icon = givenIcon(facts, context) ?? paneIcon(program, launcher, report.statuses, context);
+  const icon =
+    givenIcon(facts, context) ??
+    paneIcon(program, launcher, server !== null, report.statuses, context);
   const failed =
     !running && command?.state === "finished" && command.exit !== undefined && command.exit !== 0
       ? command.exit

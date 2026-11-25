@@ -490,7 +490,8 @@
     display: flex;
     flex-direction: column;
     width: min(620px, calc(100vw - 24px));
-    max-height: calc(100vh - var(--lume-size-topbar) - 16px);
+    /* Its end is above the status bar, which is drawn over whatever the top bar opens. */
+    max-height: calc(100vh - var(--lume-size-topbar) - var(--lume-size-statusbar) - 16px);
     padding: 6px;
     border: var(--lume-size-border) solid var(--lume-color-border);
     border-radius: calc(var(--lume-radius-control) + min(var(--lume-radius-control), 4px));
@@ -6252,6 +6253,7 @@
     font-size: 12px;
   }
 
+  .palette-more,
   .palette-empty {
     @apply text-ink-muted;
     padding: 8px 10px;

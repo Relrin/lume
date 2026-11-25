@@ -27,6 +27,8 @@ export interface RexTarget {
   readonly link: RexLink;
   /** A word at the row's end. Empty where there is none. */
   readonly meta: string;
+  /** Whether it is the session the window shows. */
+  readonly on: boolean;
   readonly command: string;
   readonly args: Readonly<Record<string, string>>;
 }
@@ -50,6 +52,7 @@ export function rexTargets(list: RexHosts | null, backend: string | null): RexTa
         sub: standing(host),
         link,
         meta: nearness(host),
+        on: false,
         command: makes ? "lume.rex.new-session" : "lume.rex.open",
         args: { host: host.id },
       },
@@ -60,6 +63,7 @@ export function rexTargets(list: RexHosts | null, backend: string | null): RexTa
         sub: host.label,
         link,
         meta: session.id === shown ? "attached" : "session",
+        on: session.id === shown,
         command: "lume.rex.open",
         args: { host: host.id, session: session.id },
       })),
