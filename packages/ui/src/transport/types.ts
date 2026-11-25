@@ -7,6 +7,8 @@
  * the transport sees the wire spelling.
  */
 
+import { TERMINAL_CELLS_MAX } from "../limits.ts";
+
 /** A terminal's size in cells. Each side is between 1 and {@link MAX_DIMENSION}. */
 export interface TermSize {
   readonly cols: number;
@@ -15,6 +17,22 @@ export interface TermSize {
 
 /** The most columns or rows a terminal may have. A rule of the wire format. */
 export const MAX_DIMENSION = 4096;
+
+/**
+ * A size with at most `max` cells: the longer side gives way, and where that would make
+ * it the shorter one, both do.
+ */
+export function withinCells(size: TermSize, max = TERMINAL_CELLS_MAX): TermSize {
+  const { cols, rows } = size;
+  if (cols * rows <= max) return size;
+  const short = Math.min(cols, rows);
+  const long = Math.floor(max / short);
+  if (long < short) {
+    const side = Math.max(1, Math.floor(Math.sqrt(max)));
+    return { cols: Math.min(side, cols), rows: Math.min(side, rows) };
+  }
+  return cols > rows ? { cols: long, rows } : { cols, rows: long };
+}
 
 /** One cell's size in device pixels. Zero means it has not been measured. */
 export interface CellPx {

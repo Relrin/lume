@@ -13,6 +13,7 @@ import {
   type CursorStyle,
   type Terminal,
   type TerminalColors,
+  type TerminalHandlers,
   type TerminalOptions,
   type Vt,
 } from "@lume/vt";
@@ -26,14 +27,16 @@ import {
   SCROLLBACK_MAX_LINES,
 } from "../limits.ts";
 import type { Attachment, HydrateFrame, StreamFrame } from "../transport/client.ts";
-import type {
-  CellPx,
-  ClientFacts,
-  ColorScheme,
-  ExitStatus,
-  SessionEvent,
-  TermSize,
+import {
+  withinCells,
+  type CellPx,
+  type ClientFacts,
+  type ColorScheme,
+  type ExitStatus,
+  type SessionEvent,
+  type TermSize,
 } from "../transport/types.ts";
+import type { ServedShare } from "./budget.ts";
 
 /** What a session tells whoever shows it. Each is optional. */
 export interface SessionHooks {
@@ -63,7 +66,13 @@ export interface SessionHooks {
    * kept it: another view of the same session decides its size.
    */
   sizedElsewhere?(sizedElsewhere: boolean): void;
+  /** The session's {@link TerminalSession.problem} changed. */
+  problem?(problem: string): void;
 }
+
+/** What is said of a copy of the screen that cannot be shown, and of the older lines. */
+const NOT_SHOWN = "What was on this terminal's screen before could not be shown.";
+const NOT_FETCHED = "The older lines of this terminal could not be shown.";
 
 /** How the terminal is set up. */
 export interface SessionOptions {
@@ -84,6 +93,11 @@ export interface SessionOptions {
    * its screen, the terminal keeps `scrollbackLines` itself.
    */
   readonly windowLines?: number;
+  /**
+   * What the terminal may hold of the window, for a terminal of a server. It is closed
+   * with the session.
+   */
+  readonly share?: ServedShare;
 }
 
 export class TerminalSession {
@@ -91,6 +105,9 @@ export class TerminalSession {
   #state: RenderState;
   readonly #vt: Vt;
   readonly #settings: TerminalOptions;
+  /** What hears the terminal. A terminal has it once its screen is what the session's is. */
+  readonly #handlers: TerminalHandlers;
+  readonly #share: ServedShare | undefined;
   /** How many lines of scrollback the backend keeps, and so how many there can be. */
   readonly #allLines: number;
   /** How many this terminal keeps while it holds only the newest; undefined: all. */
@@ -101,6 +118,9 @@ export class TerminalSession {
   #fetching = false;
   /** Whether lines older than the terminal holds were left out when it was made. */
   #cut = false;
+  /** Whether the older lines came and could not be shown, and nothing has since. */
+  #unfetchable = false;
+  #problem = "";
   readonly #attachment: Attachment;
   readonly #hooks: SessionHooks;
   /** The size last asked for, so the same one is not asked for twice. */
@@ -114,6 +134,7 @@ export class TerminalSession {
   #sizedElsewhere = false;
   #sizeTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /** A session that cannot be made throws, and has let go of its attachment. */
   constructor(vt: Vt, attachment: Attachment, options: SessionOptions) {
     this.#attachment = attachment;
     this.#hooks = options.hooks ?? {};
@@ -129,35 +150,122 @@ export class TerminalSession {
         ? Math.max(0, options.windowLines)
         : undefined;
     this.#holdsAll = this.#windowLines === undefined;
-    const settings: TerminalOptions = {
+    this.#share = options.share;
+    this.#settings = {
       colors: options.colors,
       colorScheme: options.scheme,
       cellWidthPx: options.cellPx.w,
       cellHeightPx: options.cellPx.h,
       scrollbackMaxLines: this.#allLines,
-      scrollbackMaxBytes: SCROLLBACK_MAX_BYTES,
+      scrollbackMaxBytes: Math.min(
+        options.share?.scrollbackBytes ?? SCROLLBACK_MAX_BYTES,
+        SCROLLBACK_MAX_BYTES,
+      ),
       ...(options.cursor
         ? { defaultCursorStyle: options.cursor.style, defaultCursorBlink: options.cursor.blink }
         : {}),
       resizePullsScrollback: attachment.resizePullsScrollback,
       clipboardWriteMaxBytes: OSC52_WRITE_MAX_BYTES,
-      handlers: {
-        output: (bytes, kind) => {
-          // A program's question must get one answer. When the backend answers for
-          // the session, this terminal's answers are dropped; what the user did is
-          // always sent.
-          if (kind === "reply" && attachment.caps.responder !== "client") return;
-          this.send(bytes);
-        },
-        bell: () => this.#hooks.bell?.(),
-        title: (title) => this.#hooks.title?.(title),
-        clipboardWrite: (text, location) => this.#hooks.clipboardWrite?.(text, location),
-      },
     };
-    this.#settings = settings;
-    this.#terminal = startFrom(vt, attachment, this.#withLines(this.#windowLines), options.start);
-    this.#state = new RenderState(this.#terminal);
-    this.#cut = this.#terminal.leftHistoryOut;
+    this.#handlers = {
+      output: (bytes, kind) => {
+        // A program's question must get one answer. When the backend answers for the
+        // session, this terminal's answers are dropped; what the user did is always
+        // sent.
+        if (kind === "reply" && attachment.caps.responder !== "client") return;
+        this.send(bytes);
+      },
+      bell: () => this.#hooks.bell?.(),
+      title: (title) => this.#hooks.title?.(title),
+      clipboardWrite: (text, location) => this.#hooks.clipboardWrite?.(text, location),
+    };
+    try {
+      const size = this.#fit(attachment.size);
+      const { start } = options;
+      let made: Made | undefined;
+      if (start) {
+        try {
+          made = this.#make(start, size, this.#windowLines);
+        } catch (error) {
+          console.warn("the copy of the screen could not be shown; starting blank", error);
+          this.#problem = NOT_SHOWN;
+        }
+      }
+      made ??= this.#make(undefined, size, this.#windowLines);
+      this.#terminal = made.terminal;
+      this.#state = made.state;
+      this.#cut = made.terminal.leftHistoryOut;
+    } catch (error) {
+      attachment.detach();
+      this.#share?.close();
+      throw error;
+    }
+  }
+
+  /**
+   * Makes a terminal from a copy of a screen, or a blank one, and what reads it, with
+   * `size` and `lines` of scrollback (all, if not given). Leaves nothing behind when it
+   * cannot be done.
+   *
+   * Nothing hears the terminal while it is made. What a copy holds was asked for and
+   * answered when the program printed it: taken again, it would put text on the clipboard
+   * each time a pane is shown, and type answers into a program that asked nothing.
+   */
+  #make(from: HydrateFrame | undefined, size: TermSize, lines: number | undefined): Made {
+    const settings = this.#withLines(lines);
+    let terminal: Terminal;
+    if (from?.form === "snapshot") {
+      if (from.vtVersion !== this.#vt.version) {
+        throw new Error(`the copy is of engine ${from.vtVersion}, not ${this.#vt.version}`);
+      }
+      // Only as much history as the terminal keeps is unpacked.
+      terminal = this.#vt.loadTerminal(from.bytes, {
+        ...settings,
+        historyLines: lines ?? this.#allLines,
+      });
+    } else {
+      terminal = this.#vt.createTerminal(size.cols, size.rows, settings);
+    }
+    try {
+      if (from?.form === "vt_replay") terminal.write(from.bytes);
+      // The session's size is the one the output that follows is drawn for.
+      if (terminal.cols !== size.cols || terminal.rows !== size.rows) {
+        terminal.resize(size.cols, size.rows);
+      }
+      const state = new RenderState(terminal);
+      terminal.handlers = this.#handlers;
+      return { terminal, state };
+    } catch (error) {
+      terminal.free();
+      throw error;
+    }
+  }
+
+  /** Shows another terminal in place of the one there is, which is freed. */
+  #replace(made: Made): void {
+    const { state, terminal } = { state: this.#state, terminal: this.#terminal };
+    this.#terminal = made.terminal;
+    this.#state = made.state;
+    state.free();
+    terminal.free();
+  }
+
+  /** The size the terminal may have in place of one it is to have. */
+  #fit(size: TermSize): TermSize {
+    return this.#share ? this.#share.fit(size) : withinCells(size);
+  }
+
+  /**
+   * Why what is on show is not all there is to show, in a sentence. Empty when it is.
+   */
+  get problem(): string {
+    return this.#problem;
+  }
+
+  #setProblem(problem: string): void {
+    if (problem === this.#problem) return;
+    this.#problem = problem;
+    this.#hooks.problem?.(problem);
   }
 
   /** The terminal the session is shown in. It is replaced when older lines arrive. */
@@ -200,7 +308,7 @@ export class TerminalSession {
    */
   fetchHistory(): void {
     if (this.#disposed || this.#released || this.#holdsAll || this.#fetching) return;
-    if (this.#exit !== undefined) return;
+    if (this.#exit !== undefined || this.#unfetchable) return;
     this.#fetching = true;
     this.#attachment.rehydrate();
   }
@@ -232,15 +340,13 @@ export class TerminalSession {
    */
   release(): void {
     if (this.#disposed || this.#released || !this.canRelease) return;
+    const { cols, rows } = this.#terminal;
+    const empty = this.#make(undefined, { cols, rows }, 0);
     this.#released = true;
     this.#restoring = false;
     this.#fetching = false;
     this.#attachment.release();
-    const old = this.#terminal;
-    this.#terminal = this.#vt.createTerminal(old.cols, old.rows, this.#withLines(0));
-    this.#state.free();
-    this.#state = new RenderState(this.#terminal);
-    old.free();
+    this.#replace(empty);
     this.#holdsAll = this.#windowLines === undefined;
     this.#cut = false;
     this.#hooks.replaced?.();
@@ -252,6 +358,14 @@ export class TerminalSession {
     this.#released = false;
     this.#restoring = true;
     this.#attachment.rehydrate();
+  }
+
+  /**
+   * Whether the session is a server's, which keeps its own layout: what its terminal says
+   * is the word of another machine.
+   */
+  get served(): boolean {
+    return this.#attachment.caps.serverLayout;
   }
 
   /** Whether another view of the session decides the terminal's size. */
@@ -337,6 +451,7 @@ export class TerminalSession {
     if (this.#sizeTimer !== undefined) clearTimeout(this.#sizeTimer);
     this.#sizeTimer = undefined;
     this.#attachment.detach();
+    this.#share?.close();
     this.#state.free();
     this.#terminal.free();
   }
@@ -351,10 +466,14 @@ export class TerminalSession {
           this.#attachment.consumed(frame.bytes.length);
           break;
         }
-        this.#terminal.write(frame.bytes);
-        startOutput();
-        // Only now are the bytes out of the way, and more may come.
-        this.#attachment.consumed(frame.bytes.length);
+        try {
+          this.#terminal.write(frame.bytes);
+          startOutput();
+        } finally {
+          // Only now are the bytes out of the way, and more may come: also when
+          // something that heard them failed, or the program would stand still.
+          this.#attachment.consumed(frame.bytes.length);
+        }
         this.#hooks.changed?.();
         break;
       case "resized":
@@ -387,47 +506,41 @@ export class TerminalSession {
     // wanted again.
     if (this.#released) return;
     this.#restoring = false;
-    const all = this.#fetching || this.#holdsAll;
+    const fetching = this.#fetching;
+    const all = fetching || this.#holdsAll;
     this.#fetching = false;
-    const settings = this.#withLines(all ? undefined : this.#windowLines);
-    const old = this.#terminal;
-    const { cols, rows } = old;
-    let next: Terminal | undefined;
-    if (frame.form === "snapshot" && frame.vtVersion === this.#vt.version) {
-      try {
-        next = this.#vt.loadTerminal(frame.bytes, {
-          ...settings,
-          ...(all ? {} : { historyLines: this.#windowLines }),
-        });
-      } catch (error) {
-        console.warn("the copy of the screen could not be loaded; it was not used", error);
-        return;
-      }
-    } else if (frame.form === "vt_replay") {
-      next = this.#vt.createTerminal(cols, rows, settings);
-      next.write(frame.bytes);
-    } else {
-      console.warn(`the copy of the screen is of engine ${frame.vtVersion}; it was not used`);
+    const { cols, rows } = this.#terminal;
+    let made: Made;
+    try {
+      made = this.#make(frame, { cols, rows }, all ? undefined : this.#windowLines);
+    } catch (error) {
+      console.warn("the copy of the screen could not be shown; it was not used", error);
+      // What was asked for once and cannot be shown is not asked for at every frame.
+      this.#unfetchable = fetching;
+      this.#setProblem(fetching ? NOT_FETCHED : NOT_SHOWN);
+      // What there is gets drawn: the view may have waited for this.
+      this.#hooks.changed?.();
       return;
     }
     // The view stays on the lines it was showing: as far from the newest as it was.
-    const before = old.scrollbar();
+    const before = this.#terminal.scrollbar();
     const fromEnd = before.total - before.offset - before.length;
-    if (next.cols !== cols || next.rows !== rows) next.resize(cols, rows);
-    const after = next.scrollbar();
-    if (fromEnd > 0) next.scrollToRow(Math.max(0, after.total - after.length - fromEnd));
-    this.#terminal = next;
-    this.#state.free();
-    this.#state = new RenderState(next);
-    old.free();
+    const after = made.terminal.scrollbar();
+    if (fromEnd > 0) {
+      made.terminal.scrollToRow(Math.max(0, after.total - after.length - fromEnd));
+    }
+    this.#replace(made);
     this.#holdsAll = all;
-    this.#cut = !all && next.leftHistoryOut;
+    this.#cut = !all && made.terminal.leftHistoryOut;
+    this.#unfetchable = false;
+    this.#setProblem("");
     this.#hooks.replaced?.();
     this.#hooks.changed?.();
   }
 
-  #resize(size: TermSize): void {
+  #resize(asked: TermSize): void {
     const { cellPx } = this.#requested;
+    const size = this.#fit(asked);
     this.#terminal.resize(size.cols, size.rows, cellPx.w, cellPx.h);
     this.#checkSize();
     this.#hooks.resized?.(size);
@@ -466,42 +579,8 @@ export class TerminalSession {
   }
 }
 
-/**
- * The terminal a session starts with: loaded from the snapshot it was sent when the
- * snapshot is of this engine's version, rebuilt from the output it was sent to replay,
- * or blank.
- */
-function startFrom(
-  vt: Vt,
-  attachment: Attachment,
-  settings: TerminalOptions,
-  start: HydrateFrame | undefined,
-): Terminal {
-  const { cols, rows } = attachment.size;
-  if (start?.form === "snapshot") {
-    if (start.vtVersion === vt.version) {
-      try {
-        // Only as much history as the terminal keeps is unpacked.
-        const loaded = vt.loadTerminal(start.bytes, {
-          ...settings,
-          ...(settings.scrollbackMaxLines === undefined
-            ? {}
-            : { historyLines: settings.scrollbackMaxLines }),
-        });
-        // The session's size is the one the output that follows is drawn for.
-        if (loaded.cols !== cols || loaded.rows !== rows) loaded.resize(cols, rows);
-        return loaded;
-      } catch (error) {
-        console.warn("the saved screen could not be loaded; starting blank", error);
-      }
-    } else {
-      console.warn(
-        `the saved screen is of engine ${start.vtVersion}, not ${vt.version}; starting blank`,
-      );
-    }
-    return vt.createTerminal(cols, rows, settings);
-  }
-  const terminal = vt.createTerminal(cols, rows, settings);
-  if (start?.form === "vt_replay") terminal.write(start.bytes);
-  return terminal;
+/** A terminal and what reads its screen. */
+interface Made {
+  readonly terminal: Terminal;
+  readonly state: RenderState;
 }

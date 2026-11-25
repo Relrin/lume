@@ -38,6 +38,38 @@ export const HIDDEN_RELEASE_DEFAULT_SECONDS = 30;
 export const SCROLLBACK_MAX_BYTES = 192 * 1024 * 1024;
 
 /**
+ * The most cells of a terminal's screen. A larger one is shown as large as fits: each
+ * cell costs the page about a hundred bytes where it is drawn.
+ */
+export const TERMINAL_CELLS_MAX = 512 * 1024;
+
+/**
+ * The most cells the terminals of servers have together in a window, and how many each
+ * may have however little is left. A pane that fills a large screen with small text has
+ * about a hundred thousand.
+ */
+export const SERVED_CELLS_MAX = 2 * 1024 * 1024;
+export const SERVED_CELLS_FLOOR = 80 * 24;
+
+/**
+ * How much memory the scrollback of servers' terminals may take together in a window,
+ * which part of what is left of it each may have, and what each has however little is
+ * left.
+ */
+export const SERVED_SCROLLBACK_MAX_BYTES = 1024 * 1024 * 1024;
+export const SERVED_SCROLLBACK_SHARE = 16;
+export const SERVED_SCROLLBACK_FLOOR_BYTES = 2 * 1024 * 1024;
+
+/** How many terminals of servers a window shows at once. */
+export const SERVED_TERMINALS_MAX = 256;
+
+/**
+ * How much memory the engine may hold for another terminal of a server to be made in
+ * it. The engine can hold twice as much: the rest is for the window's own terminals.
+ */
+export const SERVED_ENGINE_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+
+/**
  * The largest text a program may put on the clipboard. Programs may write the clipboard
  * and may never read it.
  */

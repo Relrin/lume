@@ -44,7 +44,7 @@ import {
   type Vt,
 } from "@lume/vt";
 
-import { LINK_SCHEMES_TO_CONFIRM, PASTE_MAX_BYTES } from "../limits.ts";
+import { LINK_SCHEMES_TO_CONFIRM, PASTE_MAX_BYTES, TERMINAL_CELLS_MAX } from "../limits.ts";
 import { startDrawn } from "../start-marks.ts";
 import {
   cssColor,
@@ -53,10 +53,11 @@ import {
   terminalColors,
   type Appearance,
 } from "../theme.ts";
-import type { TransportClient } from "../transport/client.ts";
+import type { Attachment, HydrateFrame, TransportClient } from "../transport/client.ts";
 import {
   CommandError,
   MAX_DIMENSION,
+  withinCells,
   type CellPx,
   type ClientFacts,
   type ExitStatus,
@@ -79,6 +80,7 @@ import {
   SEARCH_MATCHES_MAX,
   SEARCH_REFEED_INTERVAL_MS,
 } from "../tuning.ts";
+import type { ServedBudget, ServedShare } from "./budget.ts";
 import {
   pasteDecision,
   pastePreview,
@@ -171,6 +173,8 @@ export interface ViewServices {
   readonly layout: KeyLayout;
   readonly clipboard: ClipboardService;
   readonly prompts: PromptStore;
+  /** What the window's terminals of servers may hold together. */
+  readonly budget: ServedBudget;
   /** Opens a link the user asked for. The core checks it again before it does. */
   openLink(target: string): Promise<void>;
   /** Whether the key that opens the webview's developer tools is left to the webview. */
@@ -255,6 +259,17 @@ export interface ViewMatch {
   readonly line: string;
 }
 
+/** A size a terminal was told to have whatever fits its view. */
+interface Pin {
+  readonly size: TermSize;
+  /**
+   * The grid that fitted the view when the size was given, which the size holds against
+   * until another fits. Not known for a view that was not laid out yet: the first grid
+   * measured is then the one.
+   */
+  readonly fitted: TermSize | undefined;
+}
+
 /** A pointer button held down, and what it is doing. */
 interface Drag {
   readonly route: "report" | "select";
@@ -302,17 +317,7 @@ export class TerminalView implements FrameView {
    * fitted when it was told. The size holds until another grid fits: a caller's choice
    * is kept while the window stays as it is, and the window's user has the last word.
    */
-  #pin:
-    | {
-        readonly size: TermSize;
-        /**
-         * The grid that fitted the view when the size was given, which the size holds
-         * against until another fits. Not known for a view that was not laid out yet:
-         * the first grid measured is then the one.
-         */
-        readonly fitted: TermSize | undefined;
-      }
-    | undefined;
+  #pin: Pin | undefined;
   /** Run whenever the terminal's contents or size may have changed. */
   readonly #watchers = new Set<() => void>();
   /** Waiting for the view to have a size. */
@@ -634,7 +639,7 @@ export class TerminalView implements FrameView {
   }
 
   /** A size for the terminal to keep, held against the grid that fits the view now. */
-  #pinned(size: TermSize): { size: TermSize; fitted: TermSize | undefined } {
+  #pinned(size: TermSize): Pin {
     const measured = this.#renderer !== undefined && this.#cssSize.width !== 0;
     return { size, fitted: measured ? this.#fitted() : undefined };
   }
@@ -650,10 +655,10 @@ export class TerminalView implements FrameView {
       return this.#planned ?? this.#lastFitted ?? { cols: 80, rows: 24 };
     }
     const grid = renderer.gridSize();
-    this.#lastFitted = {
+    this.#lastFitted = withinCells({
       cols: Math.min(Math.max(grid.cols, 1), MAX_DIMENSION),
       rows: Math.min(Math.max(grid.rows, 1), MAX_DIMENSION),
-    };
+    });
     return this.#lastFitted;
   }
 
@@ -844,13 +849,38 @@ export class TerminalView implements FrameView {
     session: string,
     size?: TermSize,
   ): Promise<void> {
-    const { vt } = this.#services;
     const pin = size ? this.#pinned(size) : undefined;
     const facts = { ...this.facts(), ...(size ? { size } : {}) };
     const attachment = await client.attach(backend, session, facts);
     // The screen as the session has it now, taken before any output.
     const start = await attachment.hydrated();
     this.#dropSession();
+    try {
+      this.#open(attachment, session, facts, pin, start);
+    } catch (error) {
+      // Nothing is left that takes the session's frames or stands for its terminal.
+      this.#dropSession();
+      attachment.detach();
+      throw error;
+    }
+  }
+
+  /** What a terminal of a server may hold of the window. Throws when there is no room. */
+  #shareOf(attachment: Attachment): ServedShare | undefined {
+    if (!attachment.caps.serverLayout) return undefined;
+    const share = this.#services.budget.open();
+    if (share) return share;
+    throw new CommandError("too_large", "this window shows as much of servers as it can hold");
+  }
+
+  /** Shows a session there is an attachment to, from the state `start` if there is one. */
+  #open(
+    attachment: Attachment,
+    session: string,
+    facts: ClientFacts,
+    pin: Pin | undefined,
+    start: HydrateFrame | undefined,
+  ): void {
     // Before the session starts, which hands over at once what it reported so far.
     this.#services.attached({
       session,
@@ -861,16 +891,19 @@ export class TerminalView implements FrameView {
     this.#pin = pin;
     this.#shown = session;
     this.#lastFacts = JSON.stringify(facts);
-    this.#programClipboard = new ProgramClipboard();
+    this.#programClipboard = new ProgramClipboard(attachment.caps.serverLayout);
     // The look as it is now: what the session runs may have given the view another.
     const appearance = this.#appearance;
-    const opened = new TerminalSession(vt, attachment, {
+    // Last, so that nothing but the session has it to close.
+    const share = this.#shareOf(attachment);
+    const opened = new TerminalSession(this.#services.vt, attachment, {
       colors: terminalColors(appearance),
       scheme: appearance.scheme,
       cellPx: facts.cellPx,
       scrollbackLines: this.#scrollbackLines,
       cursor: this.#cursor,
       ...(start ? { start } : {}),
+      ...(share ? { share } : {}),
       ...(this.#history ? { windowLines: this.#history.windowLines } : {}),
       hooks: {
         changed: () => {
@@ -897,6 +930,7 @@ export class TerminalView implements FrameView {
         clipboardWrite: (text, location) => this.#onProgramClipboard(text, location),
         replaced: () => this.#onReplaced(),
         sizedElsewhere: (sizedElsewhere) => this.#onSizedElsewhere(sizedElsewhere),
+        problem: (problem) => this.#setMessage(problem),
       },
     });
     this.#session = opened;
@@ -904,7 +938,7 @@ export class TerminalView implements FrameView {
     this.#gesture = new SelectionGesture(opened.terminal);
     // What was being looked for is looked for in the new session too.
     if (this.#needle !== "") this.#beginSearch();
-    this.#setMessage("");
+    this.#setMessage(opened.problem);
     this.#updateGeometry();
     opened.start();
     // The session has its own size; ask for this view's if it differs.
@@ -1001,6 +1035,9 @@ export class TerminalView implements FrameView {
    */
   resizeTo(size: TermSize): Promise<TermSize> {
     const { open } = this.#asked();
+    if (withinCells(size) !== size) {
+      throw new CommandError("bad_request", `a terminal has at most ${TERMINAL_CELLS_MAX} cells`);
+    }
     this.#pin = this.#pinned(size);
     this.#report();
     return this.#until(
@@ -1174,6 +1211,7 @@ export class TerminalView implements FrameView {
     if (!session) return;
     if (!session.restoring) this.#stopRestoring();
     this.#gesture?.free();
+    this.#gesture = undefined;
     this.#gesture = new SelectionGesture(session.terminal);
     if (this.#search) {
       this.#endSearch();
@@ -1563,6 +1601,8 @@ export class TerminalView implements FrameView {
   #typed(): void {
     const terminal = this.#session?.terminal;
     if (!terminal) return;
+    // Whoever types has read what was said of the screen, and needs its last line.
+    if (this.#message !== "" && this.#message === this.#session?.problem) this.#setMessage("");
     if (!terminal.viewportAtBottom()) terminal.scrollToBottom();
     if (hasSelection(terminal)) clearSelection(terminal);
     this.#pokeBlink();
@@ -1712,7 +1752,7 @@ export class TerminalView implements FrameView {
 
   #onProgramClipboard(text: string, location: Parameters<ProgramClipboard["allows"]>[0]): void {
     const { clipboard, prompts } = this.#services;
-    if (!this.#programClipboard.allows(location)) return;
+    if (!this.#programClipboard.allows(location, this.#focused)) return;
     void clipboard.write(text).catch((error: unknown) => {
       console.error("a program's clipboard write failed", error);
     });
@@ -2017,6 +2057,11 @@ export class TerminalView implements FrameView {
     const { prompts, openLink } = this.#services;
     const scheme = linkScheme(target);
     if (!scheme) return;
+    if (scheme === "file" && this.#session?.served) {
+      // The file that is meant is the server's: one of that name here is another.
+      prompts.notice("The link leads to a file on the server, which is not opened here.");
+      return;
+    }
     if (LINK_SCHEMES_TO_CONFIRM.includes(scheme)) {
       const confirmed = await prompts.confirmLink(target);
       this.focus();

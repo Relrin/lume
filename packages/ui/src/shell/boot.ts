@@ -63,6 +63,7 @@ import { createRexStore, type RexStore } from "../rex/store.ts";
 import { SearchController } from "../search/controller.ts";
 import { createStatusStore, type StatusStore } from "../status/registry.ts";
 import { assets } from "../plugins/assets.ts";
+import { ServedBudget } from "../terminal/budget.ts";
 import { CursorFx, cursorFxSettings, cursorFxShaders } from "../terminal/cursor-fx.ts";
 import { currentPlatform, KeyLayout } from "../terminal/keyboard.ts";
 import { PromptStore } from "../terminal/prompts.ts";
@@ -458,6 +459,7 @@ export async function startShell(carrier: Carrier): Promise<ShellApp> {
       host,
       cursor: cursorFx,
       keys: new KeyEncoder(vt),
+      budget: new ServedBudget(() => vt.memoryBytes),
       platform,
       layout: keyLayout,
       prompts,

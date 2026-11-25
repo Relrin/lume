@@ -109,9 +109,20 @@ describe("the preview of a paste", () => {
 describe("a program writing to the clipboard", () => {
   it("may write the ordinary clipboard and no other", () => {
     const clipboard = new ProgramClipboard();
-    expect(clipboard.allows("standard")).toBe(true);
-    expect(clipboard.allows("selection")).toBe(false);
-    expect(clipboard.allows("primary")).toBe(false);
+    expect(clipboard.allows("standard", true)).toBe(true);
+    expect(clipboard.allows("selection", true)).toBe(false);
+    expect(clipboard.allows("primary", true)).toBe(false);
+    // A build that ends in a pane nobody looks at may say so on the clipboard.
+    expect(clipboard.allows("standard", false)).toBe(true);
+  });
+
+  it("may do so only with the keyboard when its terminal is a server's", () => {
+    const clipboard = new ProgramClipboard(true);
+    expect(clipboard.allows("standard", true)).toBe(true);
+    expect(clipboard.allows("standard", false)).toBe(false);
+    expect(clipboard.allows("selection", true)).toBe(false);
+    // What was refused is not announced.
+    expect(clipboard.noticeDue()).toBe(true);
   });
 
   it("is announced once for each session", () => {

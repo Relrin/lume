@@ -430,6 +430,82 @@ export const REX_SCENES: readonly Scene[] = [
       ]),
   },
   {
+    // What a server's terminal prints reaches the clipboard only with the keyboard, its
+    // links to files lead nowhere here, and a copy of its screen that cannot be shown is
+    // said to be so in its pane.
+    name: "served-terminals",
+    window: SERVED,
+    prepare: async (app, core) => {
+      await until("the panes being attached", () => (core.attached() ? true : null));
+      const inputOf = (pane: string) =>
+        until("the pane's field", () =>
+          document.querySelector<HTMLElement>(`.pane-card[data-pane="${pane}"] .terminal-input`),
+        );
+      const print = (pane: string, text: string) =>
+        core.output(pane, new TextEncoder().encode(text));
+      const copies = (pane: string, text: string) => print(pane, `\u001b]52;c;${btoa(text)}\u0007`);
+      // A window that is not the system's own focus hears of none: it is told here.
+      (await inputOf("p2")).dispatchEvent(new FocusEvent("blur"));
+      (await inputOf("p1")).dispatchEvent(new FocusEvent("focus"));
+      copies("p1", "with the keyboard");
+      copies("p2", "without it");
+      (await inputOf("p1")).dispatchEvent(new FocusEvent("blur"));
+      copies("p1", "no longer with it");
+      await until("the program's use of the clipboard being told", () => app.prompts.current());
+      app.prompts.current()?.answer(false);
+      if (JSON.stringify(core.copied) !== '["with the keyboard"]') {
+        throw new Error(`what was copied: ${JSON.stringify(core.copied)}`);
+      }
+
+      print("p1", "\r\nfile:///C:/Windows https://example.test/\r\n");
+      await until("the links being drawn", () =>
+        app.views
+          .get("p1")
+          ?.screen()
+          .lines.some((line) => line.includes("example.test"))
+          ? true
+          : null,
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const cell = app.views.get("p1")?.cellRect(3, 1);
+      const web = app.views.get("p1")?.cellRect(25, 1);
+      const root = document.querySelector('.pane-card[data-pane="p1"] .terminal');
+      if (!cell || !web || !root) throw new Error("the pane is not drawn");
+      for (const at of [cell, web]) {
+        root.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            pointerId: 1,
+            isPrimary: true,
+            button: 0,
+            buttons: 1,
+            ctrlKey: true,
+            metaKey: true,
+            clientX: at.x + at.width / 2,
+            clientY: at.y + at.height / 2,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+      const told = await until("the link being refused", () => app.prompts.current());
+      if (told.kind !== "notice") throw new Error(`a link to a file asked: ${told.kind}`);
+      told.answer(false);
+      await until("the other link being opened", () => (core.links.length > 0 ? true : null));
+      if (JSON.stringify(core.links) !== '["https://example.test/"]') {
+        throw new Error(`what was opened: ${JSON.stringify(core.links)}`);
+      }
+      print("p2", "still shown\r\n");
+      core.copy("p2", "0.0.0-another", new Uint8Array([1, 2, 3]));
+      await until("the copy being said not to be shown", () =>
+        document.querySelector('.pane-card[data-pane="p2"] .terminal-status:not([hidden])'),
+      );
+    },
+    check: (page) =>
+      wanted("what is said of the copy", texts(page, ".terminal-status:not([hidden])"), [
+        "What was on this terminal's screen before could not be shown.",
+      ]),
+  },
+  {
     // A layout a server keeps, with something in it that cannot be shown, while the
     // connection is being made again.
     name: "served-workspace",

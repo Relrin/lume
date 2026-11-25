@@ -83,6 +83,9 @@ const FLOAT_RECT = { x: 300_000, y: 250_000, w: 400_000, h: 400_000 };
 /** How many panes a tab of a fixture may have. */
 const TAB_PANES_MAX = 4;
 
+/** How a copy of a screen says that it is a saved terminal and not output to replay. */
+const HYDRATE_SNAPSHOT = 1;
+
 /** One frame: its header and its payload. */
 function frame(stream: number, kind: number, payload: Uint8Array): Uint8Array {
   const bytes = new Uint8Array(HEADER_LEN + payload.length);
@@ -534,6 +537,9 @@ export class FakeCore implements Carrier {
   readonly #facts = new Map<TabId, TabFacts>();
   #groups: Group[] = [];
   #nextGroup = GROUP_IDS_FROM;
+  /** What the page put on the clipboard, and the links it had opened, in order. */
+  readonly copied: string[] = [];
+  readonly links: string[] = [];
   /** The commands the page ran, with their arguments, in order. */
   readonly ran: { readonly id: string; readonly args: unknown }[] = [];
   /** What the page had written into the user's file, in order. */
@@ -836,7 +842,7 @@ export class FakeCore implements Carrier {
           caps: {
             persistent: false,
             multi_client: false,
-            server_layout: false,
+            server_layout: args["backend"] === this.#options.served?.backend,
             responder: "client",
             hydrate: { snapshot: false, vt_replay: false },
           },
@@ -1001,8 +1007,13 @@ export class FakeCore implements Carrier {
         this.ran.push({ id: String(args["id"]), args: args["args"] ?? null });
         this.#command(String(args["id"]), args["args"]);
         return answer(null);
-      case "page_reply":
       case "clipboard_write":
+        this.copied.push(String(args["text"]));
+        return answer(null);
+      case "open_link":
+        this.links.push(String(args["url"]));
+        return answer(null);
+      case "page_reply":
       case "window_drag":
       case "window_control":
       case "config_set":
@@ -1281,6 +1292,18 @@ export class FakeCore implements Carrier {
       this.#receive(frame(stream, Kind.Data, bytes.subarray(at, at + LIMITS.maxPayload)));
     }
     return bytes.length;
+  }
+
+  /** Sends a copy of the screen of `pane`'s session, as a backend that keeps one does. */
+  copy(pane: PaneId, vtVersion: string, bytes: Uint8Array): void {
+    const stream = this.#streamOf(pane);
+    if (stream === undefined) return;
+    const version = new TextEncoder().encode(vtVersion);
+    const payload = new Uint8Array(2 + version.length + bytes.length);
+    payload.set([HYDRATE_SNAPSHOT, version.length]);
+    payload.set(version, 2);
+    payload.set(bytes, 2 + version.length);
+    this.#receive(frame(stream, Kind.Hydrate, payload));
   }
 
   /** The stream the page attached to the session of `pane` on, once it has. */

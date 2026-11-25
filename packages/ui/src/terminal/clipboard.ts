@@ -79,15 +79,25 @@ export function pastePreview(text: string): PastePreview {
  * One per session: the notice is shown the first time each session uses the clipboard.
  */
 export class ProgramClipboard {
+  readonly #served: boolean;
   #noticed = false;
+
+  /** `served` is whether the session is a server's and not of the application's own. */
+  constructor(served = false) {
+    this.#served = served;
+  }
 
   /**
    * Whether a write is let through. Only the ordinary clipboard is written: the others
    * a program can name exist on some platforms only, and there they are what the user
    * selected by hand.
+   *
+   * What a server's terminal prints is the server's to say, whatever runs in it. It
+   * writes the clipboard only while its view has the keyboard, so that what a user copies
+   * elsewhere stays what they copied.
    */
-  allows(location: ClipboardLocation): boolean {
-    return location === "standard";
+  allows(location: ClipboardLocation, hasKeyboard: boolean): boolean {
+    return location === "standard" && (hasKeyboard || !this.#served);
   }
 
   /** Whether the user is still to be told. True once, the first time it is asked. */
