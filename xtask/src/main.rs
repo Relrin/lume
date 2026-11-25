@@ -3,6 +3,7 @@
 //! Everything that needs more than one toolchain goes through here, so that a fresh clone
 //! builds with `cargo xtask setup && cargo xtask build` on Windows, Linux and macOS.
 
+mod artwork;
 mod bench;
 mod boundaries;
 mod compat;
@@ -35,8 +36,8 @@ Commands:
   build        Build libghostty-vt if stale, then the Cargo and pnpm workspaces
   test         Run Cargo and pnpm tests
   e2e          Build, then run the suites that need the application's window: the
-               corpus and the renderer snapshots inside its webview, and real shells
-               driven through `lume ctl`
+               corpus and the renderer snapshots inside its webview, real shells
+               driven through `lume ctl`, and a Rex server that is not to be trusted
   rex-e2e [<test>]
                Build, then drive the application against real Rex servers started for
                the tests (needs Rex on this machine; no build machine has it)
@@ -208,6 +209,7 @@ fn test() -> Result<()> {
 
 fn lint() -> Result<()> {
     boundaries::check()?;
+    artwork::check()?;
     vt::native(false)?;
     run::cargo(&["fmt", "--all", "--check"])?;
     run::cargo(&[

@@ -430,30 +430,12 @@ async fn whatever_is_changed_in_what_a_server_answers_the_client_goes_on() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn whatever_is_changed_in_what_a_server_reports_the_client_goes_on() {
-    let recorded = Recorded::load();
     let mut setup = Setup::opened(World::recorded()).await;
     setup.backend.show_session(SESSION).await.unwrap();
     let id = setup.first().await;
     let (attachment, _side) = setup.attach(id).await;
-    let mut events: Vec<(String, Value)> = recorded
-        .events()
-        .into_iter()
-        .map(|(name, payload)| (name.to_owned(), payload.clone()))
-        .collect();
-    events.push((
-        "event_dropped".to_owned(),
-        json!({ "event_type": "block_event", "session_id": SESSION, "size": 9 }),
-    ));
-    // Each kind of event once: the same changes to another of the kind say no more.
-    let mut kinds = HashSet::new();
-    events.retain(|(name, payload)| {
-        kinds.insert(format!(
-            "{name} {} {}",
-            payload["event"]["type"], payload["event"]["payload"]["name"]
-        ))
-    });
     let mut told = 0usize;
-    for (name, payload) in events {
+    for (name, payload) in hostile::reports() {
         for (_, other) in hostile::changed(&payload) {
             setup.served.tell(Tell::Event(name.clone(), other));
             told += 1;

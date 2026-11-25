@@ -7465,6 +7465,13 @@
     font-size: 12px;
   }
 
+  .about-terms {
+    @apply text-ink-muted;
+    margin: 14px 2px 0;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
   .settings-group h2 {
     margin: 16px 0 6px 2px;
     font-size: 12.5px;

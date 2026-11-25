@@ -77,6 +77,10 @@ export function AboutPage({ app }: { app: SettingsApp }) {
           Versions only: no host names, folders or credentials are included.
         </span>
       </div>
+      <p className="about-terms">
+        Lume is a third-party client of the Rex server, not made or endorsed by Superlogical. “Rex”
+        only names the server that Lume can connect to.
+      </p>
     </div>
   );
 }

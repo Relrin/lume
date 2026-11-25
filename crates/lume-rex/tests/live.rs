@@ -1059,10 +1059,14 @@ async fn a_full_screen_program_is_shown_as_the_server_shows_it() {
         .await
         .expect("is a Rex server running?");
     let (other, _events) = Control::open(io, "local", &client(), None).await.unwrap();
-    // An editor that reads and writes nothing of the user's.
+    // An editor that reads and writes nothing of the user's. It is not told of the focus:
+    // Git's takes that for keys after its terminal was given another size.
+    let without_focus = "silent! set t_fe= t_fd=";
     let editor = json!({
         "flavor": "com.superlogical.terminal.shell",
-        "options": { "shell": "none", "command": [vim, "-i", "NONE", "-u", "NONE"] },
+        "options": { "shell": "none", "command": [
+            vim, "-i", "NONE", "-u", "NONE", "--cmd", without_focus,
+        ] },
     });
     let (session, block) = session_with(&other, "lume-live-screen", editor).await;
 
@@ -1074,6 +1078,13 @@ async fn a_full_screen_program_is_shown_as_the_server_shows_it() {
     let mut wanted = facts();
     wanted.size = TermSize::new(100, 30).unwrap();
     let mut view = Mirror::new(backend.attach(id, wanted).await.unwrap()).await;
+    // What is typed before the editor has drawn itself is thrown away.
+    for _ in 0..10 {
+        view.settle().await;
+        if view.rows().iter().any(|row| row.trim_end() == "~") {
+            break;
+        }
+    }
     view.attachment
         .input
         .write(b"iten columns of text, and a long line: ")

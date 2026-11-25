@@ -1,7 +1,11 @@
 //! What a server that means harm, or is broken, might say: names, codes, and every
 //! message a real server sent with something in it changed.
 
+use std::collections::HashSet;
+
 use serde_json::{Value, json};
+
+use super::{Recorded, SESSION};
 
 /// Names that show something other than what they are, or are no names.
 pub const NAMES: [&str; 12] = [
@@ -81,6 +85,35 @@ impl Numbers {
     pub fn bytes(&mut self, count: usize) -> Vec<u8> {
         (0..count).map(|_| self.next() as u8).collect()
     }
+}
+
+/// One of each kind of report a real server made, as its name and fields: of the session
+/// that is open, and not of the one it was recorded of.
+pub fn reports() -> Vec<(String, Value)> {
+    let recorded = Recorded::load();
+    let mut kinds = HashSet::new();
+    let mut found: Vec<(String, Value)> = recorded
+        .events()
+        .into_iter()
+        .filter(|(name, payload)| {
+            let event = &payload["event"];
+            kinds.insert(format!(
+                "{name} {} {}",
+                event["type"], event["payload"]["name"]
+            ))
+        })
+        .map(|(name, payload)| (name.to_owned(), payload.clone()))
+        .collect();
+    for (_, payload) in &mut found {
+        if let Some(session) = payload.get_mut("session_id") {
+            *session = json!(SESSION);
+        }
+    }
+    found.push((
+        "event_dropped".to_owned(),
+        json!({ "event_type": "block_event", "session_id": SESSION, "size": 9 }),
+    ));
+    found
 }
 
 /// What is put in place of a value.

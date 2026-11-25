@@ -3,6 +3,8 @@
 
 #![allow(dead_code)]
 
+pub mod drive;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -21,6 +23,9 @@ pub const APPLICATION: &str = if cfg!(windows) {
 } else {
     "lume-gui"
 };
+
+/// What an application writes to its standard error is kept in its folder, under this name.
+const ERRORS: &str = "errors.txt";
 
 pub static NEXT: AtomicU32 = AtomicU32::new(1);
 
@@ -149,6 +154,7 @@ impl App {
     ) -> Self {
         let log = std::env::temp_dir().join(format!("lume-{endpoint}.log"));
         let _ = std::fs::remove_file(&log);
+        let errors = std::fs::File::create(home.join(ERRORS)).expect("a file for its errors");
         let child = Command::new(application())
             .args(["--endpoint", &endpoint])
             .args(arguments)
@@ -159,7 +165,7 @@ impl App {
             .envs(environment.iter().map(|(name, value)| (*name, value)))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(errors)
             .spawn()
             .expect("the application starts");
         let app = Self {
@@ -337,6 +343,11 @@ impl App {
             .collect()
     }
 
+    /// What the application wrote to its standard error so far: what panicked, above all.
+    pub fn errors(&self) -> String {
+        std::fs::read_to_string(self.home.join(ERRORS)).unwrap_or_default()
+    }
+
     /// Ends the application's process at once, as a crash would.
     pub fn kill(mut self) {
         let mut child = self.child.take().expect("the application is running");
@@ -445,6 +456,11 @@ pub fn content_of(layout: &Value, pane: &str) -> Value {
         .find_map(|tab| find(&tab["root"], pane))
         .unwrap_or_else(|| panic!("the layout has no pane {pane}: {layout}"))
 }
+
+/// What a test tells the editor `vim` with `--cmd`, as it starts: not to be told of the
+/// focus. After its terminal was given another size, Git's takes what it is told for
+/// keys, and does what they stand for.
+pub const VIM_WITHOUT_FOCUS: &str = "silent! set t_fe= t_fd=";
 
 /// Whether a program of this name is on the search path.
 pub fn on_path(program: &str) -> bool {

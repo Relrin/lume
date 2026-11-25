@@ -797,19 +797,10 @@ async fn whatever_a_server_does_what_is_the_users_own_stands_as_it_did() {
     }
 
     // Every report a real server made, with each thing in it changed.
-    let recorded = Recorded::load();
-    let mut kinds = std::collections::HashSet::new();
     let mut said = 0usize;
-    for (name, payload) in recorded.events() {
-        let inner = &payload["event"];
-        if !kinds.insert(format!(
-            "{name} {} {}",
-            inner["type"], inner["payload"]["name"]
-        )) {
-            continue;
-        }
-        for (_, other) in hostile::changed(payload) {
-            server.tell(Tell::Event(name.to_owned(), other));
+    for (name, payload) in hostile::reports() {
+        for (_, other) in hostile::changed(&payload) {
+            server.tell(Tell::Event(name.clone(), other));
             said += 1;
             if said.is_multiple_of(400) {
                 let _ = app.backend().round_trip().await;

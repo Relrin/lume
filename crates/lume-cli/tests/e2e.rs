@@ -1505,7 +1505,7 @@ fn one_session_shows_in_two_windows_and_ends_with_the_last_of_them() {
 /// A full-screen editor to run, and its arguments: one that reads no configuration and
 /// keeps nothing of what is typed. On Windows, the one Git brings.
 fn full_screen_editor() -> Option<(String, &'static [&'static str])> {
-    const ARGS: &[&str] = &["-u", "NONE", "-i", "NONE", "-N"];
+    const ARGS: &[&str] = &["-u", "NONE", "-i", "NONE", "-N", "--cmd", VIM_WITHOUT_FOCUS];
     if cfg!(windows) {
         let program_files = std::env::var_os("ProgramFiles")?;
         let vim = Path::new(&program_files)
@@ -1594,12 +1594,18 @@ fn a_full_screen_program_comes_back_after_a_crash_and_takes_input() {
     let app = App::start_on(home, false, endpoint);
     app.status_with_session();
     assert_eq!(app.pid_of(&pane), pid, "the pane started another program");
-    let after = app.ctl(&["capture", "--pane", &pane]).ok("capture");
+    // The editor may draw itself anew for the window it is shown in now.
+    let after = until_drawn(&app, &pane);
     assert_eq!(after["alternate"], true, "{after}");
     assert_eq!(
         after["lines"], before["lines"],
         "the screen came back otherwise"
     );
+    // An editor whose terminal has just been given its size again can throw away the
+    // first that is typed. These keys change nothing, so it may.
+    app.ctl(&["send", "--pane", &pane, "--escapes", TO_COMMANDS])
+        .ok("keys that change nothing");
+    until_drawn(&app, &pane);
     app.ctl(&["send", "--pane", &pane, "--", "o"])
         .ok("beginning a line in the editor");
     app.wait_text_in(&pane, INSERTING);

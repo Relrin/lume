@@ -226,12 +226,18 @@ pub fn end_to_end() -> Result<()> {
     corpus(Profile::Debug)?;
     snapshots(Profile::Debug)?;
     chrome(Profile::Debug)?;
+    // Stands in for a Rex server, which no build machine has.
+    run::cargo(&["build", "-p", "lume-rex", "--example", "pretend_server"])?;
     run::cargo(&[
         "test",
         "-p",
         "lume-cli",
         "--test",
         "e2e",
+        "--test",
+        "hostile_e2e",
+        // The second is run whatever came of the first.
+        "--no-fail-fast",
         "--",
         "--ignored",
         "--test-threads=1",
