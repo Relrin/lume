@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use lume_plugin::broker::grant_of;
 use lume_plugin::lock::OnMachine;
 use lume_plugin::permissions::{Kind, can_do_anything};
-use lume_plugin_api::types::{MachineEntry, MachinesAllow, SpawnOptions};
+use lume_plugin_api::types::{MachineEntry, MachinesAllow, Place, SpawnOptions};
 use lume_plugin_api::{ApiError, ErrorCode};
 use lume_services::ServiceError;
 use lume_services::posix::{Asked, Limits};
@@ -26,7 +26,9 @@ use tokio::sync::Semaphore;
 use super::asking::{REASON_MAX, plain, too_long};
 use super::system::from_service;
 use super::{Plugins, api_error};
-use crate::machines::{Begun, Machine, Machines};
+use crate::carrier::SessionKey;
+use crate::machines::{Begun, Machine, Machines, NOT_CONNECTED};
+use crate::sessions::SessionStates;
 
 /// How many programs a plugin has running on a machine at once; more wait their turn.
 const AT_ONCE: usize = 8;
@@ -34,9 +36,12 @@ const AT_ONCE: usize = 8;
 /// How long a no is taken for an answer without asking again.
 const NO_STANDS: Duration = Duration::from_secs(60);
 
-/// The kinds of failure that are only another machine's.
+/// The kind of failure that is only another machine's.
 const NOT_ALLOWED: &str = "machine_not_allowed";
-const NOT_CONNECTED: &str = "not_connected";
+
+/// How many sessions' places are kept before those of sessions that are gone are let
+/// go of.
+const PLACES_KEPT: usize = 1024;
 
 /// What is kept of plugins' dealings with other machines.
 #[derive(Default)]
@@ -48,6 +53,8 @@ pub(super) struct Elsewhere {
     asking: Mutex<HashSet<(String, String)>>,
     /// When the user last said no, by the plugin and the machine.
     refused: Mutex<HashMap<(String, String), Instant>>,
+    /// Where each session on another machine was last said to be.
+    told: Mutex<HashMap<SessionKey, Place>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -62,6 +69,31 @@ impl Elsewhere {
                 .entry(key)
                 .or_insert_with(|| Arc::new(Semaphore::new(AT_ONCE))),
         )
+    }
+
+    /// Notes where a session is said to be. Says whether that is to be told: it is not
+    /// what was told last, or `whole` asks for it anyway.
+    pub(super) fn note_place(
+        &self,
+        key: &SessionKey,
+        place: &Place,
+        whole: bool,
+        reports: &SessionStates,
+    ) -> bool {
+        let mut told = lock(&self.told);
+        if !whole && told.get(key) == Some(place) {
+            return false;
+        }
+        if told.len() >= PLACES_KEPT && !told.contains_key(key) {
+            told.retain(|key, _| reports.state(key).is_some());
+        }
+        told.insert(key.clone(), place.clone());
+        true
+    }
+
+    /// Forgets where a session was: it has ended.
+    pub(super) fn forget_place(&self, key: &SessionKey) {
+        lock(&self.told).remove(key);
     }
 
     fn refused_lately(&self, key: &(String, String)) -> bool {
@@ -440,7 +472,7 @@ pub(super) fn asked_of(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
@@ -454,12 +486,11 @@ mod tests {
 
     use super::super::calls::tests::{running, says_it_is_in};
     use super::*;
-    use crate::carrier::SessionKey;
     use crate::machines::Runner;
     use crate::services::Services;
     use crate::testing::{STEP, TempDir};
 
-    const PLUGIN: &str = "acme.git";
+    pub(crate) const PLUGIN: &str = "acme.git";
     const UBUNTU: &str = "wsl:Ubuntu";
 
     /// A machine that notes what it is asked to run. What is to wait runs until it is
@@ -503,11 +534,10 @@ mod tests {
         fn close(&self) {}
     }
 
-    /// The application with a plugin that may run git, elsewhere only, and a session on
-    /// a Linux distribution.
-    async fn with_plugin(dir: &TempDir) -> (Arc<Services>, SessionKey, Arc<Noted>) {
-        let (services, key) = running(dir).await;
-        let package = dir.path().join("package");
+    /// Installs a plugin that may run git, on other machines only, and waits until it is
+    /// read.
+    pub(crate) async fn install(services: &Services, dir: &std::path::Path) {
+        let package = dir.join("package");
         std::fs::create_dir_all(&package).unwrap();
         std::fs::write(
             package.join("plugin.toml"),
@@ -530,6 +560,13 @@ mod tests {
             assert!(Instant::now() < end, "the plugin was not read");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+    }
+
+    /// The application with a plugin that may run git, elsewhere only, and a session on
+    /// a Linux distribution.
+    async fn with_plugin(dir: &TempDir) -> (Arc<Services>, SessionKey, Arc<Noted>) {
+        let (services, key) = running(dir).await;
+        install(&services, dir.path()).await;
         let launcher = Launcher::Wsl {
             distro: "Ubuntu".to_owned(),
             user: None,
@@ -547,7 +584,7 @@ mod tests {
         (services, key, noted)
     }
 
-    fn git(args: &[&str], machine: Option<&str>) -> Call {
+    pub(crate) fn git(args: &[&str], machine: Option<&str>) -> Call {
         let mut run = json!({ "program": "git", "args": args, "options": { "cwd": "/home/me" } });
         if let Some(machine) = machine {
             run["options"]["machine"] = json!(machine);
@@ -555,21 +592,59 @@ mod tests {
         Call::decode("process.run", run).unwrap()
     }
 
-    async fn run(services: &Services, call: Call) -> Result<Value, ApiError> {
+    pub(crate) async fn run(services: &Services, call: Call) -> Result<Value, ApiError> {
         services.plugins.serve_system(PLUGIN, call).await
     }
 
     /// Has the user's yes be held, as it is once they gave it.
     fn allow(services: &Services, programs: &[&str]) {
+        allow_on(services, UBUNTU, programs);
+    }
+
+    /// Has the user's yes to a machine be held.
+    pub(crate) fn allow_on(services: &Services, machine: &str, programs: &[&str]) {
         let agreed = OnMachine {
             label: "Ubuntu (WSL)".to_owned(),
             programs: programs.iter().map(|name| (*name).to_owned()).collect(),
         };
         let plugins = &services.plugins;
-        plugins.store.allow_on(PLUGIN, UBUNTU, &agreed).unwrap();
+        plugins.store.allow_on(PLUGIN, machine, &agreed).unwrap();
         let mut inner = plugins.inner();
         let entry = &mut inner.loaded.get_mut(PLUGIN).unwrap().installed.entry;
-        entry.machines.insert(UBUNTU.to_owned(), agreed);
+        entry.machines.insert(machine.to_owned(), agreed);
+    }
+
+    /// The machines the plugin is told of.
+    pub(crate) fn machines_of(services: &Services) -> Vec<MachineEntry> {
+        services.plugins.machines_list(PLUGIN)
+    }
+
+    /// Lets go of what the plugin had open, as when it stops.
+    pub(crate) fn release(services: &Services) {
+        services.plugins.release(PLUGIN);
+    }
+
+    /// What plugins are told of a session's report.
+    pub(crate) fn told(
+        services: &Services,
+        key: &SessionKey,
+        event: SessionEvent,
+    ) -> Vec<(String, Value)> {
+        services.plugins.reports_of(&crate::sessions::News {
+            key: key.clone(),
+            what: SessionNews::Event(event),
+        })
+    }
+
+    /// What a plugin is told of a session in `sessions.list()`.
+    pub(crate) async fn entry(services: &Services, key: &SessionKey) -> SessionEntry {
+        let listed = services.plugins.session_list().await.unwrap();
+        let listed: Vec<SessionEntry> = serde_json::from_value(listed).unwrap();
+        let id = key.session.to_string();
+        listed
+            .into_iter()
+            .find(|entry| entry.session == id)
+            .unwrap()
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -725,15 +800,7 @@ mod tests {
     async fn a_session_on_another_machine_has_a_place_there_and_no_folder_here() {
         let dir = TempDir::new("plugin-elsewhere-place");
         let (services, key, _) = with_plugin(&dir).await;
-        let entry = async || {
-            let listed = services.plugins.session_list().await.unwrap();
-            let listed: Vec<SessionEntry> = serde_json::from_value(listed).unwrap();
-            let id = key.session.to_string();
-            listed
-                .into_iter()
-                .find(|entry| entry.session == id)
-                .unwrap()
-        };
+        let entry = async || entry(&services, &key).await;
         assert_eq!(entry().await.place.unwrap().folder, None);
         let url = format!("file://{}/home/me", machine_name().unwrap());
         says_it_is_in(&services, &key, &url);
@@ -748,17 +815,14 @@ mod tests {
 
         // A plugin hears where it is as a report of its own kind, and never as a folder
         // of this machine.
-        let told = |event| {
-            services.plugins.reports_of(&crate::sessions::News {
-                key: key.clone(),
-                what: SessionNews::Event(event),
-            })
-        };
+        let told = |event| told(&services, &key, event);
         let place = ("place".to_owned(), serde_json::to_value(&place).unwrap());
         assert_eq!(
-            told(SessionEvent::Cwd { url }),
+            told(SessionEvent::Cwd { url: url.clone() }),
             std::slice::from_ref(&place)
         );
+        // Told once, while it stays there.
+        assert_eq!(told(SessionEvent::Cwd { url }).len(), 0);
         let state = services.state.reports().state(&key).unwrap();
         let whole = told(SessionEvent::State { state });
         assert_eq!((whole.len(), &whole[1]), (2, &place));

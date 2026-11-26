@@ -34,6 +34,9 @@ use crate::window::label_of;
 #[path = "hostile_tests.rs"]
 mod hostile;
 
+#[path = "program_tests.rs"]
+mod programs;
+
 const HOST: &str = "Build box";
 
 /// The server as it is run for a test: each control connection it takes, in order.

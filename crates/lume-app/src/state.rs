@@ -139,6 +139,8 @@ pub struct AppState {
     panes: OnceLock<Arc<Panes>>,
     /// What the sessions have reported about themselves.
     reports: Arc<SessionStates>,
+    /// What serves the sessions of backends on other machines.
+    servers: crate::machines::Servers,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -171,6 +173,7 @@ impl AppState {
             marks,
             panes: OnceLock::new(),
             reports: SessionStates::new(),
+            servers: crate::machines::Servers::default(),
         })
     }
 
@@ -212,6 +215,11 @@ impl AppState {
 
     pub fn reports(&self) -> &Arc<SessionStates> {
         &self.reports
+    }
+
+    /// What serves the sessions of backends on other machines.
+    pub fn servers(&self) -> &crate::machines::Servers {
+        &self.servers
     }
 
     /// The session backends.

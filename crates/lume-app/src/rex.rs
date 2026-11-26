@@ -9,6 +9,7 @@ mod attempt;
 pub mod commands;
 mod hosts;
 pub mod installed;
+mod programs;
 mod remembered;
 pub mod start;
 

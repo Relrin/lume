@@ -684,6 +684,16 @@ impl Hosts {
             Options::new().plain_http_agreed(agreed).ssh(asks.options),
         );
         state.router().insert(host.id.clone(), backend.clone());
+        // A server of this machine runs nothing elsewhere.
+        if !backend.is_on_this_machine() {
+            let served = super::programs::Server {
+                id: host.id.clone(),
+                address: host.endpoint.to_string(),
+                backend: Arc::clone(&backend),
+                hosts: Arc::downgrade(self),
+            };
+            state.servers().insert(host.id.clone(), Arc::new(served));
+        }
         let watcher = state
             .runtime()
             .spawn(watch(
@@ -723,6 +733,7 @@ impl Hosts {
         let state = self.state.upgrade();
         if let Some(state) = &state {
             state.router().remove(id);
+            state.servers().remove(id);
         }
         connection.backend.shutdown();
         if let Some(state) = state {

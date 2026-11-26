@@ -1,5 +1,6 @@
 //! The machines that sessions are on, other than this one, where plugins can run
-//! programs: for now the Linux distributions of this Windows machine.
+//! programs: the Linux distributions of this Windows machine, and the machines of the
+//! servers that run sessions elsewhere.
 //!
 //! A machine has an id, which is made of how it is reached and of nothing it says of
 //! itself: what a user agreed to a plugin's running on a machine is kept under it. A
@@ -18,7 +19,7 @@ use lume_plugin_api::types::{MachineKind, Place};
 use lume_services::posix::{Asked, Door, Limits, Shell};
 use lume_services::process::{RunOutput, Running, Stop};
 use lume_services::{ErrorKind, ServiceError};
-use lume_session::{Launcher, wsl};
+use lume_session::{BackendId, Launcher, SessionId, wsl};
 
 use crate::carrier::SessionKey;
 use crate::state::AppState;
@@ -30,18 +31,59 @@ const IDLE_LOOK: Duration = Duration::from_secs(60);
 /// The longest folder a session is said to be in.
 const FOLDER_MAX: usize = 4096;
 
+/// What a run on another machine fails for when that machine cannot be used now, or
+/// cannot run programs for this application at all.
+pub const NOT_CONNECTED: &str = "not_connected";
+pub const CANNOT_RUN: &str = "cannot_run";
+
+/// A machine that runs sessions for the application, and programs where it can.
+pub trait Served: Send + Sync {
+    /// What the user calls it, now.
+    fn label(&self) -> String;
+
+    /// Where it is reached, as the user is shown it.
+    fn address(&self) -> String;
+
+    /// Whether it can be used now: it is connected, and a session of it is open here.
+    fn usable(&self) -> bool;
+
+    /// The folder a session of it is in, as a path of that machine, by its own word.
+    fn folder(&self, session: SessionId) -> Option<String>;
+
+    /// What runs programs there.
+    fn runner(&self) -> Arc<dyn Runner>;
+}
+
+/// How programs are run on a machine.
+#[derive(Clone)]
+enum Reach {
+    /// By something started here, as what a session runs is.
+    Launched(Launcher),
+    /// By what serves its sessions.
+    Served(Arc<dyn Served>),
+}
+
 /// A machine that sessions are on, other than this one.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct Machine {
     pub id: String,
     /// What to call it.
     pub label: String,
     pub kind: MachineKind,
-    /// How programs are run there.
-    reach: Launcher,
+    reach: Reach,
 }
 
 impl Machine {
+    /// The machine of what serves a backend's sessions.
+    fn served(id: &BackendId, served: Arc<dyn Served>) -> Self {
+        Self {
+            id: id.0.clone(),
+            label: served.label(),
+            kind: MachineKind::Rex,
+            reach: Reach::Served(served),
+        }
+    }
+
     /// The machine that what a session runs is on, if it is another one that plugins
     /// can run programs on.
     fn of(launcher: &Launcher) -> Option<Self> {
@@ -55,47 +97,66 @@ impl Machine {
                     id: format!("wsl:{label}"),
                     label,
                     kind: MachineKind::Wsl,
-                    reach: launcher.clone(),
+                    reach: Reach::Launched(launcher.clone()),
                 })
             }
             _ => None,
         }
     }
 
-    /// Its name with how it is reached, as the user is told of it.
+    /// Its name with how it is reached, as the user is told of it. A server is named
+    /// with its address too: two can be called the same.
     pub fn shown(&self) -> String {
         let how = match self.kind {
             MachineKind::Rex => "Rex server",
             MachineKind::Ssh => "SSH",
             MachineKind::Wsl => "WSL",
         };
-        format!("{} ({how})", self.label)
+        match &self.reach {
+            Reach::Served(served) => {
+                let address = served.address();
+                if address == self.label {
+                    format!("{address} ({how})")
+                } else {
+                    format!("{}, {address} ({how})", self.label)
+                }
+            }
+            Reach::Launched(_) => format!("{} ({how})", self.label),
+        }
     }
 
-    /// Where a session on it is, going by the folder it reported, if it did.
-    pub fn place(&self, reported: Option<&str>) -> Place {
+    /// Whether it says itself where its sessions are, so that nothing they print counts.
+    pub fn says_where(&self) -> bool {
+        matches!(self.reach, Reach::Served(_))
+    }
+
+    /// Where a session on it is. `reported` is the folder it printed, which counts only
+    /// on a machine that does not say so itself.
+    pub fn place(&self, session: SessionId, reported: Option<&str>) -> Place {
         Place {
             machine: self.id.clone(),
             label: self.label.clone(),
             kind: self.kind,
-            folder: reported.and_then(|url| self.folder(url)),
+            folder: self.folder(session, reported),
         }
     }
 
-    /// The folder a session on it reported, as a path over there: an absolute one, named
-    /// by a shell that says it is on that machine and not on one it connected to.
-    fn folder(&self, url: &str) -> Option<String> {
-        let folder = match self.reach {
+    /// The folder a session on it is in, as a path over there: what the machine says
+    /// itself, or else an absolute path that a shell printed and that names that machine
+    /// and not one it connected to.
+    fn folder(&self, session: SessionId, reported: Option<&str>) -> Option<String> {
+        let folder = match &self.reach {
+            Reach::Served(served) => return served.folder(session),
             // A distribution goes by the name of the machine it is on.
-            Launcher::Wsl { .. } => lume_session::cwd::path_here(url)?,
-            _ => return None,
+            Reach::Launched(Launcher::Wsl { .. }) => lume_session::cwd::path_here(reported?)?,
+            Reach::Launched(_) => return None,
         };
         (folder.starts_with('/') && folder.len() <= FOLDER_MAX).then_some(folder)
     }
 
     fn door(&self) -> Result<Door, ServiceError> {
         match &self.reach {
-            Launcher::Wsl { distro, user } => {
+            Reach::Launched(Launcher::Wsl { distro, user }) => {
                 let program = wsl::program()
                     .ok_or_else(|| ServiceError::unavailable("WSL is not installed"))?;
                 let mut args = vec!["-d".to_owned(), distro.clone()];
@@ -223,8 +284,12 @@ impl Machines {
         self.runners.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// What runs programs on a machine.
+    /// What runs programs on a machine. That of a server is its own, and never kept
+    /// here: a new connection has a new one.
     pub fn runner(&self, machine: &Machine) -> Result<Arc<dyn Runner>, ServiceError> {
+        if let Reach::Served(served) = &machine.reach {
+            return Ok(served.runner());
+        }
         let mut runners = self.runners();
         if let Some(runner) = runners.get(&machine.id) {
             return Ok(Arc::clone(runner));
@@ -248,22 +313,62 @@ impl Machines {
     }
 }
 
+/// What serves the sessions of backends that are on other machines, by the backends.
+#[derive(Default)]
+pub struct Servers(Mutex<HashMap<BackendId, Arc<dyn Served>>>);
+
+impl Servers {
+    fn held(&self) -> MutexGuard<'_, HashMap<BackendId, Arc<dyn Served>>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Notes what serves a backend's sessions, from now until it is let go of.
+    pub fn insert(&self, backend: BackendId, served: Arc<dyn Served>) {
+        self.held().insert(backend, served);
+    }
+
+    pub fn remove(&self, backend: &BackendId) {
+        self.held().remove(backend);
+    }
+
+    fn get(&self, backend: &BackendId) -> Option<Arc<dyn Served>> {
+        self.held().get(backend).cloned()
+    }
+
+    /// Every one, taken out of the lock: what they are asked may take others.
+    fn all(&self) -> Vec<(BackendId, Arc<dyn Served>)> {
+        let held = self.held();
+        held.iter()
+            .map(|(id, served)| (id.clone(), Arc::clone(served)))
+            .collect()
+    }
+}
+
 impl AppState {
     /// The machine a session is on, if it is another one that plugins can run programs
     /// on.
     pub fn machine_of(&self, key: &SessionKey) -> Option<Machine> {
         if !self.is_local(&key.backend) {
-            return None;
+            let served = self.servers().get(&key.backend)?;
+            return Some(Machine::served(&key.backend, served));
         }
         Machine::of(&self.reports().launched(key)?.launcher)
     }
 
-    /// The machines that sessions are on, other than this one, by their ids.
+    /// The machines that sessions are on, other than this one, by their ids. A server's
+    /// is one while it can be used.
     pub fn machines(&self) -> BTreeMap<String, Machine> {
-        self.reports()
-            .launchers()
+        let launched = self.reports().launchers();
+        let served = self
+            .servers()
+            .all()
+            .into_iter()
+            .filter(|(_, served)| served.usable())
+            .map(|(id, served)| Machine::served(&id, served));
+        launched
             .iter()
             .filter_map(Machine::of)
+            .chain(served)
             .map(|machine| (machine.id.clone(), machine))
             .collect()
     }
@@ -305,7 +410,7 @@ mod tests {
                 client: None,
             },
         ] {
-            assert_eq!(Machine::of(&here), None);
+            assert!(Machine::of(&here).is_none());
         }
     }
 
@@ -313,7 +418,8 @@ mod tests {
     fn a_folder_is_one_of_the_machines_only_when_its_shell_says_it_is_there() {
         let ubuntu = Machine::of(&wsl(None)).unwrap();
         let name = machine_name().unwrap();
-        let folder = |url: &str| ubuntu.place(Some(url)).folder;
+        let session = SessionId::new(1).unwrap();
+        let folder = |url: &str| ubuntu.place(session, Some(url)).folder;
         assert_eq!(
             folder(&format!("file://{name}/home/me/a%20b")).as_deref(),
             Some("/home/me/a b")
@@ -331,6 +437,6 @@ mod tests {
         ] {
             assert_eq!(folder(url), None, "{url}");
         }
-        assert_eq!(ubuntu.place(None).folder, None);
+        assert_eq!(ubuntu.place(session, None).folder, None);
     }
 }

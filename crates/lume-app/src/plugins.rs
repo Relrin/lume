@@ -28,6 +28,8 @@
 mod asking;
 mod calls;
 mod elsewhere;
+#[cfg(test)]
+pub(crate) use elsewhere::tests as elsewhere_tests;
 mod linked;
 mod manage;
 mod openers;
@@ -391,15 +393,6 @@ fn report_of(what: &SessionNews, here: bool) -> Option<(String, Value)> {
         }
     }
     Some((kind, details))
-}
-
-/// Where a session that is on another machine says it is, as plugins are told it.
-fn place_report(machine: &crate::machines::Machine, url: &str) -> (String, Value) {
-    let place = machine.place(Some(url));
-    (
-        "place".to_owned(),
-        serde_json::to_value(place).unwrap_or(Value::Null),
-    )
 }
 
 fn api_error(code: ErrorCode, message: impl Into<String>) -> ApiError {
@@ -2192,24 +2185,62 @@ impl Plugins {
     }
 
     /// What plugins are told of a session's report. Of one on another machine that
-    /// plugins can run programs on, they are told where it is there.
+    /// plugins can run programs on, they are told where it is there when that may have
+    /// changed and is not what they were told last.
     fn reports_of(&self, news: &News) -> Vec<(String, Value)> {
         use lume_proto::SessionEvent;
 
         let machine = self.state.machine_of(&news.key);
         let here = machine.is_none() && self.state.is_here(&news.key);
-        let reported = match &news.what {
-            SessionNews::Event(SessionEvent::Cwd { url }) => Some(url),
-            SessionNews::Event(SessionEvent::State { state }) => state.cwd.as_ref(),
-            _ => None,
+        let place = match (&machine, &news.what) {
+            (Some(machine), SessionNews::Event(event)) => match event {
+                SessionEvent::Cwd { url } => {
+                    self.place_to_tell(&news.key, machine, Some(url), false)
+                }
+                // What a server says of where a session is comes with its program.
+                SessionEvent::Foreground(_) => self.place_to_tell(&news.key, machine, None, false),
+                SessionEvent::State { state } => {
+                    self.place_to_tell(&news.key, machine, state.cwd.as_deref(), true)
+                }
+                _ => None,
+            },
+            (_, SessionNews::Exit(_)) => {
+                self.elsewhere.forget_place(&news.key);
+                None
+            }
+            (None, _) => None,
         };
-        let place = machine
-            .zip(reported)
-            .map(|(machine, url)| place_report(&machine, url));
         report_of(&news.what, here)
             .into_iter()
             .chain(place)
             .collect()
+    }
+
+    /// The `place` report of a session on another machine, unless it is what plugins
+    /// were told last; `whole` is for a report of all a session's state, which tells it
+    /// whatever was told before. Nothing where the machine says nothing of folders and
+    /// the session printed none.
+    fn place_to_tell(
+        &self,
+        key: &crate::carrier::SessionKey,
+        machine: &crate::machines::Machine,
+        reported: Option<&str>,
+        whole: bool,
+    ) -> Option<(String, Value)> {
+        if !machine.says_where() && reported.is_none() {
+            return None;
+        }
+        let place = machine.place(key.session, reported);
+        if !self
+            .elsewhere
+            .note_place(key, &place, whole, self.state.reports())
+        {
+            return None;
+        }
+        Some((
+            "place".to_owned(),
+            serde_json::to_value(place).unwrap_or(Value::Null),
+        ))
     }
 
     /// Tells the plugins what each of these sessions adds up to, as a `state` report.
@@ -2224,8 +2255,9 @@ impl Plugins {
                 without_places(&mut details);
             }
             self.session_report(&key, "state".to_owned(), details).await;
-            if let (Some(machine), Some(url)) = (machine, &state.cwd) {
-                let (kind, details) = place_report(&machine, url);
+            let place = machine
+                .and_then(|machine| self.place_to_tell(&key, &machine, state.cwd.as_deref(), true));
+            if let Some((kind, details)) = place {
                 self.session_report(&key, kind, details).await;
             }
         }

@@ -516,7 +516,7 @@ impl Plugins {
                         .cwd
                         .clone()
                         .or_else(|| state.as_ref().and_then(|state| state.cwd.clone()));
-                    machine.place(reported.as_deref())
+                    machine.place(key.session, reported.as_deref())
                 });
                 SessionEntry {
                     session: listed.info.id.to_string(),
