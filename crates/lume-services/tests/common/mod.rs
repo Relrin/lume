@@ -112,6 +112,13 @@ impl Layout {
             dir.folder(folder);
         }
         let lume = dir.write(&format!("install/{}", exe("lume")), b"");
+        // A program, as the installed one is: a search along the PATH passes over a file
+        // that cannot be run.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&lume, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let places = Places {
             workspace: Some(dir.path().join("ws")),
             home: dir.path().join("home"),

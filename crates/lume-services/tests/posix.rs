@@ -410,9 +410,15 @@ fn a_connection_that_ended_is_opened_again_and_one_not_used_is_let_go_of() {
             continue;
         }
         let shell = Shell::new(door);
-        // The loop is the parent of the script that runs a program.
+        // The loop is the parent of the script that runs a program. Both go: the script
+        // holds the connection too, and would answer for the loop. What it left reading
+        // the program's output holds it until the program ends.
         let dir = text(&shell, "echo \"$d\"").trim().to_owned();
-        let error = sh(&shell, "kill -s KILL $(ps -o ppid= -p $PPID); sleep 5").unwrap_err();
+        let error = sh(
+            &shell,
+            "kill -s KILL $(ps -o ppid= -p $PPID) $PPID; sleep 5",
+        )
+        .unwrap_err();
         assert_eq!(error.kind, ErrorKind::Unavailable);
         assert_eq!(text(&shell, "echo again"), "again\n");
         // Killed, it could not take its folder with it.

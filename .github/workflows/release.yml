@@ -63,8 +63,6 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
-    with:
-      release: true
 
   # What a plugin's own repository builds against. A repository of plugins names the tag
   # and the packages' hashes, fetches them once, and checks them.
