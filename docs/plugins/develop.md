@@ -70,7 +70,7 @@ A manifest with a mistake in it keeps the plugin from being used until it is fix
 ### With a build that watches
 
 Run the build in watch mode beside Lume, and every save is on screen a moment later. With the
-add-ons template:
+lume-addons template:
 
 ```sh
 pnpm --filter @lume-addons/notes exec vite build --watch
@@ -83,7 +83,7 @@ avoids it.
 
 ## Starting from the template
 
-The add-ons repository has a template with a frame panel, a pane view, the plugin's code and the
+The lume-addons repository has a template with a frame panel, a pane view, the plugin's code and the
 builds for both. See [the plugin kit](kit.md#starting-from-the-template).
 
 ## Looking into a view

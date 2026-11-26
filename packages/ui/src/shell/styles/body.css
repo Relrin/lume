@@ -216,7 +216,7 @@
     vertical-align: 1px;
   }
 
-  .addon-git {
+  .plugin-git {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -225,7 +225,7 @@
     margin-top: 8px;
   }
 
-  .addon-git input {
+  .plugin-git input {
     @apply bg-control text-ink;
     flex: 1 1 220px;
     min-width: 0;
@@ -237,11 +237,11 @@
     font-size: 12px;
   }
 
-  .addon-git input.addon-git-path {
+  .plugin-git input.plugin-git-path {
     flex: 0 1 160px;
   }
 
-  .addon-git input:focus-visible {
+  .plugin-git input:focus-visible {
     border-color: var(--lume-color-border-focus);
     outline: none;
   }

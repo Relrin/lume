@@ -398,7 +398,7 @@ lume plugin audit acme.metrics
 - Refusals are always written. The same allowed call is written once a minute at most.
 - An answer the user gives to `lume.permissions.request` is written too.
 - `--json` prints the entries as one JSON object.
-- The settings window shows a plugin's latest entries under **Add-ons**.
+- The settings window shows a plugin's latest entries under **Plugins**.
 
 ## Services between plugins
 

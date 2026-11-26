@@ -36,7 +36,12 @@ import type {
   WindowState,
   WorkspaceList,
 } from "./types.ts";
-import type { AddonEntry, Inspection, InstallPreview, UpdateCurrent } from "../settings/addons.ts";
+import type {
+  InstalledPlugin,
+  Inspection,
+  InstallPreview,
+  UpdateCurrent,
+} from "../settings/plugins.ts";
 
 /** What a page does with what the core sends it. */
 export interface CoreEvents {
@@ -316,56 +321,56 @@ export class CoreClient {
   }
 
   /** Every plugin installed, in the order they load in, with how each fares. */
-  addonsList(): Promise<{ plugins: AddonEntry[] }> {
-    return this.transport.command("addons_list");
+  pluginsList(): Promise<{ plugins: InstalledPlugin[] }> {
+    return this.transport.command("plugins_list");
   }
 
   /** Turns a plugin on or off. */
-  addonSetEnabled(id: string, enabled: boolean): Promise<void> {
-    return this.transport.command("addon_set_enabled", { id, enabled });
+  pluginSetEnabled(id: string, enabled: boolean): Promise<void> {
+    return this.transport.command("plugin_set_enabled", { id, enabled });
   }
 
   /** Removes a plugin; its data is kept. */
-  addonRemove(id: string): Promise<void> {
-    return this.transport.command("addon_remove", { id });
+  pluginRemove(id: string): Promise<void> {
+    return this.transport.command("plugin_remove", { id });
   }
 
   /** Takes back what a plugin may run on another machine. */
-  addonRevokeMachine(id: string, machine: string): Promise<void> {
-    return this.transport.command("addon_revoke_machine", { id, machine });
+  pluginRevokeMachine(id: string, machine: string): Promise<void> {
+    return this.transport.command("plugin_revoke_machine", { id, machine });
   }
 
   /** Moves a plugin one place earlier or later in the order plugins load in. */
-  addonMove(id: string, earlier: boolean): Promise<void> {
-    return this.transport.command("addon_move", { id, earlier });
+  pluginMove(id: string, earlier: boolean): Promise<void> {
+    return this.transport.command("plugin_move", { id, earlier });
   }
 
   /** Copies and checks the package in a folder, and says what installing it would do. */
-  addonInspect(folder: string, installAs: string | null): Promise<Inspection> {
-    return this.transport.command("addon_inspect", { folder, installAs });
+  pluginInspect(folder: string, installAs: string | null): Promise<Inspection> {
+    return this.transport.command("plugin_inspect", { folder, installAs });
   }
 
   /** Installs a package the user agreed to, by the token its inspection gave. */
-  addonInspectGit(
+  pluginInspectGit(
     source: string,
     path: string | null,
     installAs: string | null,
   ): Promise<Inspection> {
-    return this.transport.command("addon_inspect_git", { source, path, installAs });
+    return this.transport.command("plugin_inspect_git", { source, path, installAs });
   }
 
   /** Looks in the repository a plugin was installed from for something newer. */
-  addonCheckUpdate(id: string): Promise<InstallPreview | UpdateCurrent> {
-    return this.transport.command("addon_check_update", { id });
+  pluginCheckUpdate(id: string): Promise<InstallPreview | UpdateCurrent> {
+    return this.transport.command("plugin_check_update", { id });
   }
 
-  addonInstall(token: number): Promise<{ id: string }> {
-    return this.transport.command("addon_install", { token });
+  pluginInstall(token: number): Promise<{ id: string }> {
+    return this.transport.command("plugin_install", { token });
   }
 
   /** Lets go of a package the user did not install. */
-  addonCancel(token: number): Promise<void> {
-    return this.transport.command("addon_cancel", { token });
+  pluginCancel(token: number): Promise<void> {
+    return this.transport.command("plugin_cancel", { token });
   }
 
   /** Runs a command that is carried out in the core. */

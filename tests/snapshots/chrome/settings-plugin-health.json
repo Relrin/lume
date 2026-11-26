@@ -72,14 +72,11 @@
               },
               {
                 "role": "heading",
-                "name": "Add-ons"
+                "name": "Plugins"
               },
               {
                 "role": "button",
-                "name": "Manage add-ons",
-                "state": {
-                  "current": "page"
-                }
+                "name": "Manage plugins"
               },
               {
                 "role": "button",
@@ -87,7 +84,10 @@
               },
               {
                 "role": "button",
-                "name": "Toolsv0.4.0"
+                "name": "Toolsv0.4.0",
+                "state": {
+                  "current": "page"
+                }
               },
               {
                 "role": "button",
@@ -108,7 +108,7 @@
             "parts": [
               {
                 "role": "heading",
-                "name": "Manage add-ons"
+                "name": "Tools"
               },
               {
                 "role": "button",
@@ -118,84 +118,27 @@
           },
           {
             "role": "heading",
-            "name": "Install"
-          },
-          {
-            "role": "button",
-            "name": "Install from folder…"
-          },
-          {
-            "role": "textbox"
-          },
-          {
-            "role": "textbox",
-            "name": "The folder of the repository the plugin is in"
-          },
-          {
-            "role": "button",
-            "name": "Look at it…"
+            "name": "Permissions"
           },
           {
             "role": "heading",
-            "name": "Installed"
+            "name": "Other machines"
           },
           {
             "role": "button",
-            "name": "Load Performance metrics earlier"
+            "name": "Revoke what Tools may run on Ubuntu (WSL)"
           },
           {
             "role": "button",
-            "name": "Load Performance metrics later"
+            "name": "Revoke what Tools may run on root@Debian (WSL)"
           },
           {
-            "role": "button",
-            "name": "Remove"
+            "role": "heading",
+            "name": "Health"
           },
           {
-            "role": "switch",
-            "state": {
-              "checked": "true"
-            }
-          },
-          {
-            "role": "button",
-            "name": "Load Tools earlier"
-          },
-          {
-            "role": "button",
-            "name": "Load Tools later"
-          },
-          {
-            "role": "button",
-            "name": "Check for update"
-          },
-          {
-            "role": "button",
-            "name": "Remove"
-          },
-          {
-            "role": "switch",
-            "state": {
-              "checked": "true"
-            }
-          },
-          {
-            "role": "button",
-            "name": "Load Core tools earlier"
-          },
-          {
-            "role": "button",
-            "name": "Load Core tools later"
-          },
-          {
-            "role": "button",
-            "name": "Remove"
-          },
-          {
-            "role": "switch",
-            "state": {
-              "checked": "false"
-            }
+            "role": "heading",
+            "name": "Activity"
           }
         ]
       }

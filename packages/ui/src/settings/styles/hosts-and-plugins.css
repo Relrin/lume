@@ -28,14 +28,14 @@
     color: var(--lume-color-accent);
   }
 
-  .addon-actions {
+  .plugin-actions {
     display: flex;
     align-items: center;
     flex-shrink: 0;
     gap: 6px;
   }
 
-  .addon-move {
+  .plugin-move {
     @apply text-ink-muted;
     display: grid;
     place-items: center;
@@ -44,19 +44,19 @@
     border-radius: min(6px, var(--lume-radius-control));
   }
 
-  .addon-move:hover:not(:disabled) {
+  .plugin-move:hover:not(:disabled) {
     @apply bg-control-hover text-ink;
   }
 
-  .addon-move:disabled {
+  .plugin-move:disabled {
     opacity: 0.35;
   }
 
-  .addon-ask {
+  .plugin-ask {
     font-size: 12.5px;
   }
 
-  .addon-as {
+  .plugin-as {
     @apply text-ink-muted;
     display: flex;
     align-items: center;
@@ -65,7 +65,7 @@
     font-size: 12.5px;
   }
 
-  .addon-as input {
+  .plugin-as input {
     @apply bg-control text-ink;
     width: 220px;
     height: 28px;
@@ -76,40 +76,40 @@
     font-size: 12px;
   }
 
-  .addon-install-actions {
+  .plugin-install-actions {
     gap: 8px;
   }
 
-  .settings-label > .addon-text {
+  .settings-label > .plugin-text {
     overflow-wrap: anywhere;
     white-space: pre-wrap;
     user-select: text;
   }
 
-  .addon-audit {
+  .plugin-audit {
     display: grid;
     gap: 3px;
     width: 100%;
     font-size: 12px;
   }
 
-  .addon-audit li {
+  .plugin-audit li {
     display: flex;
     gap: 12px;
   }
 
-  .addon-audit-time {
+  .plugin-audit-time {
     @apply text-ink-muted;
     flex-shrink: 0;
     font-family: var(--font-mono);
     font-size: 11px;
   }
 
-  .addon-audit li[data-outcome="denied"] .addon-audit-what {
+  .plugin-audit li[data-outcome="denied"] .plugin-audit-what {
     @apply text-danger;
   }
 
-  .addon-log {
+  .plugin-log {
     @apply bg-control text-ink-muted;
     width: 100%;
     max-height: 220px;

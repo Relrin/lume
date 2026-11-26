@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugin-revoke-machine"
+description = "Enables the plugin_revoke_machine command without any pre-configured scope."
+commands.allow = ["plugin_revoke_machine"]
+
+[[permission]]
+identifier = "deny-plugin-revoke-machine"
+description = "Denies the plugin_revoke_machine command without any pre-configured scope."
+commands.deny = ["plugin_revoke_machine"]

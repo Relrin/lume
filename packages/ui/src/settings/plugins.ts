@@ -10,13 +10,13 @@
 import type { SettingsPage } from "./model.ts";
 
 /** A permission a plugin holds or asks for, in words, with a warning where it is risky. */
-export interface AddonPermission {
+export interface PluginPermission {
   readonly what: string;
   readonly warning: string | null;
 }
 
 /** A plugin another depends on, and the install it uses. */
-export interface AddonDependency {
+export interface PluginDependency {
   /** The plugin, by the id its manifest names. */
   readonly id: string;
   readonly optional: boolean;
@@ -27,7 +27,7 @@ export interface AddonDependency {
 }
 
 /** Another machine a plugin may run programs on. */
-export interface AddonMachine {
+export interface PluginMachine {
   readonly id: string;
   /** What the machine is called, as the user was asked of it. */
   readonly label: string;
@@ -43,7 +43,7 @@ export interface AuditEntry {
 }
 
 /** One install, as the settings window shows it. */
-export interface AddonEntry {
+export interface InstalledPlugin {
   /** The id it is installed under. */
   readonly id: string;
   readonly manifestId: string;
@@ -65,12 +65,12 @@ export interface AddonEntry {
   readonly commit: string | null;
   /** Whether it is a folder used where it lies, for a plugin being worked on. */
   readonly dev: boolean;
-  readonly dependencies: readonly AddonDependency[];
-  readonly permissions: readonly AddonPermission[];
+  readonly dependencies: readonly PluginDependency[];
+  readonly permissions: readonly PluginPermission[];
   /** What it may ask for while it runs. */
   readonly later: readonly string[];
   /** The other machines it may run programs on, as the user agreed. */
-  readonly machines: readonly AddonMachine[];
+  readonly machines: readonly PluginMachine[];
   /** The view it is set up in, which its page here shows: one of its pane views. */
   readonly settingsView?: {
     readonly view: string;
@@ -108,7 +108,7 @@ export interface InstallPreview {
   readonly change: "new" | "newer" | "same" | "older";
   readonly from: string | null;
   /** What it would be able to do that it could not before. */
-  readonly permissions: readonly AddonPermission[];
+  readonly permissions: readonly PluginPermission[];
   readonly later: readonly string[];
   readonly warnings: readonly string[];
   readonly leftOut: readonly string[];
@@ -134,11 +134,11 @@ export type InstallFrom =
   | { readonly kind: "update"; readonly id: string };
 
 /** Where an install came from, in a few words, where that says more than its id. */
-export function sourceWords(addon: AddonEntry): string | null {
-  if (addon.dev) return `Linked to ${addon.source}`;
-  if (addon.sourceKind === "git") {
-    const commit = addon.commit === null ? "" : `, at commit ${addon.commit.slice(0, 12)}`;
-    return `From ${addon.source}${commit}`;
+export function sourceWords(plugin: InstalledPlugin): string | null {
+  if (plugin.dev) return `Linked to ${plugin.source}`;
+  if (plugin.sourceKind === "git") {
+    const commit = plugin.commit === null ? "" : `, at commit ${plugin.commit.slice(0, 12)}`;
+    return `From ${plugin.source}${commit}`;
   }
   return null;
 }
@@ -158,21 +158,23 @@ export interface InstallTaken {
 export type Inspection = InstallPreview | InstallTaken;
 
 /** The id of the page that manages the plugins. */
-export const MANAGE_PAGE = "addons";
+export const MANAGE_PAGE = "plugins";
 
 /**
  * The view a plugin is set up in, where its page can show it: a plugin that is turned
  * off or cannot be used has no code to answer its view.
  */
-export function settingsViewOf(addon: AddonEntry | undefined): AddonEntry["settingsView"] {
-  if (addon === undefined || !addon.enabled || !addon.state.ready) return null;
-  if (addon.modified || addon.missing) return null;
-  return addon.settingsView ?? null;
+export function settingsViewOf(
+  plugin: InstalledPlugin | undefined,
+): InstalledPlugin["settingsView"] {
+  if (plugin === undefined || !plugin.enabled || !plugin.state.ready) return null;
+  if (plugin.modified || plugin.missing) return null;
+  return plugin.settingsView ?? null;
 }
 
 /** The id of a plugin's own page. */
-export function addonPage(id: string): string {
-  return `addon:${id}`;
+export function pluginPage(id: string): string {
+  return `plugin:${id}`;
 }
 
 /** The heading of a page that installing a package would do, in words. */
@@ -191,38 +193,38 @@ export function installHeading(preview: InstallPreview): string {
 
 /**
  * The pages with the plugins' among them: the page that manages them first under
- * Add-ons, then a page for each plugin in the order they load in, its own settings
- * page where it has one. Pages under Add-ons that are no plugin's stay after them.
+ * Plugins, then a page for each plugin in the order they load in, its own settings
+ * page where it has one. Pages under Plugins that are no plugin's stay after them.
  */
-export function withAddons(
+export function withPluginPages(
   pages: readonly SettingsPage[],
-  addons: readonly AddonEntry[] | null,
+  plugins: readonly InstalledPlugin[] | null,
 ): SettingsPage[] {
-  const others = pages.filter((page) => page.group !== "Add-ons");
-  const own = pages.filter((page) => page.group === "Add-ons");
+  const others = pages.filter((page) => page.group !== "Plugins");
+  const own = pages.filter((page) => page.group === "Plugins");
   const manage: SettingsPage = {
     id: MANAGE_PAGE,
-    label: "Manage add-ons",
+    label: "Manage plugins",
     icon: "plugin",
-    group: "Add-ons",
+    group: "Plugins",
     blurb:
       "Plugins installed, in the order they load in. Each can only do what it was allowed when it was installed, or what you allow it later.",
     groups: [],
     manage: true,
   };
-  const listed = (addons ?? []).map((addon): SettingsPage => {
-    const page = own.find((held) => held.id === addonPage(addon.id));
+  const listed = (plugins ?? []).map((plugin): SettingsPage => {
+    const page = own.find((held) => held.id === pluginPage(plugin.id));
     return {
       ...(page ?? {
-        id: addonPage(addon.id),
-        label: addon.name,
+        id: pluginPage(plugin.id),
+        label: plugin.name,
         icon: "plugin",
-        group: "Add-ons",
-        meta: `v${addon.version}`,
-        blurb: addon.description ?? "",
+        group: "Plugins",
+        meta: `v${plugin.version}`,
+        blurb: plugin.description ?? "",
         groups: [],
       }),
-      addon: addon.id,
+      plugin: plugin.id,
     };
   });
   const rest = own.filter((page) => !listed.some((held) => held.id === page.id));

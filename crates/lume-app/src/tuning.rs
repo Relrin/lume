@@ -150,7 +150,7 @@ pub const SETTINGS_WINDOW_SIZE: (u32, u32) = (980, 680);
 pub const SETTINGS_WINDOW_MIN_SIZE: (u32, u32) = (720, 480);
 
 /// The longest name a section of the settings may have, in bytes: room for a plugin's
-/// page, `addon:` and its id.
+/// page, `plugin:` and its id.
 pub const SETTINGS_SECTION_MAX_BYTES: usize = 96;
 
 /// The largest picture shown behind the panes. A larger file is refused, not read: the

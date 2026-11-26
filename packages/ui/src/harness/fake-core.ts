@@ -57,7 +57,7 @@ import type {
 import type { Carrier, CarrierOpened } from "../transport/carrier.ts";
 import type { CommandName } from "../transport/commands.generated.ts";
 import { CONTROL_STREAM, HEADER_LEN, Kind } from "../transport/frames.ts";
-import type { AddonEntry } from "../settings/addons.ts";
+import type { InstalledPlugin } from "../settings/plugins.ts";
 import { DEFAULT_CONFIG } from "../wire/config.generated.ts";
 import { type LayoutLogic, Refused } from "./logic.ts";
 
@@ -270,7 +270,7 @@ export interface FakeCoreOptions {
   /** The settings' schema, as plugins make it. Left out, the application's own. */
   readonly schema?: unknown;
   /** The plugins installed, as the settings window lists them. Left out, none. */
-  readonly addons?: readonly AddonEntry[];
+  readonly plugins?: readonly InstalledPlugin[];
   /**
    * The core's layout logic (see `logic.ts`), which every change to the layout goes
    * through. A core without it can show its fixture but not change it.
@@ -960,13 +960,13 @@ export class FakeCore implements Carrier {
         }
         return answer(null);
       }
-      case "addons_list":
-        return answer({ plugins: this.#options.addons ?? [] });
-      case "addon_set_enabled":
-      case "addon_remove":
-      case "addon_revoke_machine":
-      case "addon_move":
-      case "addon_cancel":
+      case "plugins_list":
+        return answer({ plugins: this.#options.plugins ?? [] });
+      case "plugin_set_enabled":
+      case "plugin_remove":
+      case "plugin_revoke_machine":
+      case "plugin_move":
+      case "plugin_cancel":
         this.ran.push({ id: name, args });
         return answer(null);
       case "themes_list":

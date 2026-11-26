@@ -199,7 +199,7 @@ describe("the page a settings window is opened at", () => {
   it("is the one its address names", () => {
     expect(pageInAddress("#appearance")).toBe("appearance");
     expect(pageInAddress("appearance")).toBe("appearance");
-    expect(pageInAddress("#add-on%20one")).toBe("add-on one");
+    expect(pageInAddress("#plugin%20one")).toBe("plugin one");
   });
 
   it("is none when the address names none", () => {

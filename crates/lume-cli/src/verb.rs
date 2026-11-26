@@ -60,9 +60,9 @@ async fn unknown(client: &mut Client, words: &[String]) {
         Err(_) => Vec::new(),
     };
     if verbs.is_empty() {
-        said.push_str("No add-on adds a verb. lume --help says what lume itself knows.\n");
+        said.push_str("No plugin adds a verb. lume --help says what lume itself knows.\n");
     } else {
-        said.push_str("The verbs add-ons add:\n");
+        said.push_str("The verbs plugins add:\n");
         let width = verbs
             .iter()
             .filter_map(|verb| verb["verb"].as_str())
@@ -103,9 +103,9 @@ pub async fn run(endpoint_name: Option<&str>, words: Vec<String>) -> u8 {
         Ok(client) => client,
         Err(Failure::NotRunning(_)) => {
             eprintln!(
-                "lume: {first} is not one of lume's own commands. An add-on may add it, but \
+                "lume: {first} is not one of lume's own commands. A plugin may add it, but \
                  the application is not running, and it is the application that runs an \
-                 add-on's verbs."
+                 plugin's verbs."
             );
             return EXIT_NOT_RUNNING;
         }

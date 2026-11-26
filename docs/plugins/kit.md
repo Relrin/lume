@@ -12,7 +12,7 @@ and React among them, into one file in the plugin's package.
 
 ## Starting from the template
 
-The add-ons repository has a template with a panel, a pane view, the plugin's code and the build
+The lume-addons repository has a template with a panel, a pane view, the plugin's code and the build
 for all of it:
 
 ```sh

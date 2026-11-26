@@ -115,7 +115,7 @@ shown-when = "show-cpu"
 plugin's own page.
 
 A plugin with at least one labelled setting on its own page gets a page under the heading
-**Add-ons**. The page is called by the plugin's name and shows its description, its version and its
+**Plugins**. The page is called by the plugin's name and shows its description, its version and its
 `icon`.
 
 Settings on the page are in groups. A group has a heading:
@@ -337,7 +337,7 @@ plugin is loaded. A binding is left out, with a warning, when:
 the first is the start of the second.
 
 A dropped binding does not stop the plugin. The command still runs from the palette and from menus.
-The warning is shown with the plugin under **Add-ons** in the settings.
+The warning is shown with the plugin under **Plugins** in the settings.
 
 Do not rely on a key. Give every command a title that reads well in the palette, and treat the key
 as a shortcut the user may not have.

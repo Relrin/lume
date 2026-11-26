@@ -1494,7 +1494,7 @@ fn the_settings_window_adds_a_server_and_takes_it_out() {
     until_settings("Remove again", &pressing(".host-row", "Remove"));
     until_settings(
         "the question again",
-        "[...document.querySelectorAll('.addon-ask')].length === 1",
+        "[...document.querySelectorAll('.plugin-ask')].length === 1",
     );
     until_settings("the answer", &pressing(".host-row", "Remove"));
     until("the server to be taken out", || {

@@ -365,7 +365,7 @@ usage = "lume metrics show [--json]"
 - Where the words on the command line begin with more than one verb, the one with the most words
   is meant: with `metrics` and `metrics show` both there, `lume metrics show x` runs the second.
 - A verb belongs to the first plugin that adds it, in the order plugins load in. Another plugin
-  that adds the same verb is told so on its page of the add-ons.
+  that adds the same verb is told so on its page under **Plugins** in the settings.
 - The application has to be running: it is the application that runs the plugin's code. The
   plugin is started for the verb if it is not running.
 

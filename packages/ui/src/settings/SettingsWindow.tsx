@@ -43,8 +43,8 @@ import { TRAFFIC_LIGHTS_INSET_PX } from "../tuning.ts";
 import { AboutPage } from "./About.tsx";
 import { PluginFrame } from "../plugins/frame/PluginFrame.tsx";
 import { type FrameHost, FrameHostContext } from "../plugins/frame/host.ts";
-import { settingsViewOf, withAddons } from "./addons.ts";
-import { AddonSections, AddonsManager } from "./Addons.tsx";
+import { settingsViewOf, withPluginPages } from "./plugins.ts";
+import { PluginSections, PluginsManager } from "./Plugins.tsx";
 import type { SettingsApp } from "./boot.ts";
 import { CommandsPage } from "./Commands.tsx";
 import { HostsPage, SettingsConnection } from "./Hosts.tsx";
@@ -192,7 +192,7 @@ function Window({ app }: { app: SettingsApp }) {
     app.registry.current,
     app.registry.current,
   );
-  const addons = useStore(app.addons, (state) => state.list);
+  const plugins = useStore(app.plugins, (state) => state.list);
 
   // Plugins change what can be set; the window is given the schema again when they do.
   const readSchema = () => app.schemaStore?.getState().schema ?? app.schema;
@@ -204,9 +204,12 @@ function Window({ app }: { app: SettingsApp }) {
   const pages = useMemo(
     () =>
       view
-        ? withAddons(allPages(withOwnPages(settingsPages(schema, view, lists)), registered), addons)
+        ? withPluginPages(
+            allPages(withOwnPages(settingsPages(schema, view, lists)), registered),
+            plugins,
+          )
         : [],
-    [schema, view, lists, registered, addons],
+    [schema, view, lists, registered, plugins],
   );
   const nav = useMemo(() => navOf(pages), [pages]);
 
@@ -228,7 +231,7 @@ function Window({ app }: { app: SettingsApp }) {
 
   // A plugin that is set up in a view of its own has two sides to its page: that view,
   // and what the window says of the plugin. Each page starts on the view.
-  const ownView = settingsViewOf(addons?.find((addon) => addon.id === current?.addon));
+  const ownView = settingsViewOf(plugins?.find((plugin) => plugin.id === current?.plugin));
   const [details, setDetails] = useState<string | null>(null);
   const framed = ownView != null && !searching && details !== current?.id;
   const frames = useMemo<FrameHost>(
@@ -386,12 +389,12 @@ function Window({ app }: { app: SettingsApp }) {
               Open config.toml
             </Button>
           </div>
-          {framed && current?.addon !== undefined && (
+          {framed && current?.plugin !== undefined && (
             <div className="settings-view">
               <FrameHostContext value={frames}>
                 <PluginFrame
-                  key={current.addon}
-                  plugin={current.addon}
+                  key={current.plugin}
+                  plugin={current.plugin}
                   view={ownView.view}
                   place="settings"
                   entry={ownView.entry}
@@ -441,9 +444,9 @@ function Window({ app }: { app: SettingsApp }) {
                         ))}
                       {current.own === "commands" && <CommandsPage app={app} />}
                       {current.own === "about" && <AboutPage app={app} />}
-                      {current.manage === true && <AddonsManager app={app} />}
-                      {current.addon !== undefined && (
-                        <AddonSections app={app} id={current.addon} />
+                      {current.manage === true && <PluginsManager app={app} />}
+                      {current.plugin !== undefined && (
+                        <PluginSections app={app} id={current.plugin} />
                       )}
                     </>
                   )

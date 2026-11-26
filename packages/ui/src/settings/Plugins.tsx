@@ -23,13 +23,13 @@ import type { SettingsApp } from "./boot.ts";
 import {
   installHeading,
   sourceWords,
-  type AddonEntry,
-  type AddonMachine,
-  type AddonPermission,
+  type InstalledPlugin,
+  type PluginMachine,
+  type PluginPermission,
   type InstallFrom,
   type InstallPreview,
   type InstallTaken,
-} from "./addons.ts";
+} from "./plugins.ts";
 import { Button } from "./rows.tsx";
 
 /** How often what is installed is asked for again while a page about it is on show, so
@@ -39,8 +39,8 @@ const FRESH_MS = 5000;
 /** Asks for the plugins again now, and every so often while the page is on show. */
 function useFresh(app: SettingsApp, page: string): void {
   useEffect(() => {
-    app.refreshAddons();
-    const timer = setInterval(() => app.refreshAddons(), FRESH_MS);
+    app.refreshPlugins();
+    const timer = setInterval(() => app.refreshPlugins(), FRESH_MS);
     return () => clearInterval(timer);
   }, [app, page]);
 }
@@ -72,7 +72,7 @@ function Line({ label, children }: { label: string; children?: ReactNode }) {
 }
 
 /** What a plugin can do, each in words with its warning. */
-function PermissionLines({ permissions }: { permissions: readonly AddonPermission[] }) {
+function PermissionLines({ permissions }: { permissions: readonly PluginPermission[] }) {
   return (
     <>
       {permissions.map((permission, index) => (
@@ -87,21 +87,21 @@ function PermissionLines({ permissions }: { permissions: readonly AddonPermissio
 }
 
 /** How an install fares, in a few words, where there is something to say. */
-export function addonStatus(addon: AddonEntry): { text: string; problem: boolean } | null {
-  if (addon.modified) {
+export function pluginStatus(plugin: InstalledPlugin): { text: string; problem: boolean } | null {
+  if (plugin.modified) {
     return {
       text: "Its files have changed since it was installed, so it is not used. Install it again to use it.",
       problem: true,
     };
   }
-  if (addon.missing) return { text: "Its folder is gone, so it is not used.", problem: true };
-  if (!addon.enabled) return { text: "Turned off.", problem: false };
-  if (!addon.state.ready) {
-    return { text: `Not used: ${addon.state.reason ?? "it cannot be loaded"}`, problem: true };
+  if (plugin.missing) return { text: "Its folder is gone, so it is not used.", problem: true };
+  if (!plugin.enabled) return { text: "Turned off.", problem: false };
+  if (!plugin.state.ready) {
+    return { text: `Not used: ${plugin.state.reason ?? "it cannot be loaded"}`, problem: true };
   }
-  if (addon.health.breaches > 0) {
+  if (plugin.health.breaches > 0) {
     return {
-      text: `Stopped ${addon.health.breaches === 1 ? "once" : `${addon.health.breaches} times`} in the last minute for going over its limits.`,
+      text: `Stopped ${plugin.health.breaches === 1 ? "once" : `${plugin.health.breaches} times`} in the last minute for going over its limits.`,
       problem: true,
     };
   }
@@ -109,9 +109,9 @@ export function addonStatus(addon: AddonEntry): { text: string; problem: boolean
 }
 
 /** What an install depends on, in words. */
-export function dependencyWords(addon: AddonEntry): string | null {
-  if (addon.dependencies.length === 0) return null;
-  const parts = addon.dependencies.map((dependency) => {
+export function dependencyWords(plugin: InstalledPlugin): string | null {
+  if (plugin.dependencies.length === 0) return null;
+  const parts = plugin.dependencies.map((dependency) => {
     if (dependency.bound === null) {
       return dependency.optional
         ? `can use ${dependency.id} (not installed)`
@@ -126,15 +126,15 @@ export function dependencyWords(addon: AddonEntry): string | null {
 }
 
 /** One installed plugin, with what can be done to it. */
-function AddonRow({
+function PluginRow({
   app,
-  addon,
+  plugin,
   first,
   last,
   update,
 }: {
   app: SettingsApp;
-  addon: AddonEntry;
+  plugin: InstalledPlugin;
   first: boolean;
   last: boolean;
   /** Looks for a newer one where it came from. */
@@ -142,38 +142,38 @@ function AddonRow({
 }) {
   const label = useId();
   const [removing, setRemoving] = useState(false);
-  const from = sourceWords(addon);
+  const from = sourceWords(plugin);
   const act = (asked: Promise<unknown>) => {
     asked.then(
-      () => app.refreshAddons(),
+      () => app.refreshPlugins(),
       (error: unknown) => app.notices.push("error", sentence(reason(error))),
     );
   };
-  const status = addonStatus(addon);
-  const dependencies = dependencyWords(addon);
+  const status = pluginStatus(plugin);
+  const dependencies = dependencyWords(plugin);
   const under =
-    addon.id === addon.manifestId ? addon.id : `${addon.manifestId}, installed as ${addon.id}`;
+    plugin.id === plugin.manifestId ? plugin.id : `${plugin.manifestId}, installed as ${plugin.id}`;
   return (
-    <div className="settings-row addon-row" data-addon={addon.id}>
+    <div className="settings-row plugin-row" data-plugin={plugin.id}>
       <div className="settings-label">
         <div id={label}>
-          {addon.name}
-          <span className="settings-from">v{addon.version}</span>
-          {addon.dev && <DevBadge />}
+          {plugin.name}
+          <span className="settings-from">v{plugin.version}</span>
+          {plugin.dev && <DevBadge />}
         </div>
         <div>{under}</div>
-        {from !== null && <div className="addon-text">{from}</div>}
+        {from !== null && <div className="plugin-text">{from}</div>}
         {dependencies !== null && <div>{dependencies}</div>}
         {status !== null && (
           <div className={status.problem ? "settings-problem" : "settings-note"}>{status.text}</div>
         )}
       </div>
-      <div className="addon-actions">
+      <div className="plugin-actions">
         {removing ? (
           <>
-            <span className="addon-ask">Remove {addon.name}?</span>
+            <span className="plugin-ask">Remove {plugin.name}?</span>
             <Button onPress={() => setRemoving(false)}>Keep</Button>
-            <Button primary onPress={() => act(app.client.addonRemove(addon.id))}>
+            <Button primary onPress={() => act(app.client.pluginRemove(plugin.id))}>
               Remove
             </Button>
           </>
@@ -181,31 +181,31 @@ function AddonRow({
           <>
             <button
               type="button"
-              className="addon-move"
-              aria-label={`Load ${addon.name} earlier`}
+              className="plugin-move"
+              aria-label={`Load ${plugin.name} earlier`}
               disabled={first}
-              onClick={() => act(app.client.addonMove(addon.id, true))}
+              onClick={() => act(app.client.pluginMove(plugin.id, true))}
             >
               <Glyph name="arrow-up" size={14} />
             </button>
             <button
               type="button"
-              className="addon-move"
-              aria-label={`Load ${addon.name} later`}
+              className="plugin-move"
+              aria-label={`Load ${plugin.name} later`}
               disabled={last}
-              onClick={() => act(app.client.addonMove(addon.id, false))}
+              onClick={() => act(app.client.pluginMove(plugin.id, false))}
             >
               <Glyph name="arrow-down" size={14} />
             </button>
-            {addon.sourceKind === "git" && <Button onPress={update}>Check for update</Button>}
+            {plugin.sourceKind === "git" && <Button onPress={update}>Check for update</Button>}
             <Button onPress={() => setRemoving(true)}>Remove</Button>
             <button
               type="button"
               role="switch"
               className="settings-switch"
-              aria-checked={addon.enabled}
+              aria-checked={plugin.enabled}
               aria-labelledby={label}
-              onClick={() => act(app.client.addonSetEnabled(addon.id, !addon.enabled))}
+              onClick={() => act(app.client.pluginSetEnabled(plugin.id, !plugin.enabled))}
             />
           </>
         )}
@@ -256,14 +256,14 @@ function InstallPanel({
     const { taken } = installing;
     return (
       <Group label="Install">
-        <div className="settings-row addon-install">
+        <div className="settings-row plugin-install">
           <div className="settings-label">
             <div>Another package is installed as {taken.local}</div>
             <div>
               It came from {taken.existing}. This one can be installed beside it under an id of its
               own.
             </div>
-            <label className="addon-as" htmlFor={field}>
+            <label className="plugin-as" htmlFor={field}>
               Install it as
               <input
                 id={field}
@@ -275,7 +275,7 @@ function InstallPanel({
               />
             </label>
           </div>
-          <div className="addon-actions">
+          <div className="plugin-actions">
             <Button onPress={done}>Cancel</Button>
             <Button primary onPress={() => inspect(installing.from, as.trim() || null)}>
               Continue
@@ -287,22 +287,22 @@ function InstallPanel({
   }
   const { preview } = installing;
   const install = () => {
-    app.client.addonInstall(preview.token).then(
+    app.client.pluginInstall(preview.token).then(
       () => {
         done();
-        app.refreshAddons();
+        app.refreshPlugins();
       },
       (error: unknown) => app.notices.push("error", sentence(reason(error))),
     );
   };
   const cancel = () => {
-    app.client.addonCancel(preview.token).catch(() => undefined);
+    app.client.pluginCancel(preview.token).catch(() => undefined);
     done();
   };
   const replacing = preview.change !== "new";
   return (
     <Group label="Install">
-      <div className="settings-row addon-install">
+      <div className="settings-row plugin-install">
         <div className="settings-label">
           <div>{installHeading(preview)}</div>
           <div>
@@ -311,7 +311,7 @@ function InstallPanel({
               : `${preview.id}, installed as ${preview.local}`}
           </div>
           {preview.description !== null && <div>{preview.description}</div>}
-          <div className="addon-text">
+          <div className="plugin-text">
             From {preview.source}
             {preview.commit !== null && `, at commit ${preview.commit.slice(0, 12)}`}
           </div>
@@ -341,7 +341,7 @@ function InstallPanel({
           <div className="settings-problem">{warning}</div>
         </Line>
       ))}
-      <div className="settings-row addon-install-actions">
+      <div className="settings-row plugin-install-actions">
         <span className="settings-head-space" />
         <Button onPress={cancel}>Cancel</Button>
         <Button primary onPress={install}>
@@ -353,8 +353,8 @@ function InstallPanel({
 }
 
 /** The page that manages the plugins. */
-export function AddonsManager({ app }: { app: SettingsApp }) {
-  const list = useStore(app.addons, (state) => state.list);
+export function PluginsManager({ app }: { app: SettingsApp }) {
+  const list = useStore(app.plugins, (state) => state.list);
   const [installing, setInstalling] = useState<Installing | null>(null);
   useFresh(app, "manage");
 
@@ -366,10 +366,10 @@ export function AddonsManager({ app }: { app: SettingsApp }) {
     setInstalling({ kind: "looking", from });
     const asked =
       from.kind === "folder"
-        ? app.client.addonInspect(from.folder, as)
+        ? app.client.pluginInspect(from.folder, as)
         : from.kind === "git"
-          ? app.client.addonInspectGit(from.source, from.path, as)
-          : app.client.addonCheckUpdate(from.id);
+          ? app.client.pluginInspectGit(from.source, from.path, as)
+          : app.client.pluginCheckUpdate(from.id);
     asked.then(
       (inspected) => {
         if ("current" in inspected) {
@@ -439,7 +439,7 @@ export function AddonsManager({ app }: { app: SettingsApp }) {
                 after it if you want one; and the folder the plugin is in, if the repository holds
                 more. It is fetched with the git on this machine, and the commit is recorded.
               </div>
-              <div className="addon-git">
+              <div className="plugin-git">
                 <input
                   id={gitField}
                   type="text"
@@ -450,7 +450,7 @@ export function AddonsManager({ app }: { app: SettingsApp }) {
                   onChange={(event) => setGit(event.target.value)}
                 />
                 <input
-                  className="addon-git-path"
+                  className="plugin-git-path"
                   type="text"
                   spellCheck={false}
                   autoComplete="off"
@@ -476,14 +476,14 @@ export function AddonsManager({ app }: { app: SettingsApp }) {
       <Group label="Installed">
         {list === null && <Line label="Looking at what is installed…" />}
         {list !== null && list.length === 0 && <Line label="No plugins are installed." />}
-        {list?.map((addon, index) => (
-          <AddonRow
-            key={addon.id}
+        {list?.map((plugin, index) => (
+          <PluginRow
+            key={plugin.id}
             app={app}
-            addon={addon}
+            plugin={plugin}
             first={index === 0}
             last={index === list.length - 1}
-            update={() => inspect({ kind: "update", id: addon.id }, null)}
+            update={() => inspect({ kind: "update", id: plugin.id }, null)}
           />
         ))}
       </Group>
@@ -494,16 +494,16 @@ export function AddonsManager({ app }: { app: SettingsApp }) {
 /** A machine a plugin may run programs on, with the way to take it back. */
 function MachineRow({
   app,
-  addon,
+  plugin,
   machine,
 }: {
   app: SettingsApp;
-  addon: AddonEntry;
-  machine: AddonMachine;
+  plugin: InstalledPlugin;
+  machine: PluginMachine;
 }) {
   const revoke = () => {
-    app.client.addonRevokeMachine(addon.id, machine.id).then(
-      () => app.refreshAddons(),
+    app.client.pluginRevokeMachine(plugin.id, machine.id).then(
+      () => app.refreshPlugins(),
       (error: unknown) => app.notices.push("error", sentence(reason(error))),
     );
   };
@@ -513,7 +513,7 @@ function MachineRow({
         <div>{machine.label}</div>
         <div>It may run there, with any arguments: {machine.programs.join(", ")}</div>
       </div>
-      <Button label={`Revoke what ${addon.name} may run on ${machine.label}`} onPress={revoke}>
+      <Button label={`Revoke what ${plugin.name} may run on ${machine.label}`} onPress={revoke}>
         Revoke
       </Button>
     </div>
@@ -522,35 +522,35 @@ function MachineRow({
 
 /** What a plugin's own page shows after its settings: what it may do, how it fares,
  *  and what it did lately. */
-export function AddonSections({ app, id }: { app: SettingsApp; id: string }) {
-  const addon = useStore(app.addons, (state) => state.list?.find((entry) => entry.id === id));
+export function PluginSections({ app, id }: { app: SettingsApp; id: string }) {
+  const plugin = useStore(app.plugins, (state) => state.list?.find((entry) => entry.id === id));
   useFresh(app, id);
-  if (addon === undefined) return null;
-  const status = addonStatus(addon);
-  const state = !addon.enabled
+  if (plugin === undefined) return null;
+  const status = pluginStatus(plugin);
+  const state = !plugin.enabled
     ? "Turned off"
-    : !addon.state.ready || addon.modified || addon.missing
+    : !plugin.state.ready || plugin.modified || plugin.missing
       ? "Not used"
-      : addon.health.running
+      : plugin.health.running
         ? "Running"
         : "Ready, not running";
   return (
     <>
       <Group label="Permissions">
-        {addon.permissions.length === 0 && <Line label="It asks for no permissions." />}
-        <PermissionLines permissions={addon.permissions} />
-        {addon.later.length > 0 && (
+        {plugin.permissions.length === 0 && <Line label="It asks for no permissions." />}
+        <PermissionLines permissions={plugin.permissions} />
+        {plugin.later.length > 0 && (
           <Line label="It may ask you later to:">
-            {addon.later.map((what, index) => (
+            {plugin.later.map((what, index) => (
               <div key={index}>{what}</div>
             ))}
           </Line>
         )}
       </Group>
-      {addon.machines.length > 0 && (
+      {plugin.machines.length > 0 && (
         <Group label="Other machines">
-          {addon.machines.map((machine) => (
-            <MachineRow key={machine.id} app={app} addon={addon} machine={machine} />
+          {plugin.machines.map((machine) => (
+            <MachineRow key={machine.id} app={app} plugin={plugin} machine={machine} />
           ))}
         </Group>
       )}
@@ -563,31 +563,31 @@ export function AddonSections({ app, id }: { app: SettingsApp; id: string }) {
           )}
         </Line>
         <Line
-          label={`Started ${addon.health.starts === 1 ? "once" : `${addon.health.starts} times`} since Lume started`}
+          label={`Started ${plugin.health.starts === 1 ? "once" : `${plugin.health.starts} times`} since Lume started`}
         />
-        {addon.health.lastProblem !== null && (
+        {plugin.health.lastProblem !== null && (
           <Line label="Last problem">
-            <div className="addon-text">{addon.health.lastProblem}</div>
+            <div className="plugin-text">{plugin.health.lastProblem}</div>
           </Line>
         )}
-        {addon.health.warnings.map((warning, index) => (
+        {plugin.health.warnings.map((warning, index) => (
           <Line key={index} label="Not as its manifest asks">
-            <div className="addon-text">{warning}</div>
+            <div className="plugin-text">{warning}</div>
           </Line>
         ))}
       </Group>
       <Group label="Activity">
-        {addon.audit.length === 0 ? (
+        {plugin.audit.length === 0 ? (
           <Line label="It has used no permission lately." />
         ) : (
           <div className="settings-row">
-            <ul className="addon-audit" aria-label="What it did lately">
-              {addon.audit.map((entry, index) => (
+            <ul className="plugin-audit" aria-label="What it did lately">
+              {plugin.audit.map((entry, index) => (
                 <li key={index} data-outcome={entry.outcome}>
-                  <span className="addon-audit-time">
+                  <span className="plugin-audit-time">
                     {entry.time.replace("T", " ").replace(/\.\d+Z$|Z$/, "")}
                   </span>
-                  <span className="addon-audit-what">
+                  <span className="plugin-audit-what">
                     {entry.outcome === "denied" ? "Refused" : "Allowed"} {entry.capability}
                     {entry.scope !== "" ? ` (${entry.scope})` : ""}
                   </span>
@@ -596,10 +596,10 @@ export function AddonSections({ app, id }: { app: SettingsApp; id: string }) {
             </ul>
           </div>
         )}
-        {addon.log.length > 0 && (
+        {plugin.log.length > 0 && (
           <div className="settings-row">
-            <pre className="addon-log" aria-label="Its log">
-              {addon.log.join("\n")}
+            <pre className="plugin-log" aria-label="Its log">
+              {plugin.log.join("\n")}
             </pre>
           </div>
         )}

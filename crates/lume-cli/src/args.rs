@@ -70,7 +70,7 @@ Commands of lume ctl, which drive the running application:
                                  whether each can be used, whether its code runs, how
                                  it has fared, what its status items show, its log
   plugin activate <id>           start a plugin's code, as its activation events would
-  verbs                          list the verbs add-ons add to lume, with the add-on
+  verbs                          list the verbs plugins add to lume, with the plugin
                                  each comes from
   quit                           close the application
 
@@ -146,15 +146,15 @@ running:
   logs <id> [--lines <n>]        the end of what the plugin's code logged
 --json prints one JSON object instead.
 
-Add-ons can add verbs of their own: one to three words after lume, as in lume agent
+Plugins can add verbs of their own: one to three words after lume, as in lume agent
 run. A verb is carried out by the running application; everything after it is the
-add-on's to read, and so is what is piped in. What it prints is printed here as it
-comes, and it ends with the status the add-on gives. Interrupting it stops it. lume ctl
+plugin's to read, and so is what is piped in. What it prints is printed here as it
+comes, and it ends with the status the plugin gives. Interrupting it stops it. lume ctl
 verbs lists the verbs there are.
 
 Exit status: 0 done, 1 refused or failed (for config check: something is wrong), 2
 arguments not understood, 3 a wait ran out of time, 4 the application is not running.
-A verb ends with the status its add-on gives.";
+A verb ends with the status its plugin gives.";
 
 /// How long a wait may last when `--timeout` is not given.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);

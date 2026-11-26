@@ -122,7 +122,7 @@ impl Plugins {
 
     /// Every install, in the order plugins load in, with what the settings window shows
     /// of it: its permissions in words, how it fares, its log and its audit entries.
-    pub async fn addons(&self) -> Value {
+    pub async fn installed(&self) -> Value {
         let entries = self.audited().await;
         let inner = self.inner();
         let mut order = inner.resolution.order.clone();
@@ -225,21 +225,21 @@ impl Plugins {
     }
 
     /// Turns an install on or off.
-    pub async fn set_addon_enabled(&self, local: &str, enabled: bool) -> Result<(), CommandError> {
+    pub async fn set_plugin_enabled(&self, local: &str, enabled: bool) -> Result<(), CommandError> {
         let store = self.store.clone();
         let owned = local.to_owned();
         joined(tokio::task::spawn_blocking(move || store.set_enabled(&owned, enabled)).await)
     }
 
     /// Removes an install. Its data and log are kept, as `lume plugin remove` keeps them.
-    pub async fn remove_addon(&self, local: &str) -> Result<(), CommandError> {
+    pub async fn remove_plugin(&self, local: &str) -> Result<(), CommandError> {
         let store = self.store.clone();
         let owned = local.to_owned();
         joined(tokio::task::spawn_blocking(move || store.remove(&owned, false).map(|_| ())).await)
     }
 
     /// Moves an install one place earlier or later in the order the user wants.
-    pub async fn move_addon(&self, local: &str, earlier: bool) -> Result<(), CommandError> {
+    pub async fn move_plugin(&self, local: &str, earlier: bool) -> Result<(), CommandError> {
         let store = self.store.clone();
         let owned = local.to_owned();
         joined(
@@ -270,7 +270,7 @@ impl Plugins {
     /// what it would be able to do, and what it would replace. A package whose id is
     /// another's is not copied: the answer says so, with an id it could be installed
     /// under beside it.
-    pub async fn inspect_addon(
+    pub async fn inspect_plugin(
         &self,
         folder: String,
         install_as: Option<String>,
@@ -282,7 +282,7 @@ impl Plugins {
     /// The same for a package in a repository, which is fetched with git: `source` is
     /// its address, with `#<ref>` after it for a branch or a tag, and `path` the folder
     /// of the repository the package is in, if not its top.
-    pub async fn inspect_addon_git(
+    pub async fn inspect_plugin_git(
         &self,
         source: String,
         path: Option<String>,
@@ -296,7 +296,7 @@ impl Plugins {
 
     /// Fetches the repository an install was taken from again, and says what installing
     /// what is there now would do; `current` when it is what is installed.
-    pub async fn check_addon_update(&self, local: String) -> Result<Value, CommandError> {
+    pub async fn check_plugin_update(&self, local: String) -> Result<Value, CommandError> {
         let store = self.store.clone();
         let prepared =
             joined(tokio::task::spawn_blocking(move || store.prepare_update(&local)).await)?;
@@ -394,7 +394,7 @@ impl Plugins {
     }
 
     /// Installs a package the user agreed to, by the token its inspection gave.
-    pub async fn install_addon(&self, token: u64) -> Result<Value, CommandError> {
+    pub async fn install_plugin(&self, token: u64) -> Result<Value, CommandError> {
         let prepared = self
             .waiting
             .prepared
@@ -410,7 +410,7 @@ impl Plugins {
     }
 
     /// Lets go of a package the user did not install.
-    pub fn cancel_addon(&self, token: u64) {
+    pub fn cancel_plugin(&self, token: u64) {
         self.waiting
             .prepared
             .lock()

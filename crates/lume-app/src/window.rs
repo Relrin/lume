@@ -82,7 +82,7 @@ pub fn has_own_bar(label: &str) -> bool {
 }
 
 /// The section of the settings a request names, if it could be one: a short word of
-/// lower-case letters, digits and hyphens, or a plugin's page, as `addon:acme.tools`.
+/// lower-case letters, digits and hyphens, or a plugin's page, as `plugin:acme.tools`.
 /// It becomes part of the page's address, so nothing else is let through.
 pub fn settings_section(asked: Option<&str>) -> Option<&str> {
     asked.filter(|section| {
@@ -941,10 +941,10 @@ mod tests {
     #[test]
     fn a_section_is_a_short_plain_word_and_anything_else_is_none() {
         assert_eq!(settings_section(Some("appearance")), Some("appearance"));
-        assert_eq!(settings_section(Some("add-on-2")), Some("add-on-2"));
+        assert_eq!(settings_section(Some("plugin-2")), Some("plugin-2"));
         assert_eq!(
-            settings_section(Some("addon:acme.tools")),
-            Some("addon:acme.tools")
+            settings_section(Some("plugin:acme.tools")),
+            Some("plugin:acme.tools")
         );
         for asked in [
             "",

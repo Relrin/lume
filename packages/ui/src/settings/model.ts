@@ -170,7 +170,7 @@ export interface SettingsPage {
   readonly preview?: ComponentType;
   /** The plugin the page is about, by the id it is installed under: the page shows what
    *  it may do, how it fares and what it did lately after its rows. */
-  readonly addon?: string;
+  readonly plugin?: string;
   /** Whether the page is the one that manages the plugins. */
   readonly manage?: boolean;
   /**
@@ -634,14 +634,14 @@ export function settingsPages(
       .filter((group) => group.rows.length > 0);
     // On a plugin's own page every row is the plugin's: the name is said only on the
     // application's pages.
-    const addon = page.group === "Add-ons";
+    const ofPlugin = page.group === "Plugins";
     return {
       id: page.id,
       label: page.label,
       icon: page.icon,
       group: page.group,
       blurb: page.blurb,
-      groups: addon
+      groups: ofPlugin
         ? groups.map((group) => ({
             ...group,
             rows: group.rows.map((row) => {

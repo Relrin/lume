@@ -72,11 +72,11 @@
               },
               {
                 "role": "heading",
-                "name": "Add-ons"
+                "name": "Plugins"
               },
               {
                 "role": "button",
-                "name": "Manage add-ons"
+                "name": "Manage plugins"
               },
               {
                 "role": "button",

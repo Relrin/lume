@@ -14,7 +14,7 @@ import type { FakeCoreOptions } from "./fake-core.ts";
 import { FIXTURE_BINDINGS, FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import type { Scene } from "./scene.ts";
 import { CHROME_START_TIMEOUT_MS } from "./tuning.ts";
-import type { AddonEntry } from "../settings/addons.ts";
+import type { InstalledPlugin } from "../settings/plugins.ts";
 
 /** How often a scene looks again for what it waits for. */
 const POLL_MS = 20;
@@ -1074,7 +1074,7 @@ function pluginSchema(): unknown {
     properties: { plugins: { properties?: Record<string, unknown> } };
     "x-lume-pages": unknown[];
   };
-  const page = "addon:acme.meters";
+  const page = "plugin:acme.meters";
   const from = "Performance metrics";
   const meter = (label: string, order: number, fallback: boolean, help?: string) => ({
     type: "boolean",
@@ -1156,7 +1156,7 @@ function pluginSchema(): unknown {
       id: page,
       label: from,
       icon: "plugin",
-      group: "Add-ons",
+      group: "Plugins",
       blurb: "Meters in the status bar or the top bar for this machine.",
       groups: ["Status bar meters", "Sampling"],
       meta: "v1.2.0",
@@ -1168,7 +1168,7 @@ function pluginSchema(): unknown {
 
 /** The plugins the settings window lists: the meters, a tool that uses another, and
  *  one whose files changed. */
-export const FIXTURE_ADDONS: readonly AddonEntry[] = [
+export const FIXTURE_PLUGINS: readonly InstalledPlugin[] = [
   {
     id: "acme.meters",
     manifestId: "acme.meters",
@@ -1282,7 +1282,7 @@ export const PLUGIN_SETTINGS: FakeCoreOptions = {
   titleBar: "custom",
   schema: pluginSchema(),
   settings: { plugins: { "acme.meters": { network: true, rate: 1 } } },
-  addons: FIXTURE_ADDONS,
+  plugins: FIXTURE_PLUGINS,
 };
 
 /** The settings scenes of plugins: their page, and their rows on the application's. */
@@ -1291,8 +1291,8 @@ export const PLUGIN_SETTINGS_SCENES: readonly {
   readonly page: string;
   readonly window: FakeCoreOptions;
 }[] = [
-  { name: "settings-plugin-page", page: "addon:acme.meters", window: PLUGIN_SETTINGS },
+  { name: "settings-plugin-page", page: "plugin:acme.meters", window: PLUGIN_SETTINGS },
   { name: "settings-plugin-rows", page: "appearance", window: PLUGIN_SETTINGS },
-  { name: "settings-addons", page: "addons", window: PLUGIN_SETTINGS },
-  { name: "settings-addon-health", page: "addon:acme.tools", window: PLUGIN_SETTINGS },
+  { name: "settings-plugins", page: "plugins", window: PLUGIN_SETTINGS },
+  { name: "settings-plugin-health", page: "plugin:acme.tools", window: PLUGIN_SETTINGS },
 ];

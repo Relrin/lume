@@ -454,7 +454,7 @@ describe("the pages the settings window draws", () => {
     id: "metrics",
     label: "Performance metrics",
     icon: "metrics",
-    group: "Add-ons",
+    group: "Plugins",
     meta: "v1.2",
     blurb: "Meters in the status bar.",
     groups: [],
@@ -464,7 +464,7 @@ describe("the pages the settings window draws", () => {
     const nav = navOf(allPages(core, [extra]));
     expect(
       nav.map((entry) => (entry.kind === "heading" ? `# ${entry.label}` : entry.page.id)),
-    ).toEqual(["# Application", "appearance", "terminal", "# Add-ons", "metrics"]);
+    ).toEqual(["# Application", "appearance", "terminal", "# Plugins", "metrics"]);
   });
 
   it("puts a heading nobody foresaw after the ones that were", () => {

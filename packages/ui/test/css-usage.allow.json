@@ -2,8 +2,8 @@
   "styled": {},
   "named": {
     "about-page": "Names the About page's root for whoever reads the markup; its look comes from the about-* classes inside it.",
-    "addon-install": "Names the install rows among the settings rows; settings-row styles them.",
-    "addon-row": "Names an installed plugin's row, which carries data-addon; settings-row styles it.",
+    "plugin-install": "Names the install rows among the settings rows; settings-row styles them.",
+    "plugin-row": "Names an installed plugin's row, which carries data-plugin; settings-row styles it.",
     "commands-page": "Names the keybindings page's root; kb, beside it, styles it.",
     "group-editor-place": "Names the anchored place of the group editor; anchored styles it.",
     "key-caps": "KeyCaps' class when its caller gives none; its key-chord and key-cap children are styled.",

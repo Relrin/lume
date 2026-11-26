@@ -143,7 +143,7 @@ A line looks like this:
 ```
 
 Read the log with `lume plugin logs <id>`, which shows the last 40 lines, or `--lines <n>` of them.
-The settings window shows the end of it under **Add-ons**.
+The settings window shows the end of it under **Plugins**.
 
 Lume writes to the same log itself:
 

@@ -161,29 +161,29 @@ pub fn ui_visible(services: Shared<'_>, window: WebviewWindow, items: Vec<String
 
 /// Every plugin installed, in the order they load in, with how each fares.
 #[tauri::command]
-pub async fn addons_list(services: Shared<'_>) -> Result<Value, CommandError> {
-    Ok(services.plugins.addons().await)
+pub async fn plugins_list(services: Shared<'_>) -> Result<Value, CommandError> {
+    Ok(services.plugins.installed().await)
 }
 
 /// Turns a plugin on or off.
 #[tauri::command]
-pub async fn addon_set_enabled(
+pub async fn plugin_set_enabled(
     services: Shared<'_>,
     id: String,
     enabled: bool,
 ) -> Result<(), CommandError> {
-    services.plugins.set_addon_enabled(&id, enabled).await
+    services.plugins.set_plugin_enabled(&id, enabled).await
 }
 
 /// Removes a plugin; its data is kept.
 #[tauri::command]
-pub async fn addon_remove(services: Shared<'_>, id: String) -> Result<(), CommandError> {
-    services.plugins.remove_addon(&id).await
+pub async fn plugin_remove(services: Shared<'_>, id: String) -> Result<(), CommandError> {
+    services.plugins.remove_plugin(&id).await
 }
 
 /// Takes back what a plugin may run on another machine.
 #[tauri::command]
-pub async fn addon_revoke_machine(
+pub async fn plugin_revoke_machine(
     services: Shared<'_>,
     id: String,
     machine: String,
@@ -193,28 +193,28 @@ pub async fn addon_revoke_machine(
 
 /// Moves a plugin one place earlier or later in the order plugins load in.
 #[tauri::command]
-pub async fn addon_move(
+pub async fn plugin_move(
     services: Shared<'_>,
     id: String,
     earlier: bool,
 ) -> Result<(), CommandError> {
-    services.plugins.move_addon(&id, earlier).await
+    services.plugins.move_plugin(&id, earlier).await
 }
 
 /// Copies and checks the package in a folder, and says what installing it would do.
 #[tauri::command]
-pub async fn addon_inspect(
+pub async fn plugin_inspect(
     services: Shared<'_>,
     folder: String,
     install_as: Option<String>,
 ) -> Result<Value, CommandError> {
-    services.plugins.inspect_addon(folder, install_as).await
+    services.plugins.inspect_plugin(folder, install_as).await
 }
 
 /// Fetches the package in a repository, checks it, and says what installing it would
 /// do.
 #[tauri::command]
-pub async fn addon_inspect_git(
+pub async fn plugin_inspect_git(
     services: Shared<'_>,
     source: String,
     path: Option<String>,
@@ -227,25 +227,25 @@ pub async fn addon_inspect_git(
     }
     services
         .plugins
-        .inspect_addon_git(source, path, install_as)
+        .inspect_plugin_git(source, path, install_as)
         .await
 }
 
 /// Looks in the repository a plugin was installed from for something newer, and says
 /// what installing it would do.
 #[tauri::command]
-pub async fn addon_check_update(services: Shared<'_>, id: String) -> Result<Value, CommandError> {
-    services.plugins.check_addon_update(id).await
+pub async fn plugin_check_update(services: Shared<'_>, id: String) -> Result<Value, CommandError> {
+    services.plugins.check_plugin_update(id).await
 }
 
 /// Installs a package the user agreed to, by the token its inspection gave.
 #[tauri::command]
-pub async fn addon_install(services: Shared<'_>, token: u64) -> Result<Value, CommandError> {
-    services.plugins.install_addon(token).await
+pub async fn plugin_install(services: Shared<'_>, token: u64) -> Result<Value, CommandError> {
+    services.plugins.install_plugin(token).await
 }
 
 /// Lets go of a package the user did not install.
 #[tauri::command]
-pub fn addon_cancel(services: Shared<'_>, token: u64) {
-    services.plugins.cancel_addon(token);
+pub fn plugin_cancel(services: Shared<'_>, token: u64) {
+    services.plugins.cancel_plugin(token);
 }

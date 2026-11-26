@@ -443,7 +443,7 @@ impl Control {
             return Err(AppError::new(
                 codes::NOT_FOUND,
                 match words.first() {
-                    Some(word) => format!("no add-on adds a verb that begins with {word}"),
+                    Some(word) => format!("no plugin adds a verb that begins with {word}"),
                     None => "no verb was named".to_owned(),
                 },
             ));
@@ -729,10 +729,10 @@ impl Control {
 mod endpoint;
 mod requests;
 
-use endpoint::*;
-pub use endpoint::{bind, endpoint, launch_running, serve};
 #[cfg(test)]
 pub use endpoint::serve_client;
+use endpoint::*;
+pub use endpoint::{bind, endpoint, launch_running, serve};
 
 #[cfg(test)]
 mod tests;

@@ -12,7 +12,7 @@
 import type { SettingsPage } from "./model.ts";
 
 /** The headings pages are listed under, in the order the headings are shown. */
-export const PAGE_GROUPS = ["Application", "Workspace", "Add-ons"] as const;
+export const PAGE_GROUPS = ["Application", "Workspace", "Plugins"] as const;
 
 /** One line of the list of pages: a heading, or a page under it. */
 export type NavEntry =

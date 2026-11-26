@@ -20,7 +20,7 @@ import { CoreGate } from "../shell/boot/gate.ts";
 import { NoticeStore, sentence } from "../shell/notices.ts";
 import { TauriCarrier, type Carrier } from "../transport/carrier.ts";
 import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
-import type { AddonEntry } from "./addons.ts";
+import type { InstalledPlugin } from "./plugins.ts";
 import { NO_LISTS, type SettingsLists, type SettingWrite } from "./model.ts";
 import { SettingsRegistry } from "./registry.ts";
 
@@ -54,9 +54,9 @@ export interface SettingsApp {
   /** The Rex servers there are, and how each stands. */
   readonly rex: RexStore;
   /** The plugins installed, in the order they load in; null until they are known. */
-  readonly addons: StoreApi<{ readonly list: readonly AddonEntry[] | null }>;
+  readonly plugins: StoreApi<{ readonly list: readonly InstalledPlugin[] | null }>;
   /** Asks for the plugins again, as after a change made here. */
-  refreshAddons(): void;
+  refreshPlugins(): void;
   /** Has the user pick a folder to install a plugin from; null if they pick none. */
   pickFolder(): Promise<string | null>;
   /** Asks the core to make a change to the user's file. */
@@ -91,7 +91,7 @@ export async function startSettings(
   const registry = new SettingsRegistry();
   const rex = createRexStore();
   const lists = createStore<SettingsLists>()(() => NO_LISTS);
-  const addons = createStore<{ readonly list: readonly AddonEntry[] | null }>()(() => ({
+  const plugins = createStore<{ readonly list: readonly InstalledPlugin[] | null }>()(() => ({
     list: null,
   }));
   const shown = createStore<ShownPage>()((set, get) => ({
@@ -143,12 +143,12 @@ export async function startSettings(
   });
 
   // Answers are numbered so that one that comes late does not undo a newer one.
-  let addonsAsked = 0;
-  const refreshAddons = (): void => {
-    const asked = ++addonsAsked;
-    client.addonsList().then(
+  let pluginsAsked = 0;
+  const refreshPlugins = (): void => {
+    const asked = ++pluginsAsked;
+    client.pluginsList().then(
       (listed) => {
-        if (asked === addonsAsked) addons.setState({ list: listed.plugins });
+        if (asked === pluginsAsked) plugins.setState({ list: listed.plugins });
       },
       () => undefined,
     );
@@ -160,7 +160,7 @@ export async function startSettings(
       case "plugins_changed":
       case "contributions_changed":
       case "plugin_state":
-        refreshAddons();
+        refreshPlugins();
         break;
       case "profiles_changed":
         takeProfiles(notice);
@@ -248,7 +248,7 @@ export async function startSettings(
 
   // This window answers nothing the core asks: it shows no terminals.
   gate.goLive(follow);
-  refreshAddons();
+  refreshPlugins();
 
   return {
     config,
@@ -261,8 +261,8 @@ export async function startSettings(
     windowState,
     shown,
     rex,
-    addons,
-    refreshAddons,
+    plugins,
+    refreshPlugins,
     pickFolder: async () => {
       // The system's own folder picker, loaded only when it is wanted.
       const { open } = await import("@tauri-apps/plugin-dialog");

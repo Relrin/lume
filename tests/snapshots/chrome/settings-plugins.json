@@ -72,11 +72,14 @@
               },
               {
                 "role": "heading",
-                "name": "Add-ons"
+                "name": "Plugins"
               },
               {
                 "role": "button",
-                "name": "Manage add-ons"
+                "name": "Manage plugins",
+                "state": {
+                  "current": "page"
+                }
               },
               {
                 "role": "button",
@@ -84,10 +87,7 @@
               },
               {
                 "role": "button",
-                "name": "Toolsv0.4.0",
-                "state": {
-                  "current": "page"
-                }
+                "name": "Toolsv0.4.0"
               },
               {
                 "role": "button",
@@ -108,7 +108,7 @@
             "parts": [
               {
                 "role": "heading",
-                "name": "Tools"
+                "name": "Manage plugins"
               },
               {
                 "role": "button",
@@ -118,27 +118,84 @@
           },
           {
             "role": "heading",
-            "name": "Permissions"
-          },
-          {
-            "role": "heading",
-            "name": "Other machines"
+            "name": "Install"
           },
           {
             "role": "button",
-            "name": "Revoke what Tools may run on Ubuntu (WSL)"
+            "name": "Install from folder…"
+          },
+          {
+            "role": "textbox"
+          },
+          {
+            "role": "textbox",
+            "name": "The folder of the repository the plugin is in"
           },
           {
             "role": "button",
-            "name": "Revoke what Tools may run on root@Debian (WSL)"
+            "name": "Look at it…"
           },
           {
             "role": "heading",
-            "name": "Health"
+            "name": "Installed"
           },
           {
-            "role": "heading",
-            "name": "Activity"
+            "role": "button",
+            "name": "Load Performance metrics earlier"
+          },
+          {
+            "role": "button",
+            "name": "Load Performance metrics later"
+          },
+          {
+            "role": "button",
+            "name": "Remove"
+          },
+          {
+            "role": "switch",
+            "state": {
+              "checked": "true"
+            }
+          },
+          {
+            "role": "button",
+            "name": "Load Tools earlier"
+          },
+          {
+            "role": "button",
+            "name": "Load Tools later"
+          },
+          {
+            "role": "button",
+            "name": "Check for update"
+          },
+          {
+            "role": "button",
+            "name": "Remove"
+          },
+          {
+            "role": "switch",
+            "state": {
+              "checked": "true"
+            }
+          },
+          {
+            "role": "button",
+            "name": "Load Core tools earlier"
+          },
+          {
+            "role": "button",
+            "name": "Load Core tools later"
+          },
+          {
+            "role": "button",
+            "name": "Remove"
+          },
+          {
+            "role": "switch",
+            "state": {
+              "checked": "false"
+            }
           }
         ]
       }

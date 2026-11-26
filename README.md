@@ -21,7 +21,7 @@ the approach with adapting software to user's workflows
 - An ability to run in a standalone mode and/or with [Rex server](https://www.superlogical.com/) (optional): on this
   computer, over SSH or over HTTPS. `lume --rex [server]` starts on one
 - No built-in coding agents or other tools: a user decides what to use
-- Supports addons in TypeScript / JavaScript
+- Supports plugins in TypeScript / JavaScript
 - Supports Windows, Linux and macOS
 
 ## Development

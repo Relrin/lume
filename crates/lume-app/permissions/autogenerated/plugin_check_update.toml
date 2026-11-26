@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugin-check-update"
+description = "Enables the plugin_check_update command without any pre-configured scope."
+commands.allow = ["plugin_check_update"]
+
+[[permission]]
+identifier = "deny-plugin-check-update"
+description = "Denies the plugin_check_update command without any pre-configured scope."
+commands.deny = ["plugin_check_update"]

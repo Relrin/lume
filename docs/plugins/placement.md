@@ -536,5 +536,5 @@ out, or places it by its order, and says so in a warning.
 | A picture cannot be read, or the pictures are too large together       | The picture is left out.            |
 
 The warnings are shown as `note:` lines under the plugin in `lume plugin list`, and with the plugin
-under **Add-ons** in the settings. Whether plugins may run one of the application's commands is
+under **Plugins** in the settings. Whether plugins may run one of the application's commands is
 known only to the running application, so those warnings are shown in the settings alone.

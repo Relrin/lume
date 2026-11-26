@@ -3473,9 +3473,9 @@ fn a_plugin_from_a_repository_is_pinned_and_an_update_that_asks_for_more_waits_f
     app.quit();
 }
 
-/// Where the add-ons repository is on this machine: where `LUME_ADDONS` says, or beside
+/// Where the lume-addons repository is on this machine: where `LUME_ADDONS` says, or beside
 /// this repository.
-fn addons() -> Option<PathBuf> {
+fn plugins_repo() -> Option<PathBuf> {
     let folder = std::env::var_os("LUME_ADDONS").map_or_else(
         || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../lume-addons"),
         PathBuf::from,
@@ -3503,12 +3503,12 @@ fn status_text(plugin: &Value, item: &str) -> Option<String> {
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn the_git_review_plugin_shows_the_changes_of_a_real_repository() {
     const ID: &str = "addons.git-review";
-    let Some(plugin) = addons()
+    let Some(plugin) = plugins_repo()
         .map(|folder| folder.join("plugins").join("git-review"))
         .filter(|plugin| plugin.join("dist").join("host.js").is_file())
     else {
         println!(
-            "skipped: the add-ons repository is not beside this one, and LUME_ADDONS names \
+            "skipped: the lume-addons repository is not beside this one, and LUME_ADDONS names \
              none with plugins/git-review built in it"
         );
         return;

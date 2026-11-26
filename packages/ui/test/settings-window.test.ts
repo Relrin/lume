@@ -5,7 +5,7 @@ import { createStore } from "zustand/vanilla";
 
 import type { ConfigState } from "../src/config/store.ts";
 import type { ConfigView } from "../src/core/types.ts";
-import type { AddonEntry } from "../src/settings/addons.ts";
+import type { InstalledPlugin } from "../src/settings/plugins.ts";
 import type { SettingsApp, ShownPage } from "../src/settings/boot.ts";
 import type { SettingsLists, SettingsPage } from "../src/settings/model.ts";
 import { SettingsRegistry } from "../src/settings/registry.ts";
@@ -22,7 +22,7 @@ vi.mock("../src/shell/Notices.tsx", () => ({ Notices: () => null }));
 function app(
   held: ConfigView,
   page: string | null = null,
-  addons: readonly AddonEntry[] | null = [],
+  plugins: readonly InstalledPlugin[] | null = [],
 ): SettingsApp {
   return {
     // What is drawn without a page is what a store starts with, so this one starts
@@ -36,10 +36,10 @@ function app(
     windowState: createWindowStateStore(),
     shown: createStore<ShownPage>()(() => ({ page, asked: 0, show: () => undefined })),
     rex: createRexStore(),
-    addons: createStore<{ readonly list: readonly AddonEntry[] | null }>()(() => ({
-      list: addons,
+    plugins: createStore<{ readonly list: readonly InstalledPlugin[] | null }>()(() => ({
+      list: plugins,
     })),
-    refreshAddons: () => undefined,
+    refreshPlugins: () => undefined,
     pickFolder: () => Promise.resolve(null),
     write: () => Promise.resolve(),
     openFile: () => undefined,
@@ -106,7 +106,7 @@ describe("the settings window", () => {
       id: "metrics",
       label: "Performance metrics",
       icon: "metrics",
-      group: "Add-ons",
+      group: "Plugins",
       meta: "v1.2",
       blurb: "Meters in the status bar.",
       groups: [],
@@ -114,7 +114,7 @@ describe("the settings window", () => {
     };
     made.registry.register(extra);
     const html = markup(made);
-    expect(html).toContain("<h4>Add-ons</h4>");
+    expect(html).toContain("<h4>Plugins</h4>");
     expect(html).toContain('<span class="settings-nav-meta">v1.2</span>');
     expect(html).toContain("<h1>Performance metrics</h1>");
     expect(html).toContain('<span class="settings-meta">v1.2</span>');
@@ -126,7 +126,7 @@ describe("the settings window", () => {
   });
 
   it("manages the plugins on a page of its own, and gives each its page in the order they load in", () => {
-    const tools: AddonEntry = {
+    const tools: InstalledPlugin = {
       id: "acme.tools",
       manifestId: "acme.tools",
       name: "Tools",
@@ -166,7 +166,7 @@ describe("the settings window", () => {
         },
       ],
     };
-    const changed: AddonEntry = {
+    const changed: InstalledPlugin = {
       ...tools,
       id: "acme.changed",
       manifestId: "acme.changed",
@@ -176,7 +176,7 @@ describe("the settings window", () => {
       audit: [],
       log: [],
     };
-    const fetched: AddonEntry = {
+    const fetched: InstalledPlugin = {
       ...changed,
       id: "acme.fetched",
       manifestId: "acme.fetched",
@@ -186,7 +186,7 @@ describe("the settings window", () => {
       sourceKind: "git",
       commit: "4f9d2c81a07be35d6c1e9a0b7f2d4c6e8a1b3d5f",
     };
-    const linked: AddonEntry = {
+    const linked: InstalledPlugin = {
       ...changed,
       id: "me.work",
       manifestId: "me.work",
@@ -196,7 +196,7 @@ describe("the settings window", () => {
       sourceKind: "link",
       dev: true,
     };
-    const manage = markup(app(view(), "addons", [tools, changed, fetched, linked]));
+    const manage = markup(app(view(), "plugins", [tools, changed, fetched, linked]));
     expect(manage).toContain("Install from git");
     // Only what came from a repository can be looked for a newer one of.
     expect(manage.match(/Check for update/g)).toHaveLength(1);
@@ -205,16 +205,16 @@ describe("the settings window", () => {
     );
     expect(manage).toContain("Linked to D:/src/work");
     expect(manage.match(/class="dev-badge"/g)).toHaveLength(1);
-    expect(manage).toContain("<h4>Add-ons</h4>");
-    expect(manage).toContain("<h1>Manage add-ons</h1>");
+    expect(manage).toContain("<h4>Plugins</h4>");
+    expect(manage).toContain("<h1>Manage plugins</h1>");
     expect(manage).toContain("Install from folder…");
-    expect(manage).toContain('data-addon="acme.tools"');
+    expect(manage).toContain('data-plugin="acme.tools"');
     expect(manage).toContain("Uses acme.core as installed under acme.core-2.");
     expect(manage).toContain("so it is not used. Install it again to use it.");
     expect(manage).toMatch(/aria-label="Load Tools earlier" disabled=""/);
     expect(manage.indexOf("Tools</span>")).toBeLessThan(manage.indexOf("Changed</span>"));
 
-    const page = markup(app(view(), "addon:acme.tools", [tools]));
+    const page = markup(app(view(), "plugin:acme.tools", [tools]));
     expect(page).toContain("<h1>Tools</h1>");
     expect(page).toContain("<h2>Permissions</h2>");
     expect(page).toContain("Run these programs, with any arguments: git");
@@ -222,7 +222,7 @@ describe("the settings window", () => {
     expect(page).toContain("<h2>Other machines</h2>");
     expect(page).toContain("It may run there, with any arguments: git, cargo");
     expect(page).toContain('aria-label="Revoke what Tools may run on Ubuntu (WSL)"');
-    expect(markup(app(view(), "addon:acme.tools", [{ ...tools, machines: [] }]))).not.toContain(
+    expect(markup(app(view(), "plugin:acme.tools", [{ ...tools, machines: [] }]))).not.toContain(
       "Other machines",
     );
     expect(page).toContain("<h2>Health</h2>");

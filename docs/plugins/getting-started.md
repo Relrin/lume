@@ -133,7 +133,7 @@ here too, with their stacks.
 
 ## See it in the settings
 
-Open the settings and choose **Add-ons**. The plugin is listed there with its version, what it may
+Open the settings and choose **Plugins**. The plugin is listed there with its version, what it may
 do, how it fares, the end of its log and its latest audit entries. From there it can be turned off
 and on, removed, and moved in the order plugins load in.
 

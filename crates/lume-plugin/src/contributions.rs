@@ -36,11 +36,11 @@ const SUBMENU_DEPTH_MAX: usize = 3;
 const OWN_GROUP: &str = "Settings";
 
 /// The heading the plugins' own pages are listed under in the settings window.
-pub const ADD_ONS: &str = "Add-ons";
+pub const PLUGINS_GROUP: &str = "Plugins";
 
 /// What a page of a plugin's own settings is called by: its install.
 pub fn page_id(local: &str) -> String {
-    format!("addon:{local}")
+    format!("plugin:{local}")
 }
 
 /// One install that can be used, as this needs it.
@@ -1574,7 +1574,7 @@ fn settings(installs: &[Install<'_>], out: &mut Contributions) {
                 "id": page_id(local),
                 "label": install.name,
                 "icon": "plugin",
-                "group": ADD_ONS,
+                "group": PLUGINS_GROUP,
                 "blurb": manifest.description.clone().unwrap_or_default(),
                 "groups": headings,
                 "meta": format!("v{}", manifest.version),
@@ -2184,7 +2184,7 @@ default = ""
         assert_eq!(fragment["additionalProperties"], false);
         assert_eq!(fragment["properties"]["rate"]["enum"], json!([1, 2]));
         let rate = &fragment["properties"]["rate"]["x-lume-settings"];
-        assert_eq!(rate["page"], "addon:acme.meters");
+        assert_eq!(rate["page"], "plugin:acme.meters");
         assert_eq!(rate["group"], "Sampling");
         assert_eq!(rate["control"], "select");
         assert_eq!(rate["when"]["path"], "plugins.\"acme.meters\".cpu");
@@ -2200,7 +2200,7 @@ default = ""
         );
         let page = &out.settings.pages[0];
         assert_eq!(page["groups"], json!(["Status bar meters", "Sampling"]));
-        assert_eq!(page["group"], ADD_ONS);
+        assert_eq!(page["group"], PLUGINS_GROUP);
         assert_eq!(page["meta"], "v1.2.0");
 
         let base = lume_config::config_schema();
@@ -2212,7 +2212,7 @@ default = ""
         let pages = composed[lume_config::settings::PAGES_KEY]
             .as_array()
             .unwrap();
-        assert_eq!(pages.last().unwrap()["id"], "addon:acme.meters");
+        assert_eq!(pages.last().unwrap()["id"], "plugin:acme.meters");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Installing and managing plugins
 
-Plugins are installed and managed with `lume plugin`, or under **Add-ons** in the settings. The
+Plugins are installed and managed with `lume plugin`, or under **Plugins** in the settings. The
 commands work on what is installed and need no Lume running. A running Lume sees what they change
 and follows it without being started again.
 
@@ -394,7 +394,7 @@ lines are warnings about things that could not be placed or read as the manifest
 
 ## In the settings
 
-**Add-ons** in the settings window shows every installed plugin in the order they load in, with:
+**Plugins** in the settings window shows every installed plugin in the order they load in, with:
 
 - its name, version, description and where it was installed from;
 - whether it is turned on, and whether it can be used, with the reason if not;

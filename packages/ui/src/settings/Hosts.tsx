@@ -53,10 +53,10 @@ function Row({
         <div id={label}>{name}</div>
         <div>{line}</div>
       </div>
-      <div className="addon-actions">
+      <div className="plugin-actions">
         {removing && remove ? (
           <>
-            <span className="addon-ask">Remove {name}?</span>
+            <span className="plugin-ask">Remove {name}?</span>
             <Button onPress={() => setRemoving(false)}>Keep</Button>
             <Button primary onPress={remove}>
               Remove
