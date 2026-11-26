@@ -1,0 +1,33 @@
+# What the application ships that is neither a Rust crate nor an npm package it depends
+# on. `cargo xtask notices` lists these beside the crates and packages it finds itself.
+#
+# libghostty-vt is not listed here: its version comes from tools.toml, and the code it
+# links in from upstream's own report of its third-party code, which is read from the
+# unpacked source.
+#
+# `files` are relative to the repository root. `font = true` lets a component be under
+# the SIL Open Font License, which is accepted for fonts only.
+
+[[component]]
+name = "Inter"
+version = "4.1"
+license = "OFL-1.1"
+url = "https://github.com/rsms/inter"
+files = ["packages/ui/src/fonts/OFL-Inter.txt"]
+font = true
+
+[[component]]
+name = "JetBrains Mono"
+version = "2.305"
+license = "OFL-1.1"
+url = "https://github.com/JetBrains/JetBrainsMono"
+files = ["packages/ui/src/fonts/OFL.txt"]
+font = true
+
+# The drawings copied from lucide-static and simple-icons into the page. The notice next
+# to them is written by the same script, with each package's version and licence.
+[[component]]
+name = "Lucide and Simple Icons glyphs"
+license = "ISC AND MIT AND CC0-1.0"
+url = "https://lucide.dev"
+files = ["packages/ui/src/icons/NOTICE.md"]

@@ -1,15 +1,26 @@
 name: Release
 
-# A tag of a version (v*) gets a release that carries what a plugin's own repository
-# builds against: @lume/plugin-api and @lume/plugin-kit as packed packages, and the
-# SHA-256 of each. A repository of plugins names the tag and the hashes, fetches the
-# packages once, and checks them.
+# A tag of a version (`v<version>`) releases that commit: the full checks, then, once the
+# `release` environment approves, a GitHub release for the tag. GitHub attaches the
+# source at the tag and writes the notes from what was merged since the previous
+# release. The release also carries what a plugin's own repository builds against:
+# @lume/plugin-api and @lume/plugin-kit as packed packages, with the SHA-256 of each. A
+# version with a pre-release part is published as a pre-release.
+#
+# Started by hand, the workflow does the same from the chosen branch and publishes
+# nothing: the packed packages are kept with the run. That is how a change to this
+# workflow is tried.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
-permissions:
-  contents: write
+# Each job asks for what it needs.
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,28 +30,62 @@ env:
     libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
 jobs:
+  check:
+    name: Version
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      channel: ${{ steps.check.outputs.channel }}
+      tag: ${{ steps.check.outputs.tag }}
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # A tag must name the workspace's version. A run started by hand checks the
+      # version alone and publishes nothing.
+      - name: Check the version
+        id: check
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_TYPE" = tag ]; then
+            cargo xtask release check --tag "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            cargo xtask release check >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+  test:
+    name: Checks
+    needs: check
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      release: true
+
+  # What a plugin's own repository builds against. A repository of plugins names the tag
+  # and the packages' hashes, fetches them once, and checks them.
   plugin-packages:
     name: Plugin packages
-    runs-on: ubuntu-latest
+    needs: check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install system packages
         run: sudo apt-get update && sudo apt-get install -y $LINUX_PACKAGES
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      # The JavaScript packages are checked against the lockfile's hashes as they are
+      # installed, so taking them from the cache is safe. Nothing else is cached here:
+      # what is published is built from the tagged source alone.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .node-version
           cache: pnpm
-      - uses: Swatinem/rust-cache@v2
-      - name: Cache pinned tools and libghostty-vt builds
-        uses: actions/cache@v4
-        with:
-          path: |
-            .tools
-            vendor/ghostty
-            target/vt
-            packages/vt/dist
-          key: vt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools.toml') }}
       - run: cargo xtask setup
       - name: Pack the typings and the kit
         run: cargo xtask api --pack
@@ -51,10 +96,46 @@ jobs:
           cd target/release-packages
           sha256sum *.tgz > plugin-packages.sha256
           cat plugin-packages.sha256
-      - name: Attach them to the tag's release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: plugin-packages
+          path: target/release-packages/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [check, test, plugin-packages]
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    # The environment's required reviewers approve each release.
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.check.outputs.tag }}
+      VERSION: ${{ needs.check.outputs.version }}
+      CHANNEL: ${{ needs.check.outputs.channel }}
+    steps:
+      - name: Fetch the plugin packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: plugin-packages
+          path: release
+      # The notes can be edited on the release's page afterwards.
+      - name: Publish the release
+        shell: bash
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "" --verify-tag
-          gh release upload "$TAG" target/release-packages/* --clobber
+          flags=()
+          if [ "$CHANNEL" = preview ]; then
+            flags+=(--prerelease)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # A run that is tried again replaces what the first one uploaded, and leaves
+            # the notes as they are.
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" --verify-tag --title "Lume $VERSION" \
+              --generate-notes "${flags[@]}" release/*
+          fi

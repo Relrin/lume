@@ -16,7 +16,7 @@ serde.workspace = true
 # Written here rather than through the workspace: the workspace's entry keeps ureq's
 # default features, which bring Mozilla's root certificates. This crate trusts the
 # system's certificates only, through the platform verifier.
-ureq = { version = "3", default-features = false, features = [
+ureq = { version = "=3.5.2", default-features = false, features = [
   "_ring",
   "platform-verifier",
   "rustls-no-provider",

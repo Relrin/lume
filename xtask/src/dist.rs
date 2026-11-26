@@ -7,8 +7,12 @@
 //! - a portable archive holding the three programs, which runs from wherever it is
 //!   unpacked;
 //! - with `--installers`, the platform's installers as well, made by the Tauri bundler:
-//!   an installer on Windows, a disk image on macOS, an AppImage and a Debian package on
-//!   Linux.
+//!   an installer on Windows, a disk image on macOS, an AppImage, a Debian and an RPM
+//!   package on Linux.
+//!
+//! Each is named `lume-<version>-<os>-<arch>` with the kind's own ending, carries the
+//! licence and the third-party notices, and is listed with its SHA-256 in `SHA256SUMS`
+//! beside them.
 //!
 //! Nothing is signed. The bundler fetches the tools it needs for some installers the
 //! first time it makes one, which is why they are asked for and not made by default.
@@ -18,7 +22,9 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-use crate::{fetch, paths, run, vt};
+use sha2::{Digest, Sha256};
+
+use crate::{fetch, notices, paths, run, vt};
 
 /// The application's configuration for the bundler, laid over the one it is built with.
 const BUNDLE_CONFIG: &str = "crates/lume-app/tauri.dist.conf.json";
@@ -66,6 +72,9 @@ fn package_name() -> String {
     )
 }
 
+/// The third-party notices, as they are named wherever they are shipped.
+const NOTICES: &str = "THIRD-PARTY-NOTICES.txt";
+
 /// The programs that are shipped, each beside the others: the application looks for
 /// the session host there, and the console command for both.
 const PROGRAMS: [&str; 3] = ["lume-gui", "lume-host", "lume"];
@@ -89,6 +98,7 @@ fn portable() -> Result<PathBuf> {
         copy(&release_dir().join(library), &folder.join(library))?;
     }
     copy(&paths::root().join("LICENSE"), &folder.join("LICENSE"))?;
+    copy(&dist_dir().join(NOTICES), &folder.join(NOTICES))?;
 
     // The system's `tar` writes both forms; the extension picks the one each platform's
     // users expect to open without installing anything.
@@ -115,7 +125,7 @@ fn bundles() -> Result<&'static str> {
     Ok(match std::env::consts::OS {
         "windows" => "nsis",
         "macos" => "app,dmg",
-        "linux" => "appimage,deb",
+        "linux" => "appimage,deb,rpm",
         other => bail!("no installer is made for {other}"),
     })
 }
@@ -135,19 +145,29 @@ fn installers() -> Result<Vec<PathBuf>> {
         )?;
     }
 
-    // The libraries go into the installation folder itself, beside the programs.
-    let resources: serde_json::Map<String, serde_json::Value> = libraries()
+    // The libraries go into the installation folder itself, beside the programs, and
+    // the notices with them.
+    let mut resources: serde_json::Map<String, serde_json::Value> = libraries()
         .into_iter()
         .map(|library| {
             let from = release_dir().join(library).display().to_string();
             (from, serde_json::Value::String(library.to_owned()))
         })
         .collect();
-    let libraries_config = serde_json::json!({ "bundle": { "resources": resources } }).to_string();
-    let mut args = vec!["exec", "tauri", "build", "--config", BUNDLE_CONFIG];
-    if !resources.is_empty() {
-        args.extend(["--config", libraries_config.as_str()]);
-    }
+    resources.insert(
+        dist_dir().join(NOTICES).display().to_string(),
+        serde_json::Value::String(NOTICES.to_owned()),
+    );
+    let resources_config = serde_json::json!({ "bundle": { "resources": resources } }).to_string();
+    let mut args = vec![
+        "exec",
+        "tauri",
+        "build",
+        "--config",
+        BUNDLE_CONFIG,
+        "--config",
+        resources_config.as_str(),
+    ];
     args.extend(["--bundles", bundles()?]);
     run::pnpm(&args)?;
 
@@ -160,13 +180,13 @@ fn installers() -> Result<Vec<PathBuf>> {
         }
         for file in std::fs::read_dir(&kind)? {
             let file = file?.path();
-            let wanted = file.extension().is_some_and(|extension| {
-                ["exe", "dmg", "AppImage", "deb"]
-                    .iter()
-                    .any(|known| extension == *known)
-            });
-            if wanted && file.is_file() {
-                let to = dist_dir().join(file.file_name().context("a file name")?);
+            let ending = file
+                .extension()
+                .and_then(|extension| shipped_ending(&extension.to_string_lossy()));
+            if let Some(ending) = ending
+                && file.is_file()
+            {
+                let to = dist_dir().join(format!("{}{ending}", package_name()));
                 copy(&file, &to)?;
                 copied.push(to);
             }
@@ -176,6 +196,34 @@ fn installers() -> Result<Vec<PathBuf>> {
         bail!("the bundler left no installer in {}", made.display());
     }
     Ok(copied)
+}
+
+/// The ending a shipped installer is named with, by the extension the bundler gave it;
+/// `None` for what the bundler leaves that is not shipped.
+fn shipped_ending(extension: &str) -> Option<&'static str> {
+    Some(match extension {
+        "exe" => "-setup.exe",
+        "dmg" => ".dmg",
+        "AppImage" => ".AppImage",
+        "deb" => ".deb",
+        "rpm" => ".rpm",
+        _ => return None,
+    })
+}
+
+/// Writes `SHA256SUMS` beside the files, in the form `sha256sum -c` reads.
+fn checksums(files: &[PathBuf]) -> Result<PathBuf> {
+    let mut lines = String::new();
+    for file in files {
+        let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+        let digest = Sha256::digest(&bytes);
+        let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let name = file.file_name().context("a file name")?.to_string_lossy();
+        lines.push_str(&format!("{hex}  {name}\n"));
+    }
+    let path = dist_dir().join("SHA256SUMS");
+    std::fs::write(&path, lines).with_context(|| format!("writing {}", path.display()))?;
+    Ok(path)
 }
 
 /// Builds for release and packs the result.
@@ -198,11 +246,13 @@ pub fn run(with_installers: bool) -> Result<()> {
     ])?;
 
     std::fs::create_dir_all(dist_dir())?;
+    notices::write(&paths::host_triple()?, &dist_dir().join(NOTICES))?;
     let mut made = vec![portable()?];
     if with_installers {
         made.extend(installers()?);
     }
-    for file in &made {
+    let sums = checksums(&made)?;
+    for file in made.iter().chain([&sums]) {
         println!("dist: {}", file.display());
     }
     Ok(())

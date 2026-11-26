@@ -29,50 +29,50 @@ lume-vt = { path = "crates/lume-vt" }
 lume-vt-sys = { path = "crates/lume-vt-sys" }
 
 # Third-party
-anyhow = "1"
-arboard = { version = "3.7", default-features = false }
-async-trait = "0.1"
-bindgen = "0.73"
-flate2 = "1"
-fontdb = "0.24"
+anyhow = "=1.0.104"
+arboard = { version = "=3.7.0", default-features = false }
+async-trait = "=0.1.92"
+bindgen = "=0.73.2"
+flate2 = "=1.1.11"
+fontdb = "=0.24.0"
 data-encoding = "=2.11.1"
 futures-util = { version = "=0.3.34", default-features = false, features = ["sink", "std"] }
 getrandom = "=0.3.4"
-keyring = "4"
-keyring-core = "1"
-libloading = "0.8"
-libc = "0.2"
-notify = "8"
-portable-pty = "0.9"
-proptest = "1"
+keyring = "=4.2.0"
+keyring-core = "=1.0.1"
+libloading = "=0.8.9"
+libc = "=0.2.191"
+notify = "=8.2.2"
+portable-pty = "=0.9.0"
+proptest = "=1.12.0"
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
-rquickjs = "0.14"
+rquickjs = "=0.14.0"
 rustls = { version = "=0.23.46", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 rustls-platform-verifier = "=0.7.1"
-schemars = "1"
-semver = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.11"
-static_vcruntime = "3"
-tar = { version = "0.4", default-features = false }
-tauri = "2"
-tauri-build = "2"
+schemars = "=1.2.3"
+semver = "=1.0.28"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+sha2 = "=0.11.1"
+static_vcruntime = "=3.0.0"
+tar = { version = "=0.4.46", default-features = false }
+tauri = "=2.12.5"
+tauri-build = "=2.7.4"
 tauri-plugin-dialog = "=2.8.4"
 tauri-plugin-notification = "=2.8.1"
-thiserror = "2"
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+thiserror = "=2.0.21"
+tokio = { version = "=1.54.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
-toml = "1"
-toml_edit = "0.25"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
-ureq = "3"
-url = "2"
-windows-sys = "0.61"
-x11rb = { version = "0.13", default-features = false }
-zbus-secret-service-keyring-store = "1"
+toml = "=1.2.1"
+toml_edit = "=0.25.19"
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "std"] }
+ureq = "=3.5.2"
+url = "=2.5.8"
+windows-sys = "=0.61.2"
+x11rb = { version = "=0.13.2", default-features = false }
+zbus-secret-service-keyring-store = "=1.0.1"
 zeroize = "=1.9.1"
 
 [workspace.lints.rust]

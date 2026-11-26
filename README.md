@@ -51,15 +51,16 @@ report and exits.
 These are the commands you will reach for most often. `cargo xtask` with no arguments lists them
 all.
 
-| Command              | What it does                                                          |
-| -------------------- | --------------------------------------------------------------------- |
-| `cargo xtask test`   | Run the Rust and JavaScript tests                                     |
-| `cargo xtask lint`   | Check formatting, run clippy, licence checks and the JS linters       |
-| `cargo xtask e2e`    | Run the suites that need a real window, including the UI scenes       |
-| `cargo xtask bench`  | Measure performance against the budgets in `tests/bench`              |
-| `cargo xtask dist`   | Build release packages (add `--installers` for installers)            |
-| `cargo xtask types`  | Regenerate the UI's TypeScript copy of the core's types               |
-| `cargo xtask schema` | Regenerate the JSON Schemas for settings, themes and plugin manifests |
+| Command               | What it does                                                          |
+| --------------------- | --------------------------------------------------------------------- |
+| `cargo xtask test`    | Run the Rust and JavaScript tests                                     |
+| `cargo xtask lint`    | Check formatting, run clippy, licence checks and the JS linters       |
+| `cargo xtask e2e`     | Run the suites that need a real window, including the UI scenes       |
+| `cargo xtask bench`   | Measure performance against the budgets in `tests/bench`              |
+| `cargo xtask dist`    | Build release packages (add `--installers` for installers)            |
+| `cargo xtask notices` | Write the third-party notices and check every shipped licence         |
+| `cargo xtask types`   | Regenerate the UI's TypeScript copy of the core's types               |
+| `cargo xtask schema`  | Regenerate the JSON Schemas for settings, themes and plugin manifests |
 
 A few things are generated from the Rust code and kept in the repository: the UI's wire types, the
 JSON Schemas, the design tokens and the plugin API's typings. If you change the Rust definitions,

@@ -12,7 +12,10 @@ mod fetch;
 mod generate;
 mod latency;
 mod logic;
+mod notices;
 mod paths;
+mod pins;
+mod release;
 mod rex;
 mod rex_e2e;
 mod run;
@@ -68,6 +71,13 @@ Commands:
                console command into a portable archive in target/dist; with
                --installers, make the platform's installers too (the bundler may fetch
                tools to do so)
+  notices [--target <triple>] [--out <file>]
+               Write the third-party notices shipped with the application (for this
+               machine's target unless another is named) into target/dist, and fail
+               if anything shipped is under a licence that is not allowed
+  release check [--tag v<version>]
+               Check that a tag names the workspace version, which must be a valid
+               semantic version; prints the version and its channel
   compat --host-ref <ref> | --latest-release
                Build the session host as it was at a tag, branch or commit (or the
                newest release whose host runs on its own), and run this tree's backend
@@ -87,7 +97,7 @@ Commands:
   rex-api <dump> <revision>
                Keep the shapes of a Rex server's methods, from the output of
                `rex api call help.all`, in crates/lume-rex/api/<revision>.json
-  lint         Run format, clippy, licence and JS lint checks
+  lint         Run format, clippy, licence, pinned-version and JS lint checks
   dev          Run the app with hot reload
 ";
 
@@ -118,6 +128,8 @@ fn main() -> Result<()> {
         ["compat", "--host-ref", host_ref] => compat::run(host_ref),
         ["compat", "--latest-release"] => compat::run_latest_release(),
         ["dist", "--installers"] => dist::run(true),
+        ["notices", rest @ ..] => notices::run(rest),
+        ["release", rest @ ..] => release::run(rest),
         ["bench"] => bench("reference"),
         ["bench", "--profile", profile] => bench(profile),
         ["bench", "--views"] => {
@@ -220,6 +232,7 @@ fn test() -> Result<()> {
 fn lint() -> Result<()> {
     boundaries::check()?;
     artwork::check()?;
+    pins::check()?;
     vt::native(false)?;
     run::cargo(&["fmt", "--all", "--check"])?;
     run::cargo(&[
