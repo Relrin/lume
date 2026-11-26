@@ -2,22 +2,25 @@
 
 A cross-platform terminal with a focus on modularity and Rex server support
 
-The Lume project is a focused on bringing an idea of a terminal that built on a top of libghostty while embracing  
-the approach with adapting software to user's workflows
+Lume is a terminal built on [libghostty](https://github.com/ghostty-org/ghostty) and WebGPU. It
+keeps the core small and lets you shape the rest: your own plugins, your own layout of tabs, panes
+and panels, and, if you use one, sessions that live on a [Rex](https://www.superlogical.com/)
+server.
+
+![Lume with several panes open](docs/screenshots/lume_app.png)
 
 > [!NOTE]
-> Lume is a third-party client of the Rex server. It is not made, endorsed or supported by [Superlogical](https://www.superlogical.com/).
-> None of the logos and icons of Rex and Superlogical are used.
+> Lume is an unofficial, third-party client of the Rex server. It is not made, endorsed or
+> supported by [Superlogical](https://www.superlogical.com/), and uses none of the Rex or
+> Superlogical logos and icons. It started as a place to experiment and to cover my own needs.
 >
-> Keep in mind that this is an unofficial app that implemented for experimenting with features and cover my own needs.
->
-> In order to work with Rex server, you would need to be signed up for a beta and install the latest binaries. The
-> Rex multiplexer is still in the early access state, so expect breaking changes on the way.
+> Rex is in early access: you need to sign up for the beta and install its latest binaries, and you
+> should expect breaking changes along the way.
 
 ## Features
 
-- The application and core libraries are implemented with Rustlang
-- Made on the top of libghostty & WebGPU
+- The application and its core libraries are written in Rust. The terminal is 
+  built with WebGPU and WebGL / Canvas 2D fallbacks where is it possible
 - An ability to run in a standalone mode and/or with [Rex server](https://www.superlogical.com/) (optional): on this
   computer, over SSH or over HTTPS. `lume --rex [server]` starts on one
 - No built-in coding agents or other tools: a user decides what to use
@@ -26,34 +29,97 @@ the approach with adapting software to user's workflows
 
 ## Development
 
-Pre-requisistes:
+Lume is built from source for now. You will need:
 
-- Rust 1.100 (or later)
-- NodeJS 24.11.0
+- [Rust](https://www.rust-lang.org/tools/install) 1.100 or later
+- [Node.js](https://nodejs.org/) 24.11.0 or later
 
-In order to simplify the development there is exist the xtask CLI app that can help with installing required
-dependencies, run builds and tests:
+Everything else (the pinned Zig toolchain, libghostty-vt, JavaScript dependencies) is fetched by the 
+project's own build tool, `cargo xtask`:
 
 ```sh
-cargo xtask setup   # fetch pinned Zig and libghostty-vt, install JS dependencies
-cargo xtask build   # build libghostty-vt (native and WASM), the UI, and the workspace
-cargo xtask test    # Rust and JS tests
-cargo xtask dev     # run the app with hot reload
+cargo xtask setup   # fetch the pinned tools and libghostty-vt, install JS dependencies
+cargo xtask build   # build the terminal engine, the UI and the application
+cargo xtask dev     # run Lume with hot reload
 ```
 
-`target/debug/lume-gui --probe` starts the app, prints what the webview supports as JSON,
-and exits.
+To check what your system's webview supports, run `target/debug/lume-gui --probe`. It prints a JSON
+report and exits.
 
-## Project layout
+## Working on Lume
 
-| Path            | Contents                                                                                                                                       |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `crates/`       | Rust crates: the app (`lume-app`), the terminal engine bindings (`lume-vt-sys`, `lume-vt`), and placeholders for crates that are not built yet |
-| `packages/`     | TypeScript packages: the WASM terminal engine wrapper (`@lume/vt`) and the UI (`@lume/ui`)                                                     |
-| `xtask/`        | Build orchestration                                                                                                                            |
-| `tools.toml`    | Pinned versions and checksums of external tools                                                                                                |
-| `tests/corpus/` | Recorded terminal streams with expected screens                                                                                                |
+These are the commands you will reach for most often. `cargo xtask` with no arguments lists them
+all.
+
+| Command              | What it does                                                          |
+| -------------------- | --------------------------------------------------------------------- |
+| `cargo xtask test`   | Run the Rust and JavaScript tests                                     |
+| `cargo xtask lint`   | Check formatting, run clippy, licence checks and the JS linters       |
+| `cargo xtask e2e`    | Run the suites that need a real window, including the UI scenes       |
+| `cargo xtask bench`  | Measure performance against the budgets in `tests/bench`              |
+| `cargo xtask dist`   | Build release packages (add `--installers` for installers)            |
+| `cargo xtask types`  | Regenerate the UI's TypeScript copy of the core's types               |
+| `cargo xtask schema` | Regenerate the JSON Schemas for settings, themes and plugin manifests |
+
+A few things are generated from the Rust code and kept in the repository: the UI's wire types, the
+JSON Schemas, the design tokens and the plugin API's typings. If you change the Rust definitions,
+regenerate them with the matching `cargo xtask` command; a test will tell you if you forget.
+
+To add a command the UI can call, write the `#[tauri::command]` function and add one line for it in
+[`crates/lume-app/src/command_table.rs`](crates/lume-app/src/command_table.rs). Everything else is
+derived from that table.
+
+## Writing plugins
+
+A plugin is a folder with a `plugin.toml` manifest and, if it needs any, one JavaScript file. The
+[plugin guide](docs/plugins/README.md) walks you through a first plugin and covers everything from
+menus and settings to views of your own.
+
+## How the project is organised
+
+| Path         | What lives there                                                                     |
+| ------------ | ------------------------------------------------------------------------------------ |
+| `crates/`    | The Rust side: the application, the session host, layouts, configuration, plugins    |
+| `packages/`  | The TypeScript side: the UI, the renderer, the design tokens, the plugin kit and API |
+| `xtask/`     | The build tool behind `cargo xtask`                                                  |
+| `docs/`      | Guides for plugin authors and for shell integration                                  |
+| `tests/`     | Recorded terminal streams, UI snapshots and other test data                          |
+| `tools.toml` | Pinned versions and checksums of the external tools the build fetches                |
+
+<details>
+<summary>The crates and packages:</summary>
+
+| Crate                 | What it is                                                                  |
+| --------------------- | --------------------------------------------------------------------------- |
+| `lume-app`            | The desktop application: windows, webviews and the commands the UI may call |
+| `lume-cli`            | The `lume` console command: the launcher, `ctl` and configuration commands  |
+| `lume-host`           | The session host: sessions, scrollback and the server loop                  |
+| `lume-session`        | Session backends and the router between them                                |
+| `lume-layout`         | Workspaces, their tabs, panes and panels, and the intents that change them  |
+| `lume-config`         | Layered TOML configuration, themes, design tokens and keybindings           |
+| `lume-plugin`         | Plugin manifests, installation and load order                               |
+| `lume-plugin-api`     | The API plugins' code is given, defined once with its typings and reference |
+| `lume-plugin-runtime` | A sandboxed QuickJS engine per plugin                                       |
+| `lume-services`       | The services plugins may call, each behind a permission                     |
+| `lume-rex`            | The Rex client and a session backend over it                                |
+| `lume-proto`          | Wire types and framing between the session host and its clients             |
+| `lume-ipc`            | A local endpoint only the current user can reach                            |
+| `lume-pty`            | Pseudo-terminals on Windows (ConPTY) and Unix                               |
+| `lume-vt`, `-vt-sys`  | Rust bindings to libghostty-vt                                              |
+| `lume-codegen`        | Shared helpers for generating TypeScript and JSON Schemas from Rust         |
+| `lume-logic-wasm`     | The layout logic built for WebAssembly, used by the UI's test harness       |
+
+| Package            | What it is                                                     |
+| ------------------ | -------------------------------------------------------------- |
+| `@lume/ui`         | The web UI around the terminal                                 |
+| `@lume/renderer`   | Draws terminal cells with WebGPU, WebGL2 or Canvas 2D          |
+| `@lume/vt`         | libghostty-vt built for WebAssembly, with a TypeScript wrapper |
+| `@lume/tokens`     | The design tokens and how they become CSS variables            |
+| `@lume/plugin-kit` | What a plugin's own views are built with                       |
+| `@lume/plugin-api` | The typings of the API a plugin's code is given                |
+
+</details>
 
 ## License
 
-The Lume project is published under the Apache-2.0 license. For more details read the [LICENSE](LICENSE) file.
+Lume is released under the [Apache-2.0 license](LICENSE).
