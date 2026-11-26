@@ -308,5 +308,9 @@ mod tests {
         assert_eq!(printed("/a", 7, &long), Told::Printed(None));
         assert_eq!(front(&long, "/a"), Told::Front(None));
         assert_eq!(folder(false, [front("sh", &long)]), None);
+        // Printed, a folder may be longer than it may be taken.
+        let printed_long = format!("/{}", "x".repeat(TEXT_MAX_BYTES));
+        let told = [front("pwsh", "/"), printed(&printed_long, 7, "pwsh")];
+        assert_eq!(folder(false, told), None);
     }
 }

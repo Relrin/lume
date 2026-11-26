@@ -128,6 +128,9 @@ async fn a_plugin_runs_its_programs_on_a_servers_machine_once_the_user_allowed_i
     assert_eq!(served.machines(), []);
     assert_eq!(why(served.run(&["status"], None).await), not_allowed);
 
+    // Connected, but with no session open in a window, it is not one to run on yet.
+    served.app.rex().connect(HOST, false, None).await.unwrap();
+    assert_eq!(served.machines(), []);
     served.open().await;
     let key = served.session().await;
     let place = entry(served.services(), &key).await.place.unwrap();

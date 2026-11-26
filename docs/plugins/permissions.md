@@ -109,9 +109,20 @@ A program is stopped together with everything it started, and at the latest when
 ### Programs on other machines: `process.run-elsewhere`
 
 A session need not be on this machine. One that is in a Linux distribution of this Windows machine
-(WSL) has a `place` in `sessions.list()`: the machine, and the folder there. Its `cwd` is left out,
-because that would be a path of this machine. Panes of servers and of SSH profiles will have a
-place in the same way.
+(WSL), or that a Rex server elsewhere runs, has a `place` in `sessions.list()`: the machine, and the
+folder there. Its `cwd` is left out, because that would be a path of this machine. Panes of SSH
+profiles will have a place in the same way. A Rex server on this machine is not another machine:
+its sessions have a `cwd` and no place.
+
+Where a session is comes from that machine:
+
+- In a distribution, from what its shell reported, when the shell named that machine.
+- On a Rex server, from the server: the folder its system says the program in front is in. A
+  folder that is only printed does not count, as it may be another machine's. PowerShell is the
+  one shell whose process stays where it started; of it the folder it printed itself counts, as a
+  prompt that reports it prints it. A PowerShell that reports nothing has no folder.
+
+A session's `place` report comes when where it is changes, and with every `state` report.
 
 `lume.process.run` and `lume.process.spawn` run a program on such a machine when they are given its
 id:
@@ -136,18 +147,25 @@ for (const session of await lume.sessions.list()) {
   kept until they revoke it on the plugin's page in the settings. Call it when the user asked for
   it, as by pressing a button. After a no it answers no for a minute without asking again.
 - When the plugin comes to ask for more programs, each machine is asked about again.
-- A machine can be used while a session is on it.
-- The folder is an absolute path of that machine; `${home}` and the like stand for nothing there.
-  Left out, it is the user's home folder. In a folder that is not there nothing is run.
+- A machine can be used while a session is on it; a Rex server, while it is connected and a session
+  of it is open in a window.
+- The folder is an absolute path of that machine, as it spells paths: `/home/me`, or `C:\code` on
+  Windows. A share of a network (`\\server\share`) is refused. `${home}` and the like stand for
+  nothing there. Left out, it is the user's home folder. In a folder that is not there nothing is
+  run.
 - The program is looked up on that machine's path. It is given its whole input when it starts:
   `process.spawn` gives a program there no input to write to.
 - A plugin has eight programs at most running on a machine at once; more wait their turn.
 - A program ended by a signal has the code its shell gives it, 128 and the signal's number.
+- On a Rex server the program is run by the server, in no window, and ends with the connection.
+  Its process has no number here (`pid` is 0). On Windows a `.cmd` on the path, as `npm`, is run
+  like any other program.
 
 | Code                  | What it means                                             | `error.data`         |
 | --------------------- | --------------------------------------------------------- | -------------------- |
 | `machine_not_allowed` | The user has not allowed the plugin there.                | `{ machine, label }` |
-| `not_connected`       | No session is on that machine.                            | `{ machine, label }` |
+| `not_connected`       | No session is on that machine, or it is not connected.    | `{ machine, label }` |
+| `cannot_run`          | The server cannot run programs for Lume.                  | `{ machine, label }` |
 | `folder_missing`      | The folder is not there. Nothing was run.                 | `{ machine, label }` |
 | `program_missing`     | The program is not there.                                 | `{ machine, label }` |
 | `unavailable`         | The machine could not be reached, or the way to it broke. |                      |

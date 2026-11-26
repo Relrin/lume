@@ -1249,7 +1249,7 @@ Something a session reported, as a plugin hears it.
 
 | Field | Type | |
 |---|---|---|
-| `details` | `Json` | What was reported, as the session reported it. A session on another machine, or one that a server runs, makes no `cwd` report, and its others give no folder and no number of a process. Where its machine is one that plugins can run programs on, it makes a `place` report instead, whose details are a [`Place`]. |
+| `details` | `Json` | What was reported, as the session reported it. A session on another machine, or one that a server runs, makes no `cwd` report, and its others give no folder and no number of a process. Where its machine is one that plugins can run programs on, it makes a `place` report instead, whose details are a [`Place`]: when where it is changes, and with each `state` report. |
 | `kind` | `string` | The kind of report: `title`, `cwd`, `place`, `bell`, `command_started`, `command_finished`, `program_status`, `foreground`, `activity`, `disconnected`, `state` or `exit`. |
 | `pane` | `string` | optional. The pane that shows it, if one does. |
 | `session` | `string` | The session. |

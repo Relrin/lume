@@ -775,7 +775,8 @@ export interface SessionReport {
    * What was reported, as the session reported it. A session on another machine, or
    * one that a server runs, makes no `cwd` report, and its others give no folder and
    * no number of a process. Where its machine is one that plugins can run programs
-   * on, it makes a `place` report instead, whose details are a [`Place`].
+   * on, it makes a `place` report instead, whose details are a [`Place`]: when where
+   * it is changes, and with each `state` report.
    */
   details: Json;
   /**

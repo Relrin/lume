@@ -12,6 +12,7 @@ use lume_proto::{Body, Message, SessionId};
 use lume_session::cwd::{file_url_of, machine_name};
 
 use super::common::hostile::{self, CODES, NAMES, Numbers, OWN_CODES, is_plain};
+use super::common::programs::{self, Played, Programs, SCRIPT};
 use super::common::views::{leaf, tiled, view};
 use super::common::{DataSide, Recorded, Refusing, SESSION, asks_for_control};
 use super::*;
@@ -899,5 +900,165 @@ async fn whatever_a_server_does_what_is_the_users_own_stands_as_it_did() {
     assert_eq!(app.own().await, before);
     assert_eq!(app.kind(), "idle");
     assert!(timeout(SOON, app.services.state.list_all()).await.is_ok());
+    app.stop().await;
+}
+
+/// What is the user's own, but for what plugins keep, which their runs add to.
+async fn own_but_plugins(app: &Running) -> Own {
+    let mut own = app.own().await;
+    own.files.retain(|path, _| !path.contains("plugins"));
+    own
+}
+
+/// A folder of the server's machine, or none: never something of this machine's.
+fn sound_place(place: Option<lume_plugin_api::types::Place>) {
+    let Some(folder) = place.and_then(|place| place.folder) else {
+        return;
+    };
+    let drive = folder.starts_with(|c: char| c.is_ascii_alphabetic())
+        && matches!(folder.get(1..3), Some(":\\" | ":/"));
+    assert!(
+        drive && is_plain(&folder) && folder.len() <= 1024,
+        "{folder:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn whatever_a_server_says_of_folders_and_runs_nothing_is_started_or_changed_here() {
+    use crate::plugins::elsewhere_tests::{allow_on, entry, git, install, run, told};
+
+    let played = Programs::new(|job| Played::says(format!("ran in {}", job.told["folder"])));
+    // Where its terminals are said to be, one after another.
+    let here = std::env::temp_dir().join("k7q-here");
+    let mut folders: Vec<String> = vec![
+        here.to_string_lossy().into_owned(),
+        file_url_of(&here.to_string_lossy()).unwrap(),
+        "/home/someone".to_owned(),
+        r"\\elsewhere\share".to_owned(),
+        r"\\?\C:\x".to_owned(),
+        "C:".to_owned(),
+        "${home}".to_owned(),
+        "x".repeat(5_000),
+    ];
+    folders.extend(NAMES.iter().map(|name| format!(r"C:\{name}")));
+    let said = Arc::new(Mutex::new(folders[0].clone()));
+    let mut world = World::recorded().running(&played);
+    let saying = Arc::clone(&said);
+    world.twist = Some(Arc::new(move |method, mut answer| {
+        if method == "com.superlogical.terminal.process" {
+            let folder = saying.lock().unwrap().clone();
+            answer["foreground"]["cwd"] = json!(folder);
+            answer["child"]["cwd"] = json!(folder);
+        }
+        Some(answer)
+    }));
+    let server = Hostile::start(world).await;
+    let app = Running::plain("rex-hostile-runs", &server).await;
+    app.own_shells().await;
+    app.services.plugins.start(&app.services);
+    install(&app.services, app.dir.path()).await;
+    app.opened().await;
+    let machine = format!("rex:http://{}", server.address);
+    allow_on(&app.services, &machine, &["git"]);
+    let key = app.served_panes()[0].1.clone();
+    let before = own_but_plugins(&app).await;
+
+    for folder in &folders {
+        *said.lock().unwrap() = folder.clone();
+        let entry = entry(&app.services, &key).await;
+        assert_eq!(entry.cwd, None, "{folder:?}");
+        let place = entry.place.clone();
+        sound_place(place.clone());
+        // What the place says is asked of the server, and of nothing here.
+        let mut call = git(&["status"], Some(&machine));
+        if let lume_plugin_api::Call::ProcessRun(asked) = &mut call {
+            asked.options.cwd = place.and_then(|place| place.folder);
+        }
+        let answer = run(&app.services, call).await.unwrap();
+        assert!(
+            answer["stdout"].as_str().unwrap().starts_with("ran in"),
+            "{answer}"
+        );
+    }
+
+    // Its terminal moves more often than anybody could follow.
+    let name = block();
+    let mut placed = 0;
+    for nth in 0..2_000 {
+        let folder = &folders[nth % folders.len()];
+        let payload = json!({ "foreground": { "pid": 1000, "name": "cmd.exe", "cwd": folder } });
+        server.of_block(&name, "process_changed", payload);
+        let printed = json!({ "pwd": folder, "owner": { "pid": 1000, "name": "cmd.exe" } });
+        server.of_block(&name, "pwd_changed", printed);
+        if nth % 100 == 0 {
+            let _ = app.backend().round_trip().await;
+            let foreground = lume_proto::SessionEvent::Foreground(lume_proto::Foreground {
+                pid: 1000,
+                name: "cmd.exe".to_owned(),
+            });
+            let reports = told(&app.services, &key, foreground);
+            let places: Vec<_> = reports.iter().filter(|(kind, _)| kind == "place").collect();
+            assert!(places.len() <= 1, "{reports:?}");
+            placed += places.len();
+            for (_, place) in places {
+                sound_place(serde_json::from_value(place.clone()).unwrap());
+            }
+        }
+    }
+    assert!(placed > 0);
+
+    // It asks this client for runs that nobody made, as other clients and as their script.
+    let secret = played.seen(|seen| seen.secret(0));
+    let mut asked = 0;
+    for client in [SCRIPT, "client:other", ""] {
+        for action in [
+            "lume.run.job",
+            "lume.run.out",
+            "lume.run.done",
+            "lume.run.in",
+            "other",
+        ] {
+            for secret in [secret.as_str(), "0".repeat(32).as_str(), ""] {
+                let args = json!({ "secret": secret, "to": "out", "data": "x", "code": 0 });
+                let call_id = format!("k7q-{asked}");
+                let perform = programs::request(&call_id, client, action, args);
+                server.tell(Tell::Event("client_perform_requested".to_owned(), perform));
+                asked += 1;
+            }
+        }
+    }
+    for nth in 0..3_000 {
+        let perform = programs::request(
+            &format!("k7q-flood-{nth}"),
+            SCRIPT,
+            "lume.run.job",
+            json!({}),
+        );
+        server.tell(Tell::Event("client_perform_requested".to_owned(), perform));
+        if nth % 300 == 0 {
+            let _ = app.backend().round_trip().await;
+        }
+    }
+    assert!(
+        timeout(SOON, app.backend().round_trip())
+            .await
+            .unwrap()
+            .is_ok()
+    );
+    assert!(asked > 30);
+    // And what is run still runs, there.
+    *said.lock().unwrap() = r"C:\Users\me".to_owned();
+    let mut call = git(&["status"], Some(&machine));
+    if let lume_plugin_api::Call::ProcessRun(asked) = &mut call {
+        asked.options.cwd = Some(r"C:\Users\me".to_owned());
+    }
+    let answer = run(&app.services, call).await.unwrap();
+    assert_eq!(answer["code"], 0, "{answer}");
+
+    let after = own_but_plugins(&app).await;
+    assert_eq!(after, before);
+    assert!(!after.files.values().any(|text| text.contains("k7q")));
+    app.told_nothing_amiss();
+    assert_eq!(app.told("notice"), Vec::<Value>::new());
     app.stop().await;
 }
