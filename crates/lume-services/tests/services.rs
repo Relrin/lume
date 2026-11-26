@@ -267,17 +267,19 @@ fn a_program_runs_with_its_input_variables_and_folder() {
     assert!(text.contains("ws"), "{text}");
     assert!(!output.timed_out && !output.truncated);
 
+    // An odd number of bytes: Windows' `sort` takes input it can read as UTF-16 for
+    // UTF-16, and whether it does with an even number depends on the machine.
     let sorted = process::run(
         &program,
         &line(&args, "sort"),
         RunOptions {
-            stdin: Some(b"b\na\n".to_vec()),
+            stdin: Some(b"beta\nalpha\n".to_vec()),
             ..options(Duration::from_secs(10))
         },
     )
     .unwrap();
     let text = String::from_utf8_lossy(&sorted.stdout).replace("\r\n", "\n");
-    assert_eq!(text, "a\nb\n");
+    assert_eq!(text, "alpha\nbeta\n");
 }
 
 #[test]

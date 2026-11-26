@@ -98,6 +98,29 @@ impl Hostile {
         self.served.lock().unwrap().len()
     }
 
+    /// Waits until the client has answered all it is going to of what it was asked: no
+    /// answer has come for a while.
+    async fn answered(&self) {
+        let replies = || -> usize {
+            let served = self.served.lock().unwrap();
+            served
+                .iter()
+                .map(|served| served.asked("client.reply").len())
+                .sum()
+        };
+        let started = std::time::Instant::now();
+        let mut seen = replies();
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let now = replies();
+            if now == seen {
+                return;
+            }
+            assert!(started.elapsed() < SOON, "the client went on answering");
+            seen = now;
+        }
+    }
+
     /// How often a view was read.
     fn views_read(&self) -> usize {
         let served = self.served.lock().unwrap();
@@ -1046,7 +1069,10 @@ async fn whatever_a_server_says_of_folders_and_runs_nothing_is_started_or_change
             .is_ok()
     );
     assert!(asked > 30);
-    // And what is run still runs, there.
+    // And once that is over, what is run still runs, there. Only so many requests may
+    // wait for this client, as a server lets no more wait: a run begun while the flood
+    // still came in would have its script's requests turned away with the flood's.
+    server.answered().await;
     *said.lock().unwrap() = r"C:\Users\me".to_owned();
     let mut call = git(&["status"], Some(&machine));
     if let lume_plugin_api::Call::ProcessRun(asked) = &mut call {

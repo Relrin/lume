@@ -135,9 +135,10 @@ pub fn prints_then_exits(text: &str, code: u32) -> SpawnSpec {
     }
 }
 
-/// A program that reports what a shell with integration reports (a title, a
-/// directory, a command that starts and fails, a status), then prints `done` and
-/// waits for input.
+/// A program that waits for a line, then reports what a shell with integration reports
+/// (a title, a directory, a command that starts and fails, a status), prints `done` and
+/// waits for input. Until the line comes nothing is printed, so a client that attaches
+/// first is sent all of it as it happens, however soon the program starts.
 pub fn reports_then_waits(done: &str) -> SpawnSpec {
     // What each control string says, between the introducer and the terminator.
     const REPORTS: [&str; 5] = [
@@ -160,8 +161,8 @@ pub fn reports_then_waits(done: &str) -> SpawnSpec {
                 "-NonInteractive",
                 "-Command",
                 &format!(
-                    "$e=[string][char]27;{writes}[Console]::Out.WriteLine('{done}');\
-                     [void][Console]::In.ReadLine()"
+                    "[void][Console]::In.ReadLine();$e=[string][char]27;{writes}\
+                     [Console]::Out.WriteLine('{done}');[void][Console]::In.ReadLine()"
                 ),
             ],
         )
@@ -172,7 +173,7 @@ pub fn reports_then_waits(done: &str) -> SpawnSpec {
             .collect();
         spec(
             "/bin/sh",
-            &["-c", &format!("{writes} echo {done}; read reply")],
+            &["-c", &format!("read go; {writes} echo {done}; read reply")],
         )
     }
 }

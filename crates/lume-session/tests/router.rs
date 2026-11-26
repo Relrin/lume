@@ -242,11 +242,12 @@ async fn a_second_attachment_follows_a_detach_and_the_first_is_dead() {
     first.input.detach().await.unwrap();
     // The first attachment's stream ends and its sink refuses everything. What the shell
     // printed before the detach took effect, such as its next prompt, may still be on
-    // the way and arrives first; nothing but output does.
+    // the way and arrives first, with what that output reported (cmd sets its window's
+    // title again after each command); nothing else does.
     loop {
         match timeout(STEP, first.output.next()).await.unwrap() {
             None => break,
-            Some(OutputFrame::Data(_)) => {}
+            Some(OutputFrame::Data(_) | OutputFrame::Event(_)) => {}
             Some(other) => panic!("unexpected {other:?} after a detach"),
         }
     }

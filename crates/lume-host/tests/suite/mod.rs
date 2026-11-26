@@ -1124,6 +1124,7 @@ pub async fn what_a_program_reports_arrives_as_events_behind_its_output<H: Harne
 
     let session = client.spawn(support::reports_then_waits(MARK_OUTPUT)).await;
     client.attach_with_credit(session, 1).await;
+    client.type_line(1, "").await;
     client.read_until(1, MARK_OUTPUT).await;
 
     // In the order the program made them. A terminal may set a title of its own
@@ -1159,6 +1160,7 @@ pub async fn a_client_that_attaches_is_told_what_was_reported_before<H: Harness>
 
     let session = client.spawn(support::reports_then_waits(MARK_OUTPUT)).await;
     client.attach_with_credit(session, 1).await;
+    client.type_line(1, "").await;
     client.read_until(1, MARK_OUTPUT).await;
     client
         .event(1, "the program's status", |event| {
