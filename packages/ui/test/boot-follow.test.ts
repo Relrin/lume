@@ -33,6 +33,7 @@ function configView(revision: number): ConfigView {
     problems: [],
     tokens: DEFAULT_TOKENS,
     keymap: { bindings: [], removed: [] },
+    layouts: [],
     schema_revision: 1,
     title_bar: "system",
   };
@@ -163,6 +164,56 @@ describe("following the core", () => {
     expect(pushed[0]!.level).toBe("error");
     expect(pushed[0]!.message).toContain("the one before it is still in use");
     expect(pushed[0]!.message).toContain("config.toml:3: font.size must be a number");
+  });
+
+  it("keeps what is wrong with the files until a configuration is taken again", () => {
+    const { stores, follow } = page();
+    const problem = {
+      kind: "syntax" as const,
+      path: "",
+      file: "config.toml",
+      line: 1,
+      column: 1,
+      message: "expected `]`",
+      suggestion: null,
+    };
+    follow({ type: "config_error", problems: [problem] });
+    expect(stores.config.getState().failed).toEqual([problem]);
+    follow({ type: "config_changed", revision: 2, changed: [], view: configView(2) });
+    expect(stores.config.getState().failed).toEqual([]);
+  });
+
+  it("offers to apply a layout file that changed, saying what happens to running panes", () => {
+    const { follow, pushed } = page();
+    follow({
+      type: "layout_file_changed",
+      tab: "t4",
+      layout: "dev",
+      name: "Lume dev",
+      leaving: ["p7", "p8"],
+      busy: ["p8"],
+    });
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]!.level).toBe("warning");
+    expect(pushed[0]!.message).toBe(
+      "The layout “Lume dev” changed on disk. Applying it: 1 idle pane will close; 1 pane still running will be put away, not ended.",
+    );
+    expect(pushed[0]!.action).toEqual({
+      label: "Apply",
+      command: "lume.layout.reapply",
+      args: { tab: "t4" },
+    });
+
+    follow({
+      type: "layout_file_changed",
+      tab: "t4",
+      layout: "dev",
+      name: "Lume dev",
+      leaving: [],
+      busy: [],
+    });
+    expect(pushed[1]!.level).toBe("info");
+    expect(pushed[1]!.message).toBe("The layout “Lume dev” changed on disk.");
   });
 
   it("styles the terminals again for newer profiles only", () => {

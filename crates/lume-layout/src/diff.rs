@@ -175,8 +175,8 @@ fn diff_tab(old: &Tab, new: &Tab, changes: &mut Vec<LayoutChange>) {
             title: new.title.clone(),
         });
     }
-    if (old.color, old.locked, old.muted, old.group)
-        != (new.color, new.locked, new.muted, new.group)
+    if (old.color, old.locked, old.muted, old.group, &old.origin)
+        != (new.color, new.locked, new.muted, new.group, &new.origin)
     {
         changes.push(LayoutChange::TabState {
             tab: new.id,
@@ -184,6 +184,7 @@ fn diff_tab(old: &Tab, new: &Tab, changes: &mut Vec<LayoutChange>) {
             locked: new.locked,
             muted: new.muted,
             group: new.group,
+            origin: new.origin.clone(),
         });
     }
     if old.zoomed != new.zoomed || !old.root.same_shape(&new.root) {

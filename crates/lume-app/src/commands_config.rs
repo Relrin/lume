@@ -135,7 +135,7 @@ pub async fn background_image(services: Shared<'_>) -> Result<Response, CommandE
 }
 
 /// Opens one of the user's settings files for editing: `config`, which is the default,
-/// or `workspace` for the file of the workspace in use.
+/// `workspace` for the file of the workspace in use, or `layout:<id>` for a layout file.
 #[tauri::command]
 pub async fn config_open(services: Shared<'_>, file: Option<String>) -> Result<(), CommandError> {
     let config = Arc::clone(&services.config);

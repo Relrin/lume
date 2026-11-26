@@ -1824,11 +1824,55 @@
     },
     "layout": {
       "default": {
+        "files-reapply": "ask",
         "new-pane-cwd": "inherit",
         "tab-placement": "top"
       },
       "description": "Where things are placed in a window.",
       "properties": {
+        "files-reapply": {
+          "default": "ask",
+          "description": "What happens to a tab opened from a layout file when the file is saved again:\n\"ask\", \"always\" (programs still running in panes the file no longer has are\nput away, not ended) or \"never\".",
+          "oneOf": [
+            {
+              "const": "ask",
+              "description": "The tab's window offers to apply the change.",
+              "type": "string"
+            },
+            {
+              "const": "always",
+              "description": "The change is applied at once.",
+              "type": "string"
+            },
+            {
+              "const": "never",
+              "description": "The tab is left as it is.",
+              "type": "string"
+            }
+          ],
+          "x-lume-settings": {
+            "control": "segmented",
+            "group": "Panes",
+            "help": "For tabs opened from a file in the layouts folder. Running programs are never ended",
+            "label": "When a layout file changes",
+            "options": [
+              {
+                "label": "Ask",
+                "value": "ask"
+              },
+              {
+                "label": "Apply",
+                "value": "always"
+              },
+              {
+                "label": "Ignore",
+                "value": "never"
+              }
+            ],
+            "order": 55,
+            "page": "appearance"
+          }
+        },
         "new-pane-cwd": {
           "default": "inherit",
           "description": "The directory a new pane's program starts in.",

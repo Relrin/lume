@@ -100,12 +100,14 @@ impl Projection {
                 locked,
                 muted,
                 group,
+                origin,
             } => {
                 if let Some(tab) = tab_mut(workspace, *tab) {
                     tab.color = *color;
                     tab.locked = *locked;
                     tab.muted = *muted;
                     tab.group = *group;
+                    tab.origin = origin.clone();
                 }
             }
             LayoutChange::Groups { window, groups } => {

@@ -134,6 +134,9 @@ export const BUILTIN_PLACES: Readonly<Record<(typeof MENUS)[number], readonly Bu
     { key: "profiles", kind: "section", children: [
       { key: "profile-list", kind: "item", children: [] },
     ] },
+    { key: "layouts", kind: "section", children: [
+      { key: "layout-list", kind: "item", children: [] },
+    ] },
     { key: "more", kind: "section", children: [
       { key: "more-profiles", kind: "item", children: [] },
     ] },
@@ -153,6 +156,10 @@ export const BUILTIN_PLACES: Readonly<Record<(typeof MENUS)[number], readonly Bu
       { key: "move-left", kind: "item", children: [] },
       { key: "move-right", kind: "item", children: [] },
       { key: "move-into", kind: "item", children: [] },
+    ] },
+    { key: "layout", kind: "section", children: [
+      { key: "save-layout", kind: "item", children: [] },
+      { key: "layout-file", kind: "item", children: [] },
     ] },
     { key: "closing", kind: "section", children: [
       { key: "mute", kind: "item", children: [] },

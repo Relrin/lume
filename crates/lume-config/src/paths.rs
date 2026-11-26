@@ -189,6 +189,16 @@ impl Dirs {
         self.config.join("themes")
     }
 
+    /// Where the user's layout files are.
+    pub fn layouts_dir(&self) -> PathBuf {
+        self.config.join("layouts")
+    }
+
+    /// The layout file called `id`.
+    pub fn layout_file(&self, id: &str) -> PathBuf {
+        self.layouts_dir().join(format!("{id}.toml"))
+    }
+
     /// Where the application keeps each workspace's layout.
     pub fn state_workspaces_dir(&self) -> PathBuf {
         self.state.join("workspaces")

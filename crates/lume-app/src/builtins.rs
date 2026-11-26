@@ -38,6 +38,41 @@ type Row = (&'static str, &'static str, &'static str, Runs, bool);
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 
 const COMMANDS: &[Row] = &[
+    (
+        "lume.layout.open",
+        "Open Layout",
+        "Layout",
+        Runs::Core,
+        false,
+    ),
+    (
+        "lume.layout.save",
+        "Save Tab as Layout",
+        "Layout",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.layout.reapply",
+        "Apply Layout File to Tab Again",
+        "Layout",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.layout.detach",
+        "Stop Following Layout File",
+        "Layout",
+        Runs::Core,
+        true,
+    ),
+    (
+        "lume.layout.open-file",
+        "Open Layout File",
+        "Layout",
+        Runs::Core,
+        true,
+    ),
     ("lume.app.quit", "Quit", "Application", Runs::Core, true),
     (
         "lume.app.quit-end-sessions",
@@ -833,6 +868,25 @@ fn arguments(id: &str) -> Option<Value> {
         | "lume.group.move-right"
         | "lume.group.ungroup"
         | "lume.group.close" => Some(object(json!({ "group": group }), &[])),
+        "lume.layout.open" => Some(object(
+            json!({ "layout": { "type": "string", "description": "A layout file's name, without `.toml`." } }),
+            &["layout"],
+        )),
+        "lume.layout.save" => Some(object(
+            json!({
+                "tab": tab,
+                "name": { "type": "string", "description": "What the layout is called; the tab's title, or the layout it came from, if left out." },
+            }),
+            &[],
+        )),
+        "lume.layout.reapply" | "lume.layout.detach" => Some(object(json!({ "tab": tab }), &[])),
+        "lume.layout.open-file" => Some(object(
+            json!({
+                "layout": { "type": "string", "description": "A layout file's name; the one the tab came from if left out." },
+                "tab": tab,
+            }),
+            &[],
+        )),
         "lume.group.reopen" | "lume.group.forget" => Some(object(
             json!({ "group": { "type": "string", "description": "A closed group's id." } }),
             &["group"],
@@ -1329,6 +1383,73 @@ fn given<T: DeserializeOwned>(args: &Value, name: &str) -> Result<Option<Option<
 }
 
 /// The group a command about a closed group names.
+/// The layout file a tab was opened from, by its id.
+fn layout_of_tab(context: &Context<'_>, args: &Value) -> Result<String, CommandError> {
+    let tab = context.tab(args)?;
+    let workspace = context.panes.workspace();
+    workspace
+        .tab(tab)
+        .and_then(|found| found.origin.as_deref())
+        .and_then(lume_config::layouts::split_origin)
+        .map(|(layout, _)| layout.to_owned())
+        .ok_or_else(|| CommandError::not_found("the tab was not opened from a layout file"))
+}
+
+/// Writes a tab as a layout file. A tab opened from a layout of one tab is written over
+/// that file; any other is written as a new one, named after the tab unless a name is
+/// given, and not over a file that is there.
+async fn save_layout(context: &Context<'_>, args: &Value) -> Result<(), CommandError> {
+    use lume_config::layouts::{layout_id, split_origin};
+
+    let tab = context.tab(args)?;
+    let workspace = context.panes.workspace();
+    let found = workspace
+        .tab(tab)
+        .ok_or_else(|| CommandError::not_found(format!("there is no tab {tab}")))?;
+    let current = context.config.current();
+    let own = found
+        .origin
+        .as_deref()
+        .and_then(split_origin)
+        .and_then(|(layout, _)| current.layouts.get(layout))
+        .filter(|layout| layout.tabs.len() == 1);
+    let named: Option<String> = argument(args, "name")?;
+    let (name, replace) = match (named, own) {
+        (Some(name), _) => (name, false),
+        (None, Some(layout)) => (layout.name.clone(), true),
+        (None, None) => {
+            // The tab's title, or a name no layout file has yet.
+            let base = found.title.clone().unwrap_or_else(|| "Layout".to_owned());
+            let dirs = context.config.dirs();
+            let free = (1..100)
+                .map(|number| {
+                    if number == 1 {
+                        base.clone()
+                    } else {
+                        format!("{base} {number}")
+                    }
+                })
+                .find(|name| layout_id(name).is_some_and(|id| !dirs.layout_file(&id).exists()))
+                .ok_or_else(|| CommandError::bad_request("give the layout a name: `name`"))?;
+            (free, false)
+        }
+    };
+    let saved = context
+        .panes
+        .save_tab_as_layout(tab, &name, replace)
+        .await?;
+    context.panes.notice_with(
+        "info",
+        format!("Saved the tab as the layout “{name}”. Edit the file and the tab follows it."),
+        Some(json!({
+            "label": "Open file",
+            "command": "lume.layout.open-file",
+            "args": { "layout": saved.id },
+        })),
+    );
+    Ok(())
+}
+
 fn required_group(args: &Value) -> Result<GroupId, CommandError> {
     argument(args, "group")?.ok_or_else(|| CommandError::bad_request("which group: `group`"))
 }
@@ -1461,6 +1582,44 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
                 .map_err(|error| CommandError::internal(error.to_string()))?;
         }
         "lume.config.reload" => return Ok(context.config.reload()?),
+        "lume.layout.open" => {
+            let layout: String = argument(args, "layout")?
+                .ok_or_else(|| CommandError::bad_request("which layout: `layout`"))?;
+            panes.open_layout(&layout, Some(window)).await?;
+            return Ok(());
+        }
+        "lume.layout.save" => return save_layout(context, args).await,
+        "lume.layout.reapply" => {
+            let done = panes.reapply_layout(context.tab(args)?).await?;
+            if !done.put_away.is_empty() {
+                let count = done.put_away.len();
+                let panes_word = if count == 1 { "pane" } else { "panes" };
+                panes.notice(
+                    "info",
+                    format!(
+                        "{count} {panes_word} the layout file no longer has were put away with their programs running"
+                    ),
+                );
+            }
+            return Ok(());
+        }
+        "lume.layout.detach" => return panes.detach_layout(context.tab(args)?).await,
+        "lume.layout.open-file" => {
+            let layout = match argument::<String>(args, "layout")? {
+                Some(layout) => layout,
+                None => layout_of_tab(context, args)?,
+            };
+            let file = context
+                .config
+                .file(&format!("layout:{layout}"))
+                .ok_or_else(|| {
+                    CommandError::bad_request(format!("`{layout}` cannot be a layout"))
+                })?;
+            let dir = context.config.dirs().config.clone();
+            return tokio::task::spawn_blocking(move || opener::open_settings_file(&dir, &file))
+                .await
+                .map_err(|error| CommandError::internal(error.to_string()))?;
+        }
         "lume.app.show-logs" => {
             let shown = crate::log::log_file()
                 .and_then(|file| url::Url::from_file_path(file).ok())

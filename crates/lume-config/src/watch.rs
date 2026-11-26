@@ -204,6 +204,33 @@ mod tests {
     }
 
     #[test]
+    fn a_layout_file_saved_or_mended_is_taken_up() {
+        let dir = TempDir::new("watch-layouts");
+        let (store, _watcher, events) = watched(&dir);
+        assert!(store.current().layouts.is_empty());
+
+        dir.write("config/layouts/dev.toml", "[[tab]]\ncommand = \"htop\"\n");
+        match events
+            .recv_timeout(PATIENCE)
+            .expect("the change is noticed")
+        {
+            WatchEvent::Reloaded(now) => {
+                let layout = now.layouts.get("dev").expect("the layout is read");
+                assert_eq!(layout.tabs.len(), 1);
+            }
+            WatchEvent::Failed(problems) => panic!("{problems:?}"),
+        }
+
+        // A file that is not TOML keeps the layout as it was.
+        dir.write("config/layouts/dev.toml", "[[tab\n");
+        assert!(matches!(
+            events.recv_timeout(PATIENCE),
+            Ok(WatchEvent::Failed(_))
+        ));
+        assert!(store.current().layouts.get("dev").is_some());
+    }
+
+    #[test]
     fn the_watch_ends_with_the_watcher() {
         let dir = TempDir::new("watch-drop");
         let (_store, watcher, events) = watched(&dir);

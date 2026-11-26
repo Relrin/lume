@@ -319,6 +319,32 @@
             ]
           },
           {
+            "role": "group",
+            "parts": [
+              {
+                "role": "button",
+                "name": "Ask",
+                "state": {
+                  "pressed": "true"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Apply",
+                "state": {
+                  "pressed": "false"
+                }
+              },
+              {
+                "role": "button",
+                "name": "Ignore",
+                "state": {
+                  "pressed": "false"
+                }
+              }
+            ]
+          },
+          {
             "role": "combobox",
             "state": {
               "expanded": "false"

@@ -27,13 +27,14 @@ import { KindIcon } from "../connect/icons.tsx";
 import { kindOf } from "../connect/model.ts";
 import { NEW_TAB_MENU_MAX } from "../connect/tuning.ts";
 import type { MenuNodeData, ProfileList } from "../core/types.ts";
+import type { LayoutEntry } from "../wire/config.generated.ts";
 import { selectShelf } from "../layout/selectors.ts";
 import type { Shelved } from "../layout/types.ts";
 import { profileGroup } from "../palette/choices.ts";
 import { PluginIcon } from "../plugins/PluginIcon.tsx";
 import { useShell } from "./context.ts";
 import { menuKey } from "./hints.ts";
-import { GroupGlyph, MenuIcon } from "./icons.tsx";
+import { GroupGlyph, MenuGlyph, MenuIcon } from "./icons.tsx";
 import { Menu, type MenuItem } from "./Menu.tsx";
 import { menuRows, nodesOf, type MenuName, type MenuParts } from "./menus.ts";
 import { Overlay } from "./Part.tsx";
@@ -120,6 +121,28 @@ function profileItems(
       icon: <KindIcon kind={kindOf(profile)} size={KIND_ICON_PX} />,
       choose: () => open(profile.id),
     }));
+}
+
+/**
+ * The rows of "New tab with" for the layout files there are: each opens the tabs its
+ * file describes. Without any there are no rows; "Save as layout" in a tab's menu
+ * makes the first.
+ */
+export function layoutItems(
+  layouts: readonly LayoutEntry[],
+  open: (layout: string) => void,
+): MenuItem[] {
+  if (layouts.length === 0) return [];
+  return [
+    { key: "layouts", kind: "heading", label: "Layouts", choose: () => undefined },
+    ...layouts.map((layout) => ({
+      key: `layout:${layout.id}`,
+      label: layout.name,
+      hint: layout.description ?? (layout.tabs === 1 ? "1 tab" : `${layout.tabs} tabs`),
+      icon: <MenuGlyph name="columns-2" />,
+      choose: () => open(layout.id),
+    })),
+  ];
 }
 
 /** The row of "New tab with" that goes to all of them, with the keys that do too. */
@@ -273,6 +296,10 @@ export function AppMenu() {
           return [defaultTerminalItem(profiles, openProfile)];
         case "profile-list":
           return profileItems(profiles, openProfile);
+        case "layout-list":
+          return layoutItems(config?.layouts ?? [], (layout) =>
+            app.commands.run("lume.layout.open", { layout }),
+          );
         case "more-profiles":
           return [
             moreItem(

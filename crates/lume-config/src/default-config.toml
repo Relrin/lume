@@ -49,7 +49,9 @@
 
 [appearance]
 # The theme, whatever the system's colour scheme is. Left out, the theme follows the
-# system and is one of the two below.
+# system and is one of the two below. Built in are "lume-dark" and "lume-midnight"
+# (dark), and "lume-light" and "lume-daylight" (light); your own go in the `themes`
+# folder beside this file, and are taken up as soon as they are saved.
 #   theme = "lume-dark"
 # theme-light = "lume-light"
 # theme-dark = "lume-dark"
@@ -159,6 +161,10 @@
 # opened from is, if that shell says; otherwise as "workspace"), "workspace" (the
 # workspace's folder) or "home".
 # new-pane-cwd = "inherit"
+# What happens to a tab opened from a layout file (in the `layouts` folder beside this
+# file) when the file is saved again: "ask", "always" or "never". Programs still running
+# in panes the file no longer has are put away, never ended.
+# files-reapply = "ask"
 
 [renderer]
 # What terminals are drawn with: "auto", "webgpu", "webgl2" or "canvas2d".

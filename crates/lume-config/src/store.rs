@@ -20,6 +20,7 @@ use crate::error::ConfigError;
 use crate::keymap::{Keymap, resolve_keymap};
 use crate::keys::KeySequence;
 use crate::layers::{LayerInput, LayerKind, check, entry_schema, is_table, resolve_layers};
+use crate::layouts::Layouts;
 use crate::listed;
 use crate::paths::{Dirs, Platform, check_workspace_name};
 use crate::profiles::{
@@ -50,6 +51,8 @@ pub struct Resolved {
     pub workspace: WorkspaceSettings,
     /// The built-in themes and the user's.
     pub themes: Themes,
+    /// The user's layout files.
+    pub layouts: Layouts,
     /// Counts the changes: higher than that of every configuration before this one.
     pub revision: u64,
 }
@@ -73,6 +76,7 @@ impl Resolved {
             && self.problems == other.problems
             && self.workspace == other.workspace
             && self.themes == other.themes
+            && self.layouts == other.layouts
     }
 }
 
@@ -115,7 +119,9 @@ fn read(dirs: &Dirs, workspace: Option<&str>) -> (Resolved, Vec<Problem>) {
 
     let layered = resolve_layers(&inputs);
     fatal.extend(layered.fatal);
-    let (themes, found) = Themes::load(&dirs.themes_dir());
+    let (themes, mut found) = Themes::load(&dirs.themes_dir());
+    let (layouts, laid) = Layouts::load(&dirs.layouts_dir());
+    found.extend(laid);
     let mut problems = layered.problems;
     for problem in found {
         if problem.is_fatal() {
@@ -130,6 +136,7 @@ fn read(dirs: &Dirs, workspace: Option<&str>) -> (Resolved, Vec<Problem>) {
         problems,
         workspace: layered.workspace,
         themes,
+        layouts,
         revision: 0,
     };
     (resolved, fatal)

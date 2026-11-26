@@ -244,7 +244,7 @@ describe("the stand-in core's window as a test asks for it", () => {
     const core = new FakeCore();
     const schema = await core.command<Record<string, unknown>>("config_schema");
     expect(schema["x-lume-pages"]).toBeInstanceOf(Array);
-    expect(await core.command<unknown[]>("themes_list")).toHaveLength(2);
+    expect(await core.command<unknown[]>("themes_list")).toHaveLength(4);
     expect((await core.command<unknown[]>("shells_list")).length).toBeGreaterThan(0);
     expect(await core.command<string[]>("font_families")).toContain("JetBrains Mono");
     expect((await core.command<ArrayBuffer>("background_image")).byteLength).toBe(0);

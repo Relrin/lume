@@ -92,7 +92,10 @@ pub(crate) fn now_unix_ms() -> u64 {
 }
 
 mod launch;
+mod layout_files;
+
 use launch::*;
+pub use layout_files::{LayoutOpened, LayoutReapplied, LayoutSaved};
 
 /// Starts and ends the sessions of panes on the application's backends.
 struct PaneSpawner {

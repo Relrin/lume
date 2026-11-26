@@ -227,6 +227,7 @@ fn new_pane(workspace: &mut Workspace, content: NewContent, started: &mut Option
         title: None,
         icon: None,
         content,
+        key: None,
     }
 }
 
@@ -538,6 +539,7 @@ fn open_tab(
             locked: false,
             muted: false,
             group: None,
+            origin: None,
         },
     );
     if activate || window.centre.active.is_none() {
@@ -1422,8 +1424,158 @@ fn change(
             created.group = Some(group.id);
             put_group(&mut workspace.windows[window], group, grafted);
         }
+        Intent::TabGraft { window, tab, index } => {
+            let window = window_index(workspace, window)?;
+            let len = workspace.windows[window].centre.tabs.len();
+            let at = match index {
+                Some(index) if index as usize > len => {
+                    return Err(IntentError::BadIndex { index, len });
+                }
+                Some(index) => index as usize,
+                None => len,
+            };
+            let mut tab = *tab;
+            tab.id = TabId::new(workspace.fresh());
+            tab.group = None;
+            let mut panes = HashMap::new();
+            renumber(&mut tab.root, workspace, &mut panes);
+            forget_sessions(&mut tab.root);
+            tab.zoomed = tab.zoomed.and_then(|pane| panes.get(&pane).copied());
+            tab.last_focus = tab.last_focus.and_then(|pane| panes.get(&pane).copied());
+            let shown = tab.last_focus.unwrap_or_else(|| tab.first_pane());
+            created.tab = Some(tab.id);
+            let window = &mut workspace.windows[window];
+            window.centre.tabs.insert(at, tab);
+            focus(window, shown);
+        }
+        Intent::TabReshape {
+            tab,
+            wanted,
+            put_away,
+        } => {
+            let (window, index) = tab_index(workspace, tab)?;
+            let current = workspace.windows[window].centre.tabs[index].clone();
+            for pane in &put_away {
+                if !current.contains(*pane) {
+                    return Err(IntentError::NoSuchPane(*pane));
+                }
+            }
+            let mut wanted = *wanted;
+            let mut kept: HashMap<String, Pane> = current
+                .root
+                .panes()
+                .into_iter()
+                .filter_map(|pane| Some((pane.key.clone()?, pane.clone())))
+                .collect();
+            let mut panes = HashMap::new();
+            take_kept(&mut wanted.root, workspace, &mut kept, &mut panes);
+            let placed = wanted.root.pane_ids();
+            let window = &mut workspace.windows[window];
+            for pane in current.root.panes() {
+                if placed.contains(&pane.id) || !put_away.contains(&pane.id) {
+                    // Placed, or closed along with its session.
+                    continue;
+                }
+                let rect = default_float(window);
+                window.floating.push(Floating {
+                    pane: pane.clone(),
+                    rect,
+                    minimised: Some(Minimised::Tab),
+                });
+            }
+            let shaped = &mut window.centre.tabs[index];
+            shaped.title = wanted.title;
+            shaped.color = wanted.color;
+            shaped.origin = wanted.origin;
+            shaped.root = wanted.root;
+            shaped.zoomed = shaped.zoomed.filter(|pane| placed.contains(pane));
+            shaped.last_focus = shaped
+                .last_focus
+                .filter(|pane| placed.contains(pane))
+                .or_else(|| wanted.last_focus.and_then(|pane| panes.get(&pane).copied()));
+            created.tab = Some(tab);
+        }
+        Intent::TabOrigin { tab, origin, keys } => {
+            let (window, index) = tab_index(workspace, tab)?;
+            let found = &mut workspace.windows[window].centre.tabs[index];
+            for (pane, _) in &keys {
+                if !found.contains(*pane) {
+                    return Err(IntentError::NoSuchPane(*pane));
+                }
+            }
+            found.origin = origin;
+            for (pane, key) in keys {
+                if let Some(pane) = found.root.pane_mut(pane) {
+                    pane.key = Some(key);
+                }
+            }
+        }
     }
     Ok(created)
+}
+
+/// Fills a tree made from a layout file with the panes of a tab that the file names
+/// by their keys, taking each out of `kept`, and numbers what is new anew. `panes`
+/// notes what each pane of the file is numbered as now.
+fn take_kept(
+    node: &mut Node,
+    workspace: &mut Workspace,
+    kept: &mut HashMap<String, Pane>,
+    panes: &mut HashMap<PaneId, PaneId>,
+) {
+    match node {
+        Node::Pane(pane) => {
+            let found = pane.key.as_ref().and_then(|key| kept.remove(key));
+            let was = pane.id;
+            match found {
+                Some(mut existing) => {
+                    existing.title = pane.title.take();
+                    // What the file says the pane runs is what it runs when it is next
+                    // started; the session it has now goes on.
+                    if let (PaneContent::Terminal(now), PaneContent::Terminal(wanted)) =
+                        (&mut existing.content, &pane.content)
+                    {
+                        now.profile.clone_from(&wanted.profile);
+                        now.launcher.clone_from(&wanted.launcher);
+                        now.cwd.clone_from(&wanted.cwd);
+                        now.env.clone_from(&wanted.env);
+                    }
+                    *pane = existing;
+                }
+                None => {
+                    pane.id = PaneId::new(workspace.fresh());
+                    if let PaneContent::Terminal(terminal) = &mut pane.content {
+                        terminal.session = None;
+                    }
+                }
+            }
+            panes.insert(was, pane.id);
+        }
+        Node::Split(split) => {
+            split.id = SplitId::new(workspace.fresh());
+            for child in &mut split.children {
+                take_kept(child, workspace, kept, panes);
+            }
+        }
+    }
+}
+
+/// The panes of `current` that giving it the shape of `wanted` would take out of it:
+/// those whose key `wanted` does not have, and those with no key.
+pub fn reshape_leaves(current: &Tab, wanted: &Tab) -> Vec<PaneId> {
+    let keys: Vec<&str> = wanted
+        .root
+        .panes()
+        .into_iter()
+        .filter_map(|pane| pane.key.as_deref())
+        .collect();
+    current
+        .root
+        .panes()
+        .into_iter()
+        .filter(|pane| !pane.key.as_deref().is_some_and(|key| keys.contains(&key)))
+        .map(|pane| pane.id)
+        .collect()
 }
 
 fn placeholder() -> Split {

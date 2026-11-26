@@ -413,7 +413,9 @@ function arrange(options: FakeCoreOptions): Arrangement {
 /** The themes a fixture's settings can choose from. */
 const THEMES: readonly ThemeEntry[] = [
   { id: "lume-dark", name: "Lume Dark", scheme: "dark", builtin: true },
+  { id: "lume-daylight", name: "Lume Daylight", scheme: "light", builtin: true },
   { id: "lume-light", name: "Lume Light", scheme: "light", builtin: true },
+  { id: "lume-midnight", name: "Lume Midnight", scheme: "dark", builtin: true },
 ];
 
 /** The shells a fixture's machine has. */
@@ -809,6 +811,7 @@ export class FakeCore implements Carrier {
       problems: [],
       tokens: light ? LIGHT_TOKENS : DEFAULT_TOKENS,
       keymap: { bindings: this.#options.bindings ?? [], removed: [] },
+      layouts: [],
       schema_revision: 1,
       // Unless a test says otherwise the system draws the title bar, so the page draws
       // no window buttons of its own.

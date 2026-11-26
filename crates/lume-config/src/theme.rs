@@ -33,8 +33,26 @@ pub const DARK: &str = "lume-dark";
 /// The id of the built-in light theme.
 pub const LIGHT: &str = "lume-light";
 
-const DARK_TEXT: &str = include_str!("themes/lume-dark.toml");
-const LIGHT_TEXT: &str = include_str!("themes/lume-light.toml");
+/// The id of the built-in dark theme in blue-grey.
+pub const MIDNIGHT: &str = "lume-midnight";
+
+/// The id of the built-in light theme in soft greys.
+pub const DAYLIGHT: &str = "lume-daylight";
+
+/// The themes that come with the application, each with its file's text. The first
+/// two are the themes every other one falls back on, one for each scheme.
+const BUILTIN: [(&str, &str); 4] = [
+    (DARK, include_str!("themes/lume-dark.toml")),
+    (LIGHT, include_str!("themes/lume-light.toml")),
+    (MIDNIGHT, include_str!("themes/lume-midnight.toml")),
+    (DAYLIGHT, include_str!("themes/lume-daylight.toml")),
+];
+
+/// Whether `id` is the id of a theme that comes with the application, which a user's
+/// theme cannot take.
+pub fn is_builtin(id: &str) -> bool {
+    BUILTIN.iter().any(|(builtin, _)| *builtin == id)
+}
 
 /// The keys at the top of a theme file that are about the theme, not tokens.
 const NAME_KEY: &str = "name";
@@ -298,10 +316,10 @@ impl Default for Themes {
 }
 
 impl Themes {
-    /// The two built-in themes.
+    /// The built-in themes.
     pub fn builtin() -> Self {
         let mut themes = BTreeMap::new();
-        for (id, text) in [(DARK, DARK_TEXT), (LIGHT, LIGHT_TEXT)] {
+        for (id, text) in BUILTIN {
             // The built-in themes are part of the program; a test holds them to being
             // complete and without fault.
             if let Ok((theme, _)) = parse_theme(id, text, None) {
@@ -342,7 +360,7 @@ impl Themes {
                 message,
                 suggestion: None,
             };
-            if id == DARK || id == LIGHT {
+            if is_builtin(id) {
                 problems.push(whole_file(
                     ProblemKind::InvalidValue,
                     format!(
@@ -780,20 +798,63 @@ mod tests {
 
     #[test]
     fn the_built_in_themes_are_without_fault_and_set_every_token_but_the_fonts() {
-        for (id, text, scheme) in [
-            (DARK, DARK_TEXT, ColorScheme::Dark),
-            (LIGHT, LIGHT_TEXT, ColorScheme::Light),
-        ] {
+        let schemes = [
+            (DARK, ColorScheme::Dark),
+            (LIGHT, ColorScheme::Light),
+            (MIDNIGHT, ColorScheme::Dark),
+            (DAYLIGHT, ColorScheme::Light),
+        ];
+        for (id, text) in BUILTIN {
             let (theme, problems) = parse_theme(id, text, None).unwrap();
             assert_eq!(problems, vec![], "{id}");
-            assert_eq!(theme.scheme, scheme);
+            let scheme = schemes.iter().find(|(named, _)| *named == id).unwrap().1;
+            assert_eq!(theme.scheme, scheme, "{id}");
             assert_eq!(theme.inherits, None);
+            assert!(is_builtin(id));
             for token in TOKENS {
                 let set = theme.values.contains_key(token.name);
                 assert_eq!(set, token.group() != FONT_GROUP, "{id}: {}", token.name);
             }
         }
-        assert_eq!(Themes::builtin().iter().count(), 2);
+        assert_eq!(Themes::builtin().iter().count(), BUILTIN.len());
+    }
+
+    /// The contrast between two colours as WCAG reckons it, from 1 to 21.
+    fn contrast(a: Color, b: Color) -> f64 {
+        let (light, dark) = if a.luminance() > b.luminance() {
+            (a.luminance(), b.luminance())
+        } else {
+            (b.luminance(), a.luminance())
+        };
+        (light + 0.05) / (dark + 0.05)
+    }
+
+    #[test]
+    fn the_built_in_themes_text_can_be_read_on_what_it_is_drawn_on() {
+        // Normal text, by WCAG's AA.
+        const LEAST: f64 = 4.5;
+        let themes = Themes::builtin();
+        for theme in themes.iter() {
+            let color = |name: &str| match &theme.values[name] {
+                TokenValue::Color(color) => *color,
+                other => panic!("{}: `{name}` is {other:?}", theme.id),
+            };
+            for (fore, back) in [
+                ("color.text", "color.card"),
+                ("color.text", "color.surface"),
+                ("color.text-muted", "color.card"),
+                ("color.text-muted", "color.surface"),
+                ("color.accent-text", "color.accent"),
+                ("terminal.fg", "terminal.bg"),
+            ] {
+                let ratio = contrast(color(fore), color(back));
+                assert!(
+                    ratio >= LEAST,
+                    "{}: `{fore}` on `{back}` is {ratio:.2}:1",
+                    theme.id
+                );
+            }
+        }
     }
 
     #[test]
@@ -1126,7 +1187,7 @@ scheme = \"dusk\"\nname = 7\n\n[color]\nsurfase = \"#000000\"\ncard = \"black\"\
         let (themes, problems) = Themes::load(&dir.path().join("themes"));
 
         let ids: Vec<&str> = themes.iter().map(|theme| theme.id.as_str()).collect();
-        assert_eq!(ids, [DARK, LIGHT, "sea"]);
+        assert_eq!(ids, [DARK, DAYLIGHT, LIGHT, MIDNIGHT, "sea"]);
         assert_eq!(
             themes.get(DARK).unwrap().values["color.accent"],
             TokenValue::Color(Color::parse("#7fe3b8").unwrap())

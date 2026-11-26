@@ -493,7 +493,41 @@ export type Intent =
    * Puts a group from another workspace after the last tab of a window. Its parts
    * are numbered anew here and its panes start without sessions.
    */
-  | { readonly type: "group_graft"; readonly group: Shelved; readonly window: WindowId; };
+  | { readonly type: "group_graft"; readonly group: Shelved; readonly window: WindowId; }
+  /**
+   * Puts a tab made elsewhere, such as from a layout file, into a window and shows
+   * it. Its parts are numbered anew here and its panes start without sessions.
+   * Without an index it goes after the last tab.
+   */
+  | {
+      readonly type: "tab_graft";
+      readonly index?: number | null;
+      readonly tab: Tab;
+      readonly window: WindowId;
+    }
+  /**
+   * Gives a tab the shape of `wanted`, as a layout file says it is now. A pane of
+   * the tab with the key of one of `wanted`'s keeps its session and moves to that
+   * one's place; the other panes of `wanted` start without sessions. The tab's panes
+   * that have no place in `wanted` close, except those in `put_away`, which are put
+   * away with their programs running.
+   */
+  | {
+      readonly type: "tab_reshape";
+      readonly put_away?: readonly PaneId[];
+      readonly tab: TabId;
+      readonly wanted: Tab;
+    }
+  /**
+   * Says which layout file a tab, from now on, is the one of, or that it is none's.
+   * The panes take the keys of `keys`, by their ids; the others keep theirs.
+   */
+  | {
+      readonly type: "tab_origin";
+      readonly keys?: readonly (readonly [PaneId, string])[];
+      readonly origin?: string | null;
+      readonly tab: TabId;
+    };
 
 /**
  * What a session runs. More ways to start a session are added as variants.
@@ -592,6 +626,10 @@ export type LayoutChange =
        * Left out while the tab is not muted.
        */
       readonly muted?: boolean;
+      /**
+       * The layout file the tab was opened from. Left out while there is none.
+       */
+      readonly origin?: string;
       readonly tab: TabId;
     }
   /**
@@ -763,6 +801,11 @@ export type Node =
       readonly icon?: string;
       readonly id: PaneId;
       /**
+       * What the layout file the pane came from calls it. Applying the file again finds
+       * the pane by it, and leaves its session running.
+       */
+      readonly key?: string;
+      /**
        * The name the user gave the pane.
        */
       readonly title: string | null;
@@ -779,6 +822,11 @@ export interface Pane {
    */
   readonly icon?: string;
   readonly id: PaneId;
+  /**
+   * What the layout file the pane came from calls it. Applying the file again finds
+   * the pane by it, and leaves its session running.
+   */
+  readonly key?: string;
   /**
    * The name the user gave the pane.
    */
@@ -999,6 +1047,11 @@ export interface Tab {
    * desktop and is not marked as waiting. So is every tab of a muted group.
    */
   readonly muted?: boolean;
+  /**
+   * The layout file the tab was opened from, by its id. A change to the file can be
+   * applied to the tab again while this is set.
+   */
+  readonly origin?: string;
   readonly root: Node;
   /**
    * The name the user gave the tab. Without one, a page names the tab after what

@@ -566,6 +566,18 @@ fn main() -> ExitCode {
                     .runtime()
                     .spawn(async move { panes.sync_tab_panel().await });
             });
+            // A layout file that changes reaches the tabs that were opened from it.
+            let runtime = Arc::clone(&serving);
+            let following = Arc::downgrade(&services);
+            services.config.follow_layouts(move |before, now| {
+                let Some(services) = following.upgrade() else {
+                    return;
+                };
+                let panes = Arc::clone(&services.panes);
+                runtime
+                    .runtime()
+                    .spawn(async move { panes.layouts_changed(before, now).await });
+            });
             // What is installed on the machine is looked for off to the side, and the
             // pages are told what was found.
             let telling = Arc::clone(&serving);

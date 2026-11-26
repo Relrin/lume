@@ -22,13 +22,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
+use lume_config::layouts::Layouts;
 use lume_config::schema::TitleBar;
 use lume_config::source::split_path;
 use lume_config::{
     ColorScheme, ConfigBody, ConfigError, ConfigStore, Dirs, Dropped, Keymap, KeymapView,
-    ListedProfile, Platform, PluginBinding, Problem, Resolved, RexHostEntry, SshProfile, Theme,
-    ThemeChoice, Themes, TokenValue, WatchEvent, Watcher, check_value, plugin_setting_problems,
-    resolve_keymap_with, resolve_tokens,
+    LayoutEntry, ListedProfile, Platform, PluginBinding, Problem, Resolved, RexHostEntry,
+    SshProfile, Theme, ThemeChoice, Themes, TokenValue, WatchEvent, Watcher, check_value,
+    plugin_setting_problems, resolve_keymap_with, resolve_tokens,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -87,7 +88,14 @@ pub struct ConfigService {
     schema_revision: AtomicU64,
     /// The plugins' keys that were left out when the keys were last worked out.
     dropped: Mutex<Vec<Dropped>>,
+    /// The layout files as they were when their follower was last told of them.
+    layouts_seen: Mutex<Layouts>,
+    /// Who is told when the layout files change: the layouts before and after.
+    layouts_follower: OnceLock<LayoutsFollower>,
 }
+
+/// Something that is told the layout files before and after they changed.
+type LayoutsFollower = Box<dyn Fn(Layouts, Layouts) + Send + Sync>;
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -136,7 +144,10 @@ impl ConfigService {
             plugins: Mutex::new(PluginConfig::default()),
             schema_revision: AtomicU64::new(1),
             dropped: Mutex::new(Vec::new()),
+            layouts_seen: Mutex::new(Layouts::default()),
+            layouts_follower: OnceLock::new(),
         };
+        *lock(&service.layouts_seen) = service.store.current().layouts.clone();
         *lock(&service.told) = service.body();
         Arc::new(service)
     }
@@ -235,6 +246,17 @@ impl ConfigService {
                 bindings: keymap.bindings,
                 removed: keymap.removed,
             },
+            layouts: resolved
+                .layouts
+                .iter()
+                .map(|layout| LayoutEntry {
+                    id: layout.id.clone(),
+                    name: layout.name.clone(),
+                    description: layout.description.clone(),
+                    tabs: layout.tabs.len(),
+                    file: layout.file.display().to_string(),
+                })
+                .collect(),
             schema_revision: self.schema_revision.load(Ordering::Relaxed),
         }
     }
@@ -255,6 +277,9 @@ impl ConfigService {
 
     /// Makes the view again and tells the pages if it came out different.
     fn announce(&self) {
+        // A change made through the application reads the layout files too, and the
+        // watcher then finds nothing new.
+        self.layouts_read(&self.store.current().layouts);
         let notice = {
             let mut told = lock(&self.told);
             let body = self.body();
@@ -269,6 +294,7 @@ impl ConfigService {
                 "theme",
                 "tokens",
                 "keymap",
+                "layouts",
                 "problems",
                 "schema_revision",
             ] {
@@ -310,7 +336,10 @@ impl ConfigService {
                 return;
             };
             match event {
-                WatchEvent::Reloaded(_) => service.announce(),
+                WatchEvent::Reloaded(now) => {
+                    service.layouts_read(&now.layouts);
+                    service.announce();
+                }
                 WatchEvent::Failed(problems) => {
                     if let Some(tell) = service.tell.get() {
                         tell(json!({ "type": "config_error", "problems": problems }));
@@ -321,6 +350,27 @@ impl ConfigService {
         match watching {
             Ok(watcher) => *lock(&self.watcher) = Some(watcher),
             Err(error) => tracing::error!(%error, "the configuration is not watched for changes"),
+        }
+    }
+
+    /// Starts telling `follower` of every change to the layout files: what they were
+    /// and what they are now. A change the files' list shows also reaches the pages.
+    pub fn follow_layouts(&self, follower: impl Fn(Layouts, Layouts) + Send + Sync + 'static) {
+        let _ = self.layouts_follower.set(Box::new(follower));
+    }
+
+    /// Notes the layout files as they were read, and tells their follower if they
+    /// changed.
+    fn layouts_read(&self, now: &Layouts) {
+        let before = {
+            let mut seen = lock(&self.layouts_seen);
+            if *seen == *now {
+                return;
+            }
+            std::mem::replace(&mut *seen, now.clone())
+        };
+        if let Some(follower) = self.layouts_follower.get() {
+            follower(before, now.clone());
         }
     }
 
@@ -563,7 +613,16 @@ impl ConfigService {
         match which {
             "config" => Some(self.dirs().config_file()),
             "workspace" => Some(self.dirs().workspace_file(&self.store.workspace()?)),
-            _ => None,
+            _ => {
+                // A layout file, as `layout:<id>`, or a theme of the user's, as
+                // `theme:<id>`.
+                if let Some(id) = which.strip_prefix("layout:") {
+                    return lume_config::layouts::valid_id(id).then(|| self.dirs().layout_file(id));
+                }
+                let id = which.strip_prefix("theme:")?;
+                lume_config::layouts::valid_id(id)
+                    .then(|| self.dirs().themes_dir().join(format!("{id}.toml")))
+            }
         }
     }
 }
@@ -613,6 +672,7 @@ not-a-setting = 1
             "problems": typed.problems,
             "tokens": typed.tokens,
             "keymap": { "bindings": typed.keymap.bindings, "removed": typed.keymap.removed },
+            "layouts": typed.layouts,
             "schema_revision": typed.schema_revision,
         });
         assert!(!typed.problems.is_empty(), "the unknown key is a problem");
@@ -633,14 +693,24 @@ not-a-setting = 1
 
         let listed = service.themes();
         let ids: Vec<&str> = listed.iter().map(|theme| theme.id.as_str()).collect();
-        assert_eq!(ids, ["ember", "lume-dark", "lume-light"]);
+        assert_eq!(
+            ids,
+            [
+                "ember",
+                "lume-dark",
+                "lume-daylight",
+                "lume-light",
+                "lume-midnight"
+            ]
+        );
         assert_eq!(listed[0].name, "Ember");
         assert!(!listed[0].builtin);
-        assert!(listed[1].builtin);
+        assert!(listed[1..].iter().all(|theme| theme.builtin));
         assert_eq!(listed[2].scheme, ColorScheme::Light);
+        assert_eq!(listed[4].scheme, ColorScheme::Dark);
         assert_eq!(
-            serde_json::to_value(&listed[2]).unwrap(),
-            json!({ "id": "lume-light", "name": listed[2].name, "scheme": "light", "builtin": true })
+            serde_json::to_value(&listed[3]).unwrap(),
+            json!({ "id": "lume-light", "name": listed[3].name, "scheme": "light", "builtin": true })
         );
     }
 

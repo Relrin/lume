@@ -27,6 +27,20 @@ pub struct ThemeChoice {
     pub scheme: ColorScheme,
 }
 
+/// A layout file there is to open, as a menu offers it.
+#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct LayoutEntry {
+    /// The name of its file without `.toml`.
+    pub id: String,
+    /// What a person calls it.
+    pub name: String,
+    pub description: Option<String>,
+    /// How many tabs it opens.
+    pub tabs: usize,
+    /// The file it is read from.
+    pub file: String,
+}
+
 /// The keys in effect.
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct KeymapView {
@@ -58,6 +72,8 @@ pub struct ConfigBody {
     #[schemars(extend("x-ts" = "Tokens"))]
     pub tokens: Map<String, Value>,
     pub keymap: KeymapView,
+    /// The layout files there are to open, in the order of their ids.
+    pub layouts: Vec<LayoutEntry>,
     /// Counts the schemas of the settings there have been: it changes when plugins add
     /// to the settings or take from them.
     pub schema_revision: u64,

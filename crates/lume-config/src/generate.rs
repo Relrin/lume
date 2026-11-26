@@ -83,6 +83,11 @@ pub fn generated_files() -> Vec<Generated> {
             text: pretty_json(&theme_schema()),
         },
         Generated {
+            kind: GeneratedKind::Schema,
+            path: "schemas/layout.schema.json",
+            text: pretty_json(&crate::layouts::layout_schema()),
+        },
+        Generated {
             kind: GeneratedKind::Tokens,
             path: "packages/tokens/src/generated.ts",
             text: typescript(&defaults, &light_tokens()),
@@ -110,7 +115,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn there_is_a_schema_for_the_settings_and_for_themes_and_the_token_files() {
+    fn there_is_a_schema_for_the_settings_themes_and_layouts_and_the_token_files() {
         let files = generated_files();
         let paths: Vec<&str> = files.iter().map(|file| file.path).collect();
         assert_eq!(
@@ -118,6 +123,7 @@ mod tests {
             [
                 "schemas/config.schema.json",
                 "schemas/theme.schema.json",
+                "schemas/layout.schema.json",
                 "packages/tokens/src/generated.ts",
                 "packages/tokens/src/defaults.css",
                 "packages/ui/src/wire/config.generated.ts",
@@ -127,8 +133,8 @@ mod tests {
             assert!(file.text.ends_with('\n'), "{}", file.path);
             assert!(!file.text.contains('\r'), "{}", file.path);
         }
-        assert!(files[2].text.contains("export const TOKEN_KINDS = {"));
-        assert!(files[3].text.contains("--lume-color-surface: #121416;"));
+        assert!(files[3].text.contains("export const TOKEN_KINDS = {"));
+        assert!(files[4].text.contains("--lume-color-surface: #121416;"));
     }
 
     #[test]

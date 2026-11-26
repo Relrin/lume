@@ -22,6 +22,7 @@ function view(revision: number): ConfigView {
     problems: [],
     tokens: DEFAULT_TOKENS,
     keymap: { bindings: [], removed: [] },
+    layouts: [],
     schema_revision: 1,
     title_bar: "system",
   };

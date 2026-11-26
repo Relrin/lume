@@ -409,6 +409,52 @@ impl Control {
                     },
                 )
             }
+            AppRequestBody::LayoutFiles {} => {
+                let current = panes.config.current();
+                let layouts: Vec<serde_json::Value> = current
+                    .layouts
+                    .iter()
+                    .map(|layout| {
+                        serde_json::json!({
+                            "id": layout.id,
+                            "name": layout.name,
+                            "description": layout.description,
+                            "tabs": layout.tabs.len(),
+                            "file": layout.file.display().to_string(),
+                        })
+                    })
+                    .collect();
+                let dir = panes.config.dirs().layouts_dir();
+                let problems: Vec<&lume_config::Problem> = current
+                    .problems
+                    .iter()
+                    .filter(|problem| {
+                        problem
+                            .file
+                            .as_ref()
+                            .is_some_and(|file| file.starts_with(&dir))
+                    })
+                    .collect();
+                reply(
+                    format!("listed {} layout files", layouts.len()),
+                    AppReplyBody::LayoutFiles {
+                        layouts: serde_json::json!({
+                            "dir": dir.display().to_string(),
+                            "layouts": layouts,
+                            "problems": problems,
+                        }),
+                    },
+                )
+            }
+            AppRequestBody::LayoutOpen { name } => {
+                let opened = panes.open_layout(&name, None).await?;
+                let opened = serde_json::to_value(opened)
+                    .map_err(|error| AppError::new(codes::INTERNAL, error.to_string()))?;
+                reply(
+                    format!("opened the layout {name}"),
+                    AppReplyBody::LayoutOpened { opened },
+                )
+            }
             AppRequestBody::Workspaces {} => {
                 let (active, workspaces) = panes.workspaces()?;
                 reply(

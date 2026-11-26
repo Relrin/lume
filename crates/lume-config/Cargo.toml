@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 lume-codegen.workspace = true
+lume-layout = { workspace = true, default-features = false }
 lume-proto.workspace = true
 notify.workspace = true
 schemars.workspace = true

@@ -30,6 +30,7 @@ pub mod import;
 pub mod keymap;
 pub mod keys;
 pub mod layers;
+pub mod layouts;
 pub mod listed;
 pub mod paths;
 pub mod profiles;
@@ -70,10 +71,11 @@ pub use schema::{
 pub use source::{Problem, ProblemKind, Source};
 pub use store::{ConfigStore, ListedProfile, Resolved, SshProfile, check_setting};
 pub use theme::{
-    Theme, Themes, default_tokens, light_tokens, parse_theme, resolve_tokens, theme_schema,
+    Theme, Themes, default_tokens, is_builtin, light_tokens, parse_theme, resolve_tokens,
+    theme_schema,
 };
 pub use tokens::{Color, ResolvedTokens, TOKENS, TokenDef, TokenKind, TokenValue};
-pub use view::{ConfigBody, ConfigView, KeymapView, ThemeChoice};
+pub use view::{ConfigBody, ConfigView, KeymapView, LayoutEntry, ThemeChoice};
 pub use watch::{WatchEvent, Watcher};
 
 /// The colour scheme of the operating system, or of a theme.

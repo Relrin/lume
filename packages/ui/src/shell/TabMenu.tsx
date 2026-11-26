@@ -270,6 +270,51 @@ export function TabMenu({
     },
   ];
   for (const row of more) ownRows[row.key] = [row];
+
+  // The layout file the tab follows, if it was opened from one that is still there.
+  const layoutId = entry.origin?.split("#")[0];
+  const layout = view?.layouts.find((found) => found.id === layoutId);
+  ownRows["save-layout"] = [
+    {
+      key: "save-layout",
+      // A tab of a layout of one tab is written back over its file.
+      label: layout && layout.tabs === 1 ? `Save to layout “${layout.name}”` : "Save as layout",
+      icon: <MenuGlyph name="file-text" />,
+      hint: hint("lume.layout.save"),
+      choose: () => run("lume.layout.save", { tab }),
+    },
+  ];
+  ownRows["layout-file"] = layout
+    ? [
+        {
+          key: "layout-file",
+          label: `From layout “${layout.name}”`,
+          icon: <MenuGlyph name="columns-2" />,
+          hint: "›",
+          choose: () => undefined,
+          items: [
+            {
+              key: "layout-open-file",
+              label: "Open layout file",
+              icon: <MenuGlyph name="file" />,
+              choose: () => run("lume.layout.open-file", { layout: layout.id }),
+            },
+            {
+              key: "layout-reapply",
+              label: "Apply file again",
+              icon: <MenuGlyph name="refresh-cw" />,
+              choose: () => run("lume.layout.reapply", { tab }),
+            },
+            {
+              key: "layout-detach",
+              label: "Stop following file",
+              icon: <MenuGlyph name="x" />,
+              choose: () => run("lume.layout.detach", { tab }),
+            },
+          ],
+        },
+      ]
+    : [];
   const options = menuRows(nodesOf(shown?.menus, "menu.tab"), {
     contexts,
     builtin: (key) => ownRows[key] ?? [],

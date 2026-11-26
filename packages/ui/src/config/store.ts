@@ -9,14 +9,21 @@
 
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import type { ConfigView } from "../core/types.ts";
+import type { ConfigProblem, ConfigView } from "../core/types.ts";
 
 /** The configuration a page holds. */
 export interface ConfigState {
   /** The view in use. Nothing until the core has sent one. */
   readonly view: ConfigView | null;
+  /**
+   * Why the files, as they were last saved, could not be used: the view held is the one
+   * from before. Empty once a view is taken again.
+   */
+  readonly failed: readonly ConfigProblem[];
   /** Takes a view, unless the one held is as new or newer. Says whether it was taken. */
   set(view: ConfigView): boolean;
+  /** Notes that the files could not be used, and why. */
+  fail(problems: readonly ConfigProblem[]): void;
 }
 
 /** The store a page keeps its configuration in. */
@@ -26,11 +33,13 @@ export type ConfigStore = StoreApi<ConfigState>;
 export function createConfigStore(): ConfigStore {
   return createStore<ConfigState>()((set, get) => ({
     view: null,
+    failed: [],
     set: (view) => {
       const held = get().view;
       if (held !== null && view.revision <= held.revision) return false;
-      set({ view });
+      set({ view, failed: [] });
       return true;
     },
+    fail: (problems) => set({ failed: problems }),
   }));
 }

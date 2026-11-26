@@ -305,6 +305,7 @@ impl Maker<'_> {
                     label: String::new(),
                     kind: String::new(),
                 },
+                key: None,
             }),
         };
         if root.pane_ids().len() > TAB_PANES_MAX {
@@ -334,6 +335,7 @@ impl Maker<'_> {
             locked: false,
             muted: false,
             group: None,
+            origin: None,
         })
     }
 
@@ -416,6 +418,7 @@ impl Maker<'_> {
             title,
             icon: None,
             content,
+            key: None,
         })
     }
 

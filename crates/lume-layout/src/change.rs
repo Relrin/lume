@@ -48,6 +48,9 @@ pub enum LayoutChange {
         #[serde(default, skip_serializing_if = "crate::model::is_false")]
         muted: bool,
         group: Option<GroupId>,
+        /// The layout file the tab was opened from. Left out while there is none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<String>,
     },
     /// The groups of a window's tabs changed: which there are, their order, or how
     /// one looks.

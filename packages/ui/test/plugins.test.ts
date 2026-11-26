@@ -21,7 +21,8 @@ import { ShellContext } from "../src/shell/context.ts";
 import { flatten } from "../src/shell/ListPanel.tsx";
 import type { MenuItem } from "../src/shell/Menu.tsx";
 import { menuRows, nodesOf, type MenuParts } from "../src/shell/menus.ts";
-import { StatusBar } from "../src/shell/StatusBar.tsx";
+import { createConfigStore } from "../src/config/store.ts";
+import { problemFile, StatusBar } from "../src/shell/StatusBar.tsx";
 import { createStatusStore } from "../src/status/registry.ts";
 import { cursorFxSettings, cursorFxShaders } from "../src/terminal/cursor-fx.ts";
 import { DEVBOX, rexList } from "./rex-fixtures.ts";
@@ -124,7 +125,13 @@ describe("menus drawn from what the core placed", () => {
 
   it("draws a menu from the application's own nodes while the core has sent none", () => {
     const keys = nodesOf(undefined, "menu.tab").map((node) => node.key);
-    expect(keys).toEqual(["lume:name", "lume:group", "lume:position", "lume:closing"]);
+    expect(keys).toEqual([
+      "lume:name",
+      "lume:group",
+      "lume:position",
+      "lume:layout",
+      "lume:closing",
+    ]);
     expect(nodesOf({ "menu.tab": [] }, "menu.tab")).toEqual([]);
   });
 });
@@ -340,13 +347,51 @@ describe("the plugins' status items", () => {
 });
 
 describe("the status bar", () => {
+  it("says while the configuration's files have something wrong, and which file to open", () => {
+    const config = createConfigStore();
+    // Drawn on its own, a store is read as it first was: here, as it is now.
+    const now = { ...config, getInitialState: () => config.getState() };
+    const app = {
+      status: createStatusStore(),
+      config: now,
+      plugins: createPluginsStore(),
+      views: { focus: () => undefined },
+      layout: createStore(() => ({ backend: null })),
+      rex: createStore(() => ({ list: null })),
+    } as unknown as ShellApp;
+    const draw = () =>
+      renderToStaticMarkup(createElement(ShellContext, { value: app }, createElement(StatusBar)));
+    expect(draw()).toBe("");
+    const problem = {
+      kind: "syntax" as const,
+      path: "",
+      file: String.raw`C:\Users\me\AppData\Roaming\lume\layouts\dev.toml`,
+      line: 3,
+      column: 1,
+      message: "expected `]`",
+      suggestion: null,
+    };
+    config.getState().fail([problem]);
+    const html = draw();
+    expect(html).toContain('data-level="error"');
+    expect(html).toContain("Config not applied · 1 problem");
+    expect(problemFile(problem)).toBe("layout:dev");
+    expect(problemFile({ ...problem, file: "/home/me/.config/lume/config.toml" })).toBe("config");
+    expect(problemFile({ ...problem, file: "/home/me/.config/lume/themes/sea.toml" })).toBe(
+      "theme:sea",
+    );
+    expect(problemFile({ ...problem, file: null })).toBeNull();
+  });
+
   it("is drawn only while it has items, those of its left end before those of its right", () => {
     const status = createStatusStore();
     // Drawn on its own, a store is read as it first was: here, as it is now.
     const now = { ...status, getInitialState: () => status.getState() };
+    const config = createConfigStore();
     const app = (backend: string | null, rex: RexHosts | null = null) =>
       ({
         status: now,
+        config,
         plugins: createPluginsStore(),
         views: { focus: () => undefined },
         layout: createStore(() => ({

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-layouts-save-tab"
+description = "Enables the layouts_save_tab command without any pre-configured scope."
+commands.allow = ["layouts_save_tab"]
+
+[[permission]]
+identifier = "deny-layouts-save-tab"
+description = "Denies the layouts_save_tab command without any pre-configured scope."
+commands.deny = ["layouts_save_tab"]

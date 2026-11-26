@@ -137,6 +137,33 @@
     gap: 16px;
   }
 
+  /*
+   * What is wrong in the user's files, while something is: quiet for what was passed
+   * over, louder when the files were not applied at all.
+   */
+  .status-problems {
+    --status-tone: var(--lume-color-status-warning);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: var(--lume-radius-control);
+    font-size: 12px;
+    white-space: nowrap;
+    color: var(--status-tone);
+    background: color-mix(in srgb, var(--status-tone) 10%, transparent);
+  }
+
+  .status-problems[data-level="error"] {
+    --status-tone: var(--lume-color-status-danger);
+  }
+
+  .status-problems:hover,
+  .status-problems[aria-expanded="true"] {
+    background: color-mix(in srgb, var(--status-tone) 18%, transparent);
+  }
+
   .top-divider {
     flex-shrink: 0;
     width: var(--lume-size-border);

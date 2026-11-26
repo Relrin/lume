@@ -85,6 +85,8 @@ export interface TabEntry {
   readonly muted: boolean;
   /** The group the tab is in. */
   readonly group: GroupId | null;
+  /** The layout file the tab was opened from, as `<layout>#<tab>`, while it follows one. */
+  readonly origin?: string | undefined;
 }
 
 /** One split's direction and its children's shares. */
@@ -324,15 +326,16 @@ function dropTree(draft: Draft, tab: TabId, old: TreeNode, kept: TreeNode | unde
 }
 
 /** What a tab entry holds besides its name and its tree. */
-type TabFacts = Pick<TabEntry, "color" | "locked" | "muted" | "group">;
+type TabFacts = Pick<TabEntry, "color" | "locked" | "muted" | "group" | "origin">;
 
 /** A tab's facts, with what the core leaves out when it says nothing of it. */
-function factsOf(tab: Pick<Tab, "color" | "locked" | "muted" | "group">): TabFacts {
+function factsOf(tab: Pick<Tab, "color" | "locked" | "muted" | "group" | "origin">): TabFacts {
   return {
     color: tab.color ?? null,
     locked: tab.locked ?? false,
     muted: tab.muted ?? false,
     group: tab.group ?? null,
+    origin: tab.origin ?? undefined,
   };
 }
 
@@ -356,6 +359,7 @@ function setTree(
     before.locked === facts.locked &&
     before.muted === facts.muted &&
     before.group === facts.group &&
+    before.origin === facts.origin &&
     before.root === root;
   if (!same) {
     draft.set("tabs", tab.id, {
@@ -368,6 +372,7 @@ function setTree(
       locked: facts.locked,
       muted: facts.muted,
       group: facts.group,
+      ...(facts.origin === undefined ? {} : { origin: facts.origin }),
     });
   }
 }
@@ -517,11 +522,13 @@ function follow(draft: Draft, change: LayoutChange): void {
       const tab = draft.data.tabs[change.tab];
       if (!tab) return;
       const muted = change.muted ?? false;
+      const origin = change.origin ?? undefined;
       const same =
         tab.color === change.color &&
         tab.locked === change.locked &&
         tab.muted === muted &&
-        tab.group === change.group;
+        tab.group === change.group &&
+        tab.origin === origin;
       if (!same) {
         draft.set("tabs", tab.id, {
           ...tab,
@@ -529,6 +536,7 @@ function follow(draft: Draft, change: LayoutChange): void {
           locked: change.locked,
           muted,
           group: change.group,
+          origin,
         });
       }
       return;

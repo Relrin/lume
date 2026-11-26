@@ -44,6 +44,12 @@ import type {
 } from "../settings/plugins.ts";
 
 /** What a page does with what the core sends it. */
+/**
+ * One of the user's files the core opens for editing: the configuration, the file of the
+ * workspace in use, or a layout or theme file by its name.
+ */
+export type ConfigFile = "config" | "workspace" | `layout:${string}` | `theme:${string}`;
+
 export interface CoreEvents {
   /** Something the page keeps a copy of has changed, or there is something to say. */
   notice(notice: Notice): void;
@@ -89,6 +95,11 @@ export class CoreClient {
       },
     });
     return new CoreClient(transport);
+  }
+
+  /** Opens the tabs of a layout file in this window. */
+  layoutsOpen(id: string): Promise<{ readonly tab?: string; readonly group?: string }> {
+    return this.transport.command("layouts_open", { id });
   }
 
   /** The layout as it is now, and which of its windows this page is. */
@@ -140,7 +151,7 @@ export class CoreClient {
   }
 
   /** Opens one of the user's settings files for editing. */
-  configOpen(file: "config" | "workspace" = "config"): Promise<void> {
+  configOpen(file: ConfigFile = "config"): Promise<void> {
     return this.transport.command("config_open", { file });
   }
 

@@ -71,7 +71,8 @@
   },
   "layout": {
     "tab-placement": "top",
-    "new-pane-cwd": "inherit"
+    "new-pane-cwd": "inherit",
+    "files-reapply": "ask"
   },
   "renderer": {
     "tier": "auto"
@@ -342,6 +343,10 @@ export interface Config {
 export interface ConfigView {
   readonly config: Config;
   readonly keymap: KeymapView;
+  /**
+   * The layout files there are to open, in the order of their ids.
+   */
+  readonly layouts: readonly LayoutEntry[];
   readonly platform: Platform;
   /**
    * What was wrong in the files and was passed over.
@@ -458,6 +463,23 @@ export type CursorTrail =
    * A glowing comet flies to the new place, its tail following.
    */
   | "comet";
+
+/**
+ * What happens to a tab opened from a layout file when the file changes.
+ */
+export type FilesReapply =
+  /**
+   * The tab's window offers to apply the change.
+   */
+  | "ask"
+  /**
+   * The change is applied at once.
+   */
+  | "always"
+  /**
+   * The tab is left as it is.
+   */
+  | "never";
 
 /**
  * The fonts.
@@ -586,6 +608,12 @@ export type LauncherKind =
  */
 export interface LayoutConfig {
   /**
+   * What happens to a tab opened from a layout file when the file is saved again:
+   * "ask", "always" (programs still running in panes the file no longer has are
+   * put away, not ended) or "never".
+   */
+  readonly "files-reapply": FilesReapply;
+  /**
    * The directory a new pane's program starts in.
    */
   readonly "new-pane-cwd": NewPaneCwd;
@@ -593,6 +621,29 @@ export interface LayoutConfig {
    * Where the list of tabs is.
    */
   readonly "tab-placement": TabPlacement;
+}
+
+/**
+ * A layout file there is to open, as a menu offers it.
+ */
+export interface LayoutEntry {
+  readonly description: string | null;
+  /**
+   * The file it is read from.
+   */
+  readonly file: string;
+  /**
+   * The name of its file without `.toml`.
+   */
+  readonly id: string;
+  /**
+   * What a person calls it.
+   */
+  readonly name: string;
+  /**
+   * How many tabs it opens.
+   */
+  readonly tabs: number;
 }
 
 /**

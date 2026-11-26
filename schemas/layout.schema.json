@@ -1,0 +1,241 @@
+{
+  "$defs": {
+    "node": {
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          ],
+          "description": "The program the pane runs and its arguments: a list, or one line split at spaces outside quotes. It runs directly, not in a shell."
+        },
+        "cwd": {
+          "description": "Where the panes start. A leading `~` is the home folder.",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Variables the panes start with, on top of the environment.",
+          "type": "object"
+        },
+        "key": {
+          "description": "What the pane is called in this file. Applied again, the file finds the pane by it and leaves its program running.",
+          "type": "string"
+        },
+        "pane": {
+          "description": "The panes this one is split into.",
+          "items": {
+            "$ref": "#/$defs/node"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "type": "array"
+        },
+        "plugin": {
+          "description": "The plugin whose view the pane shows.",
+          "type": "string"
+        },
+        "profile": {
+          "description": "The profile the pane starts from, by its id.",
+          "type": "string"
+        },
+        "sizes": {
+          "description": "The panes' shares, in any unit: each is a part of their sum.",
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "split": {
+          "description": "How the panes inside are laid out: side by side, or one above the other.",
+          "enum": [
+            "row",
+            "column"
+          ]
+        },
+        "title": {
+          "description": "The pane's name.",
+          "type": "string"
+        },
+        "view": {
+          "description": "The plugin's view the pane shows.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "tab": {
+      "properties": {
+        "color": {
+          "anyOf": [
+            {
+              "enum": [
+                "red",
+                "orange",
+                "yellow",
+                "green",
+                "teal",
+                "blue",
+                "purple",
+                "pink"
+              ]
+            },
+            {
+              "pattern": "^#[0-9a-fA-F]{6}$"
+            }
+          ],
+          "description": "A colour: one of the named ones, or `#rrggbb`.",
+          "type": "string"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            }
+          ],
+          "description": "The program the pane runs and its arguments: a list, or one line split at spaces outside quotes. It runs directly, not in a shell."
+        },
+        "cwd": {
+          "description": "Where the panes start. A leading `~` is the home folder.",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Variables the panes start with, on top of the environment.",
+          "type": "object"
+        },
+        "focus": {
+          "description": "The key of the pane that has the keyboard.",
+          "type": "string"
+        },
+        "key": {
+          "description": "What the pane is called in this file. Applied again, the file finds the pane by it and leaves its program running.",
+          "type": "string"
+        },
+        "pane": {
+          "description": "The panes this one is split into.",
+          "items": {
+            "$ref": "#/$defs/node"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "type": "array"
+        },
+        "plugin": {
+          "description": "The plugin whose view the pane shows.",
+          "type": "string"
+        },
+        "profile": {
+          "description": "The profile the pane starts from, by its id.",
+          "type": "string"
+        },
+        "sizes": {
+          "description": "The panes' shares, in any unit: each is a part of their sum.",
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "split": {
+          "description": "How the panes inside are laid out: side by side, or one above the other.",
+          "enum": [
+            "row",
+            "column"
+          ]
+        },
+        "title": {
+          "description": "The tab's name.",
+          "type": "string"
+        },
+        "view": {
+          "description": "The plugin's view the pane shows.",
+          "type": "string"
+        },
+        "zoom": {
+          "description": "The key of the pane that fills the tab.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Tabs of panes to open by name, from the `layouts` folder of Lume's configuration.",
+  "properties": {
+    "color": {
+      "anyOf": [
+        {
+          "enum": [
+            "red",
+            "orange",
+            "yellow",
+            "green",
+            "teal",
+            "blue",
+            "purple",
+            "pink"
+          ]
+        },
+        {
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        }
+      ],
+      "description": "A colour: one of the named ones, or `#rrggbb`.",
+      "type": "string"
+    },
+    "cwd": {
+      "description": "Where the panes start. A leading `~` is the home folder.",
+      "type": "string"
+    },
+    "description": {
+      "description": "A few words shown beside the name.",
+      "type": "string"
+    },
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Variables the panes start with, on top of the environment.",
+      "type": "object"
+    },
+    "name": {
+      "description": "What the layout is called. Left out, the file's name.",
+      "type": "string"
+    },
+    "tab": {
+      "description": "The tabs the layout opens.",
+      "items": {
+        "$ref": "#/$defs/tab"
+      },
+      "maxItems": 32,
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "tab"
+  ],
+  "title": "Lume layout file",
+  "type": "object"
+}

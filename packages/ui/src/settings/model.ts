@@ -470,10 +470,24 @@ function sourceOf(view: ConfigView, path: string): SettingSource {
   return layer === "user" || layer === "workspace" || layer === "profile" ? layer : "default";
 }
 
-function listed(list: SettingList, lists: SettingsLists): SettingChoice[] {
+/**
+ * The themes in the order a person looks for one: those of the scheme the setting is
+ * for first, then the built-in ones before the user's own, then by name.
+ */
+function themeChoices(lists: SettingsLists, path: string): SettingChoice[] {
+  const wanted =
+    path === "appearance.theme-light" ? "light" : path === "appearance.theme-dark" ? "dark" : null;
+  const rank = (theme: ThemeEntry): number =>
+    (wanted !== null && theme.scheme !== wanted ? 2 : 0) + (theme.builtin ? 0 : 1);
+  return [...lists.themes]
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
+    .map((theme) => ({ value: theme.id, label: theme.name }));
+}
+
+function listed(list: SettingList, lists: SettingsLists, path: string): SettingChoice[] {
   switch (list) {
     case "themes":
-      return lists.themes.map((theme) => ({ value: theme.id, label: theme.name }));
+      return themeChoices(lists, path);
     case "fonts":
       return lists.fonts.map((font) => ({ value: font, label: font }));
     case "interface-fonts":
@@ -512,7 +526,7 @@ function rowOf(found: Found, view: ConfigView, lists: SettingsLists): SettingRow
       // What the application starts with is offered even where the machine's own
       // list does not have it: the font it brings with it, for one.
       // Where the list has it, it goes by the name the list gives it.
-      const fromList = listed(annotation.list, lists);
+      const fromList = listed(annotation.list, lists, path);
       if (fallback !== null && !fromList.some((choice) => choice.value === fallback)) {
         add({ value: fallback, label: String(fallback) });
       }

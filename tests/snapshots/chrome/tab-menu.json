@@ -331,6 +331,13 @@
           },
           {
             "role": "menuitem",
+            "name": "Save as layout"
+          },
+          {
+            "role": "separator"
+          },
+          {
+            "role": "menuitem",
             "name": "Mute tab"
           },
           {

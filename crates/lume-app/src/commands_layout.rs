@@ -8,12 +8,12 @@
 
 use std::sync::Arc;
 
-use lume_layout::{Applied, Intent, PaneId, WindowId};
+use lume_layout::{Applied, Intent, PaneId, TabId, WindowId};
 use serde_json::Value;
 use tauri::{State, Webview};
 
 use crate::error::CommandError;
-use crate::panes::{PaneStart, SessionsStarted};
+use crate::panes::{LayoutOpened, LayoutReapplied, LayoutSaved, PaneStart, SessionsStarted};
 use crate::registry::CommandSpec;
 use crate::services::{Asker, Services};
 use crate::window::window_of;
@@ -114,4 +114,79 @@ pub async fn command_run(
     services.state.check_carrier(webview.label(), carrier)?;
     let args = args.unwrap_or(Value::Null);
     services.run_command(window, &id, &args, Asker::Page).await
+}
+
+/// That `tab` is a tab of the calling window.
+fn own_tab(webview: &Webview, services: &Services, tab: TabId) -> Result<(), CommandError> {
+    let window = window_for(webview)?;
+    let workspace = services.panes.workspace();
+    let theirs = workspace
+        .windows
+        .iter()
+        .find(|found| found.centre.tab(tab).is_some())
+        .map(|found| found.id);
+    if theirs == Some(window) {
+        Ok(())
+    } else {
+        Err(CommandError::not_found(format!(
+            "this window has no tab {tab}"
+        )))
+    }
+}
+
+/// Opens the tabs of a layout file in the calling window.
+#[tauri::command]
+pub async fn layouts_open(
+    webview: Webview,
+    services: Shared<'_>,
+    carrier: u32,
+    id: String,
+) -> Result<LayoutOpened, CommandError> {
+    let window = window_for(&webview)?;
+    services.state.check_carrier(webview.label(), carrier)?;
+    services.panes.open_layout(&id, Some(window)).await
+}
+
+/// Gives a tab of the calling window the shape its layout file has now.
+#[tauri::command]
+pub async fn layouts_reapply(
+    webview: Webview,
+    services: Shared<'_>,
+    carrier: u32,
+    tab: TabId,
+) -> Result<LayoutReapplied, CommandError> {
+    services.state.check_carrier(webview.label(), carrier)?;
+    own_tab(&webview, &services, tab)?;
+    services.panes.reapply_layout(tab).await
+}
+
+/// Lets a tab of the calling window go of its layout file.
+#[tauri::command]
+pub async fn layouts_detach(
+    webview: Webview,
+    services: Shared<'_>,
+    carrier: u32,
+    tab: TabId,
+) -> Result<(), CommandError> {
+    services.state.check_carrier(webview.label(), carrier)?;
+    own_tab(&webview, &services, tab)?;
+    services.panes.detach_layout(tab).await
+}
+
+/// Writes a tab of the calling window as a layout file called `name`.
+#[tauri::command]
+pub async fn layouts_save_tab(
+    webview: Webview,
+    services: Shared<'_>,
+    carrier: u32,
+    tab: TabId,
+    name: String,
+    replace: Option<bool>,
+) -> Result<LayoutSaved, CommandError> {
+    services.state.check_carrier(webview.label(), carrier)?;
+    own_tab(&webview, &services, tab)?;
+    services
+        .panes
+        .save_tab_as_layout(tab, &name, replace.unwrap_or(false))
+        .await
 }

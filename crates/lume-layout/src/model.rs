@@ -265,6 +265,10 @@ pub struct Tab {
     /// The group of the window's tabs this tab is in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<GroupId>,
+    /// The layout file the tab was opened from, by its id. A change to the file can be
+    /// applied to the tab again while this is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 pub(crate) fn is_false(value: &bool) -> bool {
@@ -475,6 +479,10 @@ pub struct Shelved {
 /// A node of a tab's tree.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "most nodes are panes: boxing them would cost an allocation each for no saving"
+)]
 pub enum Node {
     Split(Split),
     Pane(Pane),
@@ -514,6 +522,10 @@ pub struct Pane {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<Box<str>>,
     pub content: PaneContent,
+    /// What the layout file the pane came from calls it. Applying the file again finds
+    /// the pane by it, and leaves its session running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 /// What a pane shows.

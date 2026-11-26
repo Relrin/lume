@@ -348,7 +348,7 @@ export function view(changes: Partial<ConfigView> = {}, appearance: Record<strin
     config: settings({
       appearance: { "pane-header": "always", "theme-dark": "lume-dark", ...appearance },
       terminal: { "scrollback-lines": 10_000, "cursor-style": "bar", "cursor-blink": false },
-      layout: { "tab-placement": "top" },
+      layout: { "tab-placement": "top", "files-reapply": "ask" },
       renderer: { tier: "auto" },
       font: { family: "JetBrains Mono" },
     }),
@@ -356,6 +356,7 @@ export function view(changes: Partial<ConfigView> = {}, appearance: Record<strin
     problems: [],
     tokens: DEFAULT_TOKENS,
     keymap: { bindings: [], removed: [] },
+    layouts: [],
     schema_revision: 1,
     title_bar: "custom",
     ...changes,

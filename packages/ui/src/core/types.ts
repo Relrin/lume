@@ -17,6 +17,7 @@ import type {
   Intent,
   LayoutChange,
   PaneId,
+  TabId,
   WindowId,
   Workspace,
 } from "../layout/types.ts";
@@ -614,6 +615,19 @@ export type Notice =
       readonly view: ConfigView;
     }
   | { readonly type: "config_error"; readonly problems: readonly ConfigProblem[] }
+  /**
+   * A layout file that a tab of this window was opened from was saved with a new
+   * shape. `leaving` are the tab's panes the file no longer has; `busy` those of them
+   * that still run something, which applying the file puts away instead of closing.
+   */
+  | {
+      readonly type: "layout_file_changed";
+      readonly tab: TabId;
+      readonly layout: string;
+      readonly name: string;
+      readonly leaving: readonly PaneId[];
+      readonly busy: readonly PaneId[];
+    }
   | ({ readonly type: "window_state" } & WindowState)
   /**
    * The window was asked to close while it must ask first. The page asks, and closes

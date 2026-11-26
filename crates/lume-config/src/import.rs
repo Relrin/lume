@@ -13,7 +13,7 @@
 
 use lume_proto::ColorScheme;
 
-use crate::theme::{DARK, LIGHT, Themes, parse_theme};
+use crate::theme::{DARK, LIGHT, Themes, is_builtin, parse_theme};
 use crate::tokens::{Color, PALETTE, PALETTE_LEN, TokenValue};
 use crate::tuning::{
     IMPORT_BORDER_MIX, IMPORT_DARK_SURFACE_MIX, IMPORT_DROP_PREVIEW_ALPHA, IMPORT_HOVER_MIX,
@@ -142,7 +142,7 @@ fn quoted(text: &str) -> String {
 pub fn import_ghostty(source: &str, name: &str) -> Result<Imported, String> {
     let id = theme_id(name)
         .ok_or_else(|| format!("`{name}` has nothing in it a theme could be called by"))?;
-    if id == DARK || id == LIGHT {
+    if is_builtin(&id) {
         return Err(format!(
             "`{id}` is a built-in theme; give the imported one another name"
         ));

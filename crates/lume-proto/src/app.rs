@@ -341,6 +341,12 @@ pub enum AppRequestBody {
     LayoutApply {
         intent: serde_json::Value,
     },
+    /// Lists the layout files there are to open.
+    LayoutFiles {},
+    /// Opens the tabs of a layout file, by its id, in the window last worked in.
+    LayoutOpen {
+        name: String,
+    },
     /// Lists the workspaces there are, and says which is on show.
     Workspaces {},
     /// Lists the profiles there are: the ways to start a terminal.
@@ -695,6 +701,14 @@ pub enum AppReplyBody {
         revision: u64,
         /// The ids of what the intent made: `pane`, `tab`, `window`.
         created: serde_json::Value,
+    },
+    /// The layout files there are, and what was wrong with those left out.
+    LayoutFiles {
+        layouts: serde_json::Value,
+    },
+    /// A layout file's tabs were opened: the `tab`, or the `group` of its tabs.
+    LayoutOpened {
+        opened: serde_json::Value,
     },
     Workspaces {
         /// The workspace on show.

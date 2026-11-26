@@ -1,0 +1,101 @@
+# A built-in light theme: soft neutral greys with a steel-blue accent.
+#
+# Colours adapted from "Cursor Light" by BioHazard786,
+# https://github.com/BioHazard786/cursor-theme-vscode (MIT licence). The original's
+# translucent inks are laid flat on the surface they sit on, so text reads the same
+# wherever it is; its ANSI white is darkened so that text a program prints in white
+# still shows on the light terminal. See lume-dark.toml for how a theme is written.
+
+name = "Lume Daylight"
+scheme = "light"
+
+[color]
+surface = "#f3f3f3"
+card = "#fcfcfc"
+card-header = "#f6f6f6"
+border = "#d9d9d9"
+border-focus = "#3c7cab"
+text = "#262626"
+text-muted = "#5f5f5f"
+text-inverse = "#fcfcfc"
+accent = "#3c7cab"
+accent-text = "#ffffff"
+control = "#fcfcfc"
+control-hover = "#ececec"
+control-active = "#e1e1e1"
+popover = "#fcfcfc"
+overlay = "#14141459"
+drop-preview = "#3c7cab33"
+
+[color.status]
+info = "#3c7cab"
+success = "#1f8a65"
+warning = "#a16900"
+danger = "#cf2d56"
+
+# The colours a tab or a group of tabs can be given.
+[color.tab]
+red = "#cf2d56"
+orange = "#db704b"
+yellow = "#a16900"
+green = "#1f8a65"
+teal = "#4c7f8c"
+blue = "#3c7cab"
+purple = "#7a6fc0"
+pink = "#b8448b"
+
+[terminal]
+fg = "#262626"
+bg = "#fcfcfc"
+cursor = "#262626"
+cursor-text = "#fcfcfc"
+selection = "#c9dcec"
+selection-text = "#262626"
+search-match = "#6f9ba65c"
+search-active = "#6f9ba6"
+palette = [
+    "#262626", "#cf2d56", "#1f8a65", "#a16900", "#3c7cab", "#b8448b", "#4c7f8c", "#8d8d8d",
+    "#5f5f5f", "#e75e78", "#55a583", "#c08532", "#6299c3", "#d06ba6", "#6f9ba6", "#a3a3a3",
+]
+
+[space]
+gap = 8
+padding = 8
+
+[radius]
+card = 10
+control = 8
+
+[size]
+header = 34
+topbar = 44
+statusbar = 28
+tab = 30
+border = 1
+focus-ring = 1
+
+[opacity]
+dim = 0.0
+disabled = 0.5
+background-image = 1.0
+
+[shadow]
+card = "0 4 16 0 #1414141f"
+card-focus = "0 0 0 1 #3c7cab33, 0 8 24 0 #1414142e"
+floating = "0 8 24 0 #14141440"
+popover = "0 12 32 0 #1414144d"
+
+[background]
+image = ""
+blur = 0
+
+[motion.duration]
+instant = 40
+fast = 120
+base = 160
+slow = 220
+
+[motion.easing]
+standard = "cubic-bezier(0.23, 1, 0.32, 1)"
+emphasized = "cubic-bezier(0.34, 1.56, 0.64, 1)"
+exit = "ease-out"

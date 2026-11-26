@@ -1,0 +1,102 @@
+# A built-in dark theme: deep blue-grey surfaces with a frost-blue accent.
+#
+# Colours adapted from "Cursor Dark Midnight" by BioHazard786,
+# https://github.com/BioHazard786/cursor-theme-vscode (MIT licence). See lume-dark.toml
+# for how a theme is written.
+
+name = "Lume Midnight"
+scheme = "dark"
+
+[color]
+surface = "#191c22"
+card = "#1e2127"
+card-header = "#1e2127"
+border = "#272c36"
+border-focus = "#88c0d099"
+text = "#d8dee9"
+text-muted = "#7b88a1"
+text-inverse = "#191c22"
+accent = "#88c0d0"
+accent-text = "#191c22"
+control = "#1e2129"
+control-hover = "#272c3699"
+control-active = "#2b303b"
+popover = "#21242b"
+overlay = "#00000080"
+drop-preview = "#88c0d014"
+
+[color.status]
+info = "#81a1c1"
+success = "#a3be8c"
+warning = "#ebcb8b"
+danger = "#bf616a"
+
+# The colours a tab or a group of tabs can be given.
+[color.tab]
+red = "#bf616a"
+orange = "#d08770"
+yellow = "#ebcb8b"
+green = "#a3be8c"
+teal = "#8fbcbb"
+blue = "#81a1c1"
+purple = "#b48ead"
+pink = "#c895bf"
+
+[terminal]
+fg = "#d8dee9"
+bg = "#1e2127"
+cursor = "#8fbcbb"
+cursor-text = "#191c22"
+selection = "#343b48"
+selection-text = "#eceff4"
+search-match = "#88c0d066"
+search-active = "#88c0d0"
+# The sixteen ANSI colours: eight normal, then eight bright.
+palette = [
+    "#272c36", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#7d7c9b", "#88c0d0", "#e5e9f0",
+    "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
+]
+
+# Lengths are in pixels.
+[space]
+gap = 8
+padding = 8
+
+[radius]
+card = 10
+control = 8
+
+[size]
+header = 34
+topbar = 44
+statusbar = 28
+tab = 30
+border = 1
+focus-ring = 1
+
+[opacity]
+dim = 0.0
+disabled = 0.5
+background-image = 1.0
+
+# A shadow is "x y blur spread colour"; several are separated by commas.
+[shadow]
+card = "0 4 16 0 #00000040"
+card-focus = "0 0 0 1 #88c0d033, 0 8 24 0 #00000059"
+floating = "0 28 70 0 #00000099"
+popover = "0 18 50 0 #00000080, 0 2 6 0 #00000040"
+
+[background]
+image = ""
+blur = 0
+
+[motion.duration]
+instant = 40
+fast = 120
+base = 160
+slow = 220
+
+[motion.easing]
+standard = "cubic-bezier(0.23, 1, 0.32, 1)"
+emphasized = "cubic-bezier(0.34, 1.56, 0.64, 1)"
+exit = "ease-out"

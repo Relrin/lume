@@ -40,6 +40,10 @@ commands! {
     commands_layout::sessions_detached     => [terminal];
     commands_layout::commands_list         => [terminal, settings];
     commands_layout::command_run           => [terminal];
+    commands_layout::layouts_open          => [terminal];
+    commands_layout::layouts_reapply       => [terminal];
+    commands_layout::layouts_detach        => [terminal];
+    commands_layout::layouts_save_tab      => [terminal];
     commands_config::config_view           => [terminal, settings];
     commands_config::config_set            => [terminal, settings];
     commands_config::config_unset          => [terminal, settings];

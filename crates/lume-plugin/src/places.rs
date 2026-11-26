@@ -189,6 +189,7 @@ const APP_HELP: &[Builtin] = &[
 const NEW_TAB: &[Builtin] = &[
     section("default", &[item("default-terminal")]),
     section("profiles", &[item("profile-list")]),
+    section("layouts", &[item("layout-list")]),
     section("more", &[item("more-profiles")]),
 ];
 
@@ -211,6 +212,7 @@ const TAB: &[Builtin] = &[
             item("move-into"),
         ],
     ),
+    section("layout", &[item("save-layout"), item("layout-file")]),
     section(
         "closing",
         &[

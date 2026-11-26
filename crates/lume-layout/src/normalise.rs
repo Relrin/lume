@@ -318,6 +318,7 @@ mod tests {
             title: None,
             icon: None,
             content: PaneContent::Terminal(TerminalPane::default()),
+            key: None,
         })
     }
 

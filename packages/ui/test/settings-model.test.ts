@@ -221,11 +221,11 @@ describe("the settings as pages of rows", () => {
       { value: "pwsh.exe", label: "PowerShell" },
     ]);
     // A value the application starts with that the list holds goes by the list's name
-    // for it, and keeps its place in the list.
+    // for it. The themes of the setting's scheme come first, the built-in ones first.
     expect(row(pages, "appearance.theme-dark").choices).toEqual([
       { value: "lume-dark", label: "Lume Dark" },
-      { value: "lume-light", label: "Lume Light" },
       { value: "ember", label: "Ember" },
+      { value: "lume-light", label: "Lume Light" },
     ]);
   });
 

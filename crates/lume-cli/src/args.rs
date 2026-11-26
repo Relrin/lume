@@ -48,6 +48,9 @@ Commands of lume ctl, which drive the running application:
   layout view                    print the layout: windows, tabs, splits and panes
   layout apply <intent> | -      change the layout; the intent is JSON, read from
                                  standard input when given as -
+  layout files                   list the layout files in the layouts folder of the
+                                 configuration
+  layout open <name>             open the tabs of a layout file
   workspaces                     list the workspaces, and say which is on show
   profiles                       list the profiles: the shells, WSL distributions and
                                  SSH hosts a terminal can be started in
@@ -605,12 +608,23 @@ fn ctl(words: &mut Words) -> Result<Ctl, String> {
                 };
                 AppRequestBody::LayoutApply { intent }
             }
+            Some("files") => {
+                nothing_more(words, "layout files")?;
+                AppRequestBody::LayoutFiles {}
+            }
+            Some("open") => {
+                let name = value(words, "layout open", "the name of a layout file")?;
+                nothing_more(words, "layout open")?;
+                AppRequestBody::LayoutOpen { name }
+            }
             Some(other) => {
                 return Err(format!(
-                    "{other} is not something ctl layout does (view or apply)"
+                    "{other} is not something ctl layout does (view, apply, files or open)"
                 ));
             }
-            None => return Err("ctl layout needs a command: view or apply".to_owned()),
+            None => {
+                return Err("ctl layout needs a command: view, apply, files or open".to_owned());
+            }
         },
         "workspaces" => {
             nothing_more(words, "workspaces")?;
@@ -1337,6 +1351,18 @@ mod tests {
             request(&["ctl", "layout", "view"]),
             AppRequestBody::Layout {}
         );
+        assert_eq!(
+            request(&["ctl", "layout", "files"]),
+            AppRequestBody::LayoutFiles {}
+        );
+        assert_eq!(
+            request(&["ctl", "layout", "open", "dev"]),
+            AppRequestBody::LayoutOpen {
+                name: "dev".to_owned()
+            }
+        );
+        assert!(parsed(&["ctl", "layout", "open"]).is_err());
+        assert!(parsed(&["ctl", "layout", "open", "a", "b"]).is_err());
         assert_eq!(
             request(&["ctl", "layout", "apply", r#"{"type":"close","pane":"p3"}"#]),
             AppRequestBody::LayoutApply {

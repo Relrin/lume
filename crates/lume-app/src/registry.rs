@@ -24,7 +24,7 @@ const ID_MAX_LEN: usize = 96;
 const OWN_PREFIX: &str = "lume";
 
 /// The areas the application's own commands are in.
-pub const AREAS: [&str; 19] = [
+pub const AREAS: [&str; 20] = [
     "app",
     "host",
     "session",
@@ -44,6 +44,7 @@ pub const AREAS: [&str; 19] = [
     "search",
     "settings",
     "rex",
+    "layout",
 ];
 
 /// Where a command is carried out.

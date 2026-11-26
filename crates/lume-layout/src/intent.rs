@@ -10,7 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::ids::{GroupId, PaneId, PanelId, SplitId, TabId, WindowId};
-use crate::model::{Area, Bounds, GroupIcon, PanelContent, Shelved, TabColor, UnitRect};
+use crate::model::{Area, Bounds, GroupIcon, PanelContent, Shelved, Tab, TabColor, UnitRect};
 
 /// A direction on the screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -268,6 +268,35 @@ pub enum Intent {
         window: WindowId,
         group: Box<Shelved>,
     },
+    /// Puts a tab made elsewhere, such as from a layout file, into a window and shows
+    /// it. Its parts are numbered anew here and its panes start without sessions.
+    /// Without an index it goes after the last tab.
+    TabGraft {
+        window: WindowId,
+        tab: Box<Tab>,
+        #[serde(default)]
+        index: Option<u32>,
+    },
+    /// Gives a tab the shape of `wanted`, as a layout file says it is now. A pane of
+    /// the tab with the key of one of `wanted`'s keeps its session and moves to that
+    /// one's place; the other panes of `wanted` start without sessions. The tab's panes
+    /// that have no place in `wanted` close, except those in `put_away`, which are put
+    /// away with their programs running.
+    TabReshape {
+        tab: TabId,
+        wanted: Box<Tab>,
+        #[serde(default)]
+        put_away: Vec<PaneId>,
+    },
+    /// Says which layout file a tab, from now on, is the one of, or that it is none's.
+    /// The panes take the keys of `keys`, by their ids; the others keep theirs.
+    TabOrigin {
+        tab: TabId,
+        #[serde(default)]
+        origin: Option<String>,
+        #[serde(default)]
+        keys: Vec<(PaneId, String)>,
+    },
 }
 
 fn yes() -> bool {
@@ -297,6 +326,9 @@ impl Intent {
                 | Intent::WorkspaceRename { .. }
                 | Intent::GroupTake { .. }
                 | Intent::GroupGraft { .. }
+                | Intent::TabGraft { .. }
+                | Intent::TabReshape { .. }
+                | Intent::TabOrigin { .. }
         )
     }
 

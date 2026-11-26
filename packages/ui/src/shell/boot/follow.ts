@@ -25,6 +25,26 @@ import { reason } from "./reason.ts";
 
 export type ConfirmNotice = Extract<Notice, { type: "confirm_requested" }>;
 
+/**
+ * What the window says when a layout file one of its tabs follows changed: which file,
+ * and what applying it would do to panes the file no longer has.
+ */
+export function layoutChangedMessage(
+  notice: Extract<Notice, { type: "layout_file_changed" }>,
+): string {
+  const changed = `The layout “${notice.name}” changed on disk.`;
+  const closing = notice.leaving.length - notice.busy.length;
+  const parts: string[] = [];
+  if (closing > 0)
+    parts.push(`${closing === 1 ? "1 idle pane" : `${closing} idle panes`} will close`);
+  if (notice.busy.length > 0) {
+    const running = notice.busy.length === 1 ? "1 pane" : `${notice.busy.length} panes`;
+    parts.push(`${running} still running will be put away, not ended`);
+  }
+  const effect = parts.length === 0 ? "" : ` Applying it: ${parts.join("; ")}.`;
+  return `${changed}${effect}`;
+}
+
 export interface FollowDeps {
   readonly layout: LayoutStore;
   readonly config: ConfigStore;
@@ -84,6 +104,7 @@ export function followCore(deps: FollowDeps): (notice: Notice) => void {
         if (config.getState().set(notice.view)) deps.configChanged(notice.view);
         break;
       case "config_error":
+        config.getState().fail(notice.problems);
         notices.push(
           "error",
           `The configuration was not applied, and the one before it is still in use. ${notice.problems
@@ -111,6 +132,13 @@ export function followCore(deps: FollowDeps): (notice: Notice) => void {
         break;
       case "notice":
         notices.push(notice.level, notice.message, notice.action);
+        break;
+      case "layout_file_changed":
+        notices.push(notice.busy.length > 0 ? "warning" : "info", layoutChangedMessage(notice), {
+          label: "Apply",
+          command: "lume.layout.reapply",
+          args: { tab: notice.tab },
+        });
         break;
       case "sign_in_withdrawn":
         prompts.withdraw(notice.ask);

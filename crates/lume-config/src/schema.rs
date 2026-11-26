@@ -1224,6 +1224,26 @@ pub struct LayoutConfig {
     pub tab_placement: TabPlacement,
     /// The directory a new pane's program starts in.
     pub new_pane_cwd: NewPaneCwd,
+    /// What happens to a tab opened from a layout file when the file is saved again:
+    /// "ask", "always" (programs still running in panes the file no longer has are
+    /// put away, not ended) or "never".
+    #[schemars(extend("x-lume-settings" = Shown::segmented("appearance", "Panes", 55, "When a layout file changes")
+        .help("For tabs opened from a file in the layouts folder. Running programs are never ended")
+        .options(&[("ask", "Ask"), ("always", "Apply"), ("never", "Ignore")])))]
+    pub files_reapply: FilesReapply,
+}
+
+/// What happens to a tab opened from a layout file when the file changes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum FilesReapply {
+    /// The tab's window offers to apply the change.
+    #[default]
+    Ask,
+    /// The change is applied at once.
+    Always,
+    /// The tab is left as it is.
+    Never,
 }
 
 /// What a terminal is drawn with.

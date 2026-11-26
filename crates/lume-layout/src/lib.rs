@@ -36,7 +36,7 @@ mod steps;
 pub mod tuning;
 mod validate;
 
-pub use apply::{Started, apply, check, needs};
+pub use apply::{Started, apply, check, needs, reshape_leaves};
 #[cfg(feature = "runtime")]
 pub use authority::{ChangeSource, ChangeStream, LayoutAuthority, LocalLayout, Spawner};
 pub use change::{Applied, Created, LayoutChange, LayoutEvent, LayoutSnapshot};

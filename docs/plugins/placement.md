@@ -127,10 +127,12 @@ neighbour (`before`, `after`).
 | `menu.app.help` | `host`        | `restart-host`                                                            |
 | `menu.new-tab`  | `default`     | `default-terminal`                                                        |
 | `menu.new-tab`  | `profiles`    | `profile-list`                                                            |
+| `menu.new-tab`  | `layouts`     | `layout-list`                                                             |
 | `menu.new-tab`  | `more`        | `more-profiles`                                                           |
 | `menu.tab`      | `name`        | `rename`, `color`                                                         |
 | `menu.tab`      | `group`       | `new-group`, `to-group`, `remove-from-group`                              |
 | `menu.tab`      | `position`    | `new-tab`, `move-left`, `move-right`, `move-into`                         |
+| `menu.tab`      | `layout`      | `save-layout`, `layout-file`                                              |
 | `menu.tab`      | `closing`     | `mute`, `lock`, `close-left`, `close-right`, `close`                      |
 | `menu.pane`     | `name`        | `rename`                                                                  |
 | `menu.pane`     | `show`        | `show-in-new-tab`, `show-in-new-window`                                   |

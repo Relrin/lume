@@ -27,7 +27,12 @@ function app(
   return {
     // What is drawn without a page is what a store starts with, so this one starts
     // with the configuration.
-    config: createStore<ConfigState>()(() => ({ view: held, set: () => false })),
+    config: createStore<ConfigState>()(() => ({
+      view: held,
+      failed: [],
+      set: () => false,
+      fail: () => undefined,
+    })),
     client: {} as SettingsApp["client"],
     schema: SCHEMA,
     lists: createStore<SettingsLists>()(() => LISTS),

@@ -2613,6 +2613,7 @@ name = "lume-config"
 version = "0.0.0"
 dependencies = [
  "lume-codegen",
+ "lume-layout",
  "lume-proto",
  "notify",
  "schemars 1.2.3",
