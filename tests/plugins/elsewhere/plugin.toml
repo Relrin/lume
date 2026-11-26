@@ -8,7 +8,7 @@ description = "Runs programs where a session is."
 api = "1"
 main = "host.js"
 repository = "https://example.invalid/lume/test-elsewhere"
-activation = ["onCommand:look", "onCommand:allow", "onCommand:work"]
+activation = ["onCommand:look", "onCommand:allow", "onCommand:signin", "onCommand:work"]
 
 [permissions]
 "workspace.read" = true
@@ -21,6 +21,10 @@ title = "Say where the sessions are"
 [[contributes.commands]]
 id = "allow"
 title = "Ask to run programs there"
+
+[[contributes.commands]]
+id = "signin"
+title = "Sign in there"
 
 [[contributes.commands]]
 id = "work"

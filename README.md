@@ -19,7 +19,7 @@ server.
 
 ## Features
 
-- The application and its core libraries are written in Rust. The terminal is 
+- The application and its core libraries are written in Rust. The terminal is
   built with WebGPU and WebGL / Canvas 2D fallbacks where is it possible
 - An ability to run in a standalone mode and/or with [Rex server](https://www.superlogical.com/) (optional): on this
   computer, over SSH or over HTTPS. `lume --rex [server]` starts on one
@@ -34,7 +34,7 @@ Lume is built from source for now. You will need:
 - [Rust](https://www.rust-lang.org/tools/install) 1.100 or later
 - [Node.js](https://nodejs.org/) 24.11.0 or later
 
-Everything else (the pinned Zig toolchain, libghostty-vt, JavaScript dependencies) is fetched by the 
+Everything else (the pinned Zig toolchain, libghostty-vt, JavaScript dependencies) is fetched by the
 project's own build tool, `cargo xtask`:
 
 ```sh

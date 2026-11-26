@@ -1998,6 +1998,9 @@ impl Plugins {
 
     /// Tells running plugins whose settings changed.
     pub fn config_changed(&self) {
+        // A profile that is gone, or reaches its machine otherwise now, has its
+        // connection let go of; the next run opens one as the profile says.
+        self.elsewhere.machines.keep_only(&self.state.machines());
         let running: Vec<(String, Arc<Plugin>)> = self
             .inner()
             .loaded
@@ -2182,6 +2185,79 @@ impl Plugins {
         for (kind, details) in self.reports_of(&news) {
             self.session_report(&news.key, kind, details).await;
         }
+        if let Some(machine) = self.to_learn(&news) {
+            let this = Arc::clone(self);
+            tokio::spawn(async move { this.learn_name(machine).await });
+        }
+    }
+
+    /// The machine a session is on, where what it calls itself is to be found out first:
+    /// what the session printed of its folder counts only once it is known. It is asked
+    /// only of a machine that a plugin may run programs on, and that lets this
+    /// application in without asking anyone.
+    fn to_learn(&self, news: &News) -> Option<crate::machines::Machine> {
+        use lume_proto::SessionEvent;
+
+        let printed = match &news.what {
+            SessionNews::Event(SessionEvent::Cwd { .. }) => true,
+            SessionNews::Event(SessionEvent::State { state }) => state.cwd.is_some(),
+            _ => false,
+        };
+        if !printed {
+            return None;
+        }
+        let machine = self.machine_of(&news.key)?;
+        let machines = &self.elsewhere.machines;
+        let wanted = machine.kind == lume_plugin_api::types::MachineKind::Ssh
+            && !machines.knows_name(&machine.id)
+            && !machines.wants_sign_in(&machine.id)
+            && self.anyone_allowed_on(&machine.id);
+        (wanted && self.elsewhere.learn(&machine.id)).then_some(machine)
+    }
+
+    /// Finds out what a machine calls itself, by reaching it, and tells the plugins
+    /// where its sessions are once it is known.
+    async fn learn_name(self: &Arc<Self>, machine: crate::machines::Machine) {
+        let learnt = match self.elsewhere.machines.runner(&machine) {
+            Ok(runner) => {
+                let asked = lume_services::posix::Asked {
+                    program: "true".to_owned(),
+                    ..Default::default()
+                };
+                let limits = lume_services::posix::Limits {
+                    stdin: Vec::new(),
+                    timeout: std::time::Duration::from_secs(30),
+                    max_output: 1024,
+                    stop: Arc::default(),
+                };
+                let ran = runner.run(asked, limits).await;
+                self.elsewhere
+                    .machines
+                    .noted(&machine, runner.as_ref(), &ran);
+                self.elsewhere.machines.knows_name(&machine.id)
+            }
+            Err(_) => false,
+        };
+        self.elsewhere.learnt(&machine.id);
+        if !learnt {
+            return;
+        }
+        let keys: Vec<crate::carrier::SessionKey> = self
+            .state
+            .reports()
+            .launched_all()
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
+        for key in keys {
+            let Some(there) = self.machine_of(&key).filter(|there| there.id == machine.id) else {
+                continue;
+            };
+            let cwd = self.state.reports().state(&key).and_then(|state| state.cwd);
+            if let Some((kind, details)) = self.place_to_tell(&key, &there, cwd.as_deref(), true) {
+                self.session_report(&key, kind, details).await;
+            }
+        }
     }
 
     /// What plugins are told of a session's report. Of one on another machine that
@@ -2190,7 +2266,7 @@ impl Plugins {
     fn reports_of(&self, news: &News) -> Vec<(String, Value)> {
         use lume_proto::SessionEvent;
 
-        let machine = self.state.machine_of(&news.key);
+        let machine = self.machine_of(&news.key);
         let here = machine.is_none() && self.state.is_here(&news.key);
         let place = match (&machine, &news.what) {
             (Some(machine), SessionNews::Event(event)) => match event {
@@ -2206,6 +2282,11 @@ impl Plugins {
             },
             (_, SessionNews::Exit(_)) => {
                 self.elsewhere.forget_place(&news.key);
+                // A connection to a machine that no session is on any more is let go of.
+                if machine.is_some() {
+                    let left = self.state.machines_but(Some(&news.key));
+                    self.elsewhere.machines.keep_only(&left);
+                }
                 None
             }
             (None, _) => None,
@@ -2249,7 +2330,7 @@ impl Plugins {
         sessions: Vec<(crate::carrier::SessionKey, lume_proto::SessionState)>,
     ) {
         for (key, state) in sessions {
-            let machine = self.state.machine_of(&key);
+            let machine = self.machine_of(&key);
             let mut details = serde_json::to_value(&state).unwrap_or(Value::Null);
             if machine.is_some() || !self.state.is_here(&key) {
                 without_places(&mut details);

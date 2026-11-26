@@ -2538,6 +2538,198 @@ fn a_plugin_runs_programs_where_a_session_is_once_the_user_allowed_it_there() {
     app.quit();
 }
 
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_plugin_signs_in_to_the_machine_of_an_ssh_profile_on_a_press_and_runs_programs_there() {
+    use support::drive::{application_in, page, press, until_page};
+
+    // The machine is played by a stand-in for the SSH client that runs what it is given
+    // with a real `sh`: on Windows, a Linux distribution's.
+    let (shell, login): (Vec<String>, Vec<String>) = if cfg!(windows) {
+        let Ok(distro) = std::env::var("LUME_TEST_DISTRO") else {
+            eprintln!("LUME_TEST_DISTRO names no distribution: nothing is tested");
+            return;
+        };
+        let wsl = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32")
+            .join("wsl.exe")
+            .display()
+            .to_string();
+        let shell = [&wsl, "-d", &distro, "--cd", "/", "--exec", "sh", "-c"];
+        let login = [&wsl, "-d", &distro, "--cd", "/tmp", "--exec", "sh"];
+        (
+            shell.map(str::to_owned).to_vec(),
+            login.map(str::to_owned).to_vec(),
+        )
+    } else {
+        (
+            vec!["/bin/sh".to_owned(), "-c".to_owned()],
+            vec!["/bin/sh".to_owned()],
+        )
+    };
+    const PASSWORD: &str = "correct horse";
+    let name = format!("stand_in_ssh{}", std::env::consts::EXE_SUFFIX);
+    let client = application().with_file_name("examples").join(name);
+    assert!(client.is_file(), "{} is not there", client.display());
+
+    let home = home_with_plugins(&["elsewhere"]);
+    let script = home.join("far.json");
+    let log = home.join("far.log");
+    let far = serde_json::json!({
+        "asks": [{
+            "words": "me@devbox's password: ",
+            "right": PASSWORD,
+            "tries": 3,
+            "again": "Permission denied, please try again.",
+            "failure": "me@devbox: Permission denied (publickey,password).",
+        }],
+        "shell": shell,
+        "login": login,
+        "log": log,
+    });
+    std::fs::write(&script, far.to_string()).unwrap();
+    let profile = format!(
+        "\n[[profile]]\nid = \"devbox\"\nname = \"Dev box\"\nlauncher = \"ssh\"\n\
+         host = \"devbox\"\nuser = \"me\"\nextra-args = ['-F', '{}']\nclient = '{}'\n",
+        script.display(),
+        client.display()
+    );
+    let config = home.join("config").join("config.toml");
+    let mut settings = std::fs::read_to_string(&config).unwrap();
+    settings.push_str(&profile);
+    std::fs::write(&config, settings).unwrap();
+    let number = NEXT.fetch_add(1, Ordering::Relaxed);
+    let endpoint = format!("e2e-ssh-{}-{number}", std::process::id());
+    let (app, pages) = application_in(home, endpoint, &[], &[]);
+    app.status_with_session();
+    app.until_plugin("test.elsewhere", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    let far_log = || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+
+    let marks = std::cell::Cell::new(0);
+    let mark = || {
+        marks.set(marks.get() + 1);
+        format!("ssh{}", marks.get())
+    };
+    let args = |mark: &str, machine: &str| {
+        serde_json::json!({ "mark": mark, "machine": machine }).to_string()
+    };
+    let said = |mark: &str| {
+        let line = format!("{mark} {{");
+        let plugin = app.until_plugin("test.elsewhere", "what it says", |plugin| {
+            logged(plugin, &line)
+        });
+        let lines = plugin["log"].as_array().unwrap();
+        let line = lines
+            .iter()
+            .filter_map(Value::as_str)
+            .find_map(|text| text.find(&line).map(|at| &text[at + line.len() - 1..]))
+            .unwrap();
+        serde_json::from_str::<Value>(line).unwrap_or_else(|error| panic!("{error}: {line}"))
+    };
+    let run = |command: &str, machine: &str| {
+        let mark = mark();
+        let command = format!("test.elsewhere.{command}");
+        app.ctl(&["command", &command, &args(&mark, machine)])
+            .ok(&command);
+        said(&mark)
+    };
+
+    let spawned = app
+        .ctl(&["spawn", "--profile", "devbox"])
+        .ok("the profile's shell");
+    let pane = spawned["pane"].as_str().map(str::to_owned);
+    let id = "ssh:me@devbox";
+    let seen = run("look", "");
+    let place = &seen["places"][0];
+    assert_eq!(
+        (&place["kind"], &place["machine"], &place["label"]),
+        (&"ssh".into(), &id.into(), &"Dev box".into()),
+        "{seen}"
+    );
+    assert_eq!(seen["machines"][0]["allowed"], false, "{seen}");
+    // Nothing was asked of the machine for the plugin before the user's yes.
+    assert_eq!(far_log(), ["signs in"]);
+
+    let asked = mark();
+    let asking = app.ctl_in_background(&["command", "test.elsewhere.allow", &args(&asked, id)]);
+    app.answer_prompt(true);
+    asking.join().unwrap().ok("the question");
+    assert_eq!(said(&asked)["allowed"], true);
+
+    // It wants a password, which is asked for only on a press.
+    let refused = run("work", id);
+    assert_eq!(refused["uname"], "sign_in", "{refused}");
+    let seen = run("look", "");
+    assert_eq!(seen["machines"][0]["signIn"], true, "{seen}");
+    assert!(!far_log().contains(&"asks".to_owned()), "{:?}", far_log());
+
+    let asked = mark();
+    let signing = app.ctl_in_background(&["command", "test.elsewhere.signin", &args(&asked, id)]);
+    until_page(
+        &pages,
+        "the window to ask for the password",
+        "document.activeElement?.matches('dialog.sign-in[open] input') === true",
+    );
+    let title = page(&pages, "document.querySelector('.sign-in h2')?.textContent");
+    assert_eq!(title, "Sign in to Dev box", "{title}");
+    press(&pages, &[&format!("text:{PASSWORD}"), "Enter"]);
+    signing.join().unwrap().ok("the sign-in");
+    assert_eq!(said(&asked)["signedIn"], true);
+    let seen = run("look", "");
+    assert_eq!(seen["machines"][0]["signIn"], false, "{seen}");
+
+    let done = run("work", id);
+    for (what, expected) in [
+        ("uname", "0 Linux"),
+        ("input", "0 åäö 'quoted' $HOME"),
+        ("folder", "3 /tmp err"),
+        ("nowhere", "folder_missing"),
+        ("missing", "program_missing"),
+        ("local", "invalid"),
+        ("other", "denied"),
+        ("here", "denied"),
+        ("pieces", "1\n2\n3\n"),
+    ] {
+        assert_eq!(done[what], expected, "{what} of {done}");
+    }
+    assert_eq!(
+        (&done["pid"], &done["exit"]),
+        (&0.into(), &4.into()),
+        "{done}"
+    );
+    // Asked once, and the program left running went over the same connection.
+    let asks = far_log().iter().filter(|line| *line == "asks").count();
+    assert_eq!(asks, 1, "{:?}", far_log());
+
+    // Where the shell says it is counts once that machine named itself so.
+    let report = "printf '\\033]7;file://%s/tmp\\033\\\\' \"$(uname -n)\"";
+    match &pane {
+        Some(pane) => app.type_line_in(pane, report),
+        None => app.type_line(report),
+    }
+    let deadline = Instant::now() + START;
+    loop {
+        let seen = run("look", "");
+        if seen["places"][0]["folder"] == "/tmp" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the folder was never told: {seen}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    app.quit();
+}
+
 /// Keeps the first line of every request made to a listener on this machine, from a
 /// thread of its own.
 fn counting_listener() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {

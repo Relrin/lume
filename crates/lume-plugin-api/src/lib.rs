@@ -27,8 +27,8 @@ pub use types::{ApiError, ErrorCode};
 use types::{
     ClipboardWrite, CommandExecute, ContextSet, FetchResult, FetchStreamResult, FsEntry, FsPath,
     FsRead, FsStat, FsUnwatch, FsWatch, FsWrite, Grant, KvKey, KvSet, LayoutApply, MachineEntry,
-    MachinesAllow, MetricsSample, MetricsSubscribe, MetricsUnsubscribe, NetFetch, Nothing,
-    PaneInfo, PaneRef, PaneStats, PaneWrite, PanelId, PanelsSet, PanelsSetChildren,
+    MachinesAllow, MachinesSignIn, MetricsSample, MetricsSubscribe, MetricsUnsubscribe, NetFetch,
+    Nothing, PaneInfo, PaneRef, PaneStats, PaneWrite, PanelId, PanelsSet, PanelsSetChildren,
     PermissionsRequest, ProcessExit, ProcessId, ProcessResult, ProcessRun, ProcessSpawn, SecretKey,
     SecretSet, ServicesCall, SessionEntry, SessionsSpawn, SettingsGet, Spawned, StatusClear,
     StatusSet, StreamId, StreamRead, StreamWrite, Subscribe, UiConfirm, UiPick, UiToast,
@@ -242,8 +242,10 @@ api! {
     /// back how it ended and what it wrote. Where the permission says so, the user is
     /// asked first, shown the command. With `machine` it runs on that machine, which the
     /// user must have allowed: until then this fails as `machine_not_allowed`, and as
-    /// `not_connected` while no session is there. There it fails as `folder_missing` or
-    /// `program_missing` where it does as `not_found` here.
+    /// `not_connected` while no session is there or it cannot be reached. There it fails
+    /// as `folder_missing` or `program_missing` where it does as `not_found` here, as
+    /// `cannot_run` where it has no way to run programs, and as `sign_in` where it wants
+    /// the user to sign in first (`machines.signIn`).
     ProcessRun = "process.run"(program, args, options): ProcessRun => ProcessResult, needs "process.run";
     /// Starts a program the plugin may run and leaves it running, with its input and
     /// output as streams.
@@ -255,6 +257,12 @@ api! {
     /// asked for it, as by pressing a button: after a no, it answers no for a minute
     /// without asking.
     MachinesAllow = "machines.allow"(machine, reason): MachinesAllow => bool, needs "process.run-elsewhere";
+    /// Has the user sign in to a machine that wants them to, in the window in front, and
+    /// says whether they did. The connection that it opens is kept while it is used, and
+    /// nothing they answered is. To be called when the user asked for it, as by pressing
+    /// a button: one they gave up answers no for a minute without asking. Only on a
+    /// machine the plugin is allowed on.
+    MachinesSignIn = "machines.signIn"(machine): MachinesSignIn => bool, needs "process.run-elsewhere";
     /// Waits for a program the plugin started to end.
     ProcessWait = "process.wait"(process): ProcessId => ProcessExit;
     /// Stops a program the plugin started.

@@ -172,11 +172,19 @@ impl SessionStates {
         })
     }
 
-    /// What the application started each of its sessions to run.
-    pub fn launchers(&self) -> Vec<Launcher> {
+    /// What the application started each of its sessions to run, and from which profile.
+    pub fn launched_all(&self) -> Vec<(SessionKey, Launched)> {
         self.sessions()
-            .values()
-            .filter_map(|known| known.launcher.clone())
+            .iter()
+            .filter_map(|(key, known)| {
+                Some((
+                    key.clone(),
+                    Launched {
+                        launcher: known.launcher.clone()?,
+                        profile: known.profile.clone(),
+                    },
+                ))
+            })
             .collect()
     }
 

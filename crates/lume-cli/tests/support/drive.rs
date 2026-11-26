@@ -134,6 +134,16 @@ pub fn application_started(
         configuration() + rex + IN_PROCESS_HOST + more,
     )
     .unwrap();
+    application_in(home, endpoint, environment, arguments)
+}
+
+/// The same, in a home that is made already.
+pub fn application_in(
+    home: std::path::PathBuf,
+    endpoint: String,
+    environment: &[(&str, String)],
+    arguments: &[&str],
+) -> (App, Pages) {
     let pages = Pages { port: free_port() };
     let mut variables = vec![
         (

@@ -13,6 +13,10 @@ lume.commands.register("allow", async (args) => {
   say(args, { allowed: await lume.machines.allow(args.machine, "to run uname").catch(why) });
 });
 
+lume.commands.register("signin", async (args) => {
+  say(args, { signedIn: await lume.machines.signIn(args.machine).catch(why) });
+});
+
 lume.commands.register("work", async (args) => {
   const { machine } = args;
   const run = (program, words, options) =>

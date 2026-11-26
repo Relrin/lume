@@ -809,12 +809,18 @@ pub enum MachineKind {
 
 /// A machine that sessions are on, other than this one.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct MachineEntry {
     pub machine: String,
     pub label: String,
     pub kind: MachineKind,
     /// Whether the plugin may run its programs there.
     pub allowed: bool,
+    /// Whether the machine wants the user to sign in before anything can be run there:
+    /// a machine reached over SSH that asks for a password, or whose key is not known.
+    /// `machines.signIn` has them sign in.
+    #[serde(default)]
+    pub sign_in: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
@@ -825,6 +831,13 @@ pub struct MachinesAllow {
     /// Why the plugin asks, in a sentence the user is shown as the plugin's words.
     #[serde(default)]
     pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MachinesSignIn {
+    /// The machine, by its id.
+    pub machine: String,
 }
 
 /// The workspace in use.

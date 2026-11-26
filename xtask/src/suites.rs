@@ -226,8 +226,16 @@ pub fn end_to_end() -> Result<()> {
     corpus(Profile::Debug)?;
     snapshots(Profile::Debug)?;
     chrome(Profile::Debug)?;
-    // Stands in for a Rex server, which no build machine has.
-    run::cargo(&["build", "-p", "lume-rex", "--example", "pretend_server"])?;
+    // Stand in for a Rex server, which no build machine has, and for the SSH client.
+    run::cargo(&[
+        "build",
+        "-p",
+        "lume-rex",
+        "--example",
+        "pretend_server",
+        "--example",
+        "stand_in_ssh",
+    ])?;
     run::cargo(&[
         "test",
         "-p",

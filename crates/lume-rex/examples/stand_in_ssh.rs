@@ -6,6 +6,9 @@
 //! `STAND_IN_SSH` in its environment. What happens to it is written to the file's `log`,
 //! one line each, without the answers.
 //!
+//! Given a shell in its script, it runs the command after the destination with it, as
+//! the other machine would, its input and output its own.
+//!
 //! Run by itself with one word, it is the program that asks: it hands the word to the
 //! test that listens at `STAND_IN_ASKPASS`, and prints what comes back.
 
@@ -39,6 +42,15 @@ struct Script {
     cut: Option<PathBuf>,
     /// A file it goes on writing for as long as it forwards.
     alive: Option<PathBuf>,
+    /// What runs the command it is given, as the other machine's shell would: the
+    /// program and its first words, the command after them as one word. Without it, a
+    /// command is not run.
+    #[serde(default)]
+    shell: Option<Vec<String>>,
+    /// What runs when it is given no command, as the shell a user signs in to, after
+    /// nothing is asked: as in a terminal whose user signed in already.
+    #[serde(default)]
+    login: Option<Vec<String>>,
     log: PathBuf,
 }
 
@@ -227,6 +239,17 @@ fn last(script: &Script) -> ExitCode {
     }
 }
 
+/// Runs a command with the script's shell, and ends as it ends.
+fn run(script: &Script, shell: &[String], command: &str) -> ExitCode {
+    let (program, words) = shell.split_first().expect("a shell to run with");
+    script.note("runs");
+    let ended = Command::new(program).args(words).arg(command).status();
+    match ended.ok().and_then(|ended| ended.code()) {
+        Some(code) => ExitCode::from(u8::try_from(code).unwrap_or(FAILED)),
+        None => ExitCode::from(FAILED),
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // The client is always told its destination after this.
@@ -243,6 +266,15 @@ fn main() -> ExitCode {
     let text = std::fs::read_to_string(file).expect("the script is read");
     let script: Script = serde_json::from_str(&text).expect("the script is understood");
 
+    if let Some(login) = &script.login
+        && args.len() <= end + 2
+    {
+        script.note("signs in");
+        let (program, words) = login.split_first().expect("a shell to sign in to");
+        let ended = Command::new(program).args(words).status();
+        let code = ended.ok().and_then(|ended| ended.code()).unwrap_or(255);
+        return ExitCode::from(u8::try_from(code).unwrap_or(FAILED));
+    }
     let batch = args[..end].iter().any(|arg| arg == "BatchMode=yes");
     script.note(if batch { "quiet" } else { "may ask" });
     if !signed_in(&script, batch) {
@@ -251,6 +283,11 @@ fn main() -> ExitCode {
     }
     if let Some(what) = after("-L") {
         return forward(&script, &what);
+    }
+    if let Some(shell) = &script.shell
+        && args.len() > end + 2
+    {
+        return run(&script, shell, &args[end + 2..].join(" "));
     }
     let said = args
         .get(end + 2)

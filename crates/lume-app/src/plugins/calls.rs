@@ -107,6 +107,9 @@ impl Plugins {
             Call::SessionsList(_) => self.session_list().await,
             Call::MachinesList(_) => value_of(&self.machines_list(local)),
             Call::MachinesAllow(asked) => self.allow_machine(local, asked).await.map(Value::Bool),
+            Call::MachinesSignIn(asked) => {
+                self.sign_in_machine(local, asked).await.map(Value::Bool)
+            }
             Call::WorkspaceCurrent(_) => value_of(&self.workspace_info()?),
             Call::WorkspaceRoot(_) => Ok(json!(self.config.current().workspace.root.clone())),
             Call::LayoutApply(apply) => {
@@ -510,7 +513,7 @@ impl Plugins {
                 };
                 let state = self.state.reports().state(&key);
                 // A folder of another machine is no path of this one.
-                let place = self.state.machine_of(&key).map(|machine| {
+                let place = self.machine_of(&key).map(|machine| {
                     let reported = listed
                         .info
                         .cwd

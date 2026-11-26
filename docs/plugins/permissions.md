@@ -109,14 +109,20 @@ A program is stopped together with everything it started, and at the latest when
 ### Programs on other machines: `process.run-elsewhere`
 
 A session need not be on this machine. One that is in a Linux distribution of this Windows machine
-(WSL), or that a Rex server elsewhere runs, has a `place` in `sessions.list()`: the machine, and the
-folder there. Its `cwd` is left out, because that would be a path of this machine. Panes of SSH
-profiles will have a place in the same way. A Rex server on this machine is not another machine:
-its sessions have a `cwd` and no place.
+(WSL), on the machine an SSH profile signs in to, or that a Rex server elsewhere runs, has a
+`place` in `sessions.list()`: the machine, and the folder there. Its `cwd` is left out, because
+that would be a path of this machine. A Rex server on this machine is not another machine: its
+sessions have a `cwd` and no place, and neither has a terminal that runs `ssh` as a program of its
+own.
 
 Where a session is comes from that machine:
 
 - In a distribution, from what its shell reported, when the shell named that machine.
+- Over SSH, from what its shell reported, when the shell named the machine by the name that
+  machine gave Lume when Lume last reached it. Until Lume has, there is no folder: once a plugin
+  is allowed there, Lume reaches it by itself to find out, and the `place` report comes again. A
+  shell on a further machine that the user went on to names another, and has no folder. A shell
+  that reports nothing has none either.
 - On a Rex server, from the server: the folder its system says the program in front is in. A
   folder that is only printed does not count, as it may be another machine's. PowerShell is the
   one shell whose process stays where it started; of it the folder it printed itself counts, as a
@@ -149,6 +155,16 @@ for (const session of await lume.sessions.list()) {
 - When the plugin comes to ask for more programs, each machine is asked about again.
 - A machine can be used while a session is on it; a Rex server, while it is connected and a session
   of it is open in a window.
+- Over SSH, Lume reaches the machine on its own connection, with the profile's options, and asks
+  the user nothing. A machine that wants a password, or whose key is not known yet, fails as
+  `sign_in`, and `machines.list()` says `signIn` of it. `lume.machines.signIn(machine)` has the
+  user sign in, in the window, and says whether they did; call it when the user asked for it, as
+  by pressing a button. The connection that opens is kept for as long as it is used (five minutes
+  unused at most), and nothing the user answered is kept. While it is open, a program started with
+  `process.spawn` there runs over it too, so that nobody is asked again: its output comes whole
+  when it ends. A sign-in the user gave up answers no for a minute without asking.
+- A connection over SSH is let go of when no session is on the machine any more, and when the
+  profile changes.
 - The folder is an absolute path of that machine, as it spells paths: `/home/me`, or `C:\code` on
   Windows. A share of a network (`\\server\share`) is refused. `${home}` and the like stand for
   nothing there. Left out, it is the user's home folder. In a folder that is not there nothing is
@@ -161,14 +177,15 @@ for (const session of await lume.sessions.list()) {
   Its process has no number here (`pid` is 0). On Windows a `.cmd` on the path, as `npm`, is run
   like any other program.
 
-| Code                  | What it means                                             | `error.data`         |
-| --------------------- | --------------------------------------------------------- | -------------------- |
-| `machine_not_allowed` | The user has not allowed the plugin there.                | `{ machine, label }` |
-| `not_connected`       | No session is on that machine, or it is not connected.    | `{ machine, label }` |
-| `cannot_run`          | The server cannot run programs for Lume.                  | `{ machine, label }` |
-| `folder_missing`      | The folder is not there. Nothing was run.                 | `{ machine, label }` |
-| `program_missing`     | The program is not there.                                 | `{ machine, label }` |
-| `unavailable`         | The machine could not be reached, or the way to it broke. |                      |
+| Code                  | What it means                                                                                         | `error.data`         |
+| --------------------- | ----------------------------------------------------------------------------------------------------- | -------------------- |
+| `machine_not_allowed` | The user has not allowed the plugin there.                                                            | `{ machine, label }` |
+| `not_connected`       | No session is on that machine, or it is not connected.                                                | `{ machine, label }` |
+| `sign_in`             | The machine wants the user to sign in first.                                                          | `{ machine, label }` |
+| `cannot_run`          | The machine cannot run programs for Lume: a server that does not, or a machine over SSH with no `sh`. | `{ machine, label }` |
+| `folder_missing`      | The folder is not there. Nothing was run.                                                             | `{ machine, label }` |
+| `program_missing`     | The program is not there.                                                                             | `{ machine, label }` |
+| `unavailable`         | The machine could not be reached, or the way to it broke.                                             |                      |
 
 ### Servers: `net`
 

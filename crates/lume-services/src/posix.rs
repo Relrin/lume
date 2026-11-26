@@ -5,7 +5,9 @@
 //! small loop in the other side's `sh`. Each run is sent to it as a script with what the
 //! program reads after it, by length; runs go on beside each other there, and each is
 //! answered whole: how it ended, what it wrote, what it wrote of errors. A program whose
-//! output is wanted as it comes has a connection of its own.
+//! output is wanted as it comes has a connection of its own, unless the connection there
+//! is took a person to open: then it runs over that one, and its output comes whole, at
+//! its end.
 //!
 //! Nothing of a run is read by a shell that this module does not know: the loop holds no
 //! quote, backslash or line end, so whatever shell a user signs in with hands it on as it
@@ -50,6 +52,15 @@ const LOOK: Duration = Duration::from_millis(50);
 
 /// How long a program that was told to end may take to be answered for.
 const END_WAIT: Duration = Duration::from_secs(5);
+
+/// How long a client whose output ended before it said anything may take to end, so
+/// that how it ended can be told.
+const ENDED_WAIT: Duration = Duration::from_secs(2);
+
+/// How much of a started program's output is kept when it runs over the one connection,
+/// and how long it may run there.
+const WHOLE_MAX: usize = 16 * 1024 * 1024;
+const WHOLE_TIME: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The longest script of a run. The arguments are in it.
 const SCRIPT_MAX: usize = 1024 * 1024;
@@ -124,8 +135,13 @@ fn quote(word: &str) -> String {
     format!("'{}'", word.replace('\'', r"'\''"))
 }
 
+/// What a connection that could not be opened failed for, by how the program that was to
+/// open it ended (`None` where it was ended from here) and what it said last on its
+/// error output: one of the kinds below, or nothing that this program can tell.
+pub type Unreached = fn(Option<i32>, &[u8]) -> Option<&'static str>;
+
 /// How the other side's shell is reached.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Door {
     /// The program of this machine, as it was found.
     pub program: PathBuf,
@@ -137,6 +153,8 @@ pub struct Door {
     pub one_line: bool,
     /// What the machine is called, for messages.
     pub label: String,
+    /// What tells why a connection was not opened, where the program has a way to.
+    pub unreached: Option<Unreached>,
 }
 
 impl Door {
@@ -172,6 +190,12 @@ impl Door {
 /// such program is.
 pub const FOLDER_MISSING: &str = "folder_missing";
 pub const PROGRAM_MISSING: &str = "program_missing";
+
+/// What a connection fails for: the machine wants the user to sign in, or to be told that
+/// it is the one it says; it is not reached; it has no shell to run programs with.
+pub const SIGN_IN: &str = "sign_in";
+pub const NOT_CONNECTED: &str = "not_connected";
+pub const CANNOT_RUN: &str = "cannot_run";
 
 /// How a machine spells its paths.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -354,6 +378,8 @@ struct Shared {
     runs: Mutex<Option<HashMap<u64, Waiting>>>,
     /// The end of what the connection said on its error output.
     said: Mutex<Vec<u8>>,
+    /// Whether all of it has been read.
+    said_all: AtomicBool,
 }
 
 /// One connection to the loop.
@@ -368,6 +394,8 @@ struct Line {
     name: String,
     /// When a run last ended.
     used: Mutex<Instant>,
+    /// Whether opening it took a person, so that another is not opened beside it.
+    signed_in: bool,
 }
 
 impl Drop for Line {
@@ -446,7 +474,16 @@ fn keep_said(mut from: impl Read + Send + 'static, shared: Arc<Shared>) {
             let over = said.len().saturating_sub(SAID_MAX);
             said.drain(..over);
         }
+        shared.said_all.store(true, Ordering::Release);
     });
+}
+
+/// Waits a little for the rest of what a connection that ended said of errors.
+fn said_all(shared: &Shared) {
+    let until = Instant::now() + ENDED_WAIT;
+    while !shared.said_all.load(Ordering::Acquire) && Instant::now() < until {
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 /// The last line that says something, made plain, of what a connection said of errors.
@@ -498,13 +535,14 @@ fn greeted(
     mut out: ChildStdout,
     words: &'static [&'static str],
     stop: &Stop,
+    wait: Duration,
 ) -> Result<(String, ChildStdout), Option<RecvTimeoutError>> {
     let (tell, told) = mpsc::channel();
     thread::spawn(move || {
         let line = first_line(&mut out, words);
         let _ = tell.send(line.map(|line| (line, out)));
     });
-    let until = Instant::now() + GREETING_WAIT;
+    let until = Instant::now() + wait;
     loop {
         match told.recv_timeout(LOOK) {
             Ok(Some(there)) => return Ok(there),
@@ -515,28 +553,63 @@ fn greeted(
     }
 }
 
-fn unreached(label: &str, late: bool, said: &[u8]) -> ServiceError {
-    ServiceError::unavailable(match last_said(said) {
+/// Why a connection was not opened. `ended` is how the program that was to open it
+/// ended, where it ended by itself, which `late` says it did not.
+fn unreached(door: &Door, late: bool, ended: Option<i32>, said: &[u8]) -> ServiceError {
+    let label = &door.label;
+    let error = ServiceError::unavailable(match last_said(said) {
         Some(said) => format!("{label} could not be reached: {said}"),
         None if late => format!("{label} did not answer in time"),
         None => format!("{label} has no shell that programs can be run with"),
-    })
+    });
+    if late {
+        return error;
+    }
+    // A program that ended before the loop said it was there: the way in failed, as the
+    // program that went there can tell, or there is no `sh` over there to run it.
+    match door.unreached.and_then(|why| why(ended, said)) {
+        Some(why) => error.because(why),
+        None => error.because(CANNOT_RUN),
+    }
+}
+
+/// How a program that may be ending by itself ended, waited for a little while.
+fn ended_by_itself(child: &Child) -> Option<i32> {
+    let until = Instant::now() + ENDED_WAIT;
+    loop {
+        if let Some(code) = child.try_wait() {
+            return code;
+        }
+        if Instant::now() >= until {
+            return None;
+        }
+        thread::sleep(LOOK);
+    }
 }
 
 impl Line {
-    fn open(door: &Door, stop: &Stop) -> Result<Self, ServiceError> {
+    /// Opens it through `door`, waiting as long as `wait` for the other side to be there.
+    /// `signed_in` says that a person was to be asked on the way.
+    fn open(
+        door: &Door,
+        stop: &Stop,
+        wait: Duration,
+        signed_in: bool,
+    ) -> Result<Self, ServiceError> {
         let spawned = door.start(&looping())?;
         let missing = || ServiceError::failed("the connection's pipes were not opened");
         let shared = Arc::new(Shared::default());
         keep_said(spawned.stderr.ok_or_else(missing)?, Arc::clone(&shared));
         let stdin = spawned.stdin.ok_or_else(missing)?;
         let child = spawned.child;
-        let (line, out) =
-            greeted(spawned.stdout.ok_or_else(missing)?, &[GREETING], stop).map_err(|why| {
+        let (line, out) = greeted(spawned.stdout.ok_or_else(missing)?, &[GREETING], stop, wait)
+            .map_err(|why| {
                 let late = why == Some(RecvTimeoutError::Timeout);
+                let ended = if late { None } else { ended_by_itself(&child) };
                 // Ended first, so that what it said last is there to be read.
                 let _ = child.kill();
-                unreached(&door.label, late, &lock(&shared.said))
+                said_all(&shared);
+                unreached(door, late, ended, &lock(&shared.said))
             })?;
         let name = line
             .split_whitespace()
@@ -559,6 +632,7 @@ impl Line {
             next: AtomicU64::new(1),
             name,
             used: Mutex::new(Instant::now()),
+            signed_in,
         })
     }
 
@@ -682,11 +756,77 @@ impl Line {
 }
 
 /// A program started on the other side, with its output as it comes.
-#[derive(Debug)]
 pub struct Started {
-    pub stdout: ChildStdout,
-    pub stderr: process::ChildStderr,
-    pub child: Held,
+    pub stdout: Box<dyn Read + Send>,
+    pub stderr: Box<dyn Read + Send>,
+    pub child: Arc<dyn process::Running>,
+}
+
+/// The output of a program that runs over the one connection, which comes whole at its
+/// end. Reading waits until then.
+#[derive(Default)]
+struct Whole {
+    ended: Mutex<Option<WholeEnd>>,
+    told: std::sync::Condvar,
+}
+
+struct WholeEnd {
+    code: Option<i32>,
+    out: std::io::Cursor<Vec<u8>>,
+    err: std::io::Cursor<Vec<u8>>,
+}
+
+impl Whole {
+    fn end(&self, end: WholeEnd) {
+        *lock(&self.ended) = Some(end);
+        self.told.notify_all();
+    }
+
+    fn read(&self, buffer: &mut [u8], err: bool) -> std::io::Result<usize> {
+        let mut ended = lock(&self.ended);
+        loop {
+            if let Some(end) = ended.as_mut() {
+                let cursor = if err { &mut end.err } else { &mut end.out };
+                return cursor.read(buffer);
+            }
+            ended = self
+                .told
+                .wait(ended)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+}
+
+struct WholeOutput {
+    whole: Arc<Whole>,
+    err: bool,
+}
+
+impl Read for WholeOutput {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.whole.read(buffer, self.err)
+    }
+}
+
+/// A program that runs over the one connection, as it is waited for and ended from here.
+struct OverLine {
+    whole: Arc<Whole>,
+    stop: Arc<Stop>,
+}
+
+impl process::Running for OverLine {
+    fn id(&self) -> u32 {
+        0
+    }
+
+    fn try_wait(&self) -> Option<Option<i32>> {
+        lock(&self.whole.ended).as_ref().map(|end| end.code)
+    }
+
+    fn kill(&self) -> Result<(), ServiceError> {
+        self.stop.ask();
+        Ok(())
+    }
 }
 
 /// The program as it is waited for and ended from here. Its input is what tells the
@@ -747,9 +887,43 @@ impl Shell {
             return Ok(Arc::clone(line));
         }
         *held = None;
-        let line = Arc::new(Line::open(&self.door, stop)?);
+        let line = Arc::new(Line::open(&self.door, stop, GREETING_WAIT, false)?);
         *held = Some(Arc::clone(&line));
         Ok(line)
+    }
+
+    /// Opens the connection through `door`, which may ask the user what signing in takes,
+    /// and keeps it in place of any other. Programs whose output is wanted as it comes run
+    /// over it from then on, so that nobody is asked again for as long as it is open. It
+    /// waits as long as `wait` for the other side, or until `stop` is asked.
+    pub fn sign_in(&self, door: &Door, stop: &Stop, wait: Duration) -> Result<(), ServiceError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(ServiceError::unavailable(format!(
+                "the connection to {} was closed",
+                self.door.label
+            )));
+        }
+        let line = Arc::new(Line::open(door, stop, wait, true)?);
+        let mut held = lock(&self.line);
+        if self.closed.load(Ordering::Acquire) {
+            line.give_up();
+            return Err(ServiceError::unavailable(format!(
+                "the connection to {} was closed",
+                self.door.label
+            )));
+        }
+        if let Some(old) = held.replace(line) {
+            // Runs on their way there end with it, and say that the connection was lost.
+            old.give_up();
+        }
+        Ok(())
+    }
+
+    /// Whether the connection there is now took a person to open.
+    pub fn signed_in(&self) -> bool {
+        lock(&self.line)
+            .as_ref()
+            .is_some_and(|line| line.signed_in && !line.ended())
     }
 
     /// Runs a program to its end, or until its time is up or it is told to stop, and
@@ -762,6 +936,13 @@ impl Shell {
     /// Starts a program and gives its output as it comes. It reads nothing.
     pub fn spawn(&self, asked: &Asked, stop: &Stop) -> Result<Started, ServiceError> {
         asked.check(Spelling::Posix)?;
+        let signed_in = lock(&self.line)
+            .as_ref()
+            .filter(|line| line.signed_in && !line.ended())
+            .cloned();
+        if let Some(line) = signed_in {
+            return Ok(Self::spawn_over(&line, asked));
+        }
         let script = format!(
             "{}echo \"{STARTED} \"\n{}",
             asked.script(|why| format!("echo \"{NOT_STARTED} {why}\"")),
@@ -782,32 +963,69 @@ impl Shell {
             .and_then(|()| stdin.write_all(script.as_bytes()))
             .and_then(|()| stdin.flush());
         let answered = match sent {
-            Ok(()) => greeted(stdout, &[STARTED, NOT_STARTED], stop),
+            Ok(()) => greeted(stdout, &[STARTED, NOT_STARTED], stop, GREETING_WAIT),
             Err(_) => Err(None),
         };
         match answered {
             Ok((line, stdout)) if line.starts_with(STARTED) => Ok(Started {
-                stdout,
-                stderr,
-                child: Held {
+                stdout: Box::new(stdout),
+                stderr: Box::new(stderr),
+                child: Arc::new(Held {
                     child,
                     there: Mutex::new(Some(stdin)),
-                },
+                }),
             }),
             Ok((line, _)) => {
                 let why = line.split_whitespace().nth(1).unwrap_or_default();
                 Err(asked.failed(why, &self.door.label))
             }
             Err(why) => {
+                let late = why == Some(RecvTimeoutError::Timeout);
+                let ended = if late { None } else { ended_by_itself(&child) };
                 let _ = child.kill();
-                let mut said = vec![0; SAID_MAX];
-                let read = stderr.read(&mut said).unwrap_or(0);
-                Err(unreached(
-                    &self.door.label,
-                    why == Some(RecvTimeoutError::Timeout),
-                    &said[..read],
-                ))
+                let mut said = Vec::new();
+                let _ = (&mut stderr).take(SAID_MAX as u64).read_to_end(&mut said);
+                Err(unreached(&self.door, late, ended, &said))
             }
+        }
+    }
+
+    /// Runs a program over the one connection, its output given when it ends.
+    fn spawn_over(line: &Arc<Line>, asked: &Asked) -> Started {
+        let whole = Arc::new(Whole::default());
+        let stop = Arc::new(Stop::default());
+        let limits = Limits {
+            stdin: Vec::new(),
+            timeout: WHOLE_TIME,
+            max_output: WHOLE_MAX,
+            stop: Arc::clone(&stop),
+        };
+        let (line, asked, ending) = (Arc::clone(line), asked.clone(), Arc::clone(&whole));
+        thread::spawn(move || {
+            let end = match line.run(&asked, limits) {
+                Ok(output) => WholeEnd {
+                    code: output.code,
+                    out: std::io::Cursor::new(output.stdout),
+                    err: std::io::Cursor::new(output.stderr),
+                },
+                Err(error) => WholeEnd {
+                    code: None,
+                    out: std::io::Cursor::new(Vec::new()),
+                    err: std::io::Cursor::new(error.message.into_bytes()),
+                },
+            };
+            ending.end(end);
+        });
+        Started {
+            stdout: Box::new(WholeOutput {
+                whole: Arc::clone(&whole),
+                err: false,
+            }),
+            stderr: Box::new(WholeOutput {
+                whole: Arc::clone(&whole),
+                err: true,
+            }),
+            child: Arc::new(OverLine { whole, stop }),
         }
     }
 
@@ -860,6 +1078,7 @@ mod tests {
             env: Vec::new(),
             one_line: false,
             label: "box".to_owned(),
+            unreached: None,
         });
         let asked = |program: &str| Asked {
             program: program.to_owned(),

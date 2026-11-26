@@ -210,6 +210,22 @@ Needs the `process.run-elsewhere` permission.
 
 Gives `boolean`.
 
+### `lume.machines.signIn(machine)`
+
+Has the user sign in to a machine that wants them to, in the window in front, and
+ says whether they did. The connection that it opens is kept while it is used, and
+ nothing they answered is. To be called when the user asked for it, as by pressing
+ a button: one they gave up answers no for a minute without asking. Only on a
+ machine the plugin is allowed on.
+
+Needs the `process.run-elsewhere` permission.
+
+| Argument | Type | |
+|---|---|---|
+| `machine` | `string` | The machine, by its id. |
+
+Gives `boolean`.
+
 ## lume.metrics
 
 ### `lume.metrics.snapshot()`
@@ -367,8 +383,10 @@ Runs a program the plugin may run, found once on the system's path, and gives
  back how it ended and what it wrote. Where the permission says so, the user is
  asked first, shown the command. With `machine` it runs on that machine, which the
  user must have allowed: until then this fails as `machine_not_allowed`, and as
- `not_connected` while no session is there. There it fails as `folder_missing` or
- `program_missing` where it does as `not_found` here.
+ `not_connected` while no session is there or it cannot be reached. There it fails
+ as `folder_missing` or `program_missing` where it does as `not_found` here, as
+ `cannot_run` where it has no way to run programs, and as `sign_in` where it wants
+ the user to sign in first (`machines.signIn`).
 
 Needs the `process.run` permission.
 
@@ -922,6 +940,7 @@ A machine that sessions are on, other than this one.
 | `kind` | `MachineKind` |  |
 | `label` | `string` |  |
 | `machine` | `string` |  |
+| `signIn` | `boolean` | optional. Whether the machine wants the user to sign in before anything can be run there: a machine reached over SSH that asks for a password, or whose key is not known. `machines.signIn` has them sign in. |
 
 ### `MachineKind`
 
@@ -935,6 +954,12 @@ How a machine is reached.
 |---|---|---|
 | `machine` | `string` | The machine, by its id. |
 | `reason` | `string` | optional. Why the plugin asks, in a sentence the user is shown as the plugin's words. |
+
+### `MachinesSignIn`
+
+| Field | Type | |
+|---|---|---|
+| `machine` | `string` | The machine, by its id. |
 
 ### `MemoryUsage`
 

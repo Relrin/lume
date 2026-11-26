@@ -302,6 +302,7 @@
   Object.assign(namespace(["machines"]), {
     list: () => request("machines.list", {}),
     allow: (machine, reason) => request("machines.allow", { machine, reason }),
+    signIn: (machine) => request("machines.signIn", { machine }),
   });
   Object.assign(namespace(["metrics"]), {
     snapshot: () => request("metrics.snapshot", {}),

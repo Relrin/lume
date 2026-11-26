@@ -5,14 +5,20 @@
 //! It is given the words of a command once, and once one line that a shell reads. On
 //! Windows it is that of the Linux distribution that `LUME_TEST_DISTRO` names, reached
 //! directly and in the same way; without it the tests do not run.
+//!
+//! Where `LUME_SSH_LIVE` names a machine (`user@host`, with what the client is to be given
+//! before it in `LUME_SSH_LIVE_ARGS`, words apart), they run there too, through this
+//! machine's OpenSSH client, which asks nothing: a key has to let it in.
 
 use std::io::Read as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use lume_services::posix::{Asked, Door, FOLDER_MISSING, Limits, PROGRAM_MISSING, Shell};
-use lume_services::process::{RunOutput, Running, Stop};
+use lume_services::posix::{
+    Asked, CANNOT_RUN, Door, FOLDER_MISSING, Limits, PROGRAM_MISSING, SIGN_IN, Shell,
+};
+use lume_services::process::{RunOutput, Stop};
 use lume_services::{ErrorKind, ServiceError};
 
 /// What starts the rest of its words away from here: in a session of its own, which a
@@ -28,27 +34,54 @@ fn doors() -> Vec<Door> {
         env: Vec::new(),
         one_line,
         label: "box".to_owned(),
+        unreached: None,
     };
+    let mut far = Vec::new();
+    if let Ok(destination) = std::env::var("LUME_SSH_LIVE") {
+        let client = if cfg!(windows) {
+            PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+                .join("System32")
+                .join("OpenSSH")
+                .join("ssh.exe")
+        } else {
+            PathBuf::from("ssh")
+        };
+        let extra = std::env::var("LUME_SSH_LIVE_ARGS").unwrap_or_default();
+        let mut args = vec![
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ControlPath=none",
+            "-o",
+            "ServerAliveInterval=15",
+            "-T",
+        ];
+        args.extend(extra.split_whitespace());
+        args.extend(["--", &destination]);
+        far.push(door(client, &args, true));
+    }
     if cfg!(windows) {
         let Ok(distro) = std::env::var("LUME_TEST_DISTRO") else {
-            eprintln!("LUME_TEST_DISTRO names no distribution: nothing is tested");
-            return Vec::new();
+            eprintln!("LUME_TEST_DISTRO names no distribution: nothing is tested here");
+            return far;
         };
         let program = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
             .join("System32")
             .join("wsl.exe");
         let near = ["-d", &distro, "--cd", "/", "--exec"];
-        let far = [&near[..], &["sh", "-c", AWAY, "away"]].concat();
-        return vec![
+        let away = [&near[..], &["sh", "-c", AWAY, "away"]].concat();
+        far.extend([
             door(program.clone(), &near, false),
-            door(program, &far, false),
-        ];
+            door(program, &away, false),
+        ]);
+        return far;
     }
     let sh = || PathBuf::from("/bin/sh");
-    vec![
+    far.extend([
         door(sh(), &["-c", AWAY, "away"], false),
         door(sh(), &["-c", AWAY, "away", "sh", "-c"], true),
-    ]
+    ]);
+    far
 }
 
 fn limits() -> Limits {
@@ -371,6 +404,11 @@ fn nothing_is_left_when_the_connection_is_let_go_of() {
 #[test]
 fn a_connection_that_ended_is_opened_again_and_one_not_used_is_let_go_of() {
     for door in doors() {
+        // Over SSH the loop killed over there leaves the connection to what it started,
+        // which goes on answering: the connection is not seen to end.
+        if door.args.iter().any(|arg| arg == "BatchMode=yes") {
+            continue;
+        }
         let shell = Shell::new(door);
         // The loop is the parent of the script that runs a program.
         let dir = text(&shell, "echo \"$d\"").trim().to_owned();
@@ -450,9 +488,11 @@ fn a_machine_that_is_not_there_is_unavailable_and_says_why() {
             door.program = PathBuf::from("/bin/sh");
             door.args = vec!["-c".into(), "echo no way in >&2; exit 255".into()];
         }
-        let shell = Shell::new(door);
+        let shell = Shell::new(door.clone());
         let error = sh(&shell, "true").unwrap_err();
         assert_eq!(error.kind, ErrorKind::Unavailable);
+        // Nothing tells what failed but that it ended before it was there.
+        assert_eq!(error.why, Some(CANNOT_RUN), "{error:?}");
         if cfg!(unix) {
             assert_eq!(error.message, "box could not be reached: no way in");
         }
@@ -460,6 +500,104 @@ fn a_machine_that_is_not_there_is_unavailable_and_says_why() {
             .spawn(&asked("sh", &[]), &Stop::default())
             .map(|_| ())
             .unwrap_err();
-        assert_eq!(error.kind, ErrorKind::Unavailable);
+        assert_eq!(
+            (error.kind, error.why),
+            (ErrorKind::Unavailable, Some(CANNOT_RUN))
+        );
+
+        // What the program that went there tells of its end is what it failed for.
+        fn told(code: Option<i32>, said: &[u8]) -> Option<&'static str> {
+            assert!(code.is_some(), "it ended by itself");
+            (!said.is_empty()).then_some(SIGN_IN)
+        }
+        let shell = Shell::new(Door {
+            unreached: Some(told),
+            ..door
+        });
+        if cfg!(unix) {
+            let error = sh(&shell, "true").unwrap_err();
+            assert_eq!(error.why, Some(SIGN_IN), "{error:?}");
+            let error = shell
+                .spawn(&asked("sh", &[]), &Stop::default())
+                .map(|_| ())
+                .unwrap_err();
+            assert_eq!(error.why, Some(SIGN_IN), "{error:?}");
+        }
+    }
+}
+
+#[test]
+fn over_a_connection_that_took_a_person_to_open_started_programs_come_whole() {
+    for door in doors() {
+        let shell = Shell::new(door.clone());
+        assert!(!shell.signed_in());
+        shell
+            .sign_in(&door, &Stop::default(), Duration::from_secs(20))
+            .unwrap();
+        assert!(shell.signed_in());
+        let name = shell.name();
+        assert!(name.is_some());
+
+        let line = "echo one; sleep 1; echo two; echo err >&2; exit 6";
+        let started = Instant::now();
+        let mut run = shell
+            .spawn(&asked("sh", &["-c", line]), &Stop::default())
+            .unwrap();
+        assert_eq!(run.child.id(), 0);
+        let mut out = String::new();
+        run.stdout.read_to_string(&mut out).unwrap();
+        // Nothing came before the end.
+        assert!(started.elapsed() >= Duration::from_secs(1));
+        assert_eq!(
+            out,
+            "one
+two
+"
+        );
+        let mut said = String::new();
+        run.stderr.read_to_string(&mut said).unwrap();
+        assert_eq!(
+            said,
+            "err
+"
+        );
+        until("it ended", || run.child.try_wait() == Some(Some(6)));
+
+        // Ended from here, with what it started; the connection stays.
+        let mark = format!("mark-whole-{}", std::process::id());
+        let mut run = shell
+            .spawn(
+                &asked("sh", &["-c", "sleep 613; echo never", &mark]),
+                &Stop::default(),
+            )
+            .unwrap();
+        let find = "ps -o args= -e | grep -c '[s]leep 613'";
+        until("it runs", || {
+            text(&Shell::new(door.clone()), find).trim() != "0"
+        });
+        run.child.kill().unwrap();
+        let mut out = String::new();
+        run.stdout.read_to_string(&mut out).unwrap();
+        assert_eq!(out, "");
+        until("it was answered for", || run.child.try_wait() == Some(None));
+        until("it is gone", || {
+            text(&Shell::new(door.clone()), find).trim() == "0"
+        });
+        assert!(shell.signed_in());
+        assert_eq!(shell.name(), name);
+
+        // Lost, and opened again without a person: started programs have their own again.
+        shell.close_idle(Duration::ZERO);
+        assert!(!shell.signed_in());
+        let mut run = shell
+            .spawn(&asked("sh", &["-c", "echo as it comes"]), &Stop::default())
+            .unwrap();
+        let mut out = String::new();
+        run.stdout.read_to_string(&mut out).unwrap();
+        assert_eq!(
+            out,
+            "as it comes
+"
+        );
     }
 }

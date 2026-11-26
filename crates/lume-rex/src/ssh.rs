@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use lume_proto::{DisconnectReason, ExitStatus};
-use lume_session::ssh::{Tail, check_word, classify, client};
+use lume_session::ssh::{Tail, Use, classify, client, destination, options};
 use serde::Deserialize;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
@@ -315,41 +315,24 @@ impl Tunnel {
     /// The arguments every run of the client begins with. The destination is not among
     /// them: it comes last, after `--`. A run that `asks` is not told to ask nothing.
     fn common(&self, asks: bool) -> Result<Vec<String>, RexError> {
-        check_word("host", &self.host).map_err(|error| self.unsupported(error.message))?;
-        if let Some(user) = &self.user {
-            check_word("user's name", user).map_err(|error| self.unsupported(error.message))?;
-        }
-        let mut args = Vec::new();
-        if !asks {
-            // It runs out of sight, with nobody to answer.
-            args.extend(["-o".to_owned(), "BatchMode=yes".to_owned()]);
-        }
-        for option in [
-            format!("ConnectTimeout={SSH_CONNECT_SECONDS}"),
-            // A connection of the user's own that others share is not this one's to
-            // add a forward to, or to end.
-            "ControlPath=none".to_owned(),
-            "ServerAliveInterval=15".to_owned(),
-            "ServerAliveCountMax=3".to_owned(),
-        ] {
-            args.extend(["-o".to_owned(), option]);
-        }
-        args.extend(["-T".to_owned(), "-n".to_owned()]);
-        // The client keeps the first value an option is given, so nothing of the user's
-        // own that follows undoes what is set above.
-        args.extend(self.options.args.iter().cloned());
-        if let Some(port) = self.port {
-            args.extend(["-p".to_owned(), port.to_string()]);
-        }
-        Ok(args)
+        options(
+            &self.host,
+            self.user.as_deref(),
+            self.port,
+            &self.options.args,
+            Use {
+                asks,
+                connect_seconds: SSH_CONNECT_SECONDS,
+                alive: true,
+                input: false,
+            },
+        )
+        .map_err(|error| self.unsupported(error.message))
     }
 
     /// The account and machine, as the client takes them.
     fn destination(&self) -> String {
-        match &self.user {
-            Some(user) => format!("{user}@{}", self.host),
-            None => self.host.clone(),
-        }
+        destination(&self.host, self.user.as_deref())
     }
 
     /// The arguments that ask the other machine one thing and end.

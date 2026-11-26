@@ -35,9 +35,18 @@ const MARKS: [&str; 3] = [
     "packages/ui/src/icons/tiles.ts",
 ];
 
-/// Where it is said that Lume is not theirs, from the workspace's root, and the words.
-const SAID_IN: [&str; 2] = ["README.md", "packages/ui/src/settings/About.tsx"];
-const SAID: &str = "Lume is a third-party client of the Rex server";
+/// Where it is said that Lume is not theirs, from the workspace's root, and the words
+/// each says it in.
+const SAID: [(&str, &str); 2] = [
+    (
+        "README.md",
+        "Lume is an unofficial, third-party client of the Rex server",
+    ),
+    (
+        "packages/ui/src/settings/About.tsx",
+        "Lume is a third-party client of the Rex server",
+    ),
+];
 
 /// Whether a name is one of theirs: a word of it is, or begins with it. `forex` is not,
 /// and nor is a word that merely has the letters in it.
@@ -104,11 +113,11 @@ fn walk(root: &Path, folder: &Path, found: &mut Vec<String>) -> Result<()> {
 /// said that Lume is not theirs.
 pub fn check() -> Result<()> {
     let root = paths::root();
-    for file in SAID_IN {
+    for (file, said) in SAID {
         let text =
             std::fs::read_to_string(root.join(file)).with_context(|| format!("{file} is read"))?;
-        if !text.contains(SAID) {
-            bail!("{file} has to say: {SAID}");
+        if !text.contains(said) {
+            bail!("{file} has to say: {said}");
         }
     }
     let mut found = Vec::new();

@@ -5,6 +5,9 @@
 //! has agreed to the plugin's running it on that machine, when asked in the window; the
 //! answer is kept with the install until they take it back. And a session is there now.
 //!
+//! A machine that wants the user to sign in is signed in to only when they ask for it,
+//! in the window; nothing they answer is kept.
+//!
 //! What comes back is what that machine says, within the limits a run here has.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -15,7 +18,9 @@ use std::time::{Duration, Instant};
 use lume_plugin::broker::grant_of;
 use lume_plugin::lock::OnMachine;
 use lume_plugin::permissions::{Kind, can_do_anything};
-use lume_plugin_api::types::{MachineEntry, MachinesAllow, Place, SpawnOptions};
+use lume_plugin_api::types::{
+    MachineEntry, MachineKind, MachinesAllow, MachinesSignIn, Place, SpawnOptions,
+};
 use lume_plugin_api::{ApiError, ErrorCode};
 use lume_services::ServiceError;
 use lume_services::posix::{Asked, Limits};
@@ -27,8 +32,9 @@ use super::asking::{REASON_MAX, plain, too_long};
 use super::system::from_service;
 use super::{Plugins, api_error};
 use crate::carrier::SessionKey;
-use crate::machines::{Begun, Machine, Machines, NOT_CONNECTED};
+use crate::machines::{Begun, CANNOT_RUN, Machine, Machines, NOT_CONNECTED};
 use crate::sessions::SessionStates;
+use crate::tuning::SSH_TRY_WAIT;
 
 /// How many programs a plugin has running on a machine at once; more wait their turn.
 const AT_ONCE: usize = 8;
@@ -53,6 +59,12 @@ pub(super) struct Elsewhere {
     asking: Mutex<HashSet<(String, String)>>,
     /// When the user last said no, by the plugin and the machine.
     refused: Mutex<HashMap<(String, String), Instant>>,
+    /// The sign-ins on their way, by the machine: one at a time, whoever asked.
+    signing: Mutex<HashSet<(String, String)>>,
+    /// When the user last gave up signing in, by the plugin and the machine.
+    given_up: Mutex<HashMap<(String, String), Instant>>,
+    /// The machines whose names are being found out.
+    learning: Mutex<HashSet<String>>,
     /// Where each session on another machine was last said to be.
     told: Mutex<HashMap<SessionKey, Place>>,
 }
@@ -100,6 +112,15 @@ impl Elsewhere {
         lock(&self.refused)
             .get(key)
             .is_some_and(|at| at.elapsed() < NO_STANDS)
+    }
+
+    /// Notes that a machine's name is being found out; `false` if it is already.
+    pub(super) fn learn(&self, machine: &str) -> bool {
+        lock(&self.learning).insert(machine.to_owned())
+    }
+
+    pub(super) fn learnt(&self, machine: &str) {
+        lock(&self.learning).remove(machine);
     }
 }
 
@@ -210,6 +231,7 @@ impl Plugins {
             .into_values()
             .map(|machine| MachineEntry {
                 allowed: self.allowed_on(local, &machine.id),
+                sign_in: self.elsewhere.machines.wants_sign_in(&machine.id),
                 machine: machine.id,
                 label: machine.label,
                 kind: machine.kind,
@@ -217,16 +239,32 @@ impl Plugins {
             .collect()
     }
 
+    /// Whether any plugin may run its programs on a machine.
+    pub(super) fn anyone_allowed_on(&self, machine: &str) -> bool {
+        let locals: Vec<String> = self.inner().loaded.keys().cloned().collect();
+        locals.iter().any(|local| self.allowed_on(local, machine))
+    }
+
+    /// The machine a session is on, with what it called itself, where plugins can run
+    /// programs there.
+    pub(super) fn machine_of(&self, key: &SessionKey) -> Option<Machine> {
+        let machine = self.state.machine_of(key)?;
+        Some(self.elsewhere.machines.named(machine))
+    }
+
     fn machine(&self, id: &str) -> Result<Machine, ApiError> {
-        self.state.machines().remove(id).ok_or_else(|| {
-            machine_error(
-                ErrorCode::Unavailable,
-                NOT_CONNECTED,
-                format!("no session is on {id}"),
-                id,
-                id,
-            )
-        })
+        let machine = self.state.machines().remove(id);
+        machine
+            .map(|machine| self.elsewhere.machines.named(machine))
+            .ok_or_else(|| {
+                machine_error(
+                    ErrorCode::Unavailable,
+                    NOT_CONNECTED,
+                    format!("no session is on {id}"),
+                    id,
+                    id,
+                )
+            })
     }
 
     /// Asks the user to let a plugin run its programs on a machine, and keeps their yes.
@@ -299,6 +337,104 @@ impl Plugins {
                 .insert(machine.id.clone(), agreed);
         }
         Ok(true)
+    }
+
+    /// Has the user sign in to a machine that wants them to, and says whether they did.
+    pub(super) async fn sign_in_machine(
+        &self,
+        local: &str,
+        asked: MachinesSignIn,
+    ) -> Result<bool, ApiError> {
+        let machine = self.machine(&asked.machine)?;
+        if !self.allowed_on(local, &machine.id) {
+            return Err(machine_error(
+                ErrorCode::Denied,
+                NOT_ALLOWED,
+                format!("{local} has not been allowed on {}", machine.shown()),
+                &machine.id,
+                &machine.shown(),
+            ));
+        }
+        if machine.kind != MachineKind::Ssh {
+            return Err(machine_error(
+                ErrorCode::Invalid,
+                CANNOT_RUN,
+                format!("nobody signs in to {}", machine.shown()),
+                &machine.id,
+                &machine.shown(),
+            ));
+        }
+        if !self.elsewhere.machines.wants_sign_in(&machine.id) {
+            return Ok(true);
+        }
+        let key = (local.to_owned(), machine.id.clone());
+        if lock(&self.elsewhere.given_up)
+            .get(&key)
+            .is_some_and(|at| at.elapsed() < NO_STANDS)
+        {
+            return Ok(false);
+        }
+        let Some(_on_show) = OnShow::begin(
+            &self.elsewhere.signing,
+            &(String::new(), machine.id.clone()),
+        ) else {
+            return Ok(false);
+        };
+        let services = self
+            .services()
+            .ok_or_else(|| api_error(ErrorCode::Failed, "there is no window to ask in"))?;
+        let window = services.panes.focused_window();
+        let address = machine.address().unwrap_or_else(|| machine.label.clone());
+        let attempt = services
+            .rex
+            .attempt(&machine.label, &address, window)
+            .ok_or_else(|| api_error(ErrorCode::Failed, "nothing can be asked in a window here"))?;
+        let may = attempt
+            .lets_ask()
+            .ok_or_else(|| api_error(ErrorCode::Failed, "nothing can be asked in a window here"))?;
+        let env = may
+            .env
+            .iter()
+            .map(|(name, value)| Some((name.clone(), value.to_str()?.to_owned())))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| {
+                api_error(ErrorCode::Failed, "the program that asks has no plain path")
+            })?;
+        let door = machine
+            .asking_door(env)
+            .map_err(|error| from_machine(error, &machine))?;
+        let runner = self
+            .elsewhere
+            .machines
+            .runner(&machine)
+            .map_err(|error| from_machine(error, &machine))?;
+        let stop = Arc::new(Stop::default());
+        // While the user is asked, no call into a plugin's code is running out of time.
+        let _asking = self.asked.begin();
+        let signing = runner.sign_in(door, Arc::clone(&stop));
+        let clock = attempt.clock();
+        let late =
+            || ServiceError::unavailable(format!("{} did not answer in time", machine.shown()));
+        let signed = tokio::select! {
+            biased;
+            () = attempt.ended() => None,
+            signed = clock.within(SSH_TRY_WAIT, signing) => Some(signed.unwrap_or_else(|| Err(late()))),
+        };
+        // The client is let go of before what it asks with: one told that nobody
+        // answers tries an empty password.
+        stop.ask();
+        drop(may);
+        let Some(signed) = signed else {
+            lock(&self.elsewhere.given_up).insert(key, Instant::now());
+            return Ok(false);
+        };
+        self.elsewhere
+            .machines
+            .noted(&machine, runner.as_ref(), &signed);
+        match signed {
+            Ok(()) => Ok(true),
+            Err(error) => Err(from_machine(error, &machine)),
+        }
     }
 
     /// Checks that a plugin may run a program on a machine, has the user approve this
@@ -390,10 +526,11 @@ impl Plugins {
             .machines
             .runner(&machine)
             .map_err(|error| from_machine(error, &machine))?;
-        runner
-            .run(asked, limits)
-            .await
-            .map_err(|error| from_machine(error, &machine))
+        let output = runner.run(asked, limits).await;
+        self.elsewhere
+            .machines
+            .noted(&machine, runner.as_ref(), &output);
+        output.map_err(|error| from_machine(error, &machine))
     }
 
     /// Starts a program on a machine.
@@ -413,10 +550,11 @@ impl Plugins {
             .runner(&machine)
             .map_err(|error| from_machine(error, &machine))?;
         let asked = asked_of(program, args, options.cwd, options.env);
-        let begun = runner
-            .spawn(asked, Arc::clone(&stop))
-            .await
-            .map_err(|error| from_machine(error, &machine))?;
+        let begun = runner.spawn(asked, Arc::clone(&stop)).await;
+        self.elsewhere
+            .machines
+            .noted(&machine, runner.as_ref(), &begun);
+        let begun = begun.map_err(|error| from_machine(error, &machine))?;
         // Nobody waits for it any more.
         if stop.asked() {
             let _ = begun.child.kill();
@@ -470,6 +608,10 @@ pub(super) fn asked_of(
         env: env.unwrap_or_default().into_iter().collect(),
     }
 }
+
+#[cfg(test)]
+#[path = "elsewhere_ssh_tests.rs"]
+mod ssh_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {

@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use lume_proto::{DisconnectReason, ExitStatus};
 use lume_session::Launcher;
-use lume_session::ssh::{Tail, check_word, classify, client};
+use lume_session::ssh::{Tail, Use, classify, client, destination, options};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
@@ -30,34 +30,20 @@ fn arguments(
     extra_args: &[String],
     asks: bool,
 ) -> Result<Vec<String>, CommandError> {
-    let word = |what: &str, word: &str| {
-        check_word(what, word).map_err(|error| CommandError::bad_request(error.message))
-    };
-    word("host", host)?;
-    if let Some(user) = user {
-        word("user's name", user)?;
-    }
-    let mut args = Vec::new();
-    if !asks {
-        args.extend(["-o".to_owned(), "BatchMode=yes".to_owned()]);
-    }
-    for option in [
-        format!("ConnectTimeout={SSH_TRY_CONNECT_SECONDS}"),
-        // A connection that is there already says nothing of signing in.
-        "ControlPath=none".to_owned(),
-    ] {
-        args.extend(["-o".to_owned(), option]);
-    }
-    args.extend(["-T".to_owned(), "-n".to_owned()]);
-    args.extend(extra_args.iter().cloned());
-    if let Some(port) = port {
-        args.extend(["-p".to_owned(), port.to_string()]);
-    }
-    let destination = match user {
-        Some(user) => format!("{user}@{host}"),
-        None => host.to_owned(),
-    };
-    args.extend(["--".to_owned(), destination, ASK.to_owned()]);
+    let mut args = options(
+        host,
+        user,
+        port,
+        extra_args,
+        Use {
+            asks,
+            connect_seconds: SSH_TRY_CONNECT_SECONDS,
+            alive: false,
+            input: false,
+        },
+    )
+    .map_err(|error| CommandError::bad_request(error.message))?;
+    args.extend(["--".to_owned(), destination(host, user), ASK.to_owned()]);
     Ok(args)
 }
 
