@@ -1055,7 +1055,9 @@ pub async fn a_flood_with_no_credit_leaves_memory_flat<H: Harness>() {
         "output without credit"
     );
 
-    // Held like this, nothing moves and nothing grows.
+    // Held like this, nothing moves and nothing grows. What a process uses is the host's
+    // only where the host has the process to itself: in the test's own, the tests running
+    // beside this one grow it too, and the host's part is what it holds, checked above.
     let memory_before = support::resident_bytes(host_pid);
     tokio::time::sleep(Duration::from_secs(3)).await;
     let memory_after = support::resident_bytes(host_pid);
@@ -1064,10 +1066,11 @@ pub async fn a_flood_with_no_credit_leaves_memory_flat<H: Harness>() {
         stats.read_bytes, read_at_stall,
         "the host read on without credit"
     );
+    assert!(u64::from(stats.pending_bytes) <= HELD_MAX, "{stats:?}");
     let grown = memory_after.saturating_sub(memory_before);
     println!("host memory while stalled: {memory_before} -> {memory_after} bytes");
     assert!(
-        grown < 8 * 1024 * KIB,
+        !H::OWN_PROCESS || grown < 8 * 1024 * KIB,
         "the host grew by {grown} bytes while stalled"
     );
 
@@ -1213,8 +1216,12 @@ pub async fn the_program_that_has_the_terminal_is_reported<H: Harness>() {
     let SessionEvent::Foreground(foreground) = event else {
         unreachable!("matched as a foreground program");
     };
-    let shell = if cfg!(windows) { "cmd" } else { "sh" };
-    assert_eq!(foreground.name, shell);
+    assert!(
+        support::shell_names().contains(&foreground.name),
+        "{} is not one of {:?}",
+        foreground.name,
+        support::shell_names()
+    );
     assert_eq!(Some(foreground.pid), pid);
     host.shutdown().await;
 }

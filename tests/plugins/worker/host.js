@@ -21,7 +21,8 @@ lume.commands.register("work", async (args) => {
 
   // A program left running, written to and read from through its streams.
   const child = await lume.process.spawn("sort");
-  await lume.streams.write(child.stdin, "b\na\n");
+  // An odd number of bytes: Windows' sort takes input it can read as UTF-16 for UTF-16.
+  await lume.streams.write(child.stdin, "beta\nalpha\n");
   await lume.streams.close(child.stdin);
   let sorted = "";
   for (;;) {

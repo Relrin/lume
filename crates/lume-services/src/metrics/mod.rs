@@ -597,6 +597,12 @@ mod tests {
 
     #[test]
     fn a_card_that_cannot_be_opened_is_unavailable_and_tried_again_later() {
+        // A retry many readings long: a busy machine that oversleeps a reading's period
+        // still reads several times between two tries.
+        let timing = Timing {
+            gpu_retry: Duration::from_millis(400),
+            ..quick()
+        };
         let tries = Arc::new(AtomicU64::new(0));
         let sampler = {
             let tries = Arc::clone(&tries);
@@ -608,7 +614,7 @@ mod tests {
                     tries.fetch_add(1, Ordering::Relaxed);
                     None
                 }),
-                quick(),
+                timing,
             )
         };
         let _hold = sampler.hold();

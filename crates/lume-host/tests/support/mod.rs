@@ -92,6 +92,24 @@ pub fn shell() -> SpawnSpec {
     }
 }
 
+/// The names the program of [`shell`] may go by once it runs. macOS's `/bin/sh` is a
+/// small program that becomes the shell it is set to (bash unless changed), so it is
+/// `sh` only until then.
+pub fn shell_names() -> Vec<String> {
+    if cfg!(windows) {
+        return vec!["cmd".to_owned()];
+    }
+    let mut names = vec!["sh".to_owned()];
+    if cfg!(target_os = "macos") {
+        let chosen = std::fs::read_link("/private/var/select/sh")
+            .ok()
+            .and_then(|target| Some(target.file_name()?.to_str()?.to_owned()))
+            .unwrap_or_else(|| "bash".to_owned());
+        names.push(chosen);
+    }
+    names
+}
+
 /// A program that prints lines for ever.
 pub fn flood() -> SpawnSpec {
     if cfg!(windows) {
@@ -802,6 +820,10 @@ impl Running {
 
 /// A way of running the host for a test.
 pub trait Harness {
+    /// Whether the host has a process to itself, so that what the process uses is what
+    /// the host uses.
+    const OWN_PROCESS: bool;
+
     fn start() -> impl Future<Output = Running> + Send;
 }
 
@@ -809,6 +831,9 @@ pub trait Harness {
 pub struct InProcess;
 
 impl Harness for InProcess {
+    // The test's process, shared with every test running beside it.
+    const OWN_PROCESS: bool = false;
+
     async fn start() -> Running {
         let (client_end, host_end) = tokio::io::duplex(256 * 1024);
         let serving = tokio::spawn(async move {
@@ -848,6 +873,8 @@ impl Drop for HostProcess {
 }
 
 impl Harness for OutOfProcess {
+    const OWN_PROCESS: bool = true;
+
     async fn start() -> Running {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let name = format!(

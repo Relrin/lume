@@ -97,6 +97,40 @@ fn name(dir: &Path) -> String {
     dir.file_name().unwrap().to_string_lossy().into_owned()
 }
 
+/// Whether this build of the library lays out its pages otherwise than the builds that
+/// write the snapshot files. A page of the terminal is sized in pages of memory, which are
+/// four times as large on Apple silicon, so its snapshots of a screen with scrollback are
+/// cut into pages elsewhere and differ in their bytes. They are not written there.
+const PAGES_OF_ITS_OWN: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+
+/// Whether the file at `path` is the snapshot of `term` that this build wrote as
+/// `written`: byte for byte, or, where the build lays out its pages otherwise, by
+/// bringing back what `term` shows and the end of its scrollback. Scrollback past its
+/// limit is let go of a page at a time, so pages of another size keep another number of
+/// the oldest lines; what one of the two kept is the end of what the other kept.
+fn is_current(path: &Path, written: &[u8], term: &Terminal) -> bool {
+    let Ok(kept) = std::fs::read(path) else {
+        return false;
+    };
+    if kept == written {
+        return true;
+    }
+    if !PAGES_OF_ITS_OWN {
+        return false;
+    }
+    let Ok(loaded) = Terminal::from_snapshot(&kept) else {
+        return false;
+    };
+    let text = |term: &Terminal| term.format(Format::Plain).unwrap().bytes;
+    let (kept, here) = (text(&loaded), text(term));
+    let (shorter, longer) = if kept.len() <= here.len() {
+        (&kept, &here)
+    } else {
+        (&here, &kept)
+    };
+    state(&loaded) == state(term) && !shorter.is_empty() && longer.ends_with(shorter)
+}
+
 #[test]
 fn a_snapshot_reproduces_every_recording_at_every_cut() {
     let mut failures = Vec::new();
@@ -170,7 +204,8 @@ fn replayed_output_reproduces_every_recording_at_every_cut() {
 
 /// The snapshot of each whole recording that the webview's engine is tested against: it
 /// must load there and show what `expect.txt` says. Written by this build of the
-/// library with `UPDATE_GOLDEN=1`, and checked to be what this build writes.
+/// library with `UPDATE_GOLDEN=1`, and checked to be what this build writes (see
+/// [`PAGES_OF_ITS_OWN`]).
 #[test]
 fn snapshots_for_the_other_build_are_current() {
     let mut stale = Vec::new();
@@ -189,7 +224,7 @@ fn snapshots_for_the_other_build_are_current() {
             std::fs::write(&path, &snapshot).unwrap();
             continue;
         }
-        if std::fs::read(&path).ok().as_deref() != Some(snapshot.as_slice()) {
+        if !is_current(&path, &snapshot, &term) {
             stale.push(name(&dir));
         }
     }
@@ -227,7 +262,7 @@ fn the_history_snapshot_for_the_other_build_is_current() {
         return;
     }
     assert!(
-        std::fs::read(&path).ok().as_deref() == Some(snapshot.as_slice()),
+        is_current(&path, &snapshot, &term),
         "{} is missing or stale; run with UPDATE_GOLDEN=1",
         path.display()
     );

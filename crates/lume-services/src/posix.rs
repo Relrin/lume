@@ -309,13 +309,14 @@ impl Asked {
 /// The script of run `id`, whose answer holds at most `max` bytes of each output and one
 /// more, which tells that there were more. What is past that is read and dropped, so the
 /// program ends as it would have; `cat` keeps it, as what it reads is written at once. Once it has ended, what is left of its output is read
-/// for as long as [`OUTPUT_GRACE`], in steps of a hundredth of a second: something it
-/// started may keep the output open.
+/// for as long as [`OUTPUT_GRACE`]: something it started may keep the output open. A
+/// timer of its own says when that is over, as a count of short sleeps can take far longer
+/// than it says on a busy machine, where each one is a program started.
 fn run_script(id: u64, asked: &Asked, max: usize) -> String {
     let keep = max.saturating_add(1);
     // Of 512 bytes, or of 1024 to some shells.
     let blocks = keep / 512 + 1;
-    let steps = OUTPUT_GRACE.as_millis() / 10;
+    let grace = OUTPUT_GRACE.as_secs_f64();
     let inner = format!(
         "echo $$ > \"$d/{id}.pid\"\n[ -e \"$d/{id}.end\" ] && exit 137\n{}{}",
         asked.script(|why| format!("echo {why} > \"$d/{id}.why\"")),
@@ -326,10 +327,12 @@ fn run_script(id: u64, asked: &Asked, max: usize) -> String {
          {{ (ulimit -f {blocks}; exec cat > \"$d/{id}.out\"); cat > /dev/null; \
          : > \"$d/{id}.read\"; }} < \"$d/{id}.pipe\" 2> /dev/null &\n\
          $G sh -c {} < \"$d/{id}.in\" > \"$d/{id}.pipe\" 2> \"$d/{id}.err\"\n\
-         c=$?; s=ran; n=0\n\
+         c=$?; s=ran\n\
+         {{ sleep {grace}; : > \"$d/{id}.late\"; }} > /dev/null 2>&1 & t=$!\n\
          until [ -e \"$d/{id}.read\" ]; do \
-         [ \"$n\" -ge {steps} ] && {{ s=held; break; }}; \
-         [ -d \"$d\" ] || exit 0; sleep 0.01; n=$((n + 1)); done\n\
+         [ -e \"$d/{id}.late\" ] && {{ s=held; break; }}; \
+         [ -d \"$d\" ] || exit 0; sleep 0.01; done\n\
+         kill \"$t\" 2>/dev/null\n\
          until mkdir \"$d/lock\" 2>/dev/null; do [ -d \"$d\" ] || exit 0; sleep 0.01; done\n\
          [ -f \"$d/{id}.why\" ] && s=$(cat \"$d/{id}.why\")\n\
          o=$(($(wc -c < \"$d/{id}.out\"))); e=$(($(wc -c < \"$d/{id}.err\")))\n\

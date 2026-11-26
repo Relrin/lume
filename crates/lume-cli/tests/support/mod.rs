@@ -317,7 +317,7 @@ impl App {
         let deadline = Instant::now() + START;
         loop {
             if let Some(status) = child.try_wait().expect("the application can be waited for") {
-                assert!(status.success(), "the application ended with {status}");
+                assert!(status.success(), "{}", self.ended_badly(status));
                 break;
             }
             if Instant::now() >= deadline {
@@ -348,6 +348,20 @@ impl App {
         std::fs::read_to_string(self.home.join(ERRORS)).unwrap_or_default()
     }
 
+    /// What is said of an application that ended with `status`, which is not success:
+    /// what it wrote to its standard error, and the end of its log. Its home goes with the
+    /// test, and the log is not kept by whoever runs the tests elsewhere.
+    fn ended_badly(&self, status: std::process::ExitStatus) -> String {
+        const LOG_LINES: usize = 40;
+        let log = std::fs::read_to_string(&self.log).unwrap_or_default();
+        let lines: Vec<&str> = log.lines().collect();
+        let tail = lines[lines.len().saturating_sub(LOG_LINES)..].join("\n");
+        format!(
+            "the application ended with {status}\n--- its errors\n{}\n--- the end of its log\n{tail}",
+            self.errors().trim_end()
+        )
+    }
+
     /// Ends the application's process at once, as a crash would.
     pub fn kill(mut self) {
         let mut child = self.child.take().expect("the application is running");
@@ -368,7 +382,7 @@ impl App {
         let deadline = Instant::now() + START;
         loop {
             if let Some(status) = child.try_wait().expect("the application can be waited for") {
-                assert!(status.success(), "the application ended with {status}");
+                assert!(status.success(), "{}", self.ended_badly(status));
                 break;
             }
             assert!(Instant::now() < deadline, "the application did not close");
@@ -509,6 +523,17 @@ impl Pages {
             .output()
             .expect("node runs: the tests that look into a view need it");
         if !output.status.success() {
+            // Why the page was not reached, said once each time it changes: a test that
+            // waits in vain then says what stood in its way.
+            static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+            let why = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            let mut last = LAST
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *last != why {
+                eprintln!("looking into {part}: {why}");
+                *last = why;
+            }
             return None;
         }
         serde_json::from_slice(&output.stdout).ok()

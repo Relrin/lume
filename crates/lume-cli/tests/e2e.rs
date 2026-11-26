@@ -2324,7 +2324,7 @@ fn a_plugin_uses_a_service_a_watch_a_running_program_and_a_panes_figures() {
         logged(plugin, "service 42 from test.provider;")
     });
     assert!(logged(&worker, "watched true"), "{worker}");
-    assert!(logged(&worker, "sorted a,b exit 0"), "{worker}");
+    assert!(logged(&worker, "sorted alpha,beta exit 0"), "{worker}");
     assert!(logged(&worker, "processes true memory true"), "{worker}");
     // The provider was started to answer.
     let provider = app.until_plugin("test.provider", "the provider to run", |plugin| {
@@ -2568,6 +2568,9 @@ fn a_plugin_signs_in_to_the_machine_of_an_ssh_profile_on_a_press_and_runs_progra
         )
     };
     const PASSWORD: &str = "correct horse";
+    // The password is typed into the window's page, which can be driven only where it
+    // has a debugging port. Elsewhere the machine asks nothing, and the rest is the same.
+    let typed = cfg!(windows);
     let name = format!("stand_in_ssh{}", std::env::consts::EXE_SUFFIX);
     let client = application().with_file_name("examples").join(name);
     assert!(client.is_file(), "{} is not there", client.display());
@@ -2575,14 +2578,19 @@ fn a_plugin_signs_in_to_the_machine_of_an_ssh_profile_on_a_press_and_runs_progra
     let home = home_with_plugins(&["elsewhere"]);
     let script = home.join("far.json");
     let log = home.join("far.log");
-    let far = serde_json::json!({
-        "asks": [{
+    let asks = if typed {
+        serde_json::json!([{
             "words": "me@devbox's password: ",
             "right": PASSWORD,
             "tries": 3,
             "again": "Permission denied, please try again.",
             "failure": "me@devbox: Permission denied (publickey,password).",
-        }],
+        }])
+    } else {
+        serde_json::json!([])
+    };
+    let far = serde_json::json!({
+        "asks": asks,
         "shell": shell,
         "login": login,
         "log": log,
@@ -2664,25 +2672,28 @@ fn a_plugin_signs_in_to_the_machine_of_an_ssh_profile_on_a_press_and_runs_progra
     asking.join().unwrap().ok("the question");
     assert_eq!(said(&asked)["allowed"], true);
 
-    // It wants a password, which is asked for only on a press.
-    let refused = run("work", id);
-    assert_eq!(refused["uname"], "sign_in", "{refused}");
-    let seen = run("look", "");
-    assert_eq!(seen["machines"][0]["signIn"], true, "{seen}");
-    assert!(!far_log().contains(&"asks".to_owned()), "{:?}", far_log());
+    if typed {
+        // It wants a password, which is asked for only on a press.
+        let refused = run("work", id);
+        assert_eq!(refused["uname"], "sign_in", "{refused}");
+        let seen = run("look", "");
+        assert_eq!(seen["machines"][0]["signIn"], true, "{seen}");
+        assert!(!far_log().contains(&"asks".to_owned()), "{:?}", far_log());
 
-    let asked = mark();
-    let signing = app.ctl_in_background(&["command", "test.elsewhere.signin", &args(&asked, id)]);
-    until_page(
-        &pages,
-        "the window to ask for the password",
-        "document.activeElement?.matches('dialog.sign-in[open] input') === true",
-    );
-    let title = page(&pages, "document.querySelector('.sign-in h2')?.textContent");
-    assert_eq!(title, "Sign in to Dev box", "{title}");
-    press(&pages, &[&format!("text:{PASSWORD}"), "Enter"]);
-    signing.join().unwrap().ok("the sign-in");
-    assert_eq!(said(&asked)["signedIn"], true);
+        let asked = mark();
+        let signing =
+            app.ctl_in_background(&["command", "test.elsewhere.signin", &args(&asked, id)]);
+        until_page(
+            &pages,
+            "the window to ask for the password",
+            "document.activeElement?.matches('dialog.sign-in[open] input') === true",
+        );
+        let title = page(&pages, "document.querySelector('.sign-in h2')?.textContent");
+        assert_eq!(title, "Sign in to Dev box", "{title}");
+        press(&pages, &[&format!("text:{PASSWORD}"), "Enter"]);
+        signing.join().unwrap().ok("the sign-in");
+        assert_eq!(said(&asked)["signedIn"], true);
+    }
     let seen = run("look", "");
     assert_eq!(seen["machines"][0]["signIn"], false, "{seen}");
 
@@ -2707,7 +2718,7 @@ fn a_plugin_signs_in_to_the_machine_of_an_ssh_profile_on_a_press_and_runs_progra
     );
     // Asked once, and the program left running went over the same connection.
     let asks = far_log().iter().filter(|line| *line == "asks").count();
-    assert_eq!(asks, 1, "{:?}", far_log());
+    assert_eq!(asks, usize::from(typed), "{:?}", far_log());
 
     // Where the shell says it is counts once that machine named itself so.
     let report = "printf '\\033]7;file://%s/tmp\\033\\\\' \"$(uname -n)\"";
@@ -2941,7 +2952,7 @@ fn a_plugins_view_keeps_its_state_and_uses_its_plugins_streams() {
         // A kind of failure the application knows nothing of, as the code named it.
         "echo own echo.own-kind {\"count\":7} a failure of its own kind",
         // A program's input and output, used by the view itself.
-        "echo sorted a,b,c ended true",
+        "echo sorted alpha,beta,charlie ended true",
         "echo ways output true/false input false/true",
         // A grant is opened once, and only by the view it was made for.
         "echo reopen refused not_found",

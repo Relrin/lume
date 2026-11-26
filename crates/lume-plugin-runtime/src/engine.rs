@@ -490,6 +490,10 @@ impl Engine {
             if self.shared.hung.load(Ordering::Acquire) {
                 return Err(Stop::Hung);
             }
+            // Memory that was refused stops it below, and is why it ran long if it did.
+            if self.refused.load(Ordering::Relaxed) {
+                break;
+            }
             if jobs >= TURN_JOBS_MAX || started.elapsed() > self.limits.job * TURN_BUDGETS {
                 return Err(Stop::Breach(
                     Breach::Turn,

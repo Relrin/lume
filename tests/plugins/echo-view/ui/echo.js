@@ -91,8 +91,10 @@ async function streams() {
     sorted += decoder.decode(bytes, { stream: true });
   });
   const input = await openStream(sort.input);
-  input.write("b\nc\n");
-  input.write("a\n");
+  // An odd number of bytes in all: Windows' sort takes input it can read as UTF-16 for
+  // UTF-16.
+  input.write("beta\ncharlie\n");
+  input.write("alpha\n");
   input.finish();
   const done = await output.ended;
   say(`sorted ${sorted.trim().split(/\r?\n/).join(",")} ended ${done.ok}`);

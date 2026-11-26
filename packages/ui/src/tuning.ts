@@ -263,3 +263,10 @@ export const GROUP_NAME_WRITE_MS = 300;
  * whole pages, so a full scrollback can be a little short of the count.
  */
 export const HISTORY_FULL_SHARE = 0.9;
+
+/**
+ * How long the top bar waits for the next frame before it reads the panes' work
+ * anyway. A window that is hidden, or whose webview draws no frames for a while, still
+ * keeps its Activity count right.
+ */
+export const WORK_READ_WAIT_MS = 250;

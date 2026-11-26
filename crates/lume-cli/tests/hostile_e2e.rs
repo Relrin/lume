@@ -128,11 +128,29 @@ impl Drop for Pretend {
     }
 }
 
-/// Starts the application, with its page to look into where that can be done.
+/// How long the page's debugging port may take to answer once the page has started a
+/// session.
+const PORT_WAIT: Duration = Duration::from_secs(15);
+
+/// Starts the application, with its page to look into where that can be done: on
+/// Windows, where the webview's debugging port answers. A machine whose webview keeps
+/// the port shut has what the application reports checked, as elsewhere.
 fn application_with(settings: &str) -> (App, Option<Pages>) {
     if cfg!(windows) {
         let (app, pages) = application_to_drive(settings);
-        return (app, Some(pages));
+        let address = std::net::SocketAddr::from(([127, 0, 0, 1], pages.port));
+        let deadline = Instant::now() + PORT_WAIT;
+        while Instant::now() < deadline {
+            if std::net::TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_ok() {
+                return (app, Some(pages));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        eprintln!(
+            "the webview's debugging port {} never answered: the page is not looked into",
+            pages.port
+        );
+        return (app, None);
     }
     let app = App::start_with(settings);
     app.status_with_session();

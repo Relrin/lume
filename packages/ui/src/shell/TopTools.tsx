@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { PaneId } from "../layout/types.ts";
+import { WORK_READ_WAIT_MS } from "../tuning.ts";
 import type { ShellApp } from "./boot/index.ts";
 import { useShell } from "./context.ts";
 import { useKeyHint } from "./hints.ts";
@@ -64,15 +65,23 @@ function signature(work: readonly PaneWork[]): string {
 /**
  * The work of the window's panes. It is read again when a pane's report or the layout
  * changes, at most once a frame, and the bar is drawn again only when what it lists
- * changed: a pane printing output changes nothing here.
+ * changed: a pane printing output changes nothing here. A page that draws no frame for
+ * a while (a hidden window, or a webview that holds its frames back) reads it after
+ * `WORK_READ_WAIT_MS` all the same. It is read once more when the subscriptions begin: a
+ * report that came after the first drawing and before them would otherwise be missed
+ * until the next one, which may never come.
  */
 function useWindowWork(app: ShellApp): PaneWork[] {
   const [work, setWork] = useState<PaneWork[]>(() => windowWork(app));
   const shown = useRef(signature(work));
   useEffect(() => {
     let frame = 0;
+    let timer = 0;
     const read = () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
       frame = 0;
+      timer = 0;
       const next = windowWork(app);
       const said = signature(next);
       if (said === shown.current) return;
@@ -80,11 +89,16 @@ function useWindowWork(app: ShellApp): PaneWork[] {
       setWork(next);
     };
     const soon = () => {
-      if (frame === 0) frame = requestAnimationFrame(read);
+      if (frame !== 0 || timer !== 0) return;
+      frame = requestAnimationFrame(read);
+      timer = window.setTimeout(read, WORK_READ_WAIT_MS);
     };
     const stops = [app.reports.subscribeAll(soon), app.layout.subscribe(soon)];
+    // What changed between the first drawing and these subscriptions told nobody.
+    soon();
     return () => {
       cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
       stops.forEach((stop) => stop());
     };
   }, [app]);
