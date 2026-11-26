@@ -287,6 +287,7 @@ export interface Mounted {
 export async function mountWindow(
   asked: FakeCoreOptions,
   limitMs: number = CHROME_START_TIMEOUT_MS,
+  width: number = SCENE_WIDTH_PX,
 ): Promise<Mounted> {
   // A dialog is the page's, and the page is the same from one scene to the next.
   connectionDialog.getState().close();
@@ -297,7 +298,7 @@ export async function mountWindow(
   container.style.setProperty("position", "fixed");
   container.style.setProperty("left", "0");
   container.style.setProperty("top", "0");
-  container.style.setProperty("width", `${SCENE_WIDTH_PX}px`);
+  container.style.setProperty("width", `${width}px`);
   container.style.setProperty("height", `${SCENE_HEIGHT_PX}px`);
   // What is laid out against the window is laid out against this box.
   container.style.setProperty("contain", "strict");
@@ -353,7 +354,7 @@ export async function showScene(name: string, scheme: "light" | "dark"): Promise
   }
   const scene = SCENES.find((candidate) => candidate.name === name);
   if (!scene) throw new Error(`there is no scene called ${name}`);
-  const mounted = await mountWindow({ ...scene.window, scheme });
+  const mounted = await mountWindow({ ...scene.window, scheme }, undefined, scene.width);
   await scene.prepare?.(mounted.app, mounted.core);
   await sleep(CHROME_SETTLE_MS);
   return scene.check?.(mounted.container) ?? [];
@@ -442,7 +443,7 @@ async function runScene(
   info: HarnessInfo | null,
   problems: string[],
 ): Promise<SceneResult> {
-  const mounted = await mountWindow(scene.window);
+  const mounted = await mountWindow(scene.window, undefined, scene.width);
   try {
     await scene.prepare?.(mounted.app, mounted.core);
     const also = (): string[] => scene.check?.(mounted.container) ?? [];

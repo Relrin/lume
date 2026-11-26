@@ -13,7 +13,7 @@ import type { CommandSpec, MenuNodeData, UiContributions } from "../core/types.t
 import type { FakeCoreOptions } from "./fake-core.ts";
 import { FIXTURE_BINDINGS, FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import type { Scene } from "./scene.ts";
-import { CHROME_START_TIMEOUT_MS } from "./tuning.ts";
+import { CHROME_START_TIMEOUT_MS, WIDE_SCENE_WIDTH_PX } from "./tuning.ts";
 import type { InstalledPlugin } from "../settings/plugins.ts";
 
 /** How often a scene looks again for what it waits for. */
@@ -854,6 +854,7 @@ export const PLUGIN_SCENES: readonly Scene[] = [
   {
     name: "plugin-app-menu",
     window: WITH_PLUGINS,
+    width: WIDE_SCENE_WIDTH_PX,
     prepare: async () => {
       await openAppMenu("View");
     },
@@ -887,6 +888,7 @@ export const PLUGIN_SCENES: readonly Scene[] = [
   {
     name: "plugin-tools-menu",
     window: WITH_PLUGINS,
+    width: WIDE_SCENE_WIDTH_PX,
     prepare: async () => {
       await openAppMenu("Tools");
     },

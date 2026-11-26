@@ -10,7 +10,7 @@ import type { ShellApp } from "../shell/boot/index.ts";
 import type { FakeCoreOptions } from "./fake-core.ts";
 import { FIXTURE_BINDINGS, FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import type { Scene } from "./scene.ts";
-import { CHROME_START_TIMEOUT_MS } from "./tuning.ts";
+import { CHROME_START_TIMEOUT_MS, WIDE_SCENE_WIDTH_PX } from "./tuning.ts";
 
 /** How often a scene looks again for what it waits for. */
 const POLL_MS = 20;
@@ -313,6 +313,7 @@ export const TAB_SCENES: readonly Scene[] = [
           "Move tab left",
           "Move tab right",
           "Move into another tab…",
+          "Save as layout",
           "Mute tab",
           "Lock session",
           "Close tabs to the left",
@@ -370,6 +371,7 @@ export const TAB_SCENES: readonly Scene[] = [
   },
   {
     name: "app-menu-groups",
+    width: WIDE_SCENE_WIDTH_PX,
     window: {
       ...GROUPED,
       groups: [],

@@ -91,6 +91,18 @@ async function until(what: string, done: () => boolean): Promise<void> {
   }
 }
 
+/**
+ * Waits for the Activity button to count `count` panes with news. The bar reads the
+ * panes' reports at the next frame after they arrive, which a slow webview may draw only
+ * well after the reports are in.
+ */
+async function activityNews(count: number): Promise<void> {
+  await until(`the Activity button counting ${count} new`, () => {
+    const button = document.querySelector('.top-tool[aria-haspopup="dialog"]');
+    return button?.getAttribute("aria-label") === `Activity, ${count} new`;
+  });
+}
+
 /** Has the fixture's sessions say what the header scenes have them say. */
 function report(core: FakeCore, reports: Readonly<Record<string, readonly SessionEvent[]>>): void {
   for (const [pane, events] of Object.entries(reports)) {
@@ -103,6 +115,7 @@ async function headerStates(app: ShellApp, core: FakeCore): Promise<void> {
   report(core, REPORTS);
   core.exit("p4", { code: 255 });
   await until("the lost connection being shown", () => app.reports.get("p4").exit !== undefined);
+  await activityNews(2);
 }
 
 /** Gives the first pane of the window `share` of its width. */
@@ -222,6 +235,7 @@ export const PANE_SCENES: readonly Scene[] = [
           document.querySelectorAll('.tab-label[data-activity="attention-error"]').length === 1
         );
       });
+      await activityNews(2);
     },
     check: (page) => {
       const tabs = [...page.querySelectorAll<HTMLElement>(".tab-label")];
@@ -249,6 +263,7 @@ export const PANE_SCENES: readonly Scene[] = [
       await until("the put-away pane saying it waits", () => {
         return document.querySelector('.pane-pill[data-waiting="true"]') !== null;
       });
+      await activityNews(1);
     },
     check: (page) => said(page, ".pane-pill-name", "claude"),
   },
@@ -275,6 +290,7 @@ export const PANE_SCENES: readonly Scene[] = [
         ],
       });
       await until("the work being reported", () => app.reports.get("p4").activity !== "idle");
+      await activityNews(2);
       document.querySelector<HTMLElement>('.top-tool[aria-haspopup="dialog"]')?.click();
       await until("the Activity list opening", () => document.querySelector(".activity") !== null);
     },
@@ -304,6 +320,7 @@ export const PANE_SCENES: readonly Scene[] = [
         ],
       });
       await until("the agent being reported", () => app.reports.get("p2").statuses.length > 0);
+      await activityNews(1);
       const tab = core.tabs[1] ?? "";
       app.commands.run("lume.tab.close", { tab });
       await until("the question being asked", () => {

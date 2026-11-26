@@ -75,7 +75,7 @@
           },
           {
             "role": "button",
-            "name": "Activity, 2 new",
+            "name": "Activity",
             "state": {
               "expanded": "true"
             }

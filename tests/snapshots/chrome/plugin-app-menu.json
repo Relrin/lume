@@ -1,11 +1,11 @@
 {
   "structure": {
     "box": "shell",
-    "at": [0, 0, 1280, 800],
+    "at": [0, 0, 1600, 800],
     "parts": [
       {
         "box": "top-bar",
-        "at": [0, 0, 1280, 44],
+        "at": [0, 0, 1600, 44],
         "parts": [
           {
             "role": "button",
@@ -163,16 +163,16 @@
       },
       {
         "box": "shell-body",
-        "at": [0, 44, 1280, 756],
+        "at": [0, 44, 1600, 756],
         "parts": [
           {
             "box": "shell-centre",
-            "at": [0, 44, 1280, 756],
+            "at": [0, 44, 1600, 756],
             "parts": [
               {
                 "role": "main",
                 "box": "tab-area",
-                "at": [0, 44, 1280, 756],
+                "at": [0, 44, 1600, 756],
                 "parts": [
                   {
                     "role": "separator",
@@ -181,7 +181,7 @@
                     "state": {
                       "orientation": "vertical"
                     },
-                    "at": [636, 44, 8, 748]
+                    "at": [796, 44, 8, 748]
                   },
                   {
                     "role": "region",
@@ -191,11 +191,11 @@
                       "focused": "true",
                       "floating": "false"
                     },
-                    "at": [8, 44, 628, 748],
+                    "at": [8, 44, 788, 748],
                     "parts": [
                       {
                         "box": "pane-header",
-                        "at": [9, 45, 626, 34],
+                        "at": [9, 45, 786, 34],
                         "parts": [
                           {
                             "role": "button",
@@ -231,7 +231,7 @@
                       },
                       {
                         "box": "terminal",
-                        "at": [9, 79, 626, 712],
+                        "at": [9, 79, 786, 712],
                         "parts": [
                           {
                             "role": "textbox",
@@ -249,11 +249,11 @@
                       "focused": "false",
                       "floating": "false"
                     },
-                    "at": [644, 44, 628, 748],
+                    "at": [804, 44, 788, 748],
                     "parts": [
                       {
                         "box": "pane-header",
-                        "at": [645, 45, 626, 34],
+                        "at": [805, 45, 786, 34],
                         "parts": [
                           {
                             "role": "button",
@@ -281,7 +281,7 @@
                       },
                       {
                         "box": "terminal",
-                        "at": [645, 79, 626, 712],
+                        "at": [805, 79, 786, 712],
                         "parts": [
                           {
                             "role": "textbox",

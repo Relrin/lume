@@ -12,6 +12,12 @@ export interface Scene {
   readonly name: string;
   readonly window: FakeCoreOptions;
   /**
+   * How wide the window is, in CSS pixels, where it is not the usual width: for a scene
+   * whose top bar would otherwise be so full that whether its tabs fit depends on how
+   * the engine measures text.
+   */
+  readonly width?: number;
+  /**
    * What is done to the page once it has started, before it is written down. The page
    * is written down once what this returns has settled.
    */

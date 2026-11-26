@@ -1,11 +1,11 @@
 {
   "structure": {
     "box": "shell",
-    "at": [0, 0, 1280, 800],
+    "at": [0, 0, 1600, 800],
     "parts": [
       {
         "box": "top-bar",
-        "at": [0, 0, 1280, 44],
+        "at": [0, 0, 1600, 44],
         "parts": [
           {
             "role": "button",
@@ -163,16 +163,16 @@
       },
       {
         "box": "shell-body",
-        "at": [0, 44, 1280, 756],
+        "at": [0, 44, 1600, 756],
         "parts": [
           {
             "box": "shell-centre",
-            "at": [0, 44, 1280, 756],
+            "at": [0, 44, 1600, 756],
             "parts": [
               {
                 "role": "main",
                 "box": "tab-area",
-                "at": [0, 44, 1280, 756],
+                "at": [0, 44, 1600, 756],
                 "parts": [
                   {
                     "role": "region",
@@ -182,11 +182,11 @@
                       "focused": "true",
                       "floating": "false"
                     },
-                    "at": [8, 44, 1264, 748],
+                    "at": [8, 44, 1584, 748],
                     "parts": [
                       {
                         "box": "pane-header",
-                        "at": [9, 45, 1262, 34],
+                        "at": [9, 45, 1582, 34],
                         "parts": [
                           {
                             "role": "button",
@@ -222,7 +222,7 @@
                       },
                       {
                         "box": "terminal",
-                        "at": [9, 79, 1262, 712],
+                        "at": [9, 79, 1582, 712],
                         "parts": [
                           {
                             "role": "textbox",

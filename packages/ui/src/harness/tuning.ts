@@ -109,6 +109,8 @@ export const CHROME_FLOOD_CHUNK_BYTES = 4096;
  * is written down of a scene does not depend on how large the real window happens to be.
  */
 export const SCENE_WIDTH_PX = 1280;
+/** The width of a scene whose top bar holds an open menu bar as well as its tabs. */
+export const WIDE_SCENE_WIDTH_PX = 1600;
 export const SCENE_HEIGHT_PX = 800;
 
 /**
