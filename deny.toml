@@ -17,6 +17,14 @@ ignore = [
   # uses for its window and webview on Linux. Nothing of it runs in the application, and
   # it goes when Tauri moves off those bindings. Remove this entry then.
   { id = "RUSTSEC-2024-0370", reason = "build-time only, through Tauri's GTK 3 bindings on Linux; no upgrade exists" },
+  # zbus_names, zvariant and zvariant_derive were folded into zbus 6 and are no longer
+  # released on their own. They come with zbus 5, which the Secret Service store of
+  # keyring (credentials on Linux) and Tauri's notification plugin still use. The
+  # advisories are about maintenance, not a flaw. Remove these entries once both move to
+  # zbus 6.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant, through zbus 5 (keyring's Secret Service store, Tauri notifications); no upgrade exists" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names, through zbus 5 (keyring's Secret Service store, Tauri notifications); no upgrade exists" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive, through zbus 5 (keyring's Secret Service store, Tauri notifications); no upgrade exists" },
 ]
 
 [licenses]

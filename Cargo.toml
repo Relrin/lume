@@ -69,7 +69,7 @@ toml_edit = "=0.25.19"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "std"] }
 ureq = "=3.5.2"
-url = "=2.5.8"
+url = "=2.5.9"
 windows-sys = "=0.61.2"
 x11rb = { version = "=0.13.2", default-features = false }
 zbus-secret-service-keyring-store = "=1.0.1"
