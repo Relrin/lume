@@ -33,7 +33,7 @@ import { useRexLook } from "../rex/look.ts";
 import type { RexLink } from "../rex/model.ts";
 import { useSlotMotion } from "../motion/slots.ts";
 import { selectTabOrder, selectTitlePane } from "../layout/selectors.ts";
-import type { ShellApp } from "../shell/boot.ts";
+import type { ShellApp } from "../shell/boot/index.ts";
 import { useShell } from "../shell/context.ts";
 import { describeNow, describeTabNow } from "../shell/describing.ts";
 import { windowWork, type WorkState } from "../shell/work.ts";

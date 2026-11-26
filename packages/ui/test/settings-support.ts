@@ -8,6 +8,7 @@ import { DEFAULT_TOKENS } from "@lume/tokens";
 import type { ConfigView } from "../src/core/types.ts";
 import type { SettingsLists } from "../src/settings/model.ts";
 import { DEVBOX, NAS } from "./rex-fixtures.ts";
+import { settings } from "./config-support.ts";
 
 /** A schema in the shape the configuration's has, small enough to read. */
 export const SCHEMA = {
@@ -344,18 +345,18 @@ export function view(changes: Partial<ConfigView> = {}, appearance: Record<strin
     platform: "windows",
     scheme: "dark",
     theme: { id: "lume-dark", scheme: "dark" },
-    config: {
+    config: settings({
       appearance: { "pane-header": "always", "theme-dark": "lume-dark", ...appearance },
       terminal: { "scrollback-lines": 10_000, "cursor-style": "bar", "cursor-blink": false },
       layout: { "tab-placement": "top" },
       renderer: { tier: "auto" },
       font: { family: "JetBrains Mono" },
-      window: {},
-    },
+    }),
     sources: {},
     problems: [],
     tokens: DEFAULT_TOKENS,
-    keymap: { bindings: [] },
+    keymap: { bindings: [], removed: [] },
+    schema_revision: 1,
     title_bar: "custom",
     ...changes,
   };

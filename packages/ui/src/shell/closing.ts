@@ -18,7 +18,7 @@ import type { Notice } from "../core/types.ts";
 import type { LayoutState } from "../layout/store.ts";
 import type { GroupId, PaneId, TabId } from "../layout/types.ts";
 import type { BusyPane, CloseAnchor, Closing } from "../terminal/prompts.ts";
-import type { ShellApp } from "./boot.ts";
+import type { ShellApp } from "./boot/index.ts";
 import { sentence } from "./notices.ts";
 import { workRest, type PaneWork } from "./work.ts";
 

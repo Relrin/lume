@@ -7,7 +7,7 @@ import {
   runProbe,
   webviewInfo,
 } from "./probe.ts";
-import { shellApp, type ShellApp } from "./shell/boot.ts";
+import { shellApp, type ShellApp } from "./shell/boot/index.ts";
 import { Shell } from "./shell/Shell.tsx";
 
 /**

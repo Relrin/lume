@@ -25,9 +25,10 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use lume_config::schema::TitleBar;
 use lume_config::source::split_path;
 use lume_config::{
-    ColorScheme, ConfigError, ConfigStore, Dirs, Dropped, Keymap, ListedProfile, Platform,
-    PluginBinding, Problem, Resolved, RexHostEntry, SshProfile, Theme, Themes, TokenValue,
-    WatchEvent, Watcher, check_value, plugin_setting_problems, resolve_keymap_with, resolve_tokens,
+    ColorScheme, ConfigBody, ConfigError, ConfigStore, Dirs, Dropped, Keymap, KeymapView,
+    ListedProfile, Platform, PluginBinding, Problem, Resolved, RexHostEntry, SshProfile, Theme,
+    ThemeChoice, Themes, TokenValue, WatchEvent, Watcher, check_value, plugin_setting_problems,
+    resolve_keymap_with, resolve_tokens,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -196,8 +197,13 @@ impl ConfigService {
         tokens.color("color.surface")
     }
 
-    /// A view without its revision.
+    /// A view without its revision, as the page's generated `ConfigView` type says it.
     fn body(&self) -> Value {
+        self.view_body().to_value()
+    }
+
+    /// A view without its revision.
+    fn view_body(&self) -> ConfigBody {
         let resolved = self.store.current();
         let scheme = *lock(&self.scheme);
         let themes = self.all_themes(&resolved);
@@ -213,18 +219,24 @@ impl ConfigService {
             .chain(&plugin_problems)
             .collect();
         let title_bar = resolved.config.window.title_bar_on(self.platform);
-        json!({
-            "platform": self.platform.as_str(),
-            "title_bar": title_bar,
-            "scheme": scheme,
-            "theme": { "id": tokens.theme, "scheme": tokens.scheme },
-            "config": resolved.config,
-            "sources": resolved.sources,
-            "problems": problems,
-            "tokens": tokens.to_json(),
-            "keymap": { "bindings": keymap.bindings, "removed": keymap.removed },
-            "schema_revision": self.schema_revision.load(Ordering::Relaxed),
-        })
+        ConfigBody {
+            platform: self.platform,
+            title_bar,
+            scheme,
+            theme: ThemeChoice {
+                id: tokens.theme.clone(),
+                scheme: tokens.scheme,
+            },
+            config: resolved.config.clone(),
+            sources: resolved.sources.clone(),
+            problems: problems.into_iter().cloned().collect(),
+            tokens: tokens.to_json(),
+            keymap: KeymapView {
+                bindings: keymap.bindings,
+                removed: keymap.removed,
+            },
+            schema_revision: self.schema_revision.load(Ordering::Relaxed),
+        }
     }
 
     fn with_revision(&self, body: &Value) -> Value {
@@ -574,6 +586,37 @@ mod tests {
             let _ = told.send(notice);
         });
         (service, notices)
+    }
+
+    #[test]
+    fn the_view_is_the_json_it_was_before_it_had_a_type() {
+        let dir = TempDir::new("view-json");
+        std::fs::create_dir_all(dir.dirs().config_file().parent().unwrap()).unwrap();
+        std::fs::write(
+            dir.dirs().config_file(),
+            "[terminal]
+cursor-style = \"bar\"
+not-a-setting = 1
+",
+        )
+        .unwrap();
+        let service = ConfigService::load(dir.dirs(), None);
+        let typed = service.view_body();
+        // The view as it was written by hand before the page's type was generated.
+        let by_hand = json!({
+            "platform": typed.platform.as_str(),
+            "title_bar": typed.title_bar,
+            "scheme": typed.scheme,
+            "theme": { "id": typed.theme.id, "scheme": typed.theme.scheme },
+            "config": typed.config,
+            "sources": typed.sources,
+            "problems": typed.problems,
+            "tokens": typed.tokens,
+            "keymap": { "bindings": typed.keymap.bindings, "removed": typed.keymap.removed },
+            "schema_revision": typed.schema_revision,
+        });
+        assert!(!typed.problems.is_empty(), "the unknown key is a problem");
+        assert_eq!(service.body(), by_hand);
     }
 
     #[test]

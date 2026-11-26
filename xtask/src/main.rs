@@ -11,6 +11,7 @@ mod dist;
 mod fetch;
 mod generate;
 mod latency;
+mod logic;
 mod paths;
 mod rex;
 mod rex_e2e;
@@ -33,6 +34,8 @@ Commands:
   setup        Fetch pinned Zig and libghostty-vt, install JS dependencies
   vt native    Build libghostty-vt for the host into target/vt/<triple>/
   vt wasm      Build libghostty-vt for wasm32 into packages/vt/dist/
+  logic        Build the core's layout logic for wasm32 into packages/ui/logic/, for
+               the UI harness's pretend core
   build        Build libghostty-vt if stale, then the Cargo and pnpm workspaces
   test         Run Cargo and pnpm tests
   e2e          Build, then run the suites that need the application's window: the
@@ -73,6 +76,8 @@ Commands:
                manifests into schemas/
   tokens       Write the design tokens' TypeScript module and stylesheet into
                packages/tokens/src/
+  types        Write the page's copy of the core's wire types into
+               packages/ui/src/wire/
   api          Write the plugin API's typings (packages/plugin-api), the runtime's
                prelude, the API reference (docs/plugins/api.md) and the window's
                list of places plugins add to
@@ -94,6 +99,7 @@ fn main() -> Result<()> {
         ["setup"] => setup(),
         ["vt", "native"] => vt::native(true),
         ["vt", "wasm"] => vt::wasm(true),
+        ["logic"] => logic::wasm(),
         ["build"] => build(),
         ["test"] => test(),
         ["e2e"] => {
@@ -126,6 +132,7 @@ fn main() -> Result<()> {
         ["schema"] => generate::write(GeneratedKind::Schema, "schema"),
         ["tokens"] => generate::write(GeneratedKind::Tokens, "tokens"),
         ["api"] => generate::write(GeneratedKind::Api, "api"),
+        ["types"] => generate::write(GeneratedKind::Types, "types"),
         ["api", "--pack"] => {
             generate::write(GeneratedKind::Api, "api")?;
             generate::pack_api()
@@ -153,6 +160,7 @@ fn setup() -> Result<()> {
 fn build() -> Result<()> {
     vt::native(false)?;
     vt::wasm(false)?;
+    logic::wasm()?;
     // A build for development and testing: the UI also contains the page that runs the
     // test suites inside the webview. A build that is shipped is made without it.
     run::pnpm_env(
@@ -174,6 +182,7 @@ fn build() -> Result<()> {
 fn build_release_for_testing() -> Result<()> {
     vt::native(false)?;
     vt::wasm(false)?;
+    logic::wasm()?;
     run::pnpm_env(
         &["--recursive", "--if-present", "run", "build"],
         &[(UI_FOR_TESTING, "1")],
@@ -200,6 +209,7 @@ fn bench(profile: &str) -> Result<()> {
 fn test() -> Result<()> {
     vt::native(false)?;
     vt::wasm(false)?;
+    logic::wasm()?;
     // Every test binary runs even after one has failed: a run on a system nobody has
     // at hand should say everything that is wrong there, not only the first thing.
     run::cargo(&["test", "--workspace", "--no-fail-fast"])?;
@@ -232,6 +242,7 @@ fn lint() -> Result<()> {
 fn dev() -> Result<()> {
     vt::native(false)?;
     vt::wasm(false)?;
+    logic::wasm()?;
     // The application starts the session host from beside itself, and the Tauri CLI
     // builds the application alone.
     run::cargo(&["build", "-p", "lume-host"])?;

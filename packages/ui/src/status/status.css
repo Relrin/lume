@@ -1,0 +1,435 @@
+@layer components {
+  /*
+   * Status items. An item's tone colours what it draws, not what it is called: the
+   * name of a meter stays quiet whatever colour its bar is.
+   */
+
+  .status-slot {
+    display: flex;
+    align-items: center;
+    flex-shrink: 1;
+    min-width: 0;
+    gap: 14px;
+    overflow: hidden;
+  }
+
+  .status-item {
+    @apply text-ink-muted;
+    --status-tone: var(--lume-color-text-muted);
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /*
+   * An item that asks for a rule after it: a thin line the height of a word, as far
+   * from the item as from what follows, which sets a plugin's things apart from the
+   * pane's own buttons or from the next item.
+   */
+  .status-item[data-separator] {
+    position: relative;
+    margin-right: 9px;
+  }
+
+  .status-item[data-separator]::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: -9px;
+    width: var(--lume-size-border);
+    height: 14px;
+    translate: 0 -50%;
+    background: var(--lume-color-border);
+    pointer-events: none;
+  }
+
+  .status-item[data-tone="info"] {
+    --status-tone: var(--lume-color-status-info);
+  }
+
+  .status-item[data-tone="success"] {
+    --status-tone: var(--lume-color-status-success);
+  }
+
+  .status-item[data-tone="warning"] {
+    --status-tone: var(--lume-color-status-warning);
+  }
+
+  .status-item[data-tone="danger"] {
+    --status-tone: var(--lume-color-status-danger);
+  }
+
+  .status-icon {
+    display: flex;
+    color: var(--status-tone);
+  }
+
+  .status-item:not([data-tone="neutral"]) .status-text {
+    color: var(--status-tone);
+  }
+
+  .status-value {
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .status-meter-track {
+    fill: var(--lume-color-border);
+  }
+
+  .status-meter-fill {
+    fill: var(--status-tone);
+  }
+
+  .status-sparkline {
+    color: var(--status-tone);
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border: var(--lume-size-border) solid color-mix(in srgb, var(--status-tone) 40%, transparent);
+    border-radius: min(5px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--status-tone) 12%, transparent);
+    color: var(--status-tone);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  /* Anything small that is pressed: it lights up under the pointer. */
+  .control {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    cursor: pointer;
+    transition:
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .control:hover,
+  .control[aria-pressed="true"] {
+    @apply bg-control-hover text-ink;
+  }
+
+  .control:focus-visible,
+  .tab-label:focus-visible,
+  .switcher-button:focus-visible,
+  .empty-action:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
+
+  /* A plugin's motion plays in place of the element's own animation. */
+  [data-motion="plugin"] {
+    animation: none !important;
+  }
+
+  /* The room a picture would take in a menu whose other rows have one. */
+  .menu-icon-blank {
+    display: block;
+    width: 14px;
+    height: 14px;
+  }
+
+  /* A picture a plugin's thing shows. */
+  .plugin-icon-image {
+    display: block;
+    flex-shrink: 0;
+    object-fit: contain;
+  }
+
+  .plugin-icon-mask {
+    display: inline-block;
+    flex-shrink: 0;
+    background-color: currentColor;
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: contain;
+  }
+
+  .plugin-icon-dot {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    margin: 0 4px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* A plugin's status item that runs a command or opens a menu. */
+  .status-button {
+    height: 24px;
+    margin: 0 -6px;
+    padding: 0 6px;
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    cursor: pointer;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .status-button:hover,
+  .status-button[aria-expanded="true"] {
+    @apply bg-control-hover;
+  }
+
+  .status-button:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
+
+  .status-picture {
+    display: flex;
+    color: var(--status-tone);
+  }
+
+  /*
+   * A segmented item: its parts in one sunken track, the chosen one raised. In a
+   * narrow pane the parts keep their pictures and lose their words.
+   */
+  .status-segmented {
+    gap: 0;
+    padding: 2px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--lume-color-surface) 80%, #000);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .status-segment {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .status-segment .status-picture {
+    color: currentColor;
+  }
+
+  .status-segment:hover {
+    @apply text-ink;
+  }
+
+  .status-segment[aria-pressed="true"] {
+    @apply text-ink;
+    background: var(--lume-color-control-hover);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    cursor: default;
+  }
+
+  .status-segment:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
+
+  /*
+   * A picture in the top bar that is pressed looks like the bar's own tools: the
+   * picture on a square button, a badge's count in a small round mark over the top
+   * right corner. With nothing to count there is no mark. Such items stand as close to
+   * each other, and to the bar's tools after them, as the tools stand to each other.
+   */
+  .status-item[data-tool] {
+    position: relative;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    margin: 0;
+    padding: 0;
+    border-radius: min(8px, var(--lume-radius-control));
+  }
+
+  .status-item[data-tool] + .status-item[data-tool] {
+    margin-left: -12px;
+  }
+
+  .top-right > .status-slot:has(> .status-item[data-tool]:last-child) {
+    margin-right: -8px;
+  }
+
+  .status-item[data-tool]:hover {
+    @apply text-ink;
+  }
+
+  .status-item[data-tool] .status-picture {
+    color: inherit;
+  }
+
+  /*
+   * The count's mark is a small pill whose middle is on the picture's top right
+   * corner, so a quarter of it lies over the picture and it grows evenly to both sides
+   * with its figures. It is as wide as they need, which the item says the number of.
+   */
+  .status-item[data-tool] {
+    --status-badge-width: calc(14px + (var(--status-badge-chars, 1) - 1) * 6.5px);
+  }
+
+  .status-item[data-tool] .status-badge {
+    position: absolute;
+    top: 0;
+    left: calc(23px - var(--status-badge-width) / 2);
+    width: var(--status-badge-width);
+    min-width: 0;
+    height: 14px;
+    padding: 0;
+    border: none;
+    border-radius: 7px;
+    background: var(--lume-color-status-info);
+    color: var(--lume-color-text-inverse);
+    /*
+     * The count is centred by its digits, not by its line: the line's box is cut to
+     * the digits' own height, so what is left above them is what is left below. The
+     * figures are the interface's, each as wide as the next.
+     */
+    font-family: var(--font-ui);
+    font-size: 10px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    text-box: trim-both cap alphabetic;
+  }
+
+  .status-item[data-tool] .status-badge:empty {
+    display: none;
+  }
+
+  /*
+   * A button that counts stands further from what follows it by as much as its mark
+   * reaches past its picture, so the mark is not read as the next button's.
+   */
+  .status-item[data-tool]:has(> .status-badge:not(:empty)) {
+    margin-right: calc(var(--status-badge-width) / 2 - 2px);
+  }
+
+  /*
+   * The picture is cut away round the mark, two pixels wide of it, so what is behind
+   * the bar shows between them whatever the theme, the glow or the picture behind the
+   * window is: no ring of one colour could match those. What is cut is the mark's own
+   * shape, a round end at each side and the stretch between, measured from the
+   * picture's corner.
+   */
+  .status-item[data-tool]:has(> .status-badge:not(:empty)) > .status-picture {
+    mask-image:
+      linear-gradient(#000 0 0),
+      radial-gradient(
+        circle 9px at calc(9px + var(--status-badge-width) / 2) 0,
+        #000 8.5px,
+        transparent 9px
+      ),
+      radial-gradient(
+        circle 9px at calc(23px - var(--status-badge-width) / 2) 0,
+        #000 8.5px,
+        transparent 9px
+      ),
+      linear-gradient(#000 0 0);
+    mask-size:
+      auto,
+      auto,
+      auto,
+      calc(var(--status-badge-width) - 14px) 9px;
+    mask-position:
+      0 0,
+      0 0,
+      0 0,
+      calc(23px - var(--status-badge-width) / 2) 0;
+    mask-repeat: no-repeat;
+    mask-composite: exclude, add, add;
+  }
+
+  /* An item of a plugin whose code was stopped is held up, and says why when asked. */
+  .status-item[data-problem] {
+    opacity: 0.6;
+  }
+
+  .status-problem {
+    display: flex;
+    color: var(--lume-color-status-warning);
+  }
+
+  /* The card of a status item, under it while the pointer rests on the item. */
+  .status-card[data-above] {
+    --menu-rise: 4px;
+  }
+
+  .status-card {
+    position: fixed;
+    z-index: 50;
+    display: grid;
+    gap: 5px;
+    width: 240px;
+    padding: 9px 11px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-card);
+    background: var(--lume-color-popover);
+    box-shadow: var(--lume-shadow-popover);
+    font-size: 12px;
+    pointer-events: none;
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  .status-card-title {
+    @apply text-ink;
+    margin-bottom: 2px;
+    font-weight: 600;
+  }
+
+  .status-card-row {
+    @apply text-ink-muted;
+    --status-tone: var(--lume-color-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-card-row[data-tone="info"] {
+    --status-tone: var(--lume-color-status-info);
+  }
+
+  .status-card-row[data-tone="success"] {
+    --status-tone: var(--lume-color-status-success);
+  }
+
+  .status-card-row[data-tone="warning"] {
+    --status-tone: var(--lume-color-status-warning);
+  }
+
+  .status-card-row[data-tone="danger"] {
+    --status-tone: var(--lume-color-status-danger);
+  }
+
+  .status-card-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .status-card-value {
+    @apply text-ink;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .status-card {
+      animation: none;
+    }
+  }
+}

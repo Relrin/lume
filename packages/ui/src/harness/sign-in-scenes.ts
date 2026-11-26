@@ -4,7 +4,7 @@
  * over the Connect palette and over the dialog that adds a connection.
  */
 
-import type { ShellApp } from "../shell/boot.ts";
+import type { ShellApp } from "../shell/boot/index.ts";
 import type { SignIn } from "../terminal/prompts.ts";
 import type { FakeCoreOptions } from "./fake-core.ts";
 import { FIXTURE_BINDINGS, FIXTURE_COMMANDS, HOST_COMMANDS } from "./fixture-commands.ts";

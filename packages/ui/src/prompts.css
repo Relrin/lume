@@ -1,0 +1,224 @@
+@layer components {
+  /* A question that must be answered, over everything. */
+
+  .prompt-backdrop {
+    @apply bg-overlay;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    cursor: default;
+  }
+
+  .prompt {
+    @apply bg-popover;
+    width: min(560px, 100%);
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 2px));
+    box-shadow: var(--lume-shadow-popover);
+  }
+
+  .prompt h2 {
+    /* A title may name something called as much as there is: its answers stay in view. */
+    flex-shrink: 0;
+    max-height: 5lh;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .prompt p {
+    @apply text-ink-muted;
+    min-height: 1lh;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+
+  /*
+   * A plugin's question: whose it is, what it would allow in plain words, a warning
+   * where that is close to trusting the plugin with everything, and the plugin's own
+   * words quoted under its name.
+   */
+  .prompt .prompt-from {
+    font-size: 12px;
+  }
+
+  .prompt .prompt-what {
+    @apply text-ink;
+  }
+
+  .prompt .prompt-warning {
+    color: var(--lume-color-status-warning);
+  }
+
+  .prompt-quote {
+    @apply text-ink-muted;
+    display: grid;
+    gap: 2px;
+    padding: 8px 12px;
+    border-left: 2px solid var(--lume-color-border);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    user-select: text;
+  }
+
+  .prompt-quote-who {
+    font-size: 12px;
+    white-space: normal;
+  }
+
+  .prompt-preview {
+    @apply bg-control;
+    padding: 10px 12px;
+    min-height: 0;
+    max-height: 240px;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+  }
+
+  .prompt-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .prompt-actions button {
+    @apply bg-control text-ink;
+    padding: 6px 16px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    cursor: pointer;
+  }
+
+  .prompt-actions button:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
+
+  .prompt-actions .prompt-proceed {
+    @apply bg-accent text-accent-ink;
+    border-color: transparent;
+  }
+
+  .prompt-actions button:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  /* What the SSH client asks: over every other dialog, with the rest out of reach. */
+
+  .sign-in {
+    @apply text-ink;
+    margin: auto;
+    overflow: auto;
+    width: min(480px, calc(100vw - 48px));
+    max-height: calc(100vh - 48px);
+  }
+
+  .sign-in:not([open]) {
+    display: none;
+  }
+
+  .sign-in::backdrop {
+    @apply bg-overlay;
+  }
+
+  .sign-in-head {
+    display: grid;
+    gap: 2px;
+  }
+
+  .sign-in-head h2 {
+    overflow-wrap: anywhere;
+  }
+
+  .prompt .sign-in-address {
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .sign-in-asks {
+    @apply text-ink-muted;
+    display: grid;
+    gap: 6px;
+    min-height: 0;
+    font-size: 12.5px;
+  }
+
+  .sign-in-asks .prompt-preview {
+    @apply text-ink;
+  }
+
+  .sign-in-field {
+    @apply bg-control text-ink;
+    display: flex;
+    align-items: center;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+  }
+
+  .sign-in-field:focus-within {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: -1px;
+  }
+
+  .sign-in-field input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 0;
+    outline: 0;
+    background: none;
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
+  /* The eye beside the field is the one there is. */
+  .sign-in-field input::-ms-reveal {
+    display: none;
+  }
+
+  .sign-in-field button {
+    @apply text-ink-muted;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin-right: 3px;
+    border-radius: var(--lume-radius-control);
+    cursor: pointer;
+  }
+
+  .sign-in-field button:hover {
+    @apply text-ink;
+  }
+
+  .sign-in-field button:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+  }
+
+  .prompt .sign-in-note {
+    font-size: 12px;
+  }
+
+  .prompt-actions .prompt-proceed[data-danger] {
+    background: color-mix(in srgb, var(--lume-color-status-danger) 18%, transparent);
+    border-color: color-mix(in srgb, var(--lume-color-status-danger) 45%, transparent);
+    color: var(--lume-color-status-danger);
+  }
+}

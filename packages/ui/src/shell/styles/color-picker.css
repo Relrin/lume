@@ -1,0 +1,367 @@
+@layer components {
+  /* The colour picker: it opens from the swatch that asked for it and applies only on
+     Apply or Enter. Opened from the keyboard it is there at once. */
+  .color-picker-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+  }
+
+  .color-picker {
+    @apply bg-popover text-ink;
+    position: fixed;
+    z-index: 91;
+    box-sizing: border-box;
+    width: 248px;
+    padding: 12px;
+    border-radius: 12px;
+    box-shadow:
+      0 0 0 var(--lume-size-border) var(--lume-color-border),
+      var(--lume-shadow-popover);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .color-picker * {
+    box-sizing: border-box;
+  }
+
+  .color-picker[data-animate] {
+    animation: color-picker-in 160ms var(--lume-motion-easing-standard);
+  }
+
+  @keyframes color-picker-in {
+    from {
+      opacity: 0;
+      scale: 0.96;
+    }
+  }
+
+  .color-picker-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 10px;
+  }
+
+  .color-picker-head b {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  .color-picker-head small {
+    @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 11.5px;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .color-picker-square {
+    position: relative;
+    height: 140px;
+    border-radius: 8px;
+    background-image:
+      linear-gradient(to top, #000, rgb(0 0 0 / 0)),
+      linear-gradient(to right, #fff, rgb(255 255 255 / 0));
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  .color-picker-hue {
+    position: relative;
+    height: 12px;
+    margin: 10px 0 12px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      #f00 0%,
+      #ff0 16.6%,
+      #0f0 33.3%,
+      #0ff 50%,
+      #00f 66.6%,
+      #f0f 83.3%,
+      #f00 100%
+    );
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  .color-picker-knob {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border-radius: 50%;
+    box-shadow:
+      0 0 0 2px #fff,
+      0 0 0 3px rgb(0 0 0 / 0.35),
+      0 1px 4px rgb(0 0 0 / 0.4);
+    pointer-events: none;
+  }
+
+  .color-picker-hue .color-picker-knob {
+    top: 50%;
+  }
+
+  .color-picker-square:focus-visible,
+  .color-picker-hue:focus-visible {
+    outline: 2px solid var(--lume-color-border-focus);
+    outline-offset: 2px;
+  }
+
+  .color-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .color-picker-compare {
+    display: flex;
+    flex-shrink: 0;
+    width: 44px;
+    height: 30px;
+    overflow: hidden;
+    border-radius: 7px;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  }
+
+  .color-picker-compare i {
+    flex: 1;
+  }
+
+  .color-picker-hex {
+    @apply bg-control text-ink-muted;
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    height: 30px;
+    padding: 0 8px;
+    border-radius: 7px;
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+
+  .color-picker-hex:focus-within {
+    box-shadow:
+      inset 0 0 0 1px #3d6bc2,
+      0 0 0 3px rgb(122 167 255 / 0.14);
+  }
+
+  .color-picker-hex[data-wrong] {
+    box-shadow:
+      inset 0 0 0 1px #b4534d,
+      0 0 0 3px rgb(255 123 114 / 0.12);
+  }
+
+  .color-picker-hex input {
+    @apply text-ink;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: none;
+    font: inherit;
+    text-transform: lowercase;
+  }
+
+  .color-picker-icon {
+    @apply text-ink-muted;
+    display: grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    cursor: pointer;
+    transition: scale 120ms var(--lume-motion-easing-standard);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .color-picker-icon:hover {
+      @apply bg-control-hover text-ink;
+    }
+  }
+
+  .color-picker-error {
+    @apply text-danger;
+    margin-top: 6px;
+    font-size: 11.5px;
+  }
+
+  .color-picker-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .color-picker-button {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 7px;
+    background: #2f5bb5;
+    color: #fff;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition:
+      scale 140ms var(--lume-motion-easing-standard),
+      background-color 120ms ease;
+  }
+
+  .color-picker-button[data-quiet] {
+    @apply text-ink-muted;
+    background: none;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .color-picker-button:hover {
+      background: #3566c4;
+    }
+
+    .color-picker-button[data-quiet]:hover {
+      @apply bg-control-hover text-ink;
+    }
+  }
+
+  .color-picker-button:active,
+  .color-picker-icon:active {
+    scale: 0.97;
+  }
+
+  /* The swatch that opens the picker: a wheel of hues with a plus, or the user's own
+     colour once there is one. */
+  .color-wheel {
+    position: relative;
+    display: grid;
+    flex-shrink: 0;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: conic-gradient(
+      from 90deg,
+      #ff7b72,
+      #f0b35a,
+      #e5c07b,
+      #8fd694,
+      #7fdbca,
+      #7aa7ff,
+      #c792ea,
+      #f48fb1,
+      #ff7b72
+    );
+    cursor: pointer;
+    transition:
+      scale 120ms var(--lume-motion-easing-standard),
+      box-shadow 150ms ease;
+  }
+
+  .color-wheel::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: var(--wheel-ground, var(--lume-color-popover));
+  }
+
+  .color-wheel svg {
+    position: relative;
+    z-index: 1;
+    color: var(--lume-color-text-muted);
+  }
+
+  .color-wheel[data-own] {
+    background: var(--own);
+  }
+
+  .color-wheel[data-own]::after,
+  .color-wheel[data-own] svg {
+    display: none;
+  }
+
+  .color-wheel:active {
+    scale: 0.9;
+  }
+
+  .color-wheel[aria-checked="true"] {
+    box-shadow:
+      0 0 0 2px var(--wheel-ground, var(--lume-color-popover)),
+      0 0 0 3.5px var(--own, var(--lume-color-text));
+  }
+
+  .color-wheel:focus-visible {
+    outline: 2px solid var(--lume-color-border-focus);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .color-picker[data-animate] {
+      animation: fade-in 150ms ease-out;
+    }
+  }
+
+  .group-editor-rows {
+    display: flex;
+    flex-direction: column;
+    margin: 0 -5px -5px;
+    padding-top: 4px;
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+  }
+
+  .group-editor-row {
+    height: 30px;
+    font-size: 12.5px;
+  }
+
+  .group-editor-workspaces .group-editor-row {
+    padding-left: 34px;
+  }
+
+  .group-editor-row[aria-pressed="true"] .menu-icon {
+    color: var(--group-color);
+  }
+
+  .group-editor-chevron {
+    transition: rotate var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
+  }
+
+  .group-editor-row[aria-expanded="true"] .group-editor-chevron {
+    rotate: 90deg;
+  }
+
+  .group-editor-rows .menu-separator {
+    margin: 4px 5px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .group-editor-icons,
+    .group-editor-workspaces,
+    .group-editor-chevron {
+      transition: none;
+    }
+  }
+
+  .notice-action {
+    @apply text-accent;
+    flex-shrink: 0;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: var(--lume-radius-control);
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+}

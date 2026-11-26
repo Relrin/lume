@@ -1,0 +1,433 @@
+@layer components {
+  /* The window's own buttons, as high as the bar. */
+
+  .window-controls {
+    display: flex;
+    align-self: stretch;
+    flex-shrink: 0;
+    margin-left: 4px;
+  }
+
+  .window-control {
+    width: 44px;
+    height: 100%;
+    border-radius: 0;
+  }
+
+  /*
+   * The tools at the right end of the bar: Activity, the command palette, a new tab.
+   * Activity's dot says something new waits in its list.
+   */
+  .top-tools {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 2px;
+  }
+
+  .top-tool {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    border-radius: min(8px, var(--lume-radius-control));
+  }
+
+  .top-tool:hover,
+  .top-tool[aria-expanded="true"] {
+    @apply text-ink;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .top-tool-dot {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--lume-color-status-info);
+    box-shadow: 0 0 0 2px var(--lume-color-surface);
+  }
+
+  .activity-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+  }
+
+  .activity {
+    @apply bg-popover;
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 46;
+    width: 340px;
+    max-width: calc(100vw - 16px);
+    padding: 6px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 4px));
+    box-shadow: var(--lume-shadow-popover);
+    transform-origin: calc(100% - 79px) 0;
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  .activity-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .activity-read {
+    @apply text-ink-muted;
+    margin-left: auto;
+    padding: 3px 6px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 400;
+    cursor: pointer;
+  }
+
+  .activity-read:hover:not(:disabled) {
+    @apply text-ink;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .activity-read:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .activity-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 9px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .activity-row:hover,
+  .activity-row:focus-visible {
+    outline: none;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .activity-tile {
+    --tile-tone: var(--lume-color-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    margin-top: 1px;
+    border-radius: 7px;
+    color: var(--tile-tone);
+    background: color-mix(in srgb, var(--tile-tone) 13%, transparent);
+  }
+
+  .activity-tile[data-state="wait"] {
+    --tile-tone: var(--lume-color-status-warning);
+  }
+
+  .activity-tile[data-state="done"] {
+    --tile-tone: var(--lume-color-status-info);
+  }
+
+  .activity-tile[data-state="failed"] {
+    --tile-tone: var(--lume-color-status-danger);
+  }
+
+  .activity-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  .activity-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+  }
+
+  .activity-title > span,
+  .activity-line {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .activity-line {
+    @apply text-ink-muted;
+    font-size: 11.5px;
+  }
+
+  .activity-unread {
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--lume-color-status-info);
+  }
+
+  .activity-when {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    opacity: 0.8;
+  }
+
+  .activity-empty {
+    @apply text-ink-muted;
+    padding: 14px 10px;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .activity-foot {
+    @apply text-ink-muted;
+    padding: 6px 10px 4px;
+    font-size: 11px;
+    opacity: 0.8;
+  }
+
+  /* A ring with a gap that turns: something is at work. */
+  .busy-spinner {
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: 11px;
+    height: 11px;
+    border: 1.5px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: busy-turn 900ms linear infinite;
+  }
+
+  @keyframes busy-turn {
+    to {
+      rotate: 360deg;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .activity {
+      animation: none;
+    }
+
+    .busy-spinner {
+      animation-duration: 2.4s;
+    }
+  }
+
+  /*
+   * The question asked before closing something still at work. It hangs under the
+   * button the close was asked from, with a nub pointing at it.
+   */
+  .close-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    cursor: default;
+  }
+
+  .close-question {
+    @apply bg-popover;
+    position: fixed;
+    box-sizing: border-box;
+    width: 300px;
+    padding: 16px 14px 14px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 6px));
+    box-shadow: var(--lume-shadow-popover);
+    text-align: center;
+    transform-origin: var(--nub) 0;
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  .close-question[data-anchored]::before {
+    content: "";
+    position: absolute;
+    top: -6px;
+    left: calc(var(--nub) - 6px);
+    width: 11px;
+    height: 11px;
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+    border-left: var(--lume-size-border) solid var(--lume-color-border);
+    border-top-left-radius: 2px;
+    background: var(--lume-color-popover);
+    rotate: 45deg;
+  }
+
+  .close-question h2 {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .close-text {
+    @apply text-ink-muted;
+    margin: 10px 0 14px;
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+
+  .close-whys {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 12px 0 14px;
+  }
+
+  .close-why {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 46px;
+    padding: 7px 8px 7px 12px;
+    border-radius: 10px;
+    background-color: color-mix(in srgb, var(--lume-color-control-hover) 55%, transparent);
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .close-why:hover,
+  .close-why:focus-visible {
+    outline: none;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .close-why .busy-spinner {
+    color: var(--lume-color-accent);
+  }
+
+  .close-why .busy-spinner[data-agent] {
+    color: var(--lume-color-status-warning);
+  }
+
+  .close-why-wait {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--lume-color-status-warning);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--lume-color-status-warning) 18%, transparent);
+  }
+
+  .close-why-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    gap: 1px;
+    line-height: 1.35;
+  }
+
+  .close-why-text b,
+  .close-why-text span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .close-why-text b {
+    @apply text-ink;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .close-why-text span {
+    font-size: 12px;
+  }
+
+  .close-why-go {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 4px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    transition:
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .close-why:hover .close-why-go {
+    @apply text-ink;
+    background-color: var(--lume-color-control-active);
+  }
+
+  .close-more {
+    @apply text-ink-muted;
+    font-size: 11.5px;
+  }
+
+  .close-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .close-actions button {
+    flex: 1;
+    height: 34px;
+    border-radius: 10px;
+    background-color: color-mix(in srgb, var(--lume-color-text) 9%, transparent);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition:
+      transform var(--lume-motion-duration-fast) var(--lume-motion-easing-standard),
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .close-actions button:hover {
+    background-color: color-mix(in srgb, var(--lume-color-text) 13%, transparent);
+  }
+
+  .close-actions button:active {
+    transform: scale(0.97);
+  }
+
+  /* A ring inside the button, so that the button with the keyboard is no larger. */
+  .close-actions button:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lume-color-text) 35%, transparent);
+  }
+
+  .close-actions .close-proceed {
+    @apply text-danger;
+    background-color: color-mix(in srgb, var(--lume-color-status-danger) 16%, transparent);
+  }
+
+  .close-actions .close-proceed:hover {
+    background-color: color-mix(in srgb, var(--lume-color-status-danger) 24%, transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .close-question {
+      animation: none;
+    }
+
+    .close-actions button,
+    .close-why,
+    .close-why-go {
+      transition: none;
+    }
+  }
+}

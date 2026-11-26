@@ -1,0 +1,293 @@
+@layer components {
+  /* The window. */
+
+  .shell {
+    @apply text-ink;
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    /* What reaches past the window's edge, such as a card's shadow, is cut off there. */
+    overflow: hidden;
+    /* A faint glow of the accent behind the top left corner, over the surface. */
+    background:
+      radial-gradient(
+        1200px 600px at 12% -10%,
+        color-mix(in srgb, var(--lume-color-accent) 9%, transparent) 0%,
+        transparent 60%
+      ),
+      var(--lume-color-surface);
+    user-select: none;
+  }
+
+  /*
+   * The picture behind the panes, when the configuration names one. It reaches past
+   * the window's edge by as much as it is blurred, so the blur does not fade it out
+   * along the edge.
+   */
+  .shell-background {
+    position: absolute;
+    top: calc(-1 * var(--lume-background-blur));
+    left: calc(-1 * var(--lume-background-blur));
+    z-index: 0;
+    width: calc(100% + 2 * var(--lume-background-blur));
+    max-width: none;
+    height: calc(100% + 2 * var(--lume-background-blur));
+    object-fit: cover;
+    opacity: var(--lume-opacity-background-image);
+    filter: blur(var(--lume-background-blur));
+    pointer-events: none;
+  }
+
+  .shell-background[data-shown="false"] {
+    display: none;
+  }
+
+  /*
+   * The cursor's effects: over the panes and the bar, so a trail can cross from one
+   * pane to another, and under menus, palettes and notices. Its canvas is hidden while
+   * nothing plays.
+   */
+  .cursor-fx {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  /*
+   * The bar along the top. Its menus drop over the panes, so it lies above the rest of
+   * the window. When the window is narrow the tabs give way first: they shrink and
+   * then scroll, and the parts at either end stay whole.
+   */
+  .top-bar {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 10px;
+    height: var(--lume-size-topbar);
+    padding: 0 var(--lume-space-gap) 0 8px;
+  }
+
+  /* The window's own buttons reach the window's edge. */
+  .top-bar[data-title-bar="custom"] {
+    padding-right: 0;
+  }
+
+  .top-left,
+  .top-right {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    min-width: 0;
+    gap: 10px;
+    height: 100%;
+  }
+
+  .top-centre {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    gap: 10px;
+    height: 100%;
+  }
+
+  /*
+   * The status bar along the bottom of the window, shown while it has items: those of
+   * its left end, then those of its right end against the window's right edge. When
+   * the window is narrow its ends give way and cut off what does not fit.
+   */
+  .status-bar {
+    @apply text-ink-muted;
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 16px;
+    height: var(--lume-size-statusbar);
+    padding: 0 14px;
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+    background: color-mix(in srgb, var(--lume-color-surface) 70%, transparent);
+  }
+
+  .status-bar-gap {
+    flex: 1;
+  }
+
+  /* Whose layout is on show, while it is a server's. */
+  .status-served {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .status-served-text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .status-bar .status-slot {
+    gap: 16px;
+  }
+
+  .top-divider {
+    flex-shrink: 0;
+    width: var(--lume-size-border);
+    height: 18px;
+    background: var(--lume-color-border);
+  }
+
+  /*
+   * The application's menu: a button, the names of its other menus, which unfold
+   * beside the button while a menu is on show, and the menu on show under them.
+   */
+
+  .app-menu {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    /* The names stand close to the button; the bar's own gap follows them. */
+    margin-right: -2px;
+  }
+
+  /* Over what puts a menu away when pressed, so another menu can be asked for. */
+  .app-menu-button,
+  .app-menu-fold {
+    position: relative;
+    z-index: 42;
+  }
+
+  .app-menu-button {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--lume-radius-control);
+  }
+
+  .app-menu-button[data-open="true"] {
+    @apply bg-control-hover text-ink;
+  }
+
+  .app-menu-fold {
+    display: grid;
+    grid-template-columns: 0fr;
+    transition: grid-template-columns var(--lume-motion-duration-slow)
+      var(--lume-motion-easing-standard);
+  }
+
+  .app-menu-fold[data-open="true"] {
+    grid-template-columns: 1fr;
+  }
+
+  .app-menu-bar {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+    gap: 2px;
+    height: 30px;
+    opacity: 0;
+    white-space: nowrap;
+    transition: opacity var(--lume-motion-duration-base) var(--lume-motion-easing-exit);
+  }
+
+  .app-menu-fold[data-open="true"] > .app-menu-bar {
+    padding: 0 2px 0 6px;
+    opacity: 1;
+    transition-delay: var(--lume-motion-duration-instant);
+  }
+
+  .app-menu-name {
+    /* Quieter than the menu on show, and plainer to read than a control at rest. */
+    color: color-mix(in srgb, var(--lume-color-text) 80%, var(--lume-color-text-muted));
+    height: 24px;
+    padding: 0 9px;
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    font-size: 12.5px;
+    cursor: pointer;
+    transition:
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .app-menu-name:hover,
+  .app-menu-name[aria-expanded="true"] {
+    @apply bg-control-hover text-ink;
+  }
+
+  /* Where the menu on show hangs: under the button, or under its own name. */
+  .app-menu-drop {
+    position: absolute;
+    top: 100%;
+    left: 0;
+  }
+
+  .app-menu-drop[data-menu="view"] {
+    left: 30px;
+  }
+
+  .app-menu-drop[data-menu="help"] {
+    left: 78px;
+  }
+
+  /* The application's menus are set closer than other menus: many short rows. */
+  .app-menu-drop > .menu {
+    min-width: 260px;
+    padding: 5px;
+    border-radius: var(--lume-radius-card);
+    transform-origin: 16px 0;
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  .app-menu-drop .menu-item {
+    justify-content: space-between;
+    gap: 24px;
+    height: 28px;
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    font-size: 12.5px;
+  }
+
+  .app-menu-drop .menu-separator {
+    margin: 4px 6px;
+  }
+
+  /* A picture stays beside its label: the row's wide gap is for the hint at its end. */
+  .app-menu-drop .menu-icon + .menu-label {
+    margin-left: -14px;
+  }
+
+  .app-menu-drop .menu-sub-place > .menu {
+    top: -5px;
+    padding: 5px;
+    border-radius: var(--lume-radius-card);
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  /* What opens above its anchor rises into place: it sets `--menu-rise` to 4px. */
+  @keyframes menu-in {
+    from {
+      opacity: 0;
+      translate: 0 var(--menu-rise, -4px);
+      scale: 0.97;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-menu-fold,
+    .app-menu-bar {
+      transition: none;
+    }
+
+    .app-menu-drop > .menu,
+    .app-menu-drop .menu-sub-place > .menu {
+      animation: none;
+    }
+  }
+}

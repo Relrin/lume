@@ -18,10 +18,12 @@
 //! the authority was given as its [`Spawner`].
 
 mod apply;
+#[cfg(feature = "runtime")]
 mod authority;
 mod change;
 mod diff;
 mod error;
+pub mod generate;
 mod geometry;
 mod ids;
 mod intent;
@@ -35,6 +37,7 @@ pub mod tuning;
 mod validate;
 
 pub use apply::{Started, apply, check, needs};
+#[cfg(feature = "runtime")]
 pub use authority::{ChangeSource, ChangeStream, LayoutAuthority, LocalLayout, Spawner};
 pub use change::{Applied, Created, LayoutChange, LayoutEvent, LayoutSnapshot};
 pub use error::{IntentError, LayoutError, SpawnFailure};

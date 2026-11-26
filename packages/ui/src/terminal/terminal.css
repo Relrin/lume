@@ -1,0 +1,90 @@
+@layer components {
+  /* A terminal fills its card under the header. Its picture is a canvas; the rest lies on top. */
+
+  .terminal {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    cursor: text;
+    touch-action: none;
+  }
+
+  .terminal-over-link {
+    cursor: pointer;
+  }
+
+  .terminal-surface {
+    position: absolute;
+    inset: 0;
+  }
+
+  /*
+   * The element that takes the keyboard. It is never seen, but it is laid out at the
+   * cursor, because an input method opens its window where the element is.
+   */
+  .terminal-input {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 2em;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    outline: none;
+    resize: none;
+    overflow: hidden;
+    white-space: pre;
+    color: transparent;
+    background: transparent;
+    caret-color: transparent;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .terminal-preedit {
+    position: absolute;
+    top: 0;
+    left: 0;
+    white-space: pre;
+    text-decoration: underline;
+    pointer-events: none;
+  }
+
+  .terminal-scrollbar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 6px;
+    pointer-events: none;
+  }
+
+  .terminal-scroll-thumb {
+    @apply bg-ink-muted;
+    position: absolute;
+    right: 1px;
+    width: 4px;
+    min-height: 12px;
+    border-radius: min(2px, var(--lume-radius-control));
+    opacity: 0.5;
+  }
+
+  /* One line along the bottom of a terminal, for what the terminal cannot show itself. */
+  .terminal-status {
+    @apply bg-popover text-ink;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    max-width: 100%;
+    padding: 2px 10px;
+    overflow: hidden;
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    border-top: var(--lume-size-border) solid var(--lume-color-border);
+    border-right: var(--lume-size-border) solid var(--lume-color-border);
+    border-top-right-radius: min(6px, var(--lume-radius-card));
+    pointer-events: none;
+  }
+}

@@ -7,7 +7,7 @@
  */
 
 import { Channel } from "@tauri-apps/api/core";
-import { invoke } from "./invoke.ts";
+import { invoke, type CommandName } from "./invoke.ts";
 
 import type { FrameLimits } from "./decoder.ts";
 
@@ -36,7 +36,7 @@ export interface Carrier {
   send(frames: Uint8Array): Promise<void>;
 
   /** Calls one of the core's commands. A refusal rejects with what the core returned. */
-  command<T>(name: string, args?: Record<string, unknown>): Promise<T>;
+  command<T>(name: CommandName, args?: Record<string, unknown>): Promise<T>;
 }
 
 /** The request header that names the carrier a raw request belongs to. */
@@ -85,7 +85,7 @@ export class TauriCarrier implements Carrier {
     await invoke("carrier_send", frames, { headers: { [CARRIER_HEADER]: String(this.#id) } });
   }
 
-  command<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  command<T>(name: CommandName, args: Record<string, unknown> = {}): Promise<T> {
     return invoke<T>(name, args);
   }
 }

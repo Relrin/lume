@@ -1,0 +1,56 @@
+@layer components {
+  /* What the application is. */
+
+  .about-head {
+    margin: 6px 2px 4px;
+  }
+
+  .about-name {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+  }
+
+  .about-version {
+    @apply text-ink-muted;
+    margin: 2px 0 0;
+    font-size: 12.5px;
+  }
+
+  .about-row {
+    justify-content: space-between;
+  }
+
+  .about-label {
+    font-size: 12.5px;
+  }
+
+  .about-value {
+    @apply text-ink-muted;
+    min-width: 0;
+    font-size: 12.5px;
+    text-align: right;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+
+  .about-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 14px 2px 0;
+  }
+
+  .about-note {
+    @apply text-ink-muted;
+    font-size: 12px;
+  }
+
+  .about-terms {
+    @apply text-ink-muted;
+    margin: 14px 2px 0;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+}

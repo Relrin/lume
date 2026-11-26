@@ -3,91 +3,56 @@
 //! Declaring the app's commands here makes Tauri generate a permission for each one, so a
 //! command is callable from the webview only if a capability file grants it. Without this
 //! every registered command would be allowed by default.
+//!
+//! The commands and the pages that may call each are listed once, in
+//! `src/command_table.rs`. This step reads that table, declares its commands, and writes
+//! the capability files from it before Tauri reads them.
 
-/// Every command the web UI may be granted. The capability files grant a terminal
-/// window its commands, the settings window the few about the configuration and its
-/// own window, and the reporting window its two; the three that start, end and list
-/// sessions directly, and the last three, are granted only when the application is
-/// started to run a test suite.
-const COMMANDS: &[&str] = &[
-    "frame_token",
-    "webview_info",
-    "about_info",
-    "probe_done",
-    "carrier_open",
-    "carrier_send",
-    "session_spawn",
-    "session_attach",
-    "session_kill",
-    "session_list",
-    "clipboard_read",
-    "clipboard_write",
-    "open_link",
-    "font_families",
-    "page_reply",
-    "page_marks",
-    "page_shown",
-    "layout_view",
-    "layout_apply",
-    "sessions_start",
-    "panes_busy",
-    "sessions_detached",
-    "commands_list",
-    "command_run",
-    "config_view",
-    "config_set",
-    "config_unset",
-    "config_open",
-    "config_schema",
-    "themes_list",
-    "shells_list",
-    "profiles_list",
-    "host_probe",
-    "background_image",
-    "window_drag",
-    "window_control",
-    "window_state",
-    "workspaces_list",
-    "folders_list",
-    "rex_hosts",
-    "rex_hosts_look",
-    "rex_read",
-    "rex_reach",
-    "rex_try",
-    "rex_host_put",
-    "rex_host_remove",
-    "ssh_reach",
-    "ssh_try",
-    "try_end",
-    "ssh_profile_put",
-    "profile_remove",
-    "profiles_listed",
-    "ui_contributions",
-    "ui_visible",
-    "ui_assets",
-    "ui_panel_expand",
-    "view_opened",
-    "view_closed",
-    "view_call",
-    "view_state",
-    "view_stream_open",
-    "addons_list",
-    "addon_set_enabled",
-    "addon_remove",
-    "addon_revoke_machine",
-    "addon_move",
-    "addon_inspect",
-    "addon_inspect_git",
-    "addon_check_update",
-    "addon_install",
-    "addon_cancel",
-    "harness_done",
-    "harness_save",
-    "harness_read",
-];
+use std::fs;
+use std::path::Path;
+
+#[path = "src/capabilities.rs"]
+#[allow(dead_code)]
+mod capabilities;
+
+/// The last part of a path, as text.
+macro_rules! last {
+    ($last:ident) => {
+        stringify!($last)
+    };
+    ($first:ident :: $($rest:ident)::+) => {
+        last!($($rest)::+)
+    };
+}
+
+/// Reads the command table as each command's name and the pages that may call it.
+macro_rules! commands {
+    ($($($path:ident)::+ => [$($page:ident),* $(,)?];)*) => {
+        const TABLE: &[(&str, &[&str])] = &[$((last!($($path)::+), &[$(stringify!($page)),*])),*];
+        const NAMES: &[&str] = &[$(last!($($path)::+)),*];
+    };
+}
+
+include!("src/command_table.rs");
 
 fn main() {
+    println!("cargo:rerun-if-changed=src/command_table.rs");
+    println!("cargo:rerun-if-changed=src/capabilities.rs");
+    // Written only when they differ, so a build that changes nothing touches nothing.
+    for capability in &capabilities::CAPABILITIES {
+        let path = capabilities::file_path(capability);
+        let text = capabilities::file_text(capability, TABLE);
+        let kept = fs::read_to_string(&path)
+            .map(|kept| kept.replace("\r\n", "\n"))
+            .ok();
+        if kept.as_deref() != Some(text.as_str()) {
+            if let Some(parent) = Path::new(&path).parent() {
+                fs::create_dir_all(parent).expect("making the capabilities directory");
+            }
+            fs::write(&path, text).expect("writing a capability file");
+        }
+    }
     let attributes = tauri_build::Attributes::new()
-        .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS));
+        .app_manifest(tauri_build::AppManifest::new().commands(NAMES));
     tauri_build::try_build(attributes).expect("tauri build step");
 }

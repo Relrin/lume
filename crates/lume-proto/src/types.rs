@@ -1,10 +1,12 @@
 //! The values both planes carry: identifiers, sizes, colours, client facts and session
 //! descriptions.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 /// Identifies one stream on a connection. Stream 0 is the control plane.
@@ -71,8 +73,24 @@ impl<'de> Deserialize<'de> for SessionId {
     }
 }
 
+impl JsonSchema for SessionId {
+    fn schema_name() -> Cow<'static, str> {
+        "SessionId".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Identifies a session within one host: sixteen lowercase hexadecimal digits.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+        })
+    }
+}
+
 /// Names a session backend. A pane refers to its session by backend id and session id.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(transparent)]
 pub struct BackendId(pub String);
 
@@ -118,6 +136,23 @@ impl TermSize {
 
     pub fn rows(self) -> u16 {
         self.rows
+    }
+}
+
+impl JsonSchema for TermSize {
+    fn schema_name() -> Cow<'static, str> {
+        "TermSize".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let side = json_schema!({ "type": "integer", "minimum": 1, "maximum": TermSize::MAX });
+        json_schema!({
+            "description": "A terminal grid size in cells, each side between 1 and 4096.",
+            "type": "object",
+            "properties": { "cols": side, "rows": side },
+            "required": ["cols", "rows"],
+            "additionalProperties": false
+        })
     }
 }
 
@@ -207,7 +242,8 @@ pub struct Palette {
     pub ansi: [Rgb; 16],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Whether a look is a light or a dark one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ColorScheme {
     Light,
@@ -240,7 +276,7 @@ pub enum ExitStatus {
 }
 
 /// What a session runs. More ways to start a session are added as variants.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum Launcher {

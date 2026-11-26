@@ -13,6 +13,7 @@
 
 import type { ConfigView, MotionDef, MotionEasing, UiContributions } from "../core/types.ts";
 import { springCurve } from "../shell/tab-motion.ts";
+import type { MotionChoices } from "../wire/config.generated.ts";
 
 /** The places a plugin's effect plays in, by the name of their setting. */
 export type MotionSlot =
@@ -26,8 +27,8 @@ export type MotionSlot =
   | "status.change";
 
 /** The setting of a place, under `appearance.motion`. */
-function settingOf(slot: MotionSlot): string {
-  return slot.replace(".", "-");
+function settingOf(slot: MotionSlot): keyof MotionChoices {
+  return slot.replace(".", "-") as keyof MotionChoices;
 }
 
 /** The effect a plugin brings that the settings choose for a place, if one is chosen and there. */

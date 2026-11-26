@@ -66,8 +66,10 @@ pub fn host_log_file() -> Option<PathBuf> {
     }
 }
 
-/// An operating system, where its conventions differ.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// An operating system, where its conventions differ. Written as configuration files
+/// and the command line spell it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
 pub enum Platform {
     Windows,
     Macos,

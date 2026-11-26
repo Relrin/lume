@@ -5,7 +5,7 @@
  */
 
 import type { RexHost, RexHosts } from "../core/types.ts";
-import type { ShellApp } from "../shell/boot.ts";
+import type { ShellApp } from "../shell/boot/index.ts";
 import type { FakeCoreOptions } from "./fake-core.ts";
 import { FIXTURE_BINDINGS, FIXTURE_COMMANDS, HOST_COMMANDS } from "./fixture-commands.ts";
 import type { Scene } from "./scene.ts";

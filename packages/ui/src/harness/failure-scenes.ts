@@ -7,7 +7,7 @@
  */
 
 import type { RexHost } from "../core/types.ts";
-import type { ShellApp } from "../shell/boot.ts";
+import type { ShellApp } from "../shell/boot/index.ts";
 import type { FakeCore, FakeCoreOptions } from "./fake-core.ts";
 import {
   texts,

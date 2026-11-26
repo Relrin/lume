@@ -12,6 +12,7 @@ publish = false
 
 [workspace.dependencies]
 # First-party crates. Add an entry when another crate first depends on one.
+lume-codegen = { path = "crates/lume-codegen" }
 lume-config = { path = "crates/lume-config" }
 lume-host = { path = "crates/lume-host" }
 lume-ipc = { path = "crates/lume-ipc" }

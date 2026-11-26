@@ -1,0 +1,615 @@
+@layer components {
+  /* What the window shows, and the selector under it. */
+
+  .switcher {
+    position: relative;
+    flex-shrink: 0;
+    min-width: 0;
+  }
+
+  .switcher-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 340px;
+    height: 30px;
+    padding: 0 10px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    cursor: pointer;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .switcher-button:hover,
+  .switcher-button[aria-expanded="true"] {
+    @apply bg-control-hover;
+  }
+
+  /*
+   * Whether the session host is connected: green while it is, grey while it is not.
+   * The green is written here and is no token of the theme, so the accent the user
+   * chooses, which recolours what the theme draws in its accent, leaves it alone.
+   */
+  .switcher-dot {
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #3fb950;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .switcher-dot[data-link="down"] {
+    background: var(--lume-color-text-muted);
+  }
+
+  /* A connection that is being made: a ring that turns, in the place of the dot. */
+  .switcher-dot[data-link="busy"],
+  .connect-dot[data-link="busy"],
+  .palette-row-link[data-link="busy"] {
+    box-sizing: border-box;
+    width: 10px;
+    height: 10px;
+    margin: 0 -1.5px;
+    border: 1.5px solid var(--lume-color-status-warning);
+    border-right-color: transparent;
+    background: none;
+    animation: link-turn 800ms linear infinite;
+  }
+
+  @keyframes link-turn {
+    to {
+      rotate: 360deg;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .switcher-dot[data-link="busy"],
+    .connect-dot[data-link="busy"],
+    .palette-row-link[data-link="busy"] {
+      animation-duration: 1.6s;
+    }
+  }
+
+  .switcher-host,
+  .switcher-name {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .switcher-host {
+    flex-shrink: 2;
+    font-weight: 600;
+  }
+
+  .switcher-slash {
+    @apply text-ink-muted;
+  }
+
+  .switcher-meta {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    margin-left: 2px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .switcher-chevron {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  /* A narrow window names what is on show, and not where it is. */
+  @media (max-width: 900px) {
+    .switcher-host,
+    .switcher-slash,
+    .switcher-meta {
+      display: none;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .switcher-button {
+      max-width: 132px;
+    }
+  }
+
+  /* The selector: a field, the hosts, and what the one looked at holds. */
+  .selector {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    /* Over its backdrop, as a menu is over its own. */
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    width: min(620px, calc(100vw - 24px));
+    /* Its end is above the status bar, which is drawn over whatever the top bar opens. */
+    max-height: calc(100vh - var(--lume-size-topbar) - var(--lume-size-statusbar) - 16px);
+    padding: 6px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-control) + min(var(--lume-radius-control), 4px));
+    background: var(--lume-color-popover);
+    box-shadow: var(--lume-shadow-popover);
+    transform-origin: 60px 0;
+    cursor: default;
+  }
+
+  .selector[data-animate] {
+    animation: selector-in 200ms var(--lume-motion-easing-standard);
+  }
+
+  @keyframes selector-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.97);
+    }
+  }
+
+  .selector-field {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
+    height: 36px;
+    margin-bottom: 4px;
+    padding: 0 10px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: min(8px, var(--lume-radius-control));
+    background: var(--lume-color-surface);
+  }
+
+  .selector-input {
+    @apply text-ink;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    background: transparent;
+    outline: none;
+    user-select: text;
+  }
+
+  .selector-input::placeholder {
+    color: var(--lume-color-text-muted);
+  }
+
+  .selector-columns {
+    display: flex;
+    min-height: 0;
+    gap: 6px;
+  }
+
+  .selector-hosts {
+    display: flex;
+    flex: 0 0 236px;
+    flex-direction: column;
+    box-sizing: border-box;
+    min-height: 120px;
+    gap: 1px;
+    padding-right: 6px;
+    overflow-y: auto;
+    border-right: var(--lume-size-border) solid var(--lume-color-border);
+    scrollbar-width: thin;
+  }
+
+  .selector-host {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 10px;
+    border-radius: min(7px, var(--lume-radius-control));
+  }
+
+  .selector-host[aria-selected="true"],
+  .selector-host[data-renaming],
+  .selector-row[data-marked],
+  .selector-row[data-renaming],
+  .selector-act[data-marked] {
+    @apply bg-control-hover;
+  }
+
+  /* Which column the arrow keys move in. */
+  .selector-host[data-marked] {
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 40%, transparent);
+  }
+
+  .selector-host[data-off] > * {
+    opacity: 0.6;
+  }
+
+  /* The way to add a host, below those there are. */
+  .selector-add {
+    position: sticky;
+    bottom: 0;
+    margin-top: auto;
+    background: var(--lume-color-popover);
+  }
+
+  .selector-tile {
+    --selector-tone: var(--lume-color-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border-radius: min(7px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--selector-tone) 14%, transparent);
+    color: var(--selector-tone);
+  }
+
+  .selector-tile[data-link="busy"] {
+    --selector-tone: var(--lume-color-status-warning);
+  }
+
+  .selector-tile[data-link="down"] {
+    --selector-tone: var(--lume-color-text-muted);
+  }
+
+  .selector-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.3;
+  }
+
+  .selector-name,
+  .selector-line {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .selector-text > .selector-name {
+    font-weight: 500;
+  }
+
+  .selector-line {
+    @apply text-ink-muted;
+    font-size: 11.5px;
+  }
+
+  .selector-side {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .selector-heading {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    padding: 7px 10px;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 16px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .selector-note,
+  .selector-why {
+    @apply text-ink-muted;
+    padding: 6px 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .selector-why {
+    user-select: text;
+  }
+
+  .selector-why[data-problem] {
+    color: var(--lume-color-status-danger);
+  }
+
+  .selector-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .selector-place {
+    position: relative;
+  }
+
+  .selector-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: min(7px, var(--lume-radius-control));
+  }
+
+  .selector-row[data-on] .selector-name {
+    font-weight: 600;
+  }
+
+  .selector-row > .selector-name {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .selector-mark {
+    @apply text-accent;
+    display: flex;
+    flex-shrink: 0;
+    width: 13px;
+  }
+
+  .selector-right {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* What can be done with a row, in the place of what it says at its end. */
+  .selector-tools {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .selector-place:hover .selector-tools,
+  .selector-host[data-marked] ~ .selector-tools,
+  .selector-row[data-marked] ~ .selector-tools {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .selector-place:hover .selector-right,
+  .selector-row[data-marked]:has(~ .selector-tools) .selector-right {
+    visibility: hidden;
+  }
+
+  .selector-tools button {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: min(6px, var(--lume-radius-control));
+    background: var(--lume-color-control-active);
+    cursor: pointer;
+  }
+
+  .selector-tools button:hover {
+    @apply text-ink;
+  }
+
+  .selector-tools button[data-danger]:hover {
+    background: color-mix(in srgb, var(--lume-color-status-danger) 14%, transparent);
+    color: var(--lume-color-status-danger);
+  }
+
+  .selector-rename {
+    @apply text-ink;
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    padding: 0 8px;
+    border-radius: min(6px, var(--lume-radius-control));
+    background: var(--lume-color-surface);
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 45%, transparent);
+    outline: none;
+    user-select: text;
+  }
+
+  .selector-rename[aria-invalid="true"] {
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-status-danger) 60%, transparent);
+  }
+
+  .selector-separator {
+    height: var(--lume-size-border);
+    margin: 5px 4px;
+    background: var(--lume-color-border);
+  }
+
+  .selector-act {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: min(7px, var(--lume-radius-control));
+  }
+
+  .selector-act-icon {
+    @apply text-accent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: min(6px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-accent) 12%, transparent);
+  }
+
+  .selector-act[data-act="command"] .selector-act-icon,
+  .selector-act[data-act="edit"] .selector-act-icon,
+  .selector-act[data-act="disconnect"] .selector-act-icon {
+    @apply text-ink-muted;
+    background: transparent;
+  }
+
+  .selector-act-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* A narrow window lists the hosts above what they hold. */
+  @media (max-width: 560px) {
+    .selector {
+      position: fixed;
+      top: calc(var(--lume-size-topbar) + 4px);
+      left: 12px;
+    }
+
+    .selector-columns {
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .selector-hosts {
+      flex: none;
+      min-height: 0;
+      padding-right: 0;
+      border-right: none;
+      border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+    }
+
+    .selector-side {
+      overflow: visible;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .selector[data-animate] {
+      animation: fade-in 150ms ease-out;
+    }
+  }
+
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+
+  .menu {
+    @apply bg-popover;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 41;
+    min-width: 240px;
+    max-width: min(360px, calc(100vw - 16px));
+    max-height: calc(100vh - var(--lume-size-topbar) - 16px);
+    padding: 6px;
+    overflow-y: auto;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 2px));
+    outline: none;
+    box-shadow: var(--lume-shadow-popover);
+    scrollbar-width: thin;
+  }
+
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .menu-item:hover,
+  .menu-item:focus {
+    @apply bg-control-hover;
+    outline: none;
+  }
+
+  .menu-item:disabled {
+    background: transparent;
+    opacity: var(--lume-opacity-disabled);
+    cursor: default;
+  }
+
+  .menu-check {
+    @apply text-accent;
+    display: flex;
+    flex-shrink: 0;
+    width: 14px;
+  }
+
+  .menu-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .menu-hint {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .menu-separator {
+    height: var(--lume-size-border);
+    margin: 5px 4px;
+    background: var(--lume-color-border);
+  }
+
+  .menu-icon {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    color: var(--lume-color-text-muted);
+  }
+
+  .menu-more {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+    margin-right: -4px;
+  }
+
+  .menu-item[aria-expanded="true"] {
+    @apply bg-control-hover;
+  }
+
+  /* An item's own menu stands beside the item; the script puts this place there. */
+  .menu-sub-place {
+    position: absolute;
+    width: 0;
+    height: 0;
+  }
+
+  .menu-sub-place > .menu {
+    top: -6px;
+    left: 2px;
+    min-width: 250px;
+    transform-origin: 0 12px;
+  }
+}

@@ -27,7 +27,7 @@ import { selectActiveTab } from "../layout/selectors.ts";
 import { connectionDialog } from "../connections/store.ts";
 import { startSettings } from "../settings/boot.ts";
 import { SettingsWindow } from "../settings/SettingsWindow.tsx";
-import { startShell, type ShellApp } from "../shell/boot.ts";
+import { startShell, type ShellApp } from "../shell/boot/index.ts";
 import { Shell } from "../shell/Shell.tsx";
 import { STATUS_FIXTURES } from "../status/fixtures.ts";
 import "../styles.css";
@@ -58,6 +58,7 @@ import {
   SCENE_HEIGHT_PX,
   SCENE_WIDTH_PX,
 } from "./tuning.ts";
+import { layoutLogic } from "./logic-load.ts";
 
 /** What the suite reports. */
 export interface ChromeReport {
@@ -289,7 +290,7 @@ export async function mountWindow(
 ): Promise<Mounted> {
   // A dialog is the page's, and the page is the same from one scene to the next.
   connectionDialog.getState().close();
-  const core = new FakeCore(asked);
+  const core = new FakeCore({ ...asked, logic: await layoutLogic() });
   const app = await startShell(core);
   // A box of its own size for the window to fill, whatever size the real window is.
   const container = document.createElement("div");
@@ -367,7 +368,7 @@ async function mountSettings(
   options: FakeCoreOptions = { titleBar: "custom" },
 ): Promise<Pick<Mounted, "core" | "container" | "unmount">> {
   connectionDialog.getState().close();
-  const core = new FakeCore(options);
+  const core = new FakeCore({ ...options, logic: await layoutLogic() });
   const app = await startSettings(core, `#${page}`);
   const container = document.createElement("div");
   container.style.setProperty("position", "fixed");
@@ -594,7 +595,7 @@ export async function runChrome(
   const problems: string[] = [];
 
   progress("starting the window's page");
-  const core = new FakeCore();
+  const core = new FakeCore({ logic: await layoutLogic() });
   const app = await startShell(core);
   const container = document.createElement("div");
   document.body.append(container);

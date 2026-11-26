@@ -1,0 +1,65 @@
+@layer components {
+  /* Notices, in the lower right corner, beside the work and not over it. */
+
+  /*
+   * The stack is sonner's: where each notice lies in it, and how it comes and goes.
+   * Its own stylesheet is brought in beneath these rules (see the top of styles.css),
+   * so what is said here holds: the stack's place among the window's layers, its
+   * width in a window of any size, and each notice as wide as the stack.
+   */
+  .notices {
+    left: auto;
+    z-index: 44;
+    width: min(380px, calc(100% - 24px));
+  }
+
+  .notices [data-sonner-toast] {
+    right: 0;
+    left: auto;
+    width: 100%;
+  }
+
+  /* Over the markers of the panes that are put away, when there are any, not on them. */
+  .shell:has(.pane-tray) .notices {
+    bottom: calc(var(--lume-space-gap) + 12px + 32px + 8px);
+  }
+
+  .notice {
+    @apply bg-popover;
+    --notice-tone: var(--lume-color-status-info);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 9px 8px 9px 12px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-left: 3px solid var(--notice-tone);
+    border-radius: var(--lume-radius-control);
+    box-shadow: var(--lume-shadow-popover);
+    cursor: pointer;
+    pointer-events: auto;
+  }
+
+  .notice[data-level="warning"] {
+    --notice-tone: var(--lume-color-status-warning);
+  }
+
+  .notice[data-level="error"] {
+    --notice-tone: var(--lume-color-status-danger);
+  }
+
+  .notice-message {
+    flex: 1;
+    min-width: 0;
+    max-height: 9em;
+    overflow: auto;
+    font-size: 12.5px;
+    overflow-wrap: anywhere;
+    user-select: text;
+    scrollbar-width: thin;
+  }
+
+  .notice-close {
+    width: 20px;
+    height: 20px;
+  }
+}

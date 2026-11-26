@@ -41,7 +41,7 @@ import {
 import type { Group, GroupId, TabId } from "../layout/types.ts";
 import { DRAG_SETTLE_TIMEOUT_MS, DRAG_START_PX } from "../tuning.ts";
 import { tabStyle } from "../motion/tab.ts";
-import type { ShellApp } from "./boot.ts";
+import type { ShellApp } from "./boot/index.ts";
 import { useShell } from "./context.ts";
 import { describeTabNow, followTab, mark } from "./describing.ts";
 import { useKeyHint } from "./hints.ts";

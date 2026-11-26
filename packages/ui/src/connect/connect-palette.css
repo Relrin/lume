@@ -1,0 +1,684 @@
+/*
+ * The palette that opens a terminal from a profile: the command palette's look, with a
+ * column beside the list that says what the marked row is and what can be done with it.
+ */
+@layer components {
+  .connect-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: max(calc(var(--lume-size-topbar) + 10px), 10vh) 16px 16px;
+    background: color-mix(in srgb, var(--lume-color-overlay) 35%, transparent);
+    cursor: default;
+  }
+
+  .connect {
+    container-type: inline-size;
+    display: flex;
+    flex-direction: column;
+    width: min(900px, 100%);
+    max-height: min(590px, 100%);
+    overflow: hidden;
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 6px));
+    background: color-mix(in srgb, var(--lume-color-popover) 92%, transparent);
+    backdrop-filter: blur(20px) saturate(1.3);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--lume-color-text) 7%, transparent),
+      0 0 0 var(--lume-size-border) var(--lume-color-border),
+      var(--lume-shadow-popover);
+    font-size: 13px;
+  }
+
+  .connect-field {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 11px;
+    height: 50px;
+    padding: 0 12px 0 16px;
+  }
+
+  .connect-field-icon {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .connect-input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    background: transparent;
+    font-size: 15px;
+    outline: none;
+    user-select: text;
+  }
+
+  .connect-input::placeholder {
+    color: color-mix(in srgb, var(--lume-color-text-muted) 80%, transparent);
+  }
+
+  /* The kinds to show, as a row of chips under the field, each with its count. */
+  .connect-chips {
+    display: flex;
+    flex-shrink: 0;
+    gap: 6px;
+    padding: 0 12px 10px;
+    overflow-x: auto;
+    border-bottom: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+    scrollbar-width: none;
+  }
+
+  .connect-chip {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      transform var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
+  }
+
+  .connect-chip:hover {
+    @apply text-ink;
+  }
+
+  .connect-chip:active {
+    transform: scale(0.96);
+  }
+
+  /*
+   * The label, its picture and its count sit on one centre line: each is its own box
+   * one line high, so the monospaced count does not ride on a baseline of its own.
+   */
+  .connect-chip > * {
+    display: block;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+
+  .connect-chip-count {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+
+  .connect-chip[aria-pressed="true"] {
+    @apply text-accent;
+    background-color: color-mix(in srgb, var(--lume-color-accent) 12%, transparent);
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 35%, transparent);
+  }
+
+  .connect-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .connect-results {
+    flex: 1 1 420px;
+    min-width: 0;
+    height: 410px;
+    padding: 4px 6px 6px;
+    overflow-y: auto;
+    border-right: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+    scrollbar-width: thin;
+  }
+
+  .connect-list,
+  .connect-group {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .connect-heading {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 6px 10px 0;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .connect-row,
+  .connect-action {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: min(8px, var(--lume-radius-control));
+    cursor: default;
+  }
+
+  .connect-action {
+    @apply text-ink-muted;
+  }
+
+  .connect-row[aria-selected="true"],
+  .connect-action[aria-selected="true"] {
+    @apply bg-control-hover;
+  }
+
+  .connect-action[aria-selected="true"] {
+    @apply text-ink;
+  }
+
+  .connect-row-icon {
+    --connect-tone: var(--lume-color-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 15px;
+    color: var(--connect-tone);
+  }
+
+  .connect-row-icon[data-kind="wsl"] {
+    --connect-tone: var(--lume-color-status-warning);
+  }
+
+  .connect-row-icon[data-kind="ssh"] {
+    --connect-tone: var(--lume-color-status-info);
+  }
+
+  .connect-row-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connect-row-line {
+    @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    opacity: 0.8;
+  }
+
+  .connect-row[aria-selected="true"] .connect-row-line {
+    opacity: 1;
+  }
+
+  .connect-row-line[data-kind="ssh"] {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+  }
+
+  .connect-mark {
+    @apply text-accent;
+    background: transparent;
+    font-weight: 600;
+  }
+
+  .connect-meta {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .connect-dot {
+    box-sizing: border-box;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+
+  .connect-dot[data-state="running"] {
+    background: var(--lume-color-accent);
+  }
+
+  .connect-dot[data-state="ended"] {
+    border: 1.5px solid var(--lume-color-text-muted);
+  }
+
+  /* Whether a Rex server can be used: it can, it is being connected to, or it cannot. */
+  .connect-dot[data-link] {
+    flex-shrink: 0;
+  }
+
+  .connect-dot[data-link="up"] {
+    background: var(--lume-color-accent);
+  }
+
+  .connect-dot[data-link="down"] {
+    background: color-mix(in srgb, var(--lume-color-text-muted) 60%, transparent);
+  }
+
+  .connect-action-icon {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .connect-action-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connect-note {
+    @apply text-ink-muted;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  /* What the marked row is, and what can be done with it. */
+  .connect-detail {
+    display: flex;
+    flex: 0 0 340px;
+    flex-direction: column;
+    box-sizing: border-box;
+    min-width: 0;
+    height: 410px;
+    gap: 10px;
+    padding: 16px 16px 14px;
+    overflow-y: auto;
+    background: color-mix(in srgb, var(--lume-color-overlay) 12%, transparent);
+  }
+
+  .connect-detail-head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .connect-detail-name {
+    overflow-wrap: anywhere;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .connect-detail-line,
+  .connect-detail-about,
+  .connect-detail-empty {
+    @apply text-ink-muted;
+    font-size: 12px;
+  }
+
+  .connect-detail-line {
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+  }
+
+  .connect-detail-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .connect-detail-top > .connect-detail-head {
+    flex: 1;
+  }
+
+  /* The pin beside a profile's name: a ring, filled in while the profile is pinned. */
+  .connect-pin {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: min(8px, var(--lume-radius-control));
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    cursor: pointer;
+    transition:
+      transform var(--lume-motion-duration-fast) var(--lume-motion-easing-standard),
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .connect-pin:hover {
+    @apply text-ink;
+    background-color: var(--lume-color-control-hover);
+  }
+
+  .connect-pin:active {
+    transform: scale(0.94);
+  }
+
+  .connect-pin[aria-pressed="true"] {
+    @apply text-accent;
+    background-color: color-mix(in srgb, var(--lume-color-accent) 8%, transparent);
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 35%, transparent);
+  }
+
+  .connect-pin[aria-pressed="true"] svg {
+    fill: currentColor;
+  }
+
+  .connect-row-pin {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  /* A host's numbers: how near it is, how many panes run it, its port. */
+  .connect-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .connect-stats[data-count="2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .connect-stats > div {
+    min-width: 0;
+    padding: 7px 10px;
+    border-radius: min(8px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-text) 3.5%, transparent);
+  }
+
+  .connect-stats dt {
+    @apply text-ink-muted;
+    font-size: 11px;
+  }
+
+  .connect-stats dd {
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connect-facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .connect-fact {
+    min-width: 0;
+    padding: 7px 10px;
+    border-radius: min(8px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-text) 3.5%, transparent);
+  }
+
+  /* The first fact says what runs, which is long: it has the whole width. */
+  .connect-fact:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .connect-fact dt {
+    @apply text-ink-muted;
+    font-size: 11px;
+  }
+
+  .connect-fact dd {
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  /* Where a profile comes from is said in words, not as something to type. */
+  .connect-fact dd[data-prose] {
+    font-family: var(--font-ui);
+  }
+
+  /* Why a server's sessions are not listed, or what went wrong with it. */
+  .connect-call {
+    @apply text-ink-muted;
+    padding: 10px 12px;
+    border-radius: min(9px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-text) 3%, transparent);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+
+  .connect-call[data-problem] {
+    @apply text-ink;
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-status-danger) 45%, transparent);
+  }
+
+  /* A server's sessions, the marked one ringed while the arrow keys move among them. */
+  .connect-sessions {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 84px;
+    gap: 4px;
+  }
+
+  .connect-sessions-list {
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .connect-sessions-title {
+    @apply text-ink-muted;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .connect-session {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: min(8px, var(--lume-radius-control));
+    cursor: default;
+  }
+
+  .connect-session[aria-selected="true"] {
+    @apply bg-control-hover;
+  }
+
+  .connect-sessions[data-inside] .connect-session[aria-selected="true"] {
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 40%, transparent);
+  }
+
+  .connect-session-name,
+  .connect-act-label {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .connect-session-name {
+    flex: 1;
+  }
+
+  .connect-detail-spacer {
+    flex: 1;
+  }
+
+  /* What can be done: the first thing, filled in; the others as plain rows. */
+  .connect-acts {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .connect-primary,
+  .connect-secondary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: min(7px, var(--lume-radius-control));
+    font-size: 12.5px;
+    cursor: pointer;
+    transition:
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      transform var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
+  }
+
+  .connect-primary:active,
+  .connect-secondary:active {
+    transform: scale(0.98);
+  }
+
+  .connect-primary {
+    @apply bg-accent text-accent-ink;
+    font-weight: 600;
+  }
+
+  .connect-primary:hover {
+    filter: brightness(1.06);
+  }
+
+  .connect-secondary:hover {
+    @apply bg-control-hover;
+  }
+
+  .connect-keys {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: auto;
+  }
+
+  .connect-keys .key-chord {
+    display: inline-flex;
+    gap: 3px;
+  }
+
+  .connect-keys kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 5px;
+    background: var(--lume-color-control-active);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+  }
+
+  .connect-primary .connect-keys kbd {
+    background: color-mix(in srgb, var(--lume-color-accent-text) 16%, transparent);
+    box-shadow: none;
+    color: inherit;
+  }
+
+  .connect-footer {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 14px;
+    height: 36px;
+    padding: 0 14px;
+    overflow: hidden;
+    border-top: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  .connect-footer > span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .connect-footer-keys,
+  .connect-footer-keys .key-chord {
+    display: inline-flex;
+    gap: 3px;
+  }
+
+  .connect-footer-keys kbd {
+    @apply text-ink;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 4px;
+    background: var(--lume-color-control-active);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .connect-footer > span[data-off] {
+    opacity: 0.45;
+  }
+
+  .connect-footer-spacer {
+    flex: 1;
+  }
+
+  /* A narrow palette lists above what it says of the marked profile. */
+  @container (max-width: 640px) {
+    .connect-body {
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .connect-results,
+    .connect-detail {
+      flex: none;
+      height: auto;
+      overflow: visible;
+    }
+
+    .connect-results {
+      border-right: none;
+      border-bottom: var(--lume-size-border) solid
+        color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+    }
+  }
+
+  @container (max-width: 420px) {
+    .connect-footer > span:nth-child(2),
+    .connect-footer > span:nth-child(4) {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .connect-chip,
+    .connect-pin,
+    .connect-primary,
+    .connect-secondary {
+      transition: none;
+    }
+  }
+}

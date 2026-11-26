@@ -20,7 +20,7 @@ use serde_json::Value;
 
 pub mod encoding;
 pub mod generate;
-mod ts;
+use lume_codegen::ts;
 pub mod types;
 
 pub use types::{ApiError, ErrorCode};

@@ -31,8 +31,12 @@ mod attention;
 mod background;
 mod bounds;
 mod builtins;
+// Its file writing is the build step's; the application reads only who is granted what.
+#[cfg_attr(not(test), allow(dead_code))]
+mod capabilities;
 mod carrier;
 mod clipboard;
+mod command_registry;
 mod commands;
 mod commands_config;
 mod commands_connections;
@@ -349,14 +353,6 @@ fn claim_instance(args: &Args, launch: &Launch) -> Result<Instance, String> {
     })
 }
 
-/// Gives the application's commands the runtime they run in.
-fn commands_of<F>(handler: F) -> F
-where
-    F: Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool,
-{
-    handler
-}
-
 fn main() -> ExitCode {
     let marks = Arc::new(Marks::start());
     log::install();
@@ -460,82 +456,7 @@ fn main() -> ExitCode {
     let for_plugins = clipboard.clone();
     // The application's commands, which run only for a request that carries its
     // page's token (see `frame_token`).
-    let handler = commands_of(tauri::generate_handler![
-        frame_token::frame_token,
-        commands::webview_info,
-        commands::about_info,
-        commands::probe_done,
-        commands::carrier_open,
-        commands::carrier_send,
-        commands::session_spawn,
-        commands::session_attach,
-        commands::session_kill,
-        commands::session_list,
-        commands::clipboard_read,
-        commands::clipboard_write,
-        commands::open_link,
-        commands::font_families,
-        commands::page_reply,
-        commands::page_marks,
-        commands::page_shown,
-        commands_layout::layout_view,
-        commands_layout::layout_apply,
-        commands_layout::sessions_start,
-        commands_layout::panes_busy,
-        commands_layout::sessions_detached,
-        commands_layout::commands_list,
-        commands_layout::command_run,
-        commands_config::config_view,
-        commands_config::config_set,
-        commands_config::config_unset,
-        commands_config::config_open,
-        commands_config::config_schema,
-        commands_config::host_probe,
-        commands_config::themes_list,
-        commands_config::shells_list,
-        commands_config::profiles_list,
-        commands_config::background_image,
-        commands_window::window_drag,
-        commands_window::window_control,
-        commands_window::window_state,
-        commands_window::workspaces_list,
-        commands_folders::folders_list,
-        rex::commands::rex_hosts,
-        rex::commands::rex_hosts_look,
-        rex::commands::rex_read,
-        rex::commands::rex_reach,
-        rex::commands::rex_try,
-        rex::commands::rex_host_put,
-        rex::commands::rex_host_remove,
-        commands_connections::ssh_reach,
-        commands_connections::ssh_try,
-        commands_connections::try_end,
-        commands_connections::ssh_profile_put,
-        commands_connections::profile_remove,
-        commands_connections::profiles_listed,
-        commands_plugins::ui_contributions,
-        commands_plugins::ui_visible,
-        commands_plugins::ui_assets,
-        commands_plugins::ui_panel_expand,
-        commands_plugins::view_opened,
-        commands_plugins::view_closed,
-        commands_plugins::view_call,
-        commands_plugins::view_state,
-        commands_plugins::view_stream_open,
-        commands_plugins::addons_list,
-        commands_plugins::addon_set_enabled,
-        commands_plugins::addon_remove,
-        commands_plugins::addon_revoke_machine,
-        commands_plugins::addon_move,
-        commands_plugins::addon_inspect,
-        commands_plugins::addon_inspect_git,
-        commands_plugins::addon_check_update,
-        commands_plugins::addon_install,
-        commands_plugins::addon_cancel,
-        harness::harness_done,
-        harness::harness_save,
-        harness::harness_read,
-    ]);
+    let handler = command_registry::handler();
     let tokens = Arc::new(frame_token::FrameTokens::default());
     let starting = Arc::clone(&tokens);
     let guarding = Arc::clone(&tokens);

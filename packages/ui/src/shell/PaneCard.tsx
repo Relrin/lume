@@ -35,7 +35,7 @@ import { focusPaneFrame } from "../plugins/frame/registry.ts";
 import { SearchBar } from "../search/SearchBar.tsx";
 import { playSlot } from "../motion/slots.ts";
 import { StatusSlotItems } from "../status/StatusItem.tsx";
-import type { ShellApp } from "./boot.ts";
+import type { ShellApp } from "./boot/index.ts";
 import { useShell } from "./context.ts";
 import { describeNow, followPane, mark } from "./describing.ts";
 import { useKeyHint } from "./hints.ts";
@@ -349,6 +349,8 @@ function PaneHeaderBody({ pane, focused, floating, dev = false }: HeaderProps) {
   const where = useRef<HTMLSpanElement>(null);
   const marks = usePaneHeader(app, pane, header, name, where);
   useFittedButtons(header, [name, where]);
+  // The views know which panes can be renamed in their headers.
+  useLayoutEffect(() => app.views.keepHeader(pane), [app, pane]);
   const renaming = useStore(app.tabUi, (state) => state.renamingPane === pane);
   const zoomed = useStore(
     app.layout,

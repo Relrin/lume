@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 lume-config.workspace = true
+lume-layout.workspace = true
 lume-plugin.workspace = true
 lume-plugin-api.workspace = true
 serde.workspace = true

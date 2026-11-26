@@ -9,12 +9,20 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-async-trait.workspace = true
+async-trait = { workspace = true, optional = true }
+lume-codegen.workspace = true
 lume-proto.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, optional = true }
+
+[features]
+default = ["runtime"]
+# The layout's authority, which owns a workspace, orders intents and tells views. Left out,
+# what remains is plain functions over the tree, which build for WebAssembly too.
+runtime = ["dep:async-trait", "dep:tokio"]
 
 [dev-dependencies]
 proptest.workspace = true

@@ -20,29 +20,35 @@ use crate::schema::{BindingEntry, BindingValue, Config, UNBOUND};
 use crate::source::{Problem, ProblemKind, Source, join_path};
 
 /// A key bound to a command.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct Binding {
+    /// The chords to press one after another, each written as in `ctrl+shift+t`.
+    #[schemars(with = "Vec<String>")]
     pub keys: KeySequence,
     /// The id of the command the keys run.
     pub command: String,
     /// What the command is given. Null when it is given nothing.
     pub args: Value,
-    /// Where the binding holds. Empty is everywhere.
+    /// Where the binding holds: context names, each negated by a leading `!`. Empty is
+    /// everywhere.
+    #[schemars(with = "Vec<String>")]
     pub when: Vec<WhenTerm>,
     /// The layer the binding came from.
+    #[schemars(with = "serde_json::Value")]
     pub source: Source,
 }
 
 /// A default binding that the user took away.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct Removed {
     pub binding: Binding,
     /// What took it away.
+    #[schemars(with = "serde_json::Value")]
     pub by: Source,
 }
 
 /// The keys in effect.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct Keymap {
     /// The bindings, lowest first: of two that match a key equally well, the later
     /// one wins.

@@ -5,14 +5,17 @@
 //! space among their children by ratio. Nothing here is measured in pixels: a page lays
 //! the tree out in whatever space its window has.
 
+use std::borrow::Cow;
+
 use lume_proto::{BackendId, Launcher, SessionId};
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{GroupId, PaneId, PanelId, SplitId, TabId, WindowId, WorkspaceId};
 use crate::tuning::{DOCK_SIZE_DEFAULT, UNITS};
 
 /// A named arrangement of windows that can be saved and brought back.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Workspace {
     pub id: WorkspaceId,
@@ -37,7 +40,7 @@ pub struct Workspace {
 
 /// The scratch terminal: one floating pane a workspace keeps at hand. It is shown over
 /// whichever window asks for it and put away again without ending its program.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Scratch {
     pub pane: PaneId,
@@ -47,7 +50,7 @@ pub struct Scratch {
 }
 
 /// One window of a workspace.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Window {
     pub id: WindowId,
@@ -66,7 +69,7 @@ pub struct Window {
 }
 
 /// A window's place and size on the desktop.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Bounds {
     /// Where the window's top left corner is, in the desktop's own pixels. On a
@@ -84,7 +87,7 @@ pub struct Bounds {
 }
 
 /// One of the four edges of a window, where panels are docked.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Area {
     Top,
@@ -98,7 +101,7 @@ impl Area {
 }
 
 /// The panels at each edge of a window.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DockAreas {
     pub top: DockArea,
@@ -152,7 +155,7 @@ impl Default for DockAreas {
 }
 
 /// The panels docked at one edge of a window.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DockArea {
     pub panels: Vec<Panel>,
@@ -174,7 +177,7 @@ impl Default for DockArea {
 }
 
 /// Something docked at an edge of a window.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Panel {
     pub id: PanelId,
@@ -182,7 +185,7 @@ pub struct Panel {
 }
 
 /// What a panel shows.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PanelContent {
     /// One of the top bar's three places for status items.
@@ -199,7 +202,7 @@ pub enum PanelContent {
 }
 
 /// A place in the top bar that status items are shown in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum Slot {
     #[serde(rename = "topbar.left")]
     TopbarLeft,
@@ -222,7 +225,7 @@ impl Slot {
 }
 
 /// The tabs of a window.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TabGroup {
     pub tabs: Vec<Tab>,
@@ -235,7 +238,7 @@ pub struct TabGroup {
 }
 
 /// One tab: a tree of splits and panes.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Tab {
     pub id: TabId,
@@ -287,8 +290,9 @@ pub enum TabColor {
 }
 
 impl TabColor {
-    /// The named colours and the word each is written as.
-    const NAMED: [(TabColor, &'static str); 8] = [
+    /// The named colours and the word each is written as, in the order a tab's menu
+    /// offers them.
+    pub const NAMED: [(TabColor, &'static str); 8] = [
         (TabColor::Red, "red"),
         (TabColor::Orange, "orange"),
         (TabColor::Yellow, "yellow"),
@@ -358,6 +362,40 @@ impl<'de> Deserialize<'de> for TabColor {
     }
 }
 
+/// The colours a tab or a group can be given by name, as the schema of [`TabColor`]
+/// names them. The theme says how each looks.
+#[derive(JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "NamedTabColor")]
+#[allow(dead_code)]
+enum NamedTabColor {
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Teal,
+    Blue,
+    Purple,
+    Pink,
+}
+
+impl JsonSchema for TabColor {
+    fn schema_name() -> Cow<'static, str> {
+        "TabColor".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let named = generator.subschema_for::<NamedTabColor>();
+        json_schema!({
+            "description": "A colour of a tab or a group: one of the theme's by name, or one of the user's own as `#rrggbb`.",
+            "anyOf": [
+                named,
+                { "type": "string", "pattern": "^#[0-9a-f]{6}$", "x-ts": "`#${string}`" }
+            ]
+        })
+    }
+}
+
 impl TabColor {
     /// The order a window's new groups take their colours in, each the first one no
     /// other group of the window has.
@@ -374,7 +412,7 @@ impl TabColor {
 }
 
 /// The pictures a group's label can show.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GroupIcon {
     Bug,
@@ -387,8 +425,22 @@ pub enum GroupIcon {
     Book,
 }
 
+impl GroupIcon {
+    /// Every picture, in the order the group editor offers them.
+    pub const ALL: [GroupIcon; 8] = [
+        GroupIcon::Bug,
+        GroupIcon::Flame,
+        GroupIcon::Rocket,
+        GroupIcon::Flask,
+        GroupIcon::Wrench,
+        GroupIcon::Layers,
+        GroupIcon::Server,
+        GroupIcon::Book,
+    ];
+}
+
 /// Tabs of a window gathered under one name and colour.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Group {
     pub id: GroupId,
@@ -413,7 +465,7 @@ pub struct Group {
 
 /// A kept group that was closed, with its tabs as they were. Its panes have no
 /// sessions: they are started anew when the group is opened again.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Shelved {
     pub group: Group,
@@ -421,7 +473,7 @@ pub struct Shelved {
 }
 
 /// A node of a tab's tree.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Node {
     Split(Split),
@@ -429,7 +481,7 @@ pub enum Node {
 }
 
 /// The direction a split lays its children out in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Axis {
     /// Side by side, from left to right.
@@ -439,7 +491,7 @@ pub enum Axis {
 }
 
 /// A node that divides its space among two or more children.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Split {
     pub id: SplitId,
@@ -451,7 +503,7 @@ pub struct Split {
 }
 
 /// A leaf of a tab's tree, or a floating pane: one place that shows one thing.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Pane {
     pub id: PaneId,
@@ -465,7 +517,7 @@ pub struct Pane {
 }
 
 /// What a pane shows.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PaneContent {
     Terminal(TerminalPane),
@@ -486,7 +538,7 @@ pub enum PaneContent {
 }
 
 /// A pane that shows a terminal session, and what is needed to start the session again.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TerminalPane {
     /// The backend the session runs on. Without one, it is the application's default.
@@ -505,7 +557,7 @@ pub struct TerminalPane {
 }
 
 /// A pane that floats over a window's tabs.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Floating {
     pub pane: Pane,
@@ -518,7 +570,7 @@ pub struct Floating {
 }
 
 /// Where a pane that is put away goes when it is brought back.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Minimised {
     /// It floated, and floats again where it was.
@@ -528,7 +580,7 @@ pub enum Minimised {
 }
 
 /// A rectangle within a whole that is [`UNITS`] wide and [`UNITS`] high.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UnitRect {
     pub x: u32,

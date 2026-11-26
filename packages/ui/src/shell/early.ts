@@ -2,7 +2,7 @@ import { loadTerminalFonts } from "../config/fonts.ts";
 import { webviewInfo } from "../probe.ts";
 import { DEFAULT_APPEARANCE } from "../theme.ts";
 import { ready } from "../transport/invoke.ts";
-import { shellApp, startVt } from "./boot.ts";
+import { shellApp, startVt } from "./boot/index.ts";
 
 /**
  * Begins, as the page's script starts, what a window's start otherwise reaches one

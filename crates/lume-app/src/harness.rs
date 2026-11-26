@@ -33,22 +33,13 @@ const ROOT_HEADER: &str = "lume-root";
 
 /// Lets the page call the harness commands, and ends the run if the page never reports.
 pub fn start(app: &App) -> tauri::Result<()> {
-    app.add_capability(
-        CapabilityBuilder::new("harness")
-            .window(crate::window::LABEL)
-            .permission("allow-frame-token")
-            // A suite's page starts and ends the sessions it measures itself.
-            .permission("allow-carrier-open")
-            .permission("allow-carrier-send")
-            .permission("allow-session-spawn")
-            .permission("allow-session-attach")
-            .permission("allow-session-kill")
-            .permission("allow-session-list")
-            .permission("allow-page-reply")
-            .permission("allow-harness-done")
-            .permission("allow-harness-save")
-            .permission("allow-harness-read"),
-    )?;
+    // A suite's page starts and ends the sessions it measures itself; the command table
+    // says which commands that takes.
+    let mut capability = CapabilityBuilder::new("harness").window(crate::window::LABEL);
+    for permission in crate::command_registry::harness_permissions() {
+        capability = capability.permission(permission);
+    }
+    app.add_capability(capability)?;
     let handle = app.handle().clone();
     std::thread::spawn(move || {
         std::thread::sleep(HARNESS_TIMEOUT);

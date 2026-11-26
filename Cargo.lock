@@ -2602,9 +2602,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lume-codegen"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "lume-config"
 version = "0.0.0"
 dependencies = [
+ "lume-codegen",
  "lume-proto",
  "notify",
  "schemars 1.2.3",
@@ -2648,12 +2656,24 @@ name = "lume-layout"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "lume-codegen",
  "lume-proto",
  "proptest",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "lume-logic-wasm"
+version = "0.0.0"
+dependencies = [
+ "lume-layout",
+ "lume-proto",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2676,6 +2696,7 @@ dependencies = [
 name = "lume-plugin-api"
 version = "0.0.0"
 dependencies = [
+ "lume-codegen",
  "lume-config",
  "schemars 1.2.3",
  "serde",
@@ -2697,6 +2718,7 @@ name = "lume-proto"
 version = "0.0.0"
 dependencies = [
  "proptest",
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -6663,6 +6685,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "lume-config",
+ "lume-layout",
  "lume-plugin",
  "lume-plugin-api",
  "serde",

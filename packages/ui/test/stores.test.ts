@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { chordLabel, createCommandStore, keyLabel } from "../src/commands/store.ts";
 import { createConfigStore } from "../src/config/store.ts";
 import type { CommandSpec, ConfigView, KeyBinding } from "../src/core/types.ts";
+import { settings } from "./config-support.ts";
 
 function view(revision: number): ConfigView {
   return {
@@ -11,16 +12,17 @@ function view(revision: number): ConfigView {
     platform: "windows",
     scheme: "dark",
     theme: { id: "lume-dark", scheme: "dark" },
-    config: {
+    config: settings({
       appearance: { "pane-header": "always" },
       terminal: { "scrollback-lines": 10_000, "cursor-style": "block", "cursor-blink": true },
       layout: { "tab-placement": "top" },
       renderer: { tier: "auto" },
-    },
+    }),
     sources: {},
     problems: [],
     tokens: DEFAULT_TOKENS,
-    keymap: { bindings: [] },
+    keymap: { bindings: [], removed: [] },
+    schema_revision: 1,
     title_bar: "system",
   };
 }

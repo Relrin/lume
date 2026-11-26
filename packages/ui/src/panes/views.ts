@@ -124,6 +124,8 @@ export class PaneViews {
   #epoch: number | undefined;
   /** Out of sight, each of these panes lets go of its screen when its timer runs out. */
   readonly #releases = new Map<PaneId, number>();
+  /** The panes whose cards show a header, and how many of them each has on screen. */
+  readonly #headers = new Map<PaneId, number>();
 
   constructor(services: ViewsServices) {
     this.#services = services;
@@ -142,6 +144,27 @@ export class PaneViews {
   /** The panes that have a view. */
   panes(): ReadonlySet<PaneId> {
     return new Set(this.#entries.keys());
+  }
+
+  /**
+   * Notes that a pane's card shows its header, where the pane can be renamed, until
+   * what is given back is called.
+   */
+  keepHeader(pane: PaneId): () => void {
+    this.#headers.set(pane, (this.#headers.get(pane) ?? 0) + 1);
+    let kept = true;
+    return () => {
+      if (!kept) return;
+      kept = false;
+      const count = (this.#headers.get(pane) ?? 1) - 1;
+      if (count <= 0) this.#headers.delete(pane);
+      else this.#headers.set(pane, count);
+    };
+  }
+
+  /** Whether a pane's card shows its header. A pane alone in its tab may show none. */
+  hasHeader(pane: PaneId): boolean {
+    return this.#headers.has(pane);
   }
 
   /** The pane that has the keyboard, and its view. */

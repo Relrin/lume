@@ -1,5 +1,5 @@
-//! `cargo xtask schema` and `cargo xtask tokens`: write the files that are generated
-//! from the configuration's definitions.
+//! `cargo xtask schema`, `tokens`, `api` and `types`: write the files that are
+//! generated from the crates' definitions.
 //!
 //! The settings' JSON Schema, the theme schema, the plugin manifest's schema and the
 //! page's token module are kept in the repository, because editors and the page's build
@@ -23,6 +23,7 @@ pub fn write(kind: GeneratedKind, command: &str) -> Result<()> {
         .chain(lume_plugin::manifest::generated_files())
         .chain(lume_plugin::places::generated_files())
         .chain(lume_plugin_api::generate::generated_files())
+        .chain(lume_layout::generate::generated_files())
         .filter(|file| file.kind == kind)
     {
         let path = root.join(file.path);

@@ -16,7 +16,7 @@ import { pluginStatusItems } from "../src/plugins/status.ts";
 import { createPluginsStore, holds, iconNamed } from "../src/plugins/store.ts";
 import { VisibleItems } from "../src/plugins/visible.ts";
 import { joinPath, splitPath } from "../src/settings/model.ts";
-import type { ShellApp } from "../src/shell/boot.ts";
+import type { ShellApp } from "../src/shell/boot/index.ts";
 import { ShellContext } from "../src/shell/context.ts";
 import { flatten } from "../src/shell/ListPanel.tsx";
 import type { MenuItem } from "../src/shell/Menu.tsx";
@@ -495,6 +495,24 @@ describe("the plugins' pictures and shaders", () => {
     fail = false;
     await held.load(["a"]);
     expect(held.peek("a")).toBe("x");
+  });
+
+  it("are not asked for once the page that asked lets go, unless another page asks", async () => {
+    const held = new Assets();
+    const asked: string[] = [];
+    const ask = (hashes: readonly string[]) => {
+      asked.push(...hashes);
+      return Promise.resolve({});
+    };
+    const stop = held.connect(ask);
+    stop();
+    await held.load(["a"]);
+    expect(asked).toEqual([]);
+    // A page that went first letting go leaves the one after it asking.
+    held.connect((hashes) => ask(hashes));
+    stop();
+    await held.load(["b"]);
+    expect(asked).toEqual(["b"]);
   });
 });
 

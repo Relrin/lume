@@ -197,10 +197,15 @@ export class CursorFx implements CursorWatch {
     return this.#effects?.played ?? { trails: 0, pulses: 0 };
   }
 
-  /** Told when a plugin's effect cannot be drawn: its id and why. */
-  onProblem(listener: (id: string, message: string) => void): void {
+  /** Told when a plugin's effect cannot be drawn: its id and why. Gives how to stop. */
+  onProblem(listener: (id: string, message: string) => void): () => void {
     this.#problem = listener;
     this.#effects?.onProblem?.(listener);
+    return () => {
+      if (this.#problem !== listener) return;
+      this.#problem = undefined;
+      this.#effects?.onProblem?.(() => undefined);
+    };
   }
 
   /** The element the effects are drawn in, from the page. */

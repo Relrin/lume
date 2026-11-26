@@ -1,0 +1,274 @@
+@layer components {
+  /*
+   * The settings window: a bar of its own where the page draws the title bar, a list
+   * of pages down the left, and the page on show beside it.
+   */
+
+  .settings-window {
+    /* The shades its controls are drawn in: steps from the card towards the text. */
+    --settings-raised: color-mix(in srgb, var(--lume-color-text) 7%, var(--lume-color-card));
+    --settings-pressed: color-mix(in srgb, var(--lume-color-text) 12%, var(--lume-color-card));
+    --settings-off: color-mix(in srgb, var(--lume-color-text) 22%, var(--lume-color-card));
+    --settings-quiet: color-mix(in srgb, var(--lume-color-text) 78%, var(--lume-color-text-muted));
+
+    @apply bg-surface text-ink;
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    font-size: 13px;
+    line-height: 1.45;
+    user-select: none;
+  }
+
+  .settings-titlebar {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    height: 40px;
+    padding-left: 14px;
+    border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+    font-size: 12.5px;
+  }
+
+  .settings-titlebar-name {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .settings-titlebar .window-controls {
+    height: 100%;
+  }
+
+  .settings-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* The list of pages, and the field that searches every page. */
+
+  .settings-side {
+    @apply bg-card;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    width: 236px;
+    padding: 10px 10px 12px;
+    border-right: var(--lume-size-border) solid var(--lume-color-border);
+  }
+
+  .settings-search {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    margin-bottom: 10px;
+    padding: 0 10px;
+    border-radius: min(8px, var(--lume-radius-control));
+    background: var(--settings-raised);
+  }
+
+  .settings-search:focus-within {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
+
+  .settings-search input {
+    @apply text-ink;
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: none;
+    font-size: 12.5px;
+    user-select: text;
+  }
+
+  .settings-search input::placeholder {
+    @apply text-ink-muted;
+  }
+
+  .settings-nav {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    gap: 1px;
+    overflow: auto;
+  }
+
+  .settings-nav h4 {
+    @apply text-ink-muted;
+    margin: 12px 8px 3px;
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+
+  .settings-nav h4:first-child {
+    margin-top: 2px;
+  }
+
+  .settings-nav-item {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 9px;
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: min(7px, var(--lume-radius-control));
+    color: var(--settings-quiet);
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .settings-nav-item > svg {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+  }
+
+  .settings-nav-item:hover {
+    background: var(--settings-raised);
+  }
+
+  .settings-nav-item[aria-current="page"] {
+    @apply text-ink;
+    background: var(--settings-pressed);
+  }
+
+  .settings-nav-item[aria-current="page"] > svg {
+    @apply text-ink;
+  }
+
+  .settings-nav-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .settings-nav-meta {
+    @apply text-ink-muted;
+    font-size: 10.5px;
+  }
+
+  /* The page on show: its name over what scrolls. */
+
+  .settings-main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .settings-head {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 10px;
+    height: 46px;
+    padding: 10px 22px 5px;
+    border-bottom: var(--lume-size-border) solid transparent;
+    transition: border-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  /* A line under the name once something has scrolled beneath it. */
+  .settings-head[data-scrolled="true"] {
+    border-bottom-color: var(--lume-color-border);
+  }
+
+  .settings-head h1 {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 30px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The name and what stands beside it share a baseline, whatever their sizes. */
+  .settings-head h1,
+  .settings-meta {
+    align-self: baseline;
+  }
+
+  .settings-meta {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    font-size: 11.5px;
+    line-height: 30px;
+    white-space: nowrap;
+  }
+
+  .settings-head-space {
+    flex: 1;
+  }
+
+  .settings-scroll {
+    flex: 1;
+    padding: 0 22px 32px;
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--settings-off) transparent;
+    scrollbar-gutter: stable;
+  }
+
+  /* A plugin's own view of its settings takes the page whole, and scrolls itself. */
+  .settings-view {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .settings-scroll[hidden] {
+    display: none;
+  }
+
+  /*
+   * Every page keeps the same column of settings. The column beside it is a page's
+   * own to fill, and stays empty on a page that shows nothing there. In a narrow
+   * window the second column gives way first, so the settings stay readable.
+   */
+  .settings-split {
+    display: grid;
+    grid-template-columns: minmax(min(100%, 420px), 760px) minmax(0, 360px);
+    align-items: start;
+    gap: 22px;
+  }
+
+  .settings-column {
+    min-width: 0;
+  }
+
+  .settings-preview {
+    position: sticky;
+    top: 12px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 10px;
+    padding: 12px;
+    border-radius: min(10px, var(--lume-radius-card));
+    background: var(--lume-color-control);
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .settings-intro {
+    @apply text-ink-muted;
+    margin: 2px 0 14px 2px;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  .settings-empty {
+    @apply text-ink-muted;
+    padding: 60px 0;
+    text-align: center;
+  }
+}

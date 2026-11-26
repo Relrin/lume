@@ -21,49 +21,40 @@ import type {
   Workspace,
 } from "../layout/types.ts";
 import type { Launcher, TermSize } from "../transport/types.ts";
+import type {
+  Binding,
+  ColorScheme,
+  Config,
+  Contributed,
+  CursorPulse,
+  CursorTrail,
+  Platform,
+  Problem,
+  TabHighlight,
+  TitleBar,
+  ConfigView as WireConfigView,
+} from "../wire/config.generated.ts";
+
+// The configuration view and every type it names are generated from the core's own
+// definitions (`crates/lume-config`) by `cargo xtask types`; the names the page has
+// always used for them are kept here.
 
 /** Whether a look is a light or a dark one. */
-export type Scheme = "light" | "dark";
+export type Scheme = ColorScheme;
 
 /** The platform's name as the configuration spells it. */
-export type ConfigPlatform = "windows" | "macos" | "linux";
+export type ConfigPlatform = Platform;
 
 /** Something wrong in the user's files that was passed over. */
-export interface ConfigProblem {
-  readonly kind: string;
-  /** The setting's path, such as `font.size`. Empty for a problem with a whole file. */
-  readonly path: string;
-  readonly file: string | null;
-  /** Counted from one; nought when the problem has no place in the file. */
-  readonly line: number;
-  readonly column: number;
-  readonly message: string;
-  readonly suggestion: string | null;
-}
+export type ConfigProblem = Problem;
 
 /** One key and the command it runs. */
-export interface KeyBinding {
-  /** The chords to press one after another, each spelt as in `ctrl+shift+t`. */
-  readonly keys: readonly string[];
-  readonly command: string;
-  /** What the command is given. `null` when it is given nothing. */
-  readonly args: unknown;
-  /** Where the binding holds: context names, each negated by a leading `!`. */
-  readonly when: readonly string[];
-  readonly source: unknown;
-}
+export type KeyBinding = Binding;
 
-/** Something a plugin brings, by the id of the plugin as installed and its own name. */
-export type Contributed = `${string}/${string}`;
+/** The settings, as the core resolved them from every layer. */
+export type ConfigSettings = Config;
 
-/** How the mark of the tab on show moves from one tab to another. */
-export type TabHighlight = "instant" | "glide" | "stretch" | "spring" | "glow";
-
-/** What the cursor leaves behind when it jumps a distance or moves to another pane. */
-export type CursorTrail = "none" | "warp" | "sweep" | "comet";
-
-/** What the cursor gives off when it changes shape or moves to another pane. */
-export type CursorPulse = "none" | "burst" | "ripple" | "box-burst" | "box-ripple";
+export type { Contributed, CursorPulse, CursorTrail, TabHighlight, TitleBar };
 
 /** What a notice offers to do about what it says: a command, run when its button is pressed. */
 export interface NoticeAction {
@@ -72,87 +63,8 @@ export interface NoticeAction {
   readonly args?: unknown;
 }
 
-/** The settings a page reads itself. Everything else reaches it as tokens. */
-export interface ConfigSettings {
-  readonly appearance: {
-    readonly "pane-header": "always" | "auto" | "never";
-    /** Which program tiles are drawn in colour. A core that does not say means all of them. */
-    readonly "tile-color"?: "always" | "active-pane" | "active-tab" | "never";
-    /** How the mark of the tab on show moves to another. A core that does not say means glow. */
-    readonly "tab-highlight"?: TabHighlight | Contributed;
-    /** The plugins' effects chosen for places in the window, by place. */
-    readonly motion?: Readonly<Record<string, Contributed | undefined>>;
-    readonly [key: string]: unknown;
-  };
-  readonly terminal: {
-    readonly "scrollback-lines": number;
-    /** Keep only the newest lines in a window. A core that does not say means off. */
-    readonly "history-paging"?: boolean;
-    /** How many lines a window keeps then. A core that does not say means 1000. */
-    readonly "window-history-lines"?: number;
-    /** How long fetched lines stay at the newest output. A core that does not say means 60. */
-    readonly "history-release-seconds"?: number;
-    /** Let panes out of sight let go of their screen. A core that does not say means off. */
-    readonly "hidden-release"?: boolean;
-    /** After how many seconds out of sight. A core that does not say means 30. */
-    readonly "hidden-release-seconds"?: number;
-    readonly "cursor-style": "block" | "bar" | "underline";
-    readonly "cursor-blink": boolean;
-    /** Copy what the pointer selects at once. A core that does not say means off. */
-    readonly "copy-on-select"?: boolean;
-    /** What the cursor leaves behind when it jumps. A core that does not say means none. */
-    readonly "cursor-trail"?: CursorTrail | Contributed;
-    /** What the cursor gives off when it changes shape. A core that does not say means none. */
-    readonly "cursor-pulse"?: CursorPulse | Contributed;
-    /** How long both last against their own length. A core that does not say means 1. */
-    readonly "cursor-effect-length"?: number;
-    readonly [key: string]: unknown;
-  };
-  readonly layout: {
-    readonly "tab-placement": "top" | "left" | "right";
-    readonly [key: string]: unknown;
-  };
-  readonly renderer: {
-    readonly tier: "auto" | "webgpu" | "webgl2" | "canvas2d";
-    readonly [key: string]: unknown;
-  };
-  readonly [section: string]: unknown;
-}
-
 /** The configuration in use, as `config_view` returns it and `config_changed` carries it. */
-export interface ConfigView {
-  /** Higher than that of every view before this one. */
-  readonly revision: number;
-  readonly platform: ConfigPlatform;
-  /** The colour scheme of the operating system. */
-  readonly scheme: Scheme;
-  /** The theme the tokens were resolved from. */
-  readonly theme: { readonly id: string; readonly scheme: Scheme };
-  readonly config: ConfigSettings;
-  /** Where each setting came from, by the setting's path. */
-  readonly sources: Readonly<Record<string, unknown>>;
-  readonly problems: readonly ConfigProblem[];
-  /** Every design token's value. */
-  readonly tokens: Tokens;
-  readonly keymap: {
-    readonly bindings: readonly KeyBinding[];
-    /** The bindings that were unbound or replaced, and the source of what did it. */
-    readonly removed?: readonly { readonly binding: KeyBinding; readonly by: unknown }[];
-  };
-  /**
-   * Who draws the window's title bar: the page, with its own buttons in the top bar,
-   * or the window system. Already decided for the platform.
-   */
-  readonly title_bar: TitleBar;
-  /**
-   * Counts the schemas of the settings there have been: it changes when plugins add to
-   * the settings or take from them. A core that does not say has one schema only.
-   */
-  readonly schema_revision?: number;
-}
-
-/** Who draws a window's title bar. */
-export type TitleBar = "custom" | "system";
+export type ConfigView = WireConfigView;
 
 /** What a window is doing on the desktop, as far as the page shows it. */
 export interface WindowState {

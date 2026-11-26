@@ -4,7 +4,7 @@
  * obvious way, and small trees to lay out.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 import type { LayoutView } from "../src/core/types.ts";
 import type {
@@ -21,13 +21,14 @@ import type {
 
 const VECTORS = "../../../tests/layout/vectors/";
 
-/** The names of the recorded sequences. */
-export const VECTOR_NAMES = [
-  "splits-and-tabs",
-  "floating-and-scratch",
-  "panels-and-windows",
-  "tab-groups",
-] as const;
+/**
+ * The names of the recorded sequences: every one the core's tests wrote, so a sequence
+ * added there is replayed here without being listed twice.
+ */
+export const VECTOR_NAMES: readonly string[] = readdirSync(new URL(VECTORS, import.meta.url))
+  .filter((file) => file.endsWith(".json"))
+  .map((file) => file.slice(0, -".json".length))
+  .sort();
 
 /** One step of a recorded sequence: an intent, and what it changed or why it was refused. */
 export interface VectorStep {

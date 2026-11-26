@@ -36,6 +36,7 @@ import type {
 import type { ExitStatus, Launcher, SessionEvent } from "../transport/types.ts";
 import type {
   Area,
+  Created,
   DockArea,
   Floating,
   Group,
@@ -50,11 +51,15 @@ import type {
   Tab,
   TabColor,
   TabId,
+  Window as LayoutWindow,
   Workspace,
 } from "../layout/types.ts";
 import type { Carrier, CarrierOpened } from "../transport/carrier.ts";
+import type { CommandName } from "../transport/commands.generated.ts";
 import { CONTROL_STREAM, HEADER_LEN, Kind } from "../transport/frames.ts";
 import type { AddonEntry } from "../settings/addons.ts";
+import { DEFAULT_CONFIG } from "../wire/config.generated.ts";
+import { type LayoutLogic, Refused } from "./logic.ts";
 
 /** The protocol's sizes, as the core reports them. */
 const LIMITS = {
@@ -266,6 +271,11 @@ export interface FakeCoreOptions {
   readonly schema?: unknown;
   /** The plugins installed, as the settings window lists them. Left out, none. */
   readonly addons?: readonly AddonEntry[];
+  /**
+   * The core's layout logic (see `logic.ts`), which every change to the layout goes
+   * through. A core without it can show its fixture but not change it.
+   */
+  readonly logic?: LayoutLogic;
 }
 
 /** Rows with the rows beneath the row at `path` put in, as a plugin gives them. */
@@ -466,14 +476,6 @@ interface TabFacts {
 /** The number the fixture's groups are counted from: past whatever else it numbers. */
 const GROUP_IDS_FROM = 101;
 
-/** What the layout of the fake core's tabs is, to compare one moment with another. */
-interface TabsNow {
-  readonly order: readonly TabId[];
-  readonly active: TabId;
-  readonly facts: ReadonlyMap<TabId, TabFacts>;
-  readonly groups: readonly Group[];
-}
-
 /** Reads an address as the core does, as far as the scenes need. */
 function readAddress(
   address: string,
@@ -532,6 +534,12 @@ export class FakeCore implements Carrier {
   readonly #ended = new Set<PaneId>();
   /** Commands the page called that this core has no answer for. */
   readonly unanswered: string[] = [];
+  /** The settings written since the core started, by their dotted paths. */
+  readonly #settingsWritten = new Map<string, unknown>();
+  /** The layout once an intent has changed it; until then the fixture's is built anew. */
+  #held: Workspace | null = null;
+  /** How many sessions the core's logic was given for panes intents made. */
+  #sessionsMade = 0;
   /** The order of the tabs, what each is besides its tree, and the groups. */
   #order: TabId[];
   readonly #facts = new Map<TabId, TabFacts>();
@@ -597,19 +605,26 @@ export class FakeCore implements Carrier {
     return [...this.#fixture.sessions.keys()];
   }
 
-  /** The panes of one tab, in order. */
+  /** The panes of one tab, in order, as the layout is now. */
   panesOf(tab: TabId): readonly PaneId[] {
-    return this.#fixture.tabs.find((found) => found.id === tab)?.panes ?? [];
+    const root = this.#window().centre.tabs.find((found) => found.id === tab)?.root;
+    const panes: PaneId[] = [];
+    const walk = (node: Node) => {
+      if (node.type === "pane") panes.push(node.id);
+      else node.children.forEach(walk);
+    };
+    if (root) walk(root);
+    return panes;
   }
 
-  /** The tabs of the fixture, in order. */
+  /** The tabs, in order, as the layout is now. */
   get tabs(): readonly TabId[] {
-    return this.#order;
+    return this.#window().centre.tabs.map((tab) => tab.id);
   }
 
-  /** The groups of the fixture's tabs, in order. */
+  /** The groups of the tabs, in order, as the layout is now. */
   get groups(): readonly Group[] {
-    return this.#groups;
+    return this.#window().centre.groups ?? [];
   }
 
   /** The session a pane of the fixture shows. */
@@ -745,28 +760,56 @@ export class FakeCore implements Carrier {
 
   /** The built-in look, with a cursor that does not blink: nothing moves unless told to. */
   #config(): ConfigView {
+    const view = this.#sceneConfig();
+    if (this.#settingsWritten.size === 0) return view;
+    const config = structuredClone(view.config) as unknown as Record<string, unknown>;
+    for (const [path, value] of this.#settingsWritten) {
+      const parts = path.split(".");
+      const last = parts.pop();
+      if (last === undefined) continue;
+      let section: Record<string, unknown> = config;
+      for (const part of parts) {
+        const next = section[part];
+        section[part] = typeof next === "object" && next !== null ? { ...next } : {};
+        section = section[part] as Record<string, unknown>;
+      }
+      section[last] = value;
+    }
+    return { ...view, config: config as unknown as ConfigView["config"] };
+  }
+
+  /** The view the scene asks for, before any setting is written. */
+  #sceneConfig(): ConfigView {
     const light = this.#scheme === "light";
     return {
       revision: this.#configRevision,
       platform: "windows",
       scheme: this.#scheme,
       theme: { id: light ? "lume-light" : "lume-dark", scheme: this.#scheme },
+      // Every setting at the core's default, with what the scene asks for on top.
       config: {
-        appearance: { "pane-header": "always", ...this.#options.settings?.["appearance"] },
+        ...DEFAULT_CONFIG,
+        appearance: {
+          ...DEFAULT_CONFIG.appearance,
+          "pane-header": "always",
+          ...this.#options.settings?.["appearance"],
+        },
         terminal: {
+          ...DEFAULT_CONFIG.terminal,
           "scrollback-lines": this.#options.scrollbackLines ?? 1000,
           "cursor-style": "block",
           "cursor-blink": false,
           ...this.#options.settings?.["terminal"],
         },
-        layout: { "tab-placement": this.#options.tabPlacement ?? "top" },
-        renderer: { tier: this.#options.tier ?? "auto" },
+        layout: { ...DEFAULT_CONFIG.layout, "tab-placement": this.#options.tabPlacement ?? "top" },
+        renderer: { ...DEFAULT_CONFIG.renderer, tier: this.#options.tier ?? "auto" },
         plugins: { ...this.#options.settings?.["plugins"] },
       },
       sources: {},
       problems: [],
       tokens: light ? LIGHT_TOKENS : DEFAULT_TOKENS,
-      keymap: { bindings: this.#options.bindings ?? [] },
+      keymap: { bindings: this.#options.bindings ?? [], removed: [] },
+      schema_revision: 1,
       // Unless a test says otherwise the system draws the title bar, so the page draws
       // no window buttons of its own.
       title_bar: this.#options.titleBar ?? "system",
@@ -788,7 +831,7 @@ export class FakeCore implements Carrier {
     return Promise.resolve();
   }
 
-  command<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  command<T>(name: CommandName, args: Record<string, unknown> = {}): Promise<T> {
     const answer = (value: unknown) => Promise.resolve(value as T);
     switch (name) {
       case "layout_view":
@@ -796,7 +839,7 @@ export class FakeCore implements Carrier {
           window: WINDOW,
           epoch: 1,
           revision: this.#revision,
-          workspace: this.#workspace(),
+          workspace: this.#current(),
           machine: FIXTURE_MACHINE,
           host: { connected: true },
         });
@@ -851,12 +894,13 @@ export class FakeCore implements Carrier {
         });
       }
       case "layout_apply":
-        this.#apply(args["intent"] as Intent);
-        return answer({
-          epoch: 1,
-          revision: this.#revision,
-          created: { pane: null, tab: null, window: null },
-        });
+        try {
+          const created = this.#applyReal(args["intent"] as Intent);
+          return answer({ epoch: 1, revision: this.#revision, created });
+        } catch (error) {
+          if (!(error instanceof Refused)) throw error;
+          return Promise.reject({ code: error.code, message: error.message });
+        }
       case "config_schema":
         return answer(this.#options.schema ?? JSON.parse(schemaText));
       case "ui_contributions":
@@ -1014,11 +1058,25 @@ export class FakeCore implements Carrier {
       case "open_link":
         this.links.push(String(args["url"]));
         return answer(null);
+      case "config_set":
+      case "config_unset": {
+        // Written as the core writes a setting: the view changes, and the pages are told.
+        const path = String(args["path"]);
+        this.written.push({ name, args });
+        if (name === "config_set") this.#settingsWritten.set(path, args["value"]);
+        else this.#settingsWritten.delete(path);
+        this.#configRevision += 1;
+        this.#notify({
+          type: "config_changed",
+          revision: this.#configRevision,
+          changed: [path],
+          view: this.#config(),
+        });
+        return answer(null);
+      }
       case "page_reply":
       case "window_drag":
       case "window_control":
-      case "config_set":
-      case "config_unset":
       case "config_open":
         return answer(null);
       default:
@@ -1027,184 +1085,123 @@ export class FakeCore implements Carrier {
     }
   }
 
+  /** The layout as it is now: the fixture's, until an intent has changed it. */
+  #current(): Workspace {
+    return this.#held ?? this.#workspace();
+  }
+
+  /** The fixture's one window, as it is now. */
+  #window(): LayoutWindow {
+    const window = this.#current().windows[0];
+    if (!window) throw new Error("the stand-in core has lost its window");
+    return window;
+  }
+
   /**
-   * Does the little of an intent a test's window needs done: a split's shares, which
-   * pane has the keyboard, and how wide a dock area is. The page is told as the core
-   * tells it. Anything else is taken and changes nothing.
+   * Applies an intent with the core's own layout logic and tells the page what changed,
+   * as the core does. A pane the intent makes is given a session no fixture names.
    */
-  #apply(intent: Intent | undefined): void {
-    if (!intent) return;
-    switch (intent.type) {
-      case "resize":
-        this.#shares.set(intent.split, intent.ratios);
-        this.#changed([{ type: "ratios", split: intent.split, ratios: intent.ratios }]);
-        break;
-      case "focus":
-        if (intent.target.type !== "pane" || intent.target.pane === this.#focus) break;
-        if (!this.#fixture.sessions.has(intent.target.pane)) break;
-        this.#focus = intent.target.pane;
-        this.#changed([{ type: "focus", window: WINDOW, pane: this.#focus }]);
-        break;
-      case "panel_resize":
-        this.#dockSizes.set(intent.area, intent.size);
-        this.#changed([
-          { type: "dock_size", window: WINDOW, area: intent.area, size: intent.size },
-        ]);
-        break;
-      case "tab_activate":
-        if (intent.target.type === "id") this.activate(intent.target.tab);
-        break;
-      case "tab_place":
-        this.#tabs(() => {
-          const facts = this.#facts.get(intent.tab);
-          if (!facts) return;
-          this.#order = this.#order.filter((tab) => tab !== intent.tab);
-          this.#order.splice(Math.min(intent.index, this.#order.length), 0, intent.tab);
-          facts.group = intent.group ?? null;
-        });
-        break;
-      case "group_move":
-        this.#tabs(() => {
-          const block = this.#order.filter((tab) => this.#facts.get(tab)?.group === intent.group);
-          const rest = this.#order.filter((tab) => this.#facts.get(tab)?.group !== intent.group);
-          rest.splice(Math.min(intent.index, rest.length), 0, ...block);
-          this.#order = rest;
-        });
-        break;
-      default:
-        break;
+  #applyReal(intent: Intent): Created {
+    const logic = this.#options.logic;
+    if (!logic) {
+      throw new Error(
+        "the stand-in core changes a layout with the core's own logic: give it `logic` " +
+          "(built by `cargo xtask logic`)",
+      );
     }
+    const workspace = this.#current();
+    const started = logic.needs(workspace, intent)
+      ? {
+          backend: "local",
+          session: (0xf000 + ++this.#sessionsMade).toString(16).padStart(16, "0"),
+        }
+      : undefined;
+    const applied = logic.apply(workspace, intent, started);
+    this.#held = applied.workspace;
+    if (applied.changes.length > 0) this.#changed(applied.changes);
+    return applied.created;
   }
 
-  /** The tab a command acts on: the one it names, or the one on show. */
-  #tabOf(args: unknown): TabId {
-    const named = (args as { tab?: unknown } | null)?.tab;
-    return typeof named === "string" ? named : this.#active;
-  }
-
-  /** The group a command acts on: the one it names, or the group of the tab on show. */
-  #groupOf(args: unknown): GroupId | null {
-    const named = (args as { group?: unknown } | null)?.group;
-    return typeof named === "string" ? named : (this.#facts.get(this.#active)?.group ?? null);
-  }
-
-  /** Does the little of a command about tabs and groups the scenes need done. */
+  /**
+   * Turns a command about tabs, groups and panes into the intent the core would apply
+   * for it, and applies it. A command the core would refuse changes nothing.
+   */
   #command(id: string, args: unknown): void {
     const given = (args ?? {}) as Record<string, unknown>;
-    const tab = this.#tabOf(args);
-    const facts = this.#facts.get(tab);
-    const group = this.#groupOf(args);
-    const editGroup = (edit: (found: Group) => Group) => {
-      this.#groups = this.#groups.map((found) => (found.id === group ? edit(found) : found));
-    };
-    switch (id) {
-      case "lume.tab.color":
-        this.#tabs(() => {
-          if (facts) facts.color = (given["color"] as TabColor | null) ?? null;
-        });
-        return;
-      case "lume.tab.lock":
-        this.#tabs(() => {
-          if (facts) facts.locked = typeof given["on"] === "boolean" ? given["on"] : !facts.locked;
-        });
-        return;
-      case "lume.tab.mute":
-        this.#tabs(() => {
-          if (facts) facts.muted = typeof given["on"] === "boolean" ? given["on"] : !facts.muted;
-        });
-        return;
-      case "lume.group.mute":
-        this.#tabs(() =>
-          editGroup((found) => {
-            const { muted, ...rest } = found;
-            const on = typeof given["on"] === "boolean" ? given["on"] : !muted;
-            return on ? { ...rest, muted: true } : rest;
-          }),
-        );
-        return;
-      case "lume.tab.rename":
-        this.#tabs(() => {
-          if (facts) facts.title = typeof given["title"] === "string" ? given["title"] : null;
-        });
-        return;
-      case "lume.pane.rename": {
-        // Told as a change and not kept: a layout read whole again has the pane unnamed.
-        const pane = typeof given["pane"] === "string" ? given["pane"] : this.#focus;
-        const session = this.#fixture.sessions.get(pane);
-        if (session === undefined) return;
-        const title = typeof given["title"] === "string" ? given["title"] : null;
-        const node = terminal(pane, session, this.#options.panes?.[pane]);
-        this.#changed([{ type: "pane", pane: { id: node.id, title, content: node.content } }]);
-        return;
+    const window = this.#window();
+    const tabs = window.centre.tabs;
+    const tab = typeof given["tab"] === "string" ? given["tab"] : window.centre.active;
+    const shown = tabs.find((found) => found.id === tab);
+    const groupId = typeof given["group"] === "string" ? given["group"] : (shown?.group ?? null);
+    const group = (window.centre.groups ?? []).find((found) => found.id === groupId);
+    const on = (now: boolean | undefined) =>
+      typeof given["on"] === "boolean" ? given["on"] : !(now ?? false);
+    const title = typeof given["title"] === "string" ? given["title"] : null;
+    const intent = ((): Intent | null => {
+      switch (id) {
+        case "lume.tab.color":
+          return shown
+            ? {
+                type: "tab_color",
+                tab: shown.id,
+                color: (given["color"] as TabColor | null) ?? null,
+              }
+            : null;
+        case "lume.tab.lock":
+          return shown ? { type: "tab_lock", tab: shown.id, on: on(shown.locked) } : null;
+        case "lume.tab.mute":
+          return shown ? { type: "tab_mute", tab: shown.id, on: on(shown.muted) } : null;
+        case "lume.tab.rename":
+          return shown ? { type: "tab_rename", tab: shown.id, title } : null;
+        case "lume.pane.rename": {
+          const pane = typeof given["pane"] === "string" ? given["pane"] : window.focus;
+          return pane ? { type: "pane_rename", pane, title } : null;
+        }
+        case "lume.group.new":
+          return shown ? { type: "group_new", tab: shown.id } : null;
+        case "lume.group.add": {
+          const into = given["group"];
+          if (!shown || typeof into !== "string") return null;
+          const others = tabs.filter((found) => found.id !== shown.id);
+          const last = others.findLastIndex((found) => found.group === into);
+          return { type: "tab_place", tab: shown.id, index: last + 1, group: into };
+        }
+        case "lume.group.remove":
+          return shown
+            ? { type: "tab_place", tab: shown.id, index: tabs.indexOf(shown), group: null }
+            : null;
+        case "lume.group.mute":
+          return group ? { type: "group_set", group: group.id, muted: on(group.muted) } : null;
+        case "lume.group.set": {
+          if (!group) return null;
+          const set: Record<string, unknown> = { type: "group_set", group: group.id };
+          for (const key of ["name", "color", "icon", "collapsed", "kept", "muted"]) {
+            if (key in given) set[key] = given[key];
+          }
+          return set as unknown as Intent;
+        }
+        case "lume.group.toggle":
+          return group
+            ? { type: "group_set", group: group.id, collapsed: !(group.collapsed ?? false) }
+            : null;
+        case "lume.group.ungroup":
+          return group ? { type: "group_ungroup", group: group.id } : null;
+        default:
+          return null;
       }
-      case "lume.group.new":
-        this.#tabs(() => {
-          if (!facts) return;
-          const used = new Set(this.#groups.map((found) => found.color));
-          const order: readonly TabColor[] = [
-            "blue",
-            "pink",
-            "yellow",
-            "purple",
-            "teal",
-            "red",
-            "green",
-            "orange",
-          ];
-          const id = `g${this.#nextGroup++}`;
-          this.#groups.push({ id, color: order.find((color) => !used.has(color)) ?? "blue" });
-          facts.group = id;
-        });
-        return;
-      case "lume.group.add":
-        this.#tabs(() => {
-          if (facts && typeof given["group"] === "string") facts.group = given["group"];
-        });
-        return;
-      case "lume.group.remove":
-        this.#tabs(() => {
-          if (facts) facts.group = null;
-        });
-        return;
-      case "lume.group.set":
-        this.#tabs(() =>
-          editGroup((found) => {
-            const next: Record<string, unknown> = { ...found };
-            for (const key of ["name", "color", "icon", "collapsed", "kept", "muted"]) {
-              if (!(key in given)) continue;
-              if (given[key] === null) delete next[key];
-              else next[key] = given[key];
-            }
-            return next as unknown as Group;
-          }),
-        );
-        return;
-      case "lume.group.toggle":
-        this.#tabs(() => editGroup((found) => ({ ...found, collapsed: !found.collapsed })));
-        return;
-      case "lume.group.ungroup":
-        this.#tabs(() => {
-          for (const each of this.#facts.values()) if (each.group === group) each.group = null;
-        });
-        return;
-      // A session that is shown again, or ended, is no longer one that no pane shows.
-      case "lume.session.reattach":
-      case "lume.session.end":
-        this.#detached = this.#detached.filter((found) => found.session !== given["session"]);
-        return;
-      default:
-        return;
+    })();
+    if (intent) {
+      try {
+        this.#applyReal(intent);
+      } catch (error) {
+        if (!(error instanceof Refused)) throw error;
+      }
+      return;
     }
-  }
-
-  /** What the tabs are now, to compare with what they are after a change. */
-  #tabsNow(): TabsNow {
-    return {
-      order: [...this.#order],
-      active: this.#active,
-      facts: new Map([...this.#facts].map(([tab, facts]) => [tab, { ...facts }])),
-      groups: this.#groups.map((group) => ({ ...group })),
-    };
+    // A session that is shown again, or ended, is no longer one that no pane shows.
+    if (id === "lume.session.reattach" || id === "lume.session.end") {
+      this.#detached = this.#detached.filter((found) => found.session !== given["session"]);
+    }
   }
 
   /**
@@ -1238,43 +1235,6 @@ export class FakeCore implements Carrier {
       delete open["collapsed"];
       return open as unknown as Group;
     });
-  }
-
-  /** Changes the tabs, and tells the page what changed, as the core would. */
-  #tabs(change: () => void): void {
-    const before = this.#tabsNow();
-    change();
-    this.#tidy();
-    const after = this.#tabsNow();
-    const changes: LayoutChange[] = [];
-    for (const tab of after.order) {
-      const was = before.facts.get(tab);
-      const is = after.facts.get(tab);
-      if (!was || !is) continue;
-      if (was.title !== is.title) changes.push({ type: "tab_title", tab, title: is.title });
-      if (
-        was.color !== is.color ||
-        was.locked !== is.locked ||
-        was.muted !== is.muted ||
-        was.group !== is.group
-      ) {
-        changes.push({
-          type: "tab_state",
-          tab,
-          color: is.color,
-          locked: is.locked,
-          ...(is.muted ? { muted: true } : {}),
-          group: is.group,
-        });
-      }
-    }
-    if (JSON.stringify(before.groups) !== JSON.stringify(after.groups)) {
-      changes.push({ type: "groups", window: WINDOW, groups: after.groups });
-    }
-    if (before.order.join() !== after.order.join() || before.active !== after.active) {
-      changes.push({ type: "tabs", window: WINDOW, order: after.order, active: after.active });
-    }
-    if (changes.length > 0) this.#changed(changes);
   }
 
   /** Whether the page has attached to the session of every pane. */
@@ -1354,22 +1314,9 @@ export class FakeCore implements Carrier {
     this.#notify({ type: "layout_changed", epoch: 1, revision: this.#revision, changes });
   }
 
-  /** Shows a tab, as the core does: the tab's first pane takes the keyboard. */
+  /** Shows a tab, as the core does. */
   activate(tab: TabId): void {
-    const focus = this.#fixture.tabs.find((found) => found.id === tab)?.panes[0];
-    if (focus === undefined) return;
-    const groups = JSON.stringify(this.#groups);
-    this.#active = tab;
-    this.#focus = focus;
-    // A folded group opens when one of its tabs is shown.
-    this.#tidy();
-    this.#changed([
-      ...(JSON.stringify(this.#groups) === groups
-        ? []
-        : [{ type: "groups" as const, window: WINDOW, groups: this.#groups }]),
-      { type: "tabs", window: WINDOW, order: this.tabs, active: tab },
-      { type: "focus", window: WINDOW, pane: focus },
-    ]);
+    this.#applyReal({ type: "tab_activate", target: { type: "id", tab } });
   }
 
   /** Changes between the light look and the dark one, as the system's scheme changing does. */

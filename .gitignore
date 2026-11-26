@@ -44,3 +44,6 @@ zig-out/
 
 # Tauri generated schemas
 crates/lume-app/gen/
+
+# The core's layout logic built for the UI harness (cargo xtask logic).
+packages/ui/logic/

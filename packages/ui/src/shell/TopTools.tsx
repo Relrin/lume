@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { PaneId } from "../layout/types.ts";
-import type { ShellApp } from "./boot.ts";
+import type { ShellApp } from "./boot/index.ts";
 import { useShell } from "./context.ts";
 import { useKeyHint } from "./hints.ts";
 import { AttentionIcon, CommandIcon, DoneIcon, EyeIcon, PlusIcon } from "./icons.tsx";

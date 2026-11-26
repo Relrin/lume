@@ -5,10 +5,12 @@
 //! to the same workspace always gives the same ids. In JSON an id is a letter for its
 //! kind and the number: `"p12"`, `"t3"`, `"s7"`, `"g4"`, `"w1"`.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 macro_rules! counted_id {
@@ -70,6 +72,20 @@ macro_rules! counted_id {
                 text.parse().map_err(de::Error::custom)
             }
         }
+
+        impl JsonSchema for $name {
+            fn schema_name() -> Cow<'static, str> {
+                stringify!($name).into()
+            }
+
+            fn json_schema(_: &mut SchemaGenerator) -> Schema {
+                json_schema!({
+                    "description": concat!("An id: ", $what, ", as in `", $prefix, "12`."),
+                    "type": "string",
+                    "pattern": concat!("^", $prefix, "(0|[1-9][0-9]*)$")
+                })
+            }
+        }
     };
 }
 
@@ -127,6 +143,20 @@ impl PanelId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl JsonSchema for PanelId {
+    fn schema_name() -> Cow<'static, str> {
+        "PanelId".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Names a panel: a dotted name, as in `lume.tabs`.",
+            "type": "string",
+            "pattern": "^[a-z0-9.-]{1,64}$"
+        })
     }
 }
 
@@ -198,6 +228,20 @@ impl FromStr for WorkspaceId {
             .ok()
             .and_then(Self::new)
             .ok_or(WHAT)
+    }
+}
+
+impl JsonSchema for WorkspaceId {
+    fn schema_name() -> Cow<'static, str> {
+        "WorkspaceId".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Identifies a workspace whatever it is called: sixteen lowercase hexadecimal digits.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+        })
     }
 }
 

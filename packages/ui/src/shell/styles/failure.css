@@ -1,0 +1,117 @@
+@layer components {
+  /* What the window shows when it cannot start, or is asked only to report on the webview. */
+
+  /* A part of the window that could not be drawn, in its place. */
+  .part-failed {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
+    min-width: 0;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  .part-failed-text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .part-failed-again {
+    @apply text-ink;
+    flex-shrink: 0;
+    padding: 1px 8px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: min(6px, var(--lume-radius-control));
+    cursor: pointer;
+  }
+
+  .part-failed-again:hover {
+    @apply bg-control-hover;
+  }
+
+  /* Where a pane or all of them would be, it is in the middle. */
+  .tab-area > .part-failed,
+  .pane-card > .part-failed {
+    flex: 1;
+    justify-content: center;
+    height: 100%;
+  }
+
+  .window-failed .start-failure {
+    flex: 1;
+    width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .window-failed-ways {
+    display: flex;
+    gap: 8px;
+  }
+
+  .start-failure,
+  .hello {
+    max-width: 760px;
+    height: 100%;
+    margin: 0 auto;
+    padding: 32px 24px;
+    overflow: auto;
+    user-select: text;
+  }
+
+  .start-failure h1,
+  .hello h1 {
+    margin-bottom: 4px;
+    font-size: 24px;
+    font-weight: 600;
+  }
+
+  .start-failure p,
+  .lead {
+    @apply text-ink-muted;
+    margin-bottom: 24px;
+  }
+
+  .hello a {
+    @apply text-accent;
+  }
+
+  .facts {
+    @apply bg-card;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    overflow: hidden;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-card);
+  }
+
+  .facts dt,
+  .facts dd {
+    padding: 10px 16px;
+    border-bottom: var(--lume-size-border) solid var(--lume-color-border);
+  }
+
+  .facts dt {
+    @apply text-ink-muted;
+    white-space: nowrap;
+  }
+
+  .facts dd {
+    overflow-wrap: anywhere;
+  }
+
+  .facts dt:last-of-type,
+  .facts dd:last-of-type {
+    border-bottom: none;
+  }
+
+  .yes {
+    @apply text-success;
+  }
+
+  .no {
+    @apply text-danger;
+  }
+}

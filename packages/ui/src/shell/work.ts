@@ -10,7 +10,7 @@
 
 import { selectWindowPanes } from "../layout/selectors.ts";
 import type { PaneId, TabId } from "../layout/types.ts";
-import type { ShellApp } from "./boot.ts";
+import type { ShellApp } from "./boot/index.ts";
 import { describeNow, describeTabNow } from "./describing.ts";
 
 /**

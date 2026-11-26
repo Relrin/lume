@@ -9,7 +9,7 @@
 import { LIGHT_TOKENS } from "@lume/tokens";
 
 import type { ProfileList } from "../core/types.ts";
-import type { ShellApp } from "../shell/boot.ts";
+import type { ShellApp } from "../shell/boot/index.ts";
 import type { Launcher, SessionEvent } from "../transport/types.ts";
 import type { FakeCore, FixturePane } from "./fake-core.ts";
 import { FIXTURE_COMMANDS } from "./fixture-commands.ts";

@@ -1,0 +1,293 @@
+@layer components {
+  /*
+   * The colours of tabs and groups, from the theme. A tab takes its own colour, else
+   * its group's, else the accent, as the tint the mark of the tab on show is drawn in.
+   */
+  [data-group-color="red"] {
+    --group-color: var(--lume-color-tab-red);
+  }
+  [data-group-color="orange"] {
+    --group-color: var(--lume-color-tab-orange);
+  }
+  [data-group-color="yellow"] {
+    --group-color: var(--lume-color-tab-yellow);
+  }
+  [data-group-color="green"] {
+    --group-color: var(--lume-color-tab-green);
+  }
+  [data-group-color="teal"] {
+    --group-color: var(--lume-color-tab-teal);
+  }
+  [data-group-color="blue"] {
+    --group-color: var(--lume-color-tab-blue);
+  }
+  [data-group-color="purple"] {
+    --group-color: var(--lume-color-tab-purple);
+  }
+  [data-group-color="pink"] {
+    --group-color: var(--lume-color-tab-pink);
+  }
+
+  .tab {
+    --tab-tint: var(--lume-color-accent);
+  }
+
+  .tab[data-group-color] {
+    --tab-tint: var(--group-color);
+  }
+
+  .tab[data-color="red"] {
+    --tab-tint: var(--lume-color-tab-red);
+  }
+  .tab[data-color="orange"] {
+    --tab-tint: var(--lume-color-tab-orange);
+  }
+  .tab[data-color="yellow"] {
+    --tab-tint: var(--lume-color-tab-yellow);
+  }
+  .tab[data-color="green"] {
+    --tab-tint: var(--lume-color-tab-green);
+  }
+  .tab[data-color="teal"] {
+    --tab-tint: var(--lume-color-tab-teal);
+  }
+  .tab[data-color="blue"] {
+    --tab-tint: var(--lume-color-tab-blue);
+  }
+  .tab[data-color="purple"] {
+    --tab-tint: var(--lume-color-tab-purple);
+  }
+  .tab[data-color="pink"] {
+    --tab-tint: var(--lume-color-tab-pink);
+  }
+
+  /* A tab with a colour of its own is washed in it, a little more while it is on show. */
+  .tab[data-color] {
+    @apply text-ink;
+    background-color: color-mix(in srgb, var(--tab-tint) 13%, transparent);
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--tab-tint) 28%, transparent);
+  }
+
+  .tab[data-color][data-active="true"] {
+    background-color: color-mix(in srgb, var(--tab-tint) 24%, transparent);
+    box-shadow:
+      inset 0 0 0 var(--lume-size-border) color-mix(in srgb, var(--tab-tint) 50%, transparent),
+      0 0 14px color-mix(in srgb, var(--tab-tint) 22%, transparent);
+  }
+
+  .tab-label {
+    position: relative;
+  }
+
+  /* A locked tab shows a lock where its close button would be. */
+  .tab-lock {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+    padding: 0 9px 0 2px;
+  }
+
+  /* A struck-through bell on a tab, or a group's label, that does not ask for attention. */
+  .tab-muted {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+    padding: 0 2px;
+  }
+
+  .tab-group-muted {
+    display: flex;
+    flex-shrink: 0;
+    opacity: 0.75;
+  }
+
+  /* As far from the name or the picture before it as a tab's bell is from its title. */
+  .tab-group-label > .tab-group-muted:not(:first-child) {
+    margin-left: 6px;
+  }
+
+  /*
+   * Folding a group: its tabs narrow to nothing and fade, and the label turns solid and
+   * shows how many tabs it holds.
+   */
+  .tab {
+    transition:
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      scale var(--lume-motion-duration-base) var(--lume-motion-easing-standard),
+      max-width var(--lume-motion-duration-slow) var(--lume-motion-easing-standard),
+      min-width var(--lume-motion-duration-slow) var(--lume-motion-easing-standard),
+      opacity var(--lume-motion-duration-base) var(--lume-motion-easing-standard),
+      margin var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
+  }
+
+  .tab[data-folded="true"] {
+    max-width: 0;
+    min-width: 0;
+    margin-left: -2px;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition-duration:
+      var(--lume-motion-duration-base), var(--lume-motion-duration-base),
+      var(--lume-motion-duration-slow), var(--lume-motion-duration-slow),
+      var(--lume-motion-duration-fast), var(--lume-motion-duration-base);
+  }
+
+  /* The line in a group's colour under its label and its tabs. */
+  .tab-group-line {
+    position: absolute;
+    left: 0;
+    right: -2px;
+    bottom: -4px;
+    height: 2px;
+    background-color: var(--group-color);
+    pointer-events: none;
+    transition:
+      opacity var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      height var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      bottom var(--lume-motion-duration-base) var(--lume-motion-easing-exit);
+  }
+
+  .tab[data-group-last] > .tab-group-line {
+    right: 6px;
+    border-radius: 0 2px 2px 0;
+  }
+
+  [data-joining] > .tab-group-line {
+    height: 3px;
+    bottom: -5px;
+  }
+
+  .tab-group-label {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    height: 22px;
+    padding: 0 8px;
+    margin: 0 3px 0 4px;
+    border-radius: min(7px, var(--lume-radius-control));
+    background-color: color-mix(in srgb, var(--group-color) 18%, transparent);
+    color: var(--group-color);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    user-select: none;
+    touch-action: pan-y;
+    cursor: pointer;
+    transition:
+      background-color var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      color var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard),
+      margin var(--lume-motion-duration-base) var(--lume-motion-easing-standard),
+      box-shadow var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      opacity var(--lume-motion-duration-base) var(--lume-motion-easing-exit);
+  }
+
+  .tab-group-label:hover {
+    background-color: color-mix(in srgb, var(--group-color) 27%, transparent);
+  }
+
+  .tab-group-label:active {
+    scale: 0.96;
+  }
+
+  .tab-group-label:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--group-color) 70%, transparent);
+    outline-offset: 2px;
+  }
+
+  /* The label is shorter than a tab and stands in the row's middle: its line is put
+     where the tabs' lines are whatever its height, and reaches the first tab across the
+     label's margin and the row's gap. */
+  .tab-group-label > .tab-group-line {
+    right: -5px;
+    bottom: calc((100% - var(--lume-size-tab)) / 2 - 4px);
+    border-radius: 2px 0 0 2px;
+  }
+
+  .tab-group-label[data-joining] > .tab-group-line {
+    bottom: calc((100% - var(--lume-size-tab)) / 2 - 5px);
+  }
+
+  .tab-group-label[data-joining] {
+    box-shadow: 0 0 0 1.5px var(--group-color);
+  }
+
+  .tab-group-label[data-collapsed] {
+    background-color: var(--group-color);
+    color: var(--lume-color-text-inverse);
+  }
+
+  .tab-group-label[data-collapsed] > .tab-group-line {
+    opacity: 0;
+  }
+
+  /* A group with neither a name nor a picture is a small mark in its colour. */
+  .tab-group-label[data-empty] {
+    min-width: 16px;
+    height: 16px;
+    padding: 0;
+    border-radius: 8px;
+    background-color: var(--group-color);
+    color: var(--lume-color-text-inverse);
+  }
+
+  .tab-group-icon {
+    display: flex;
+  }
+
+  .tab-group-icon + .tab-group-name {
+    margin-left: 5px;
+  }
+
+  .tab-group-count {
+    display: grid;
+    grid-template-columns: 0fr;
+    transition: grid-template-columns var(--lume-motion-duration-slow)
+      var(--lume-motion-easing-standard);
+  }
+
+  .tab-group-label[data-collapsed] .tab-group-count {
+    grid-template-columns: 1fr;
+  }
+
+  .tab-group-count > span {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+    padding-left: 6px;
+  }
+
+  .tab-group-label[data-empty] .tab-group-count > span {
+    padding: 0 5px;
+  }
+
+  .tab-group-label:not([data-collapsed]) .tab-group-count > span {
+    padding: 0;
+  }
+
+  /* The label's own font and size, so the count stands on the name's baseline; figures
+     of one width, so a count that changes keeps its place. */
+  .tab-group-number {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+
+  .tab-group-waiting {
+    display: none;
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: var(--lume-color-status-warning);
+    box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--lume-color-surface) 80%, transparent);
+  }
+
+  .tab-group-label[data-collapsed][data-waiting="true"] .tab-group-waiting {
+    display: block;
+  }
+}

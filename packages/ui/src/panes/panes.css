@@ -1,0 +1,700 @@
+@layer components {
+  /* The panes. Each card and divider is placed by a transform and a size set on it. */
+
+  /*
+   * The cards stack among themselves: a floating card is above the others, not above
+   * the window. Nothing is cut off at the area's edges: a card's shadow falls on
+   * whatever lies beside the area, a panel at the window's side included, so the side
+   * reads as the same ground the cards stand on and no edge shows between the two.
+   */
+  .tab-area {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    isolation: isolate;
+  }
+
+  .pane-card {
+    @apply bg-card;
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-card);
+    box-shadow: var(--lume-shadow-card);
+    will-change: transform;
+  }
+
+  .pane-card[data-focused="true"] {
+    border-color: var(--lume-color-border-focus);
+    box-shadow: var(--lume-shadow-card-focus);
+  }
+
+  /* A card that does not have the keyboard is dimmed towards the surface. */
+  .pane-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--lume-color-surface);
+    opacity: var(--lume-opacity-dim);
+    pointer-events: none;
+  }
+
+  .pane-card[data-focused="true"]::after {
+    opacity: 0;
+  }
+
+  /*
+   * A header is as wide as its card, and a card can be narrow. The title and the
+   * directory give way first; then the header does without the directory, and then
+   * without the buttons there are keys for, so the ones that are left are whole.
+   */
+  .pane-header {
+    @apply bg-card-header;
+    container-type: inline-size;
+    cursor: grab;
+    touch-action: none;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    gap: 8px;
+    height: var(--lume-size-header);
+    padding: 0 6px 0 12px;
+    border-bottom: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 80%, transparent);
+  }
+
+  .pane-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .pane-title {
+    /* What runs in the pane is the last thing a narrow header lets go of. */
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 40cqi;
+    overflow: hidden;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* The field a pane is renamed in, in the place of its name. */
+  .pane-rename {
+    @apply bg-control text-ink;
+    flex: 0 1 200px;
+    min-width: 60px;
+    height: 20px;
+    padding: 0 6px;
+    border: var(--lume-size-border) solid var(--lume-color-border-focus);
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    outline: none;
+    font-weight: 600;
+    user-select: text;
+  }
+
+  /* The directory gives way to the title when there is not room for both. */
+  .pane-cwd {
+    @apply text-ink-muted;
+    flex: 0 1000 auto;
+    /* Never squeezed to a sliver: it shows a few characters or, narrower still, is left out. */
+    min-width: 5ch;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .pane-spacer {
+    flex: 1;
+  }
+
+  .pane-buttons {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 2px;
+  }
+
+  .pane-button {
+    width: 26px;
+    height: 26px;
+    transition: opacity var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  /*
+   * Only the card that has the keyboard shows its buttons. Another card's come back
+   * while the pointer is over its header or the keyboard is on one of them, and keep
+   * their room meanwhile, so the title beside them does not move.
+   */
+  .pane-card:not([data-focused="true"]) .pane-header:not(:hover, :focus-within) .pane-button {
+    opacity: 0;
+  }
+
+  @container (max-width: 320px) {
+    .pane-cwd {
+      display: none;
+    }
+  }
+
+  /*
+   * A header with no room for every button does without them a few at a time, so the
+   * ones left are whole and inside the card: the splits first, then float and
+   * minimise, leaving zoom and close, and at last zoom, leaving close alone. The
+   * header measures what fits and says how far it went in `data-gives-way`.
+   */
+  .pane-header[data-gives-way] .pane-button[data-gives-way="1"],
+  .pane-header:is([data-gives-way="2"], [data-gives-way="3"]) .pane-button[data-gives-way="2"],
+  .pane-header[data-gives-way="3"] .pane-button[data-gives-way="3"] {
+    display: none;
+  }
+
+  @container (max-width: 130px) {
+    .pane-icon {
+      display: none;
+    }
+  }
+
+  /*
+   * Where a shell at its prompt runs, in a Linux distribution here or on another
+   * machine, as the colour of its prompt. A program's own tile keeps its colours.
+   */
+  .pane-icon {
+    position: relative;
+  }
+
+  .pane-header[data-pane-kind="wsl"] .tile[data-tile="terminal"] {
+    --tile-ink: var(--lume-color-status-warning);
+  }
+
+  .pane-header[data-pane-kind="ssh"] .tile[data-tile="terminal"] {
+    --tile-ink: var(--lume-color-status-info);
+  }
+
+  /* What a pane the user is not looking at has gathered, as a dot on its tile's corner. */
+  .pane-activity,
+  .tab-activity,
+  .pane-pill-mark {
+    display: none;
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--activity-tone);
+  }
+
+  .pane-activity {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    box-shadow: 0 0 0 1.5px var(--lume-color-card-header);
+  }
+
+  [data-activity="output"] {
+    --activity-tone: color-mix(in srgb, var(--lume-color-accent) 70%, transparent);
+  }
+
+  [data-activity="attention"],
+  .pane-pill[data-waiting="true"] {
+    --activity-tone: var(--lume-color-status-warning);
+  }
+
+  [data-activity="attention-error"] {
+    --activity-tone: var(--lume-color-status-danger);
+  }
+
+  .pane-header:is([data-activity="output"], [data-activity^="attention"]) .pane-activity,
+  .tab-label:is([data-activity="output"], [data-activity^="attention"]) .tab-activity,
+  .pane-pill:is([data-activity="output"], [data-activity^="attention"], [data-waiting="true"])
+    .pane-pill-mark {
+    display: block;
+  }
+
+  /* A command line is running. */
+  .pane-running {
+    flex-shrink: 0;
+    width: 10px;
+    height: 10px;
+    border: 2px solid color-mix(in srgb, var(--lume-color-accent) 25%, transparent);
+    border-top-color: var(--lume-color-accent);
+    border-radius: 50%;
+    animation: pane-spin 900ms linear infinite;
+  }
+
+  @keyframes pane-spin {
+    to {
+      rotate: 360deg;
+    }
+  }
+
+  /* The last command line failed: its exit code. */
+  .pane-exit {
+    flex-shrink: 0;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: min(5px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-status-danger) 14%, transparent);
+    color: var(--lume-color-status-danger);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+
+  /* Another view of the session decides the terminal's size. */
+  .pane-sized {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: min(5px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--lume-color-text-muted) 14%, transparent);
+    color: var(--lume-color-text-muted);
+    font-size: 11px;
+    line-height: 18px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* How a program in the pane says its work stands. Narrow, only its mark is left. */
+  .pane-status {
+    --status-tone: var(--lume-color-accent);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    gap: 6px;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: min(10px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--status-tone) 12%, transparent);
+    color: var(--status-tone);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 20px;
+    white-space: nowrap;
+  }
+
+  .pane-status[data-program-status="blocked"] {
+    --status-tone: var(--lume-color-status-warning);
+  }
+
+  .pane-status[data-program-status="error"] {
+    --status-tone: var(--lume-color-status-danger);
+  }
+
+  .pane-status[data-program-status="done"] {
+    --status-tone: var(--lume-color-status-info);
+  }
+
+  .pane-status-mark {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--status-tone);
+  }
+
+  .pane-status[data-program-status="working"] .pane-status-mark {
+    background: none;
+    border: 2px solid color-mix(in srgb, var(--status-tone) 25%, transparent);
+    border-top-color: var(--status-tone);
+    animation: pane-spin 900ms linear infinite;
+  }
+
+  .pane-status[data-program-status="done"] .pane-status-mark {
+    width: auto;
+    height: auto;
+    background: none;
+  }
+
+  /* How the pane's program ended, and the way to start it again. */
+  .pane-ended {
+    @apply text-ink-muted;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 1;
+    min-width: 0;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .pane-ended-reason {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .pane-again {
+    @apply text-ink;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 5px;
+    height: 22px;
+    padding: 0 8px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: min(6px, var(--lume-radius-control));
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  @container (max-width: 440px) {
+    .pane-status {
+      width: 20px;
+      padding: 0;
+    }
+
+    .pane-status-label,
+    .pane-ended-reason,
+    .status-segment .status-picture + .status-segment-label {
+      display: none;
+    }
+
+    .pane-status-mark {
+      display: inline-flex;
+    }
+  }
+
+  @container (max-width: 320px) {
+    .pane-exit,
+    .pane-sized {
+      display: none;
+    }
+  }
+
+  @container (max-width: 210px) {
+    .pane-again span {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pane-running,
+    .pane-status[data-program-status="working"] .pane-status-mark {
+      animation: none;
+      border-color: var(--lume-color-accent);
+    }
+  }
+
+  /* A card in hand stays where it is, dimmed, until it is let go. */
+  .pane-card[data-dragging="true"] {
+    opacity: var(--lume-opacity-disabled);
+    outline: var(--lume-size-border) dashed
+      color-mix(in srgb, var(--lume-color-accent) 60%, transparent);
+    outline-offset: -1px;
+  }
+
+  .pane-card[data-dragging="true"] .pane-header,
+  .pane-card[data-moving="true"] .pane-header {
+    cursor: grabbing;
+  }
+
+  /*
+   * A card that floats over the tabs is told apart by the colour of its edge, and has
+   * edges the pointer can take hold of to resize it.
+   */
+  .pane-card[data-floating="true"] {
+    border-color: color-mix(
+      in srgb,
+      var(--lume-color-status-warning) 35%,
+      var(--lume-color-border)
+    );
+    box-shadow: var(--lume-shadow-floating);
+  }
+
+  .pane-card[data-floating="true"][data-focused="true"] {
+    border-color: color-mix(in srgb, var(--lume-color-status-warning) 60%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--lume-color-status-warning) 18%, transparent),
+      var(--lume-shadow-floating);
+  }
+
+  .pane-card[data-floating="true"] .pane-header {
+    background: color-mix(
+      in srgb,
+      var(--lume-color-status-warning) 5%,
+      var(--lume-color-card-header)
+    );
+  }
+
+  /* The button that lifts a pane off the others is lit while the pane floats. */
+  .pane-button-lit[aria-pressed="true"],
+  .pane-button-lit[aria-pressed="true"]:hover {
+    color: var(--lume-color-status-warning);
+    background: color-mix(in srgb, var(--lume-color-status-warning) 16%, transparent);
+  }
+
+  /* A card that begins to float, or comes back from the corner, grows into its place. */
+  .pane-card[data-floating="true"] {
+    animation: float-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  @keyframes float-in {
+    from {
+      opacity: 0;
+      scale: 0.96;
+    }
+  }
+
+  /*
+   * The panes that are put away: a row of markers at the bottom right of the panes,
+   * over everything else there. Only the markers take the pointer.
+   */
+  .pane-tray {
+    position: absolute;
+    right: calc(var(--lume-space-gap) + 12px);
+    bottom: calc(var(--lume-space-gap) + 12px);
+    z-index: 100;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    max-width: calc(100% - 2 * var(--lume-space-gap) - 24px);
+    pointer-events: none;
+  }
+
+  .pane-pill {
+    @apply bg-popover text-ink;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 220px;
+    gap: 8px;
+    height: 32px;
+    padding: 0 12px 0 8px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-card);
+    box-shadow: var(--lume-shadow-floating);
+    font-size: 12.5px;
+    cursor: pointer;
+    pointer-events: auto;
+    transform-origin: 100% 100%;
+    animation: pill-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+    transition:
+      border-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      scale var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
+  }
+
+  .pane-pill:hover {
+    border-color: var(--lume-color-border-focus);
+  }
+
+  .pane-pill:active {
+    scale: 0.97;
+  }
+
+  .pane-pill:focus-visible {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: 1px;
+  }
+
+  .pane-pill-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .pane-pill-name {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  @keyframes pill-in {
+    from {
+      opacity: 0;
+      scale: 0.9;
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pane-card[data-floating="true"],
+    .pane-pill {
+      animation: fade-in var(--lume-motion-duration-base) var(--lume-motion-easing-exit);
+    }
+  }
+
+  .float-edge {
+    position: absolute;
+    z-index: 3;
+    touch-action: none;
+  }
+
+  .float-edge[data-edge="w"],
+  .float-edge[data-edge="e"] {
+    top: var(--lume-size-header);
+    bottom: 16px;
+    width: 6px;
+    cursor: ew-resize;
+  }
+
+  .float-edge[data-edge="w"] {
+    left: 0;
+  }
+
+  .float-edge[data-edge="e"] {
+    right: 0;
+  }
+
+  .float-edge[data-edge="s"] {
+    right: 16px;
+    bottom: 0;
+    left: 16px;
+    height: 6px;
+    cursor: ns-resize;
+  }
+
+  .float-edge[data-edge="sw"],
+  .float-edge[data-edge="se"] {
+    bottom: 0;
+    width: 16px;
+    height: 16px;
+  }
+
+  .float-edge[data-edge="sw"] {
+    left: 0;
+    cursor: nesw-resize;
+  }
+
+  .float-edge[data-edge="se"] {
+    right: 0;
+    cursor: nwse-resize;
+  }
+
+  /* A small mark in the lower right corner, which says the card can be resized. */
+  .float-edge[data-edge="se"]::after {
+    content: "";
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 6px;
+    height: 6px;
+    border-right: 1.5px solid var(--lume-color-text-muted);
+    border-bottom: 1.5px solid var(--lume-color-text-muted);
+    border-bottom-right-radius: min(3px, var(--lume-radius-card));
+    opacity: 0.6;
+  }
+
+  /* Where a card in hand would go. It is above the cards of the tab and below the floating ones. */
+  .drop-preview {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 10;
+    display: grid;
+    place-items: center;
+    border-radius: var(--lume-radius-card);
+    background: var(--lume-color-drop-preview);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lume-color-accent) 75%, transparent);
+    pointer-events: none;
+  }
+
+  .drop-preview-label {
+    @apply bg-popover;
+    padding: 6px 12px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    font-size: 12px;
+    box-shadow: var(--lume-shadow-popover);
+  }
+
+  .drop-preview-label:empty {
+    display: none;
+  }
+
+  .divider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 2;
+    touch-action: none;
+  }
+
+  .divider[data-axis="row"] {
+    cursor: col-resize;
+  }
+
+  .divider[data-axis="column"] {
+    cursor: row-resize;
+  }
+
+  /* A thin line down the middle of the gap, which shows when the gap is in use. */
+  .divider::after {
+    content: "";
+    position: absolute;
+    border-radius: min(2px, var(--lume-radius-control));
+    background: transparent;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .divider[data-axis="row"]::after {
+    top: 10px;
+    bottom: 10px;
+    left: calc(50% - 1px);
+    width: 2px;
+  }
+
+  .divider[data-axis="column"]::after {
+    right: 10px;
+    left: 10px;
+    top: calc(50% - 1px);
+    height: 2px;
+  }
+
+  .divider:hover::after {
+    background: color-mix(in srgb, var(--lume-color-accent) 55%, transparent);
+  }
+
+  .divider[data-dragging="true"]::after,
+  .divider:focus-visible::after {
+    background: var(--lume-color-accent);
+  }
+
+  .empty-window {
+    @apply text-ink-muted;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .empty-action {
+    @apply bg-control-active text-ink;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 14px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    cursor: pointer;
+  }
+
+  .empty-action:hover {
+    border-color: var(--lume-color-border-focus);
+  }
+}

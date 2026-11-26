@@ -1,10 +1,21 @@
+import { readFileSync } from "node:fs";
+
 import { DEFAULT_TOKENS, LIGHT_TOKENS } from "@lume/tokens";
 import { describe, expect, it } from "vitest";
 
 import type { ConfigView, LayoutView, Notice } from "../src/core/types.ts";
 import { FakeCore, FIXTURE_SESSIONS, FIXTURE_TABS } from "../src/harness/fake-core.ts";
+import { LayoutLogic } from "../src/harness/logic.ts";
 import type { Node, Workspace } from "../src/layout/types.ts";
 import { HEADER_LEN } from "../src/transport/frames.ts";
+import type { CommandName } from "../src/transport/commands.generated.ts";
+
+/** The core's layout logic, which the stand-in core changes its layout with. */
+const logic = await LayoutLogic.load(
+  readFileSync(new URL("../logic/lume-logic.wasm", import.meta.url)),
+).catch((error: unknown) => {
+  throw new Error(`build the layout logic first with \`cargo xtask logic\`: ${String(error)}`);
+});
 
 /** A core with what it tells its page kept. */
 async function opened(core: FakeCore): Promise<Notice[]> {
@@ -119,7 +130,7 @@ describe("the stand-in core's window when nothing is asked of it", () => {
   });
 
   it("shows a tab and gives its first pane the keyboard", async () => {
-    const core = new FakeCore();
+    const core = new FakeCore({ logic });
     const notices = await opened(core);
     core.activate("t2");
     expect(notices).toEqual([
@@ -186,7 +197,7 @@ describe("the stand-in core's window as a test asks for it", () => {
   });
 
   it("tells the page of a split resized, a pane focused and a dock area resized", async () => {
-    const core = new FakeCore({ tabs: [2] });
+    const core = new FakeCore({ tabs: [2], logic });
     const notices = await opened(core);
     await core.command("layout_apply", {
       intent: { type: "resize", split: "s1", ratios: [300_000, 700_000] },
@@ -239,7 +250,58 @@ describe("the stand-in core's window as a test asks for it", () => {
     expect((await core.command<ArrayBuffer>("background_image")).byteLength).toBe(0);
     await expect(core.command("config_unset", { path: "font.size" })).resolves.toBeNull();
     expect(core.unanswered).toEqual([]);
-    await expect(core.command("no_such_command")).rejects.toMatchObject({ code: "unsupported" });
+    // A name the core does not have no longer type-checks; a page built against an older
+    // core could still send one.
+    const unknown = "no_such_command" as CommandName;
+    await expect(core.command(unknown)).rejects.toMatchObject({ code: "unsupported" });
     expect(core.unanswered).toEqual(["no_such_command"]);
+  });
+});
+
+describe("the stand-in core changing its layout and settings as the core does", () => {
+  it("keeps a pane renamed when the layout is read whole again", async () => {
+    const core = new FakeCore({ logic });
+    const notices = await opened(core);
+    await core.command("command_run", {
+      id: "lume.pane.rename",
+      args: { pane: "p1", title: "logs" },
+    });
+    expect(notices).toHaveLength(1);
+    const root = (await workspace(core)).windows[0]?.centre.tabs[0]?.root;
+    const renamed = root?.type === "split" ? root.children[0] : root;
+    expect(renamed?.type === "pane" && renamed.title).toBe("logs");
+  });
+
+  it("mutes a tab and its group as the core does", async () => {
+    const core = new FakeCore({ logic });
+    await opened(core);
+    await core.command("command_run", { id: "lume.tab.mute", args: { tab: "t1" } });
+    await core.command("command_run", { id: "lume.group.new", args: { tab: "t2" } });
+    const centre = (await workspace(core)).windows[0]?.centre;
+    expect(centre?.tabs.find((tab) => tab.id === "t1")?.muted).toBe(true);
+    expect(centre?.groups?.length).toBe(1);
+    expect(centre?.tabs.find((tab) => tab.id === "t2")?.group).toBe(centre?.groups?.[0]?.id);
+  });
+
+  it("refuses an intent the core refuses, with the core's code", async () => {
+    const core = new FakeCore({ logic });
+    await opened(core);
+    await expect(
+      core.command("layout_apply", { intent: { type: "close", pane: "p99" } }),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("writes a setting, shows it in the view and tells the pages", async () => {
+    const core = new FakeCore({ logic });
+    const notices = await opened(core);
+    await core.command("config_set", { path: "terminal.copy-on-select", value: true });
+    const told = notices.find((notice) => notice.type === "config_changed");
+    expect(told?.type === "config_changed" && told.changed).toEqual(["terminal.copy-on-select"]);
+    const view = await core.command<ConfigView>("config_view");
+    expect(view.config.terminal["copy-on-select"]).toBe(true);
+    await core.command("config_unset", { path: "terminal.copy-on-select" });
+    const after = await core.command<ConfigView>("config_view");
+    expect(after.config.terminal["copy-on-select"]).toBe(false);
+    expect(core.written.map((write) => write.name)).toEqual(["config_set", "config_unset"]);
   });
 });

@@ -239,7 +239,9 @@ describe("the settings as pages of rows", () => {
   });
 
   it("lists the Rex servers there are to start on, by the address that is written", () => {
-    const held = view({ config: { ...view().config, rex: { "start-on": "" } } });
+    const held = view({
+      config: { ...view().config, rex: { ...view().config.rex, "start-on": "" } },
+    });
     const start = row(settingsPages(SCHEMA, held, LISTS), "rex.start-on");
     expect(start.choices).toEqual([
       { value: null, label: "Your workspace" },
@@ -377,7 +379,7 @@ describe("the settings as pages of rows", () => {
   it("puts what is wrong with a setting in the user's files on its row", () => {
     const problems = [
       {
-        kind: "invalid",
+        kind: "invalid_value" as const,
         path: "terminal.cursor-style",
         file: "C:\\Users\\someone\\config.toml",
         line: 7,

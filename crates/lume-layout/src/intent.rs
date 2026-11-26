@@ -6,13 +6,14 @@
 //! sends it and whenever it arrives.
 
 use lume_proto::{BackendId, Launcher, SessionId, TermSize};
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::ids::{GroupId, PaneId, PanelId, SplitId, TabId, WindowId};
 use crate::model::{Area, Bounds, GroupIcon, PanelContent, Shelved, TabColor, UnitRect};
 
 /// A direction on the screen.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Dir {
     Left,
@@ -26,7 +27,7 @@ impl Dir {
 }
 
 /// A change asked of a layout.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Intent {
     /// Divides a pane's space and puts a new pane on one side of it. `ratio` is the new
@@ -150,6 +151,7 @@ pub enum Intent {
             deserialize_with = "given",
             skip_serializing_if = "Option::is_none"
         )]
+        #[schemars(with = "Option<String>")]
         name: Option<Option<String>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         color: Option<TabColor>,
@@ -158,6 +160,7 @@ pub enum Intent {
             deserialize_with = "given",
             skip_serializing_if = "Option::is_none"
         )]
+        #[schemars(with = "Option<GroupIcon>")]
         icon: Option<Option<GroupIcon>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         collapsed: Option<bool>,
@@ -310,7 +313,7 @@ impl Intent {
 }
 
 /// What a new pane shows.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NewContent {
     /// A terminal, and how to start its session.
@@ -326,7 +329,7 @@ pub enum NewContent {
 
 /// How the session of a new terminal pane is to be started. Everything may be left out:
 /// the application then starts its default shell where new panes start.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SpawnRequest {
     #[serde(default)]
@@ -350,7 +353,7 @@ pub struct SpawnRequest {
 }
 
 /// Which pane is to have the keyboard.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FocusTarget {
     /// This pane. If it is in a tab that is not shown, the tab is shown.
@@ -364,7 +367,7 @@ pub enum FocusTarget {
 }
 
 /// Which tab is to be shown.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TabTarget {
     Id {
@@ -386,7 +389,7 @@ pub enum TabTarget {
 }
 
 /// Where a pane is to go.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Place {
     /// On one side of another pane, sharing that pane's space half and half.

@@ -23,7 +23,7 @@ import type { LayoutState } from "../layout/store.ts";
 import type { PaneId, TabId } from "../layout/types.ts";
 import { hostOnShow, isRexBackend, UNKNOWN_SERVER } from "../rex/model.ts";
 import { TAB_ICONS_MAX } from "../tuning.ts";
-import type { ShellApp } from "./boot.ts";
+import type { ShellApp } from "./boot/index.ts";
 
 /** The user's pictures for programs, worked out once for each configuration. */
 const ICONS = new WeakMap<ConfigView, ReadonlyMap<string, ProgramIcon>>();

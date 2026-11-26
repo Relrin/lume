@@ -4,7 +4,7 @@
 
 import { createContext, useContext } from "react";
 
-import type { ShellApp } from "./boot.ts";
+import type { ShellApp } from "./boot/index.ts";
 
 /** The page's stores, views and commands, for the components under a shell. */
 export const ShellContext = createContext<ShellApp | null>(null);

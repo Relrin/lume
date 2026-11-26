@@ -65,6 +65,24 @@ function setup(reduced = { matches: false }) {
 }
 
 describe("the cursor's effects in a window", () => {
+  it("stop telling of an effect that cannot be drawn once told to stop", () => {
+    const told: string[] = [];
+    let tell: ((id: string, message: string) => void) | undefined;
+    const effects = Object.assign(new FakeEffects(), {
+      onProblem: (listener: (id: string, message: string) => void) => void (tell = listener),
+    });
+    const fx = new CursorFx(() => effects, { matches: false });
+    const stop = fx.onProblem((id) => told.push(id));
+    fx.attach({} as HTMLElement);
+    tell?.("acme/glow", "no shader");
+    stop();
+    tell?.("acme/glow", "no shader");
+    // Effects made again for another element are not told of the listener either.
+    fx.attach({} as HTMLElement);
+    tell?.("acme/glow", "no shader");
+    expect(told).toEqual(["acme/glow"]);
+  });
+
   it("say nothing until the first cursor is known, then follow its jumps", () => {
     const { fx, effects } = setup();
     const left = pane(0);

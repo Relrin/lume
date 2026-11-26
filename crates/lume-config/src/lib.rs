@@ -44,6 +44,7 @@ mod testing;
 pub mod theme;
 pub mod tokens;
 pub mod tuning;
+pub mod view;
 pub mod watch;
 pub mod write;
 
@@ -72,6 +73,7 @@ pub use theme::{
     Theme, Themes, default_tokens, light_tokens, parse_theme, resolve_tokens, theme_schema,
 };
 pub use tokens::{Color, ResolvedTokens, TOKENS, TokenDef, TokenKind, TokenValue};
+pub use view::{ConfigBody, ConfigView, KeymapView, ThemeChoice};
 pub use watch::{WatchEvent, Watcher};
 
 /// The colour scheme of the operating system, or of a theme.

@@ -54,7 +54,7 @@ impl fmt::Display for Source {
 }
 
 /// What kind of thing is wrong.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProblemKind {
     /// The file is not TOML. Nothing in it can be used.
@@ -71,7 +71,7 @@ pub enum ProblemKind {
 }
 
 /// One thing wrong with a configuration or theme file, and where.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct Problem {
     pub kind: ProblemKind,
     /// The key the problem is about, as a dotted path. Empty for a problem with the

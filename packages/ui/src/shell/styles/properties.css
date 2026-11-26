@@ -1,0 +1,25 @@
+/* The numbers the mark of the tab on show moves by, registered so they can be eased. */
+@property --mark-press {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+@property --mark-speed {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+/* How wide the fade at each end of a row of tabs is, registered so it can be eased. */
+@property --tab-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --tab-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}

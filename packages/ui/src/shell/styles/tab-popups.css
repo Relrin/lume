@@ -1,0 +1,278 @@
+@layer components {
+  /* A menu or an editor opened from a tab or a label, under it. */
+  .anchored {
+    position: fixed;
+    z-index: 45;
+    width: 0;
+    height: 0;
+  }
+
+  .anchored > .menu,
+  .anchored > .group-editor {
+    top: 6px;
+    left: 0;
+    width: var(--anchored-width);
+    min-width: 0;
+    max-width: none;
+    max-height: var(--anchored-room);
+    transform-origin: var(--anchored-origin);
+    animation: menu-in var(--lume-motion-duration-slow) var(--lume-motion-easing-standard);
+  }
+
+  .anchored[data-above] > .menu,
+  .anchored[data-above] > .group-editor {
+    --menu-rise: 4px;
+    top: auto;
+    bottom: 6px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .anchored > .menu,
+    .anchored > .group-editor {
+      animation: none;
+    }
+  }
+
+  .menu-heading {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 10px;
+    font-size: 11.5px;
+  }
+
+  .menu-note {
+    @apply text-ink-muted;
+    margin: 6px 10px 4px;
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+
+  .menu-swatches {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 34px;
+    padding: 0 10px;
+  }
+
+  .menu-swatches > .menu-label {
+    flex: none;
+  }
+
+  .menu-swatch-row {
+    display: flex;
+    gap: 5px;
+    margin-left: auto;
+  }
+
+  .menu-swatch {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
+  }
+
+  .menu-swatch:active {
+    scale: 0.9;
+  }
+
+  .menu-swatch[data-none] {
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    background: linear-gradient(
+      to top right,
+      transparent calc(50% - 0.75px),
+      var(--lume-color-text-muted) calc(50% - 0.75px),
+      var(--lume-color-text-muted) calc(50% + 0.75px),
+      transparent calc(50% + 0.75px)
+    );
+  }
+
+  .menu-swatch[aria-checked="true"] {
+    box-shadow:
+      0 0 0 2px var(--lume-color-popover),
+      0 0 0 3.5px var(--lume-color-text);
+  }
+
+  .menu-swatch:focus-visible {
+    outline: 2px solid var(--lume-color-border-focus);
+    outline-offset: 3px;
+  }
+
+  .menu-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+  }
+
+  .menu-dot[data-none] {
+    background: var(--lume-color-text-muted);
+    opacity: 0.6;
+  }
+
+  .menu-group-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .menu-item[data-danger],
+  .menu-item[data-danger] .menu-icon {
+    color: var(--lume-color-status-danger);
+  }
+
+  /* The editor of a group of tabs. */
+  .group-editor {
+    @apply bg-popover;
+    position: absolute;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    overflow-y: auto;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 2px));
+    box-shadow: var(--lume-shadow-popover);
+  }
+
+  .group-editor-top {
+    display: flex;
+    gap: 6px;
+  }
+
+  .group-editor-picture {
+    @apply bg-control;
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    color: var(--group-color);
+    cursor: pointer;
+    transition:
+      border-color var(--lume-motion-duration-base) var(--lume-motion-easing-exit),
+      scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
+  }
+
+  .group-editor-picture:active {
+    scale: 0.95;
+  }
+
+  .group-editor-picture[aria-expanded="true"] {
+    border-color: color-mix(in srgb, var(--group-color) 60%, var(--lume-color-border));
+  }
+
+  .group-editor-name {
+    @apply bg-control text-ink;
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    padding: 0 10px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    font-size: 13px;
+    outline: none;
+    user-select: text;
+  }
+
+  .group-editor-name:focus {
+    border-color: color-mix(in srgb, var(--group-color) 70%, var(--lume-color-border));
+  }
+
+  .group-editor-name::placeholder {
+    color: var(--lume-color-text-muted);
+  }
+
+  .group-editor-dot {
+    display: block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--group-color);
+  }
+
+  .group-editor-dot[data-small] {
+    width: 8px;
+    height: 8px;
+  }
+
+  .group-editor-icons,
+  .group-editor-workspaces {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--lume-motion-duration-base)
+      var(--lume-motion-easing-standard);
+  }
+
+  .group-editor-icons[data-open="true"],
+  .group-editor-workspaces[data-open="true"] {
+    grid-template-rows: 1fr;
+  }
+
+  .group-editor-icons {
+    margin-top: -10px;
+  }
+
+  .group-editor-icons[data-open="true"] {
+    margin-top: -2px;
+  }
+
+  .group-editor-icons > div,
+  .group-editor-workspaces > div {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .group-editor-icons > div {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    gap: 3px;
+  }
+
+  .group-editor-icons button {
+    @apply text-ink-muted;
+    height: 26px;
+  }
+
+  .group-editor-icons button[aria-pressed="true"] {
+    background-color: color-mix(in srgb, var(--group-color) 18%, transparent);
+    color: var(--group-color);
+  }
+
+  .group-editor-colors {
+    display: flex;
+    gap: 8px;
+    padding: 0 2px;
+  }
+
+  .group-editor-color {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: scale var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
+  }
+
+  .group-editor-color:active {
+    scale: 0.9;
+  }
+
+  .group-editor-color[aria-checked="true"] {
+    box-shadow:
+      0 0 0 2px var(--lume-color-popover),
+      0 0 0 4px var(--group-color);
+  }
+
+  .group-editor-color:focus-visible {
+    outline: 2px solid var(--lume-color-border-focus);
+    outline-offset: 3px;
+  }
+}

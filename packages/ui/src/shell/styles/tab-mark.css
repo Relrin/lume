@@ -1,0 +1,136 @@
+@layer components {
+  /*
+   * The mark of the tab on show, for the styles that move it. While it is there the tab
+   * on show draws no box of its own, and its label shows bright where the mark is.
+   */
+  .tab-mark {
+    --mark-rgb: 128 128 128;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: var(--lume-size-tab);
+    border-radius: var(--lume-radius-control);
+    pointer-events: none;
+    will-change: transform;
+    transition: --mark-press var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
+  }
+
+  .tab-list:not([data-moving]) .tab-mark {
+    display: none;
+  }
+
+  .tab-mark.pressed {
+    --mark-press: 0.97;
+  }
+
+  .tab-list[data-moving] .tab[data-active="true"] {
+    background-color: transparent;
+    box-shadow: none;
+  }
+
+  .tab-list[data-moving] .tab[data-active="true"] .tab-label {
+    @apply text-ink-muted;
+  }
+
+  .tab-list[data-moving] .tab:has(> .tab-label:active) {
+    scale: 0.97;
+  }
+
+  .tab-lit {
+    display: none;
+  }
+
+  .tab-list[data-moving] .tab-lit {
+    @apply text-ink;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: inherit;
+    clip-path: inset(0 100% 0 0);
+    pointer-events: none;
+  }
+
+  .tab-lit .tab-title {
+    min-width: 0;
+  }
+
+  .shell[data-tab-highlight="glide"] .tab-mark,
+  .shell[data-tab-highlight="spring"] .tab-mark {
+    @apply bg-control-active;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .shell[data-tab-highlight="spring"] .tab-mark {
+    box-shadow:
+      inset 0 0 0 var(--lume-size-border) var(--lume-color-border),
+      0 1px 2px color-mix(in srgb, black 35%, transparent);
+  }
+
+  .shell[data-tab-highlight="glide"] .tab-mark.tinted,
+  .shell[data-tab-highlight="spring"] .tab-mark.tinted {
+    background: rgb(var(--mark-rgb) / 0.14);
+    box-shadow: inset 0 0 0 var(--lume-size-border) rgb(var(--mark-rgb) / 0.42);
+  }
+
+  /* Glow: one lit pill in the tab's colour, brighter and wider while it travels fast. */
+  .shell[data-tab-highlight="glow"] .tab-mark {
+    background: linear-gradient(
+      180deg,
+      rgb(var(--mark-rgb) / calc(0.17 + 0.09 * var(--mark-speed))),
+      rgb(var(--mark-rgb) / calc(0.085 + 0.07 * var(--mark-speed)))
+    );
+    box-shadow:
+      inset 0 0 0 1px rgb(var(--mark-rgb) / calc(0.24 + 0.22 * var(--mark-speed))),
+      inset 0 1px 0 color-mix(in srgb, white 7%, transparent),
+      0 0 6px rgb(var(--mark-rgb) / calc(0.1 + 0.18 * var(--mark-speed))),
+      0 0 calc(18px + 18px * var(--mark-speed)) calc(3px * var(--mark-speed))
+        rgb(var(--mark-rgb) / calc(0.12 + 0.24 * var(--mark-speed)));
+  }
+
+  .shell[data-tab-highlight="glow"] .tab-list[data-moving] .tab-lit {
+    color: color-mix(in srgb, var(--tab-tint) 14%, var(--lume-color-text));
+  }
+
+  /* Stretch: an underline, one pixel wide and scaled to its tab. */
+  .shell[data-tab-highlight="stretch"] .tab-mark {
+    width: 1px;
+    height: 12px;
+    border-radius: 0;
+    transform-origin: 0 50%;
+    background: linear-gradient(
+      to bottom,
+      transparent 0,
+      rgb(var(--mark-rgb) / 0.16) 30%,
+      rgb(var(--mark-rgb)) 41.7%,
+      rgb(var(--mark-rgb)) 58.3%,
+      rgb(var(--mark-rgb) / 0.16) 70%,
+      transparent 100%
+    );
+  }
+
+  /* The stretch style keeps the box of the tab on show; only the underline travels. */
+  .shell[data-tab-highlight="stretch"] .tab-list[data-moving] .tab[data-active="true"] {
+    @apply bg-control-active;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tab,
+    .tab[data-folded="true"] {
+      transition-property: opacity;
+    }
+
+    .tab-group-count,
+    .tab-group-label {
+      transition: none;
+    }
+
+    .tab-list[data-moving] .tab:has(> .tab-label:active),
+    .tab-group-label:active {
+      scale: none;
+    }
+  }
+}

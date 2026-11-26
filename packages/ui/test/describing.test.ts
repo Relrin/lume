@@ -4,7 +4,7 @@ import { createStore } from "zustand/vanilla";
 import type { LayoutState } from "../src/layout/store.ts";
 import { PaneReports } from "../src/events/store.ts";
 import { createRexStore } from "../src/rex/store.ts";
-import type { ShellApp } from "../src/shell/boot.ts";
+import type { ShellApp } from "../src/shell/boot/index.ts";
 import { followPane, followTab, paneFacts } from "../src/shell/describing.ts";
 import { DEVBOX, NAS, rexList } from "./rex-fixtures.ts";
 

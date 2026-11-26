@@ -16,6 +16,7 @@ import {
 } from "../src/shell/closing.ts";
 import { PromptStore, type Closing, type Confirmation } from "../src/terminal/prompts.ts";
 import { oneTab, pane, split, viewOf } from "./layout-support.ts";
+import { settings } from "./config-support.ts";
 
 function view(confirm: "never" | "always"): ConfigView {
   return {
@@ -23,7 +24,7 @@ function view(confirm: "never" | "always"): ConfigView {
     platform: "windows",
     scheme: "dark",
     theme: { id: "lume-dark", scheme: "dark" },
-    config: {
+    config: settings({
       appearance: { "pane-header": "always" },
       terminal: {
         "scrollback-lines": 10_000,
@@ -33,11 +34,12 @@ function view(confirm: "never" | "always"): ConfigView {
       },
       layout: { "tab-placement": "top" },
       renderer: { tier: "auto" },
-    },
+    }),
     sources: {},
     problems: [],
     tokens: DEFAULT_TOKENS,
-    keymap: { bindings: [] },
+    keymap: { bindings: [], removed: [] },
+    schema_revision: 1,
     title_bar: "custom",
   };
 }

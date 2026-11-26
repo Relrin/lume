@@ -5,7 +5,7 @@
  */
 
 import type { ProfileList } from "../core/types.ts";
-import type { ShellApp } from "../shell/boot.ts";
+import type { ShellApp } from "../shell/boot/index.ts";
 import { FIXTURE_BINDINGS, FIXTURE_COMMANDS } from "./fixture-commands.ts";
 import type { Scene } from "./scene.ts";
 import { CHROME_START_TIMEOUT_MS } from "./tuning.ts";

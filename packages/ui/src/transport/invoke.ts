@@ -13,6 +13,10 @@
 
 import { invoke as tauriInvoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/core";
 
+import type { CommandName } from "./commands.generated.ts";
+
+export type { CommandName };
+
 /** The header the token travels in. */
 export const TOKEN_HEADER = "lume-frame";
 
@@ -26,7 +30,7 @@ export function ready(): Promise<string> {
 
 /** Calls an application command with the page's token. */
 export async function invoke<T>(
-  command: string,
+  command: CommandName,
   args?: InvokeArgs,
   options?: InvokeOptions,
 ): Promise<T> {

@@ -1,0 +1,542 @@
+@layer components {
+  /* Where a card that is being dragged can be let go to get a tab of its own. */
+  [data-drop-active="true"] {
+    border-radius: var(--lume-radius-control);
+    background: var(--lume-color-drop-preview);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lume-color-accent) 75%, transparent);
+  }
+
+  /*
+   * The body of the window: the panes in the middle, and the panels docked at the left,
+   * the right and the bottom. The panels lie flush on the window, not in cards.
+   */
+
+  .shell-body {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .shell-centre {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .dock-area {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    min-width: 0;
+    min-height: 0;
+    gap: 6px;
+  }
+
+  /* A side never takes so much that nothing is left for the panes. */
+  .dock-area[data-area="left"] {
+    max-width: 60%;
+    padding: 0 0 var(--lume-space-gap) var(--lume-space-gap);
+  }
+
+  .dock-area[data-area="right"] {
+    max-width: 60%;
+    padding: 0 var(--lume-space-gap) var(--lume-space-gap) 0;
+  }
+
+  .dock-area[data-area="bottom"] {
+    flex-direction: row;
+    max-height: 60%;
+    padding: 0 var(--lume-space-gap) var(--lume-space-gap);
+  }
+
+  /* The inner edge of a side, in the gap between it and the panes. */
+  .dock-resize {
+    position: absolute;
+    z-index: 3;
+    touch-action: none;
+  }
+
+  .dock-area[data-area="left"] > .dock-resize,
+  .dock-area[data-area="right"] > .dock-resize {
+    top: 0;
+    bottom: var(--lume-space-gap);
+    width: max(var(--lume-space-gap), 6px);
+    cursor: col-resize;
+  }
+
+  .dock-area[data-area="left"] > .dock-resize {
+    left: 100%;
+  }
+
+  .dock-area[data-area="right"] > .dock-resize {
+    right: 100%;
+  }
+
+  .dock-area[data-area="bottom"] > .dock-resize {
+    right: var(--lume-space-gap);
+    bottom: 100%;
+    left: var(--lume-space-gap);
+    height: max(var(--lume-space-gap), 6px);
+    cursor: row-resize;
+  }
+
+  .dock-resize::after {
+    content: "";
+    position: absolute;
+    border-radius: min(2px, var(--lume-radius-control));
+    background: transparent;
+    transition: background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit);
+  }
+
+  .dock-area[data-area="left"] > .dock-resize::after,
+  .dock-area[data-area="right"] > .dock-resize::after {
+    top: 10px;
+    bottom: 10px;
+    left: calc(50% - 1px);
+    width: 2px;
+  }
+
+  .dock-area[data-area="bottom"] > .dock-resize::after {
+    top: calc(50% - 1px);
+    right: 10px;
+    left: 10px;
+    height: 2px;
+  }
+
+  .dock-resize:hover::after {
+    background: color-mix(in srgb, var(--lume-color-accent) 55%, transparent);
+  }
+
+  .dock-resize[data-dragging="true"]::after,
+  .dock-resize:focus-visible::after {
+    background: var(--lume-color-accent);
+  }
+
+  /* An edge that has the keyboard shows its line, and needs no ring around the gap. */
+  .dock-resize:focus-visible,
+  .divider:focus-visible {
+    outline: none;
+  }
+
+  /* The side a panel that is being dragged would be docked at. */
+  .dock-drop {
+    position: absolute;
+    z-index: 5;
+    border-radius: var(--lume-radius-card);
+    background: var(--lume-color-drop-preview);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--lume-color-accent) 75%, transparent);
+    pointer-events: none;
+  }
+
+  .dock-drop[data-area="left"],
+  .dock-drop[data-area="right"] {
+    top: 0;
+    bottom: var(--lume-space-gap);
+    width: min(240px, 33%);
+  }
+
+  .dock-drop[data-area="left"] {
+    left: var(--lume-space-gap);
+  }
+
+  .dock-drop[data-area="right"] {
+    right: var(--lume-space-gap);
+  }
+
+  .dock-drop[data-area="bottom"] {
+    right: var(--lume-space-gap);
+    bottom: var(--lume-space-gap);
+    left: var(--lume-space-gap);
+    height: min(240px, 33%);
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
+    height: 30px;
+    padding: 0 2px 0 8px;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .panel-header[data-dragging="true"] {
+    opacity: var(--lume-opacity-disabled);
+    cursor: grabbing;
+  }
+
+  .panel-title {
+    @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .panel-button {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* Marks what comes from a plugin that is being worked on, wherever it is named. */
+  .dev-badge {
+    @apply text-ink-muted;
+    flex: 0 0 auto;
+    padding: 0 5px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: min(4px, var(--lume-radius-control));
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 15px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .settings-from + .dev-badge,
+  .settings-label .dev-badge {
+    display: inline-block;
+    margin-left: 6px;
+    vertical-align: 1px;
+  }
+
+  .addon-git {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  .addon-git input {
+    @apply bg-control text-ink;
+    flex: 1 1 220px;
+    min-width: 0;
+    height: 28px;
+    padding: 0 8px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: min(6px, var(--lume-radius-control));
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .addon-git input.addon-git-path {
+    flex: 0 1 160px;
+  }
+
+  .addon-git input:focus-visible {
+    border-color: var(--lume-color-border-focus);
+    outline: none;
+  }
+
+  .panel-icon {
+    @apply text-ink-muted;
+    display: flex;
+  }
+
+  /* A plugin's list panel: rows in a tree, only those in sight made. */
+  .list-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .list-panel-rows {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    outline: none;
+  }
+
+  .list-panel-space {
+    position: relative;
+  }
+
+  .list-panel-empty,
+  .list-panel-problem {
+    @apply text-ink-muted;
+    padding: 10px 8px;
+    font-size: 12px;
+  }
+
+  .list-row-note {
+    @apply text-ink-muted;
+    font-style: italic;
+  }
+
+  .list-row-note[data-note="failed"] {
+    color: var(--lume-color-status-warning);
+  }
+
+  .list-panel-problem {
+    color: var(--lume-color-status-warning);
+  }
+
+  .list-row {
+    @apply text-ink;
+    --status-tone: var(--lume-color-text-muted);
+    position: absolute;
+    right: 0;
+    left: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding-right: 6px;
+    border-radius: calc(var(--lume-radius-control) - 2px);
+    font-size: 12.5px;
+    white-space: nowrap;
+    cursor: default;
+  }
+
+  .list-row:hover {
+    @apply bg-control-hover;
+  }
+
+  .list-row[data-active] {
+    background: color-mix(in srgb, var(--lume-color-accent) 14%, transparent);
+  }
+
+  .list-panel-rows:focus-visible .list-row[data-active] {
+    outline: var(--lume-size-focus-ring) solid var(--lume-color-accent);
+    outline-offset: -1px;
+  }
+
+  .list-row[data-tone="info"] {
+    --status-tone: var(--lume-color-status-info);
+  }
+
+  .list-row[data-tone="success"] {
+    --status-tone: var(--lume-color-status-success);
+  }
+
+  .list-row[data-tone="warning"] {
+    --status-tone: var(--lume-color-status-warning);
+  }
+
+  .list-row[data-tone="danger"] {
+    --status-tone: var(--lume-color-status-danger);
+  }
+
+  .list-row-fold {
+    display: flex;
+    flex-shrink: 0;
+    width: 14px;
+  }
+
+  .list-row-chevron {
+    @apply text-ink-muted;
+    display: flex;
+    transition: rotate var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
+  }
+
+  .list-row-chevron[data-open] {
+    rotate: 90deg;
+  }
+
+  .list-row-icon {
+    display: flex;
+    color: var(--status-tone);
+  }
+
+  .list-row-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .list-row-detail {
+    @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+  }
+
+  .list-row-badge {
+    flex-shrink: 0;
+    padding: 0 5px;
+    border-radius: min(5px, var(--lume-radius-control));
+    background: color-mix(in srgb, var(--status-tone) 14%, transparent);
+    color: var(--status-tone);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .list-row-actions {
+    display: none;
+    flex-shrink: 0;
+    gap: 2px;
+    margin-left: auto;
+  }
+
+  .list-row:hover .list-row-actions,
+  .list-row[data-active] .list-row-actions {
+    display: flex;
+  }
+
+  .list-row-action {
+    height: 20px;
+    min-width: 20px;
+    padding: 0 4px;
+  }
+
+  .list-row-action-text {
+    font-size: 11.5px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .list-row-chevron {
+      transition: none;
+    }
+  }
+
+  .panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .panel-placeholder {
+    @apply text-ink-muted;
+    padding: 10px 8px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .panel-placeholder-name {
+    @apply text-ink;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .panel-placeholder-plugin {
+    font-family: var(--font-mono);
+  }
+
+  /* A plugin's own page, in a sandboxed frame, and what stands in for it while it
+     loads or after it stopped. */
+
+  /* The card of a view whose tab is not on show: kept, with its frame, out of sight. */
+  .pane-card[data-parked="true"] {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .pane-plugin {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .plugin-frame {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  .plugin-frame-page {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: transparent;
+    color-scheme: normal;
+  }
+
+  .plugin-frame[data-shown="loading"] .plugin-frame-page {
+    visibility: hidden;
+  }
+
+  .plugin-frame-note {
+    @apply text-ink-muted;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px;
+    font-size: 12px;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .plugin-frame-spinner {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: pane-spin 900ms linear infinite;
+  }
+
+  .plugin-frame-again {
+    @apply text-ink;
+    padding: 4px 10px;
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px var(--lume-color-border);
+  }
+
+  /* The tabs as a list down a side of the window. */
+
+  .tab-column {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 100%;
+  }
+
+  .tab-column .tab-list {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0;
+    margin: 0;
+    overflow: visible;
+  }
+
+  .tab-column .tab {
+    flex: none;
+    max-width: none;
+    height: 34px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+    touch-action: pan-x;
+  }
+
+  .tab-column-new {
+    justify-content: flex-start;
+    gap: 7px;
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: calc(var(--lume-radius-control) - 1px);
+  }
+}

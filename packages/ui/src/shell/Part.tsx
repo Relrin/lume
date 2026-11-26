@@ -11,7 +11,7 @@ import { useEffect, useLayoutEffect, type ReactNode } from "react";
 
 import { ErrorBoundary, type Failure } from "../ErrorBoundary.tsx";
 import { PART_RETRY_MAX_MS, PART_RETRY_MIN_MS } from "../tuning.ts";
-import type { ShellApp } from "./boot.ts";
+import type { ShellApp } from "./boot/index.ts";
 import { useShell } from "./context.ts";
 
 /** Calls `told` when something is heard that parts are drawn from. Returns how to stop. */

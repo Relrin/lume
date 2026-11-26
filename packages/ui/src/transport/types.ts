@@ -8,12 +8,13 @@
  */
 
 import { TERMINAL_CELLS_MAX } from "../limits.ts";
+import type { Launcher, TermSize } from "../wire/layout.generated.ts";
 
-/** A terminal's size in cells. Each side is between 1 and {@link MAX_DIMENSION}. */
-export interface TermSize {
-  readonly cols: number;
-  readonly rows: number;
-}
+/**
+ * A terminal's size in cells, each side between 1 and {@link MAX_DIMENSION}; what a
+ * session runs. Both are generated from the core's definitions.
+ */
+export type { Launcher, TermSize };
 
 /** The most columns or rows a terminal may have. A rule of the wire format. */
 export const MAX_DIMENSION = 4096;
@@ -171,27 +172,6 @@ export interface SessionInfo {
   /** Set once the program has ended. */
   readonly exit: ExitStatus | null;
 }
-
-/**
- * What a session runs: a program on this machine, the shell of a Linux distribution
- * on it, or a shell on another machine. Left out, the core starts the default profile.
- */
-export type Launcher =
-  | {
-      readonly type: "shell";
-      readonly program: string;
-      readonly args: readonly string[];
-      readonly login: boolean;
-    }
-  | { readonly type: "wsl"; readonly distro: string; readonly user?: string }
-  | {
-      readonly type: "ssh";
-      readonly host: string;
-      readonly user?: string;
-      readonly port?: number;
-      readonly extra_args?: readonly string[];
-      readonly client?: string;
-    };
 
 /** What to start. Only the size is required. */
 export interface SpawnRequest {

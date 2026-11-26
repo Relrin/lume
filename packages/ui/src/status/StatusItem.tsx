@@ -32,7 +32,7 @@ import { playSlot } from "../motion/slots.ts";
 import { PluginIcon } from "../plugins/PluginIcon.tsx";
 import { findNode } from "../plugins/store.ts";
 import { AnchoredMenu } from "../shell/AnchoredMenu.tsx";
-import type { ShellApp } from "../shell/boot.ts";
+import type { ShellApp } from "../shell/boot/index.ts";
 import { ShellContext } from "../shell/context.ts";
 import {
   AlertIcon,

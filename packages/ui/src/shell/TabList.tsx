@@ -9,7 +9,7 @@ import { useStore } from "zustand";
 
 import { selectActiveTab, selectTabOrder } from "../layout/selectors.ts";
 import type { TabId } from "../layout/types.ts";
-import type { ShellApp } from "./boot.ts";
+import type { ShellApp } from "./boot/index.ts";
 import { useShell } from "./context.ts";
 import { describeTabNow } from "./describing.ts";
 import { ChevronDownIcon, ProgramTile, SearchIcon } from "./icons.tsx";

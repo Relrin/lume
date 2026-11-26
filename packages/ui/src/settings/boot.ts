@@ -16,6 +16,7 @@ import { CoreClient } from "../core/client.ts";
 import type { Notice, ProfileList } from "../core/types.ts";
 import { deliverViewEvent, reloadPluginFrames } from "../plugins/frame/registry.ts";
 import { createRexStore, type RexStore } from "../rex/store.ts";
+import { CoreGate } from "../shell/boot/gate.ts";
 import { NoticeStore, sentence } from "../shell/notices.ts";
 import { TauriCarrier, type Carrier } from "../transport/carrier.ts";
 import { createWindowStateStore, type WindowStateStore } from "../window/state.ts";
@@ -101,13 +102,10 @@ export async function startSettings(
 
   // What the core sends before the page has its first copy is kept and followed once
   // it has one; a view the copy already holds is passed over there.
-  let early: Notice[] | null = [];
-  let onNotice = (notice: Notice): void => void early?.push(notice);
+  const gate = new CoreGate();
 
   const client = await CoreClient.open(carrier, {
-    notice: (notice) => onNotice(notice),
-    // This window answers nothing: it shows no terminals.
-    request: () => undefined,
+    ...gate.handlers,
     failure: (error) =>
       notices.push("error", `The application can no longer be reached: ${error.message}`),
   });
@@ -248,9 +246,8 @@ export async function startSettings(
     () => undefined,
   );
 
-  onNotice = follow;
-  for (const notice of early ?? []) follow(notice);
-  early = null;
+  // This window answers nothing the core asks: it shows no terminals.
+  gate.goLive(follow);
   refreshAddons();
 
   return {

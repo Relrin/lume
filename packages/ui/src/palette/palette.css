@@ -1,0 +1,401 @@
+@layer components {
+  /*
+   * The command palette: a wide field and a list, a little way down the window, on a
+   * frosted card. Its rows are a picture, a title, the command's kind and its keys.
+   */
+
+  .palette-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: max(calc(var(--lume-size-topbar) + 10px), 13vh) 16px 16px;
+    background: color-mix(in srgb, var(--lume-color-overlay) 35%, transparent);
+    cursor: default;
+  }
+
+  .palette {
+    display: flex;
+    flex-direction: column;
+    width: min(640px, 100%);
+    max-height: min(470px, 100%);
+    overflow: hidden;
+    border-radius: calc(var(--lume-radius-card) + min(var(--lume-radius-card), 6px));
+    background: color-mix(in srgb, var(--lume-color-popover) 92%, transparent);
+    backdrop-filter: blur(20px) saturate(1.3);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--lume-color-text) 7%, transparent),
+      0 0 0 var(--lume-size-border) var(--lume-color-border),
+      var(--lume-shadow-popover);
+    font-size: 13px;
+  }
+
+  .palette-field {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 11px;
+    height: 50px;
+    padding: 0 12px 0 16px;
+    border-bottom: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+  }
+
+  .palette-field-icon {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .palette-crumb {
+    @apply bg-control-active;
+    flex-shrink: 0;
+    max-width: 45%;
+    padding: 2px 8px;
+    overflow: hidden;
+    border-radius: min(6px, var(--lume-radius-control));
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .palette-input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    background: transparent;
+    font-size: 15px;
+    outline: none;
+    user-select: text;
+  }
+
+  .palette-input::placeholder {
+    color: color-mix(in srgb, var(--lume-color-text-muted) 80%, transparent);
+  }
+
+  /* What is searched, as a row of chips under the field, each with its count. */
+  .palette-chips {
+    display: flex;
+    flex-shrink: 0;
+    gap: 6px;
+    padding: 0 12px 10px;
+    overflow-x: auto;
+    border-bottom: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+    scrollbar-width: none;
+  }
+
+  .palette-chip {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+    font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      color var(--lume-motion-duration-fast) var(--lume-motion-easing-exit),
+      transform var(--lume-motion-duration-fast) var(--lume-motion-easing-standard);
+  }
+
+  .palette-chip:hover {
+    @apply text-ink;
+  }
+
+  .palette-chip:active {
+    transform: scale(0.96);
+  }
+
+  /*
+   * The label, its picture and its count sit on one centre line: each is its own box
+   * one line high, so the monospaced count does not ride on a baseline of its own.
+   */
+  .palette-chip > * {
+    display: block;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+
+  .palette-chip-count {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+
+  .palette-chip[aria-pressed="true"] {
+    @apply text-accent;
+    background-color: color-mix(in srgb, var(--lume-color-accent) 12%, transparent);
+    box-shadow: inset 0 0 0 var(--lume-size-border)
+      color-mix(in srgb, var(--lume-color-accent) 35%, transparent);
+  }
+
+  /* With the chips under it, the field has no line of its own. */
+  .palette-field:has(+ .palette-chips) {
+    border-bottom: none;
+  }
+
+  .palette-problem {
+    @apply text-danger;
+    flex-shrink: 0;
+    padding: 8px 16px 0;
+    font-size: 12px;
+  }
+
+  .palette-list {
+    flex: 1;
+    min-height: 0;
+    padding: 4px 6px 6px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .palette-list:empty {
+    display: none;
+  }
+
+  .palette-heading {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 6px 10px 0;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .palette-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: min(8px, var(--lume-radius-control));
+    cursor: default;
+  }
+
+  .palette-row[aria-selected="true"] {
+    @apply bg-control-hover;
+  }
+
+  .palette-row-icon {
+    @apply text-ink-muted;
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .palette-row-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .palette-row-sub {
+    @apply text-ink-muted;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    opacity: 0.8;
+  }
+
+  .palette-row[aria-selected="true"] .palette-row-sub {
+    opacity: 1;
+  }
+
+  /* A host's picture is coloured by its kind, as the connect palette colours it. */
+  .palette-host-icon {
+    display: flex;
+    color: var(--lume-color-accent);
+  }
+
+  .palette-host-icon[data-kind="wsl"] {
+    color: var(--lume-color-status-warning);
+  }
+
+  .palette-host-icon[data-kind="ssh"] {
+    color: var(--lume-color-status-info);
+  }
+
+  /* How the work in a tab stands: a dot before its line, a word at its end. */
+  .palette-row-state {
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--lume-color-accent);
+  }
+
+  .palette-row-state[data-state="wait"] {
+    background: var(--lume-color-status-warning);
+  }
+
+  .palette-row-state[data-state="done"] {
+    background: var(--lume-color-status-info);
+  }
+
+  .palette-row-state[data-state="failed"] {
+    background: var(--lume-color-status-danger);
+  }
+
+  /* Whether a Rex server can be used. */
+  .palette-row-link {
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+
+  .palette-row-link[data-link="up"] {
+    background: var(--lume-color-accent);
+  }
+
+  .palette-row-link[data-link="down"] {
+    background: color-mix(in srgb, var(--lume-color-text-muted) 60%, transparent);
+  }
+
+  .palette-row-meta {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .palette-mark {
+    @apply text-accent;
+    background: transparent;
+    font-weight: 600;
+  }
+
+  /*
+   * Keys beside a command: quiet letters, raised into caps on the marked row.
+   */
+  .palette-row-keys {
+    @apply text-ink-muted;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    opacity: 0.8;
+  }
+
+  .palette-row-keys .key-chord {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .palette-row-keys kbd {
+    padding: 0 2px;
+    font: inherit;
+  }
+
+  .palette-row-keys .key-then,
+  .connect-keys .key-then {
+    margin: 0 3px;
+    font-family: var(--font-ui);
+    font-size: 10.5px;
+    opacity: 0.7;
+  }
+
+  .palette-row[aria-selected="true"] .palette-row-keys {
+    opacity: 1;
+  }
+
+  .palette-row[aria-selected="true"] .palette-row-keys .key-chord {
+    gap: 3px;
+  }
+
+  .palette-row[aria-selected="true"] .palette-row-keys kbd,
+  .key-cap {
+    @apply text-ink;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: 5px;
+    background: var(--lume-color-control-active);
+    box-shadow:
+      inset 0 0 0 var(--lume-size-border) var(--lume-color-border),
+      0 1px 0 color-mix(in srgb, var(--lume-color-overlay) 60%, transparent);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  /* A footer's legend: what the keys do. */
+  .palette-foot {
+    @apply text-ink-muted;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 14px;
+    height: 36px;
+    padding: 0 14px;
+    overflow: hidden;
+    border-top: var(--lume-size-border) solid
+      color-mix(in srgb, var(--lume-color-border) 70%, transparent);
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  .palette-foot > span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .palette-foot .key-cap,
+  .connect-footer .key-cap {
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 4px;
+    font-size: 10px;
+    box-shadow: inset 0 0 0 var(--lume-size-border) var(--lume-color-border);
+  }
+
+  .palette-foot-end {
+    margin-left: auto;
+  }
+
+  /* A plugin's choice: each row's detail after its label, quieter. */
+  .plugin-pick-detail {
+    @apply text-ink-muted;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .plugin-pick-title {
+    @apply text-ink-muted;
+    padding: 0 12px 4px;
+    font-size: 12px;
+  }
+
+  .palette-more,
+  .palette-empty {
+    @apply text-ink-muted;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+}

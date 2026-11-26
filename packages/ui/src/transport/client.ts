@@ -12,6 +12,7 @@
  */
 
 import type { Carrier, CarrierOpened } from "./carrier.ts";
+import type { CommandName } from "./commands.generated.ts";
 import { Granter } from "./credit.ts";
 import { FrameDecoder } from "./decoder.ts";
 import {
@@ -367,7 +368,7 @@ export class TransportClient {
    * Calls one of the core's commands as this page's carrier. A refusal rejects with a
    * {@link CommandError}.
    */
-  async command<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  async command<T>(name: CommandName, args: Record<string, unknown> = {}): Promise<T> {
     if (this.#failed) throw this.#failed;
     try {
       return await this.#carrier.command<T>(name, { carrier: this.#opened.carrier, ...args });

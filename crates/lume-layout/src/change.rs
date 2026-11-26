@@ -5,6 +5,7 @@
 //! ratios, a floating pane's rectangle. A change to the structure of a tab carries the
 //! tab's whole tree, which leaves a page nothing to get wrong.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{GroupId, PaneId, SplitId, TabId, WindowId};
@@ -14,7 +15,7 @@ use crate::model::{
 };
 
 /// One difference between a layout before an intent and after it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LayoutChange {
     /// A window was opened. It is given whole.
@@ -106,7 +107,7 @@ pub enum LayoutChange {
 }
 
 /// A whole layout, and where it stands in the sequence of its changes.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LayoutSnapshot {
     /// Counts how many times the layout was replaced as a whole. Revisions are counted
@@ -132,7 +133,7 @@ pub enum LayoutEvent {
 }
 
 /// What applying an intent gave.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Applied {
     pub epoch: u32,
@@ -143,7 +144,7 @@ pub struct Applied {
 }
 
 /// What an intent made.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Created {
     pub pane: Option<PaneId>,

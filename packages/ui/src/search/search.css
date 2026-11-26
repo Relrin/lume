@@ -1,0 +1,111 @@
+@layer components {
+  /*
+   * The bar a pane is searched from. It takes no room of its own: it lies over the top
+   * right corner of the terminal, so opening it does not change the terminal's size.
+   */
+
+  .search-anchor {
+    position: relative;
+    z-index: 3;
+    flex-shrink: 0;
+    height: 0;
+    /* The bar does without some of its parts in a narrow pane. */
+    container-type: inline-size;
+  }
+
+  .search-bar {
+    @apply bg-popover text-ink;
+    position: absolute;
+    top: 8px;
+    right: 14px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    max-width: calc(100% - 28px);
+    height: 32px;
+    padding: 0 4px 0 10px;
+    /* In a pane narrower than its field, what does not fit is cut off inside it. */
+    overflow: hidden;
+    font-size: 12.5px;
+    border: var(--lume-size-border) solid var(--lume-color-border);
+    border-radius: var(--lume-radius-control);
+    box-shadow: var(--lume-shadow-popover);
+    animation: search-in var(--lume-motion-duration-base) var(--lume-motion-easing-standard);
+  }
+
+  .search-bar:focus-within {
+    border-color: var(--lume-color-border-focus);
+  }
+
+  @keyframes search-in {
+    from {
+      opacity: 0;
+      translate: 0 -4px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .search-bar {
+      animation: none;
+    }
+  }
+
+  .search-field {
+    @apply text-ink;
+    flex: 1 1 150px;
+    width: 150px;
+    min-width: 40px;
+    height: 100%;
+    padding: 0;
+    font: inherit;
+    background: none;
+    border: 0;
+    outline: none;
+  }
+
+  .search-field::placeholder {
+    @apply text-ink-muted;
+  }
+
+  .search-count {
+    @apply text-ink-muted;
+    flex-shrink: 0;
+    min-width: 34px;
+    padding: 0 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .search-bar[data-none="true"] .search-count {
+    color: var(--lume-color-status-danger);
+  }
+
+  .search-button {
+    width: 24px;
+    height: 24px;
+  }
+
+  .search-button:disabled {
+    cursor: default;
+    opacity: var(--lume-opacity-disabled);
+  }
+
+  .search-button:disabled:hover {
+    background: none;
+  }
+
+  /* A narrow pane's bar does without what Enter and the field say as well. */
+  @container (max-width: 250px) {
+    .search-count {
+      display: none;
+    }
+  }
+
+  @container (max-width: 200px) {
+    .search-step {
+      display: none;
+    }
+  }
+}

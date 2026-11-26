@@ -21,3 +21,5 @@ docs/plugins/api.md
 packages/ui/src/shell/places.generated.ts
 crates/lume-rex/api/
 crates/lume-rex/tests/fixtures/
+packages/ui/src/wire/
+packages/ui/logic/

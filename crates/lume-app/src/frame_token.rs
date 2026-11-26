@@ -19,9 +19,6 @@ use tauri::ipc::Invoke;
 /// The header a command's token travels in.
 pub const HEADER: &str = "lume-frame";
 
-/// The commands that run without the token: only the one that hands it out.
-const OPEN: [&str; 1] = ["frame_token"];
-
 /// The token of each webview's page, by the webview's label.
 #[derive(Default)]
 pub struct FrameTokens {
@@ -85,7 +82,7 @@ impl FrameTokens {
     /// refusal otherwise. Gives whether the command was dealt with here (refused).
     pub fn refuses<R: Runtime>(&self, invoke: &Invoke<R>) -> bool {
         let command = invoke.message.command();
-        if OPEN.contains(&command) {
+        if crate::command_registry::is_open(command) {
             return false;
         }
         let label = invoke.message.webview().label().to_owned();

@@ -21,7 +21,7 @@ import { Background } from "./Background.tsx";
 import { ColorPickerHost } from "./ColorPicker.tsx";
 import { Connection } from "./Connection.tsx";
 import { CursorFxLayer } from "./CursorFxLayer.tsx";
-import type { ShellApp } from "./boot.ts";
+import type { ShellApp } from "./boot/index.ts";
 import { colorPicker } from "./color-picker.ts";
 import { ShellContext } from "./context.ts";
 import { DockArea, DockDropPreview } from "./DockArea.tsx";

@@ -24,9 +24,12 @@ export class Assets {
   #flush: Promise<void> | undefined;
   #fetch: FetchAssets | undefined;
 
-  /** Says how the core is asked. Until then nothing is fetched. */
-  connect(fetch: FetchAssets): void {
+  /** Says how the core is asked. Until then nothing is fetched. Gives how to stop. */
+  connect(fetch: FetchAssets): () => void {
     this.#fetch = fetch;
+    return () => {
+      if (this.#fetch === fetch) this.#fetch = undefined;
+    };
   }
 
   /** What was fetched under a hash: a picture's address or a shader's text. */

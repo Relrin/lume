@@ -1,0 +1,94 @@
+@layer components {
+  /* What is being dragged, and where it would land: a line, and a gap opening for it. */
+  .tab[data-dragging],
+  .tab-group-label[data-dragging] {
+    opacity: var(--lume-opacity-disabled);
+  }
+
+  .tab[data-drop-side]::after,
+  .tab-group-label[data-drop-side]::after {
+    content: "";
+    position: absolute;
+    top: 5px;
+    bottom: 5px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--lume-color-accent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--lume-color-accent) 60%, transparent);
+    pointer-events: none;
+  }
+
+  .tab-group-label[data-drop-side]::after {
+    top: -1px;
+    bottom: -1px;
+  }
+
+  .tab[data-drop-side="before"],
+  .tab-group-label[data-drop-side="before"] {
+    margin-left: 36px;
+  }
+
+  .tab[data-drop-side="after"],
+  .tab-group-label[data-drop-side="after"] {
+    margin-right: 36px;
+  }
+
+  .tab[data-drop-side="before"]::after,
+  .tab-group-label[data-drop-side="before"]::after {
+    left: -20px;
+  }
+
+  .tab[data-drop-side="after"]::after,
+  .tab-group-label[data-drop-side="after"]::after {
+    right: -20px;
+  }
+
+  /* In a column the gap opens above or below, and the line runs across. */
+  .tab-column .tab[data-folded="true"] {
+    display: none;
+  }
+
+  .tab-column .tab-group-label {
+    align-self: flex-start;
+    margin: 6px 0 2px 6px;
+  }
+
+  .tab-column .tab-group-line {
+    top: 4px;
+    bottom: 4px;
+    left: 0;
+    right: auto;
+    width: 2px;
+    height: auto;
+    border-radius: 2px;
+  }
+
+  .tab-column .tab-group-label > .tab-group-line {
+    display: none;
+  }
+
+  .tab-column [data-drop-side="before"] {
+    margin: 18px 0 0;
+  }
+
+  .tab-column [data-drop-side="after"] {
+    margin: 0 0 18px;
+  }
+
+  .tab-column [data-drop-side]::after {
+    left: 6px;
+    right: 6px;
+    width: auto;
+    height: 2px;
+  }
+
+  .tab-column [data-drop-side="before"]::after {
+    top: -10px;
+    bottom: auto;
+  }
+
+  .tab-column [data-drop-side="after"]::after {
+    top: auto;
+    bottom: -10px;
+  }
+}
