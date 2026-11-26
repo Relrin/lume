@@ -2546,7 +2546,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lume-app"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "arboard",
  "async-trait",
@@ -2587,7 +2587,7 @@ dependencies = [
 
 [[package]]
 name = "lume-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "libc",
  "lume-config",
@@ -2603,14 +2603,14 @@ dependencies = [
 
 [[package]]
 name = "lume-codegen"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "lume-config"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lume-codegen",
  "lume-layout",
@@ -2626,7 +2626,7 @@ dependencies = [
 
 [[package]]
 name = "lume-host"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -2644,7 +2644,7 @@ dependencies = [
 
 [[package]]
 name = "lume-ipc"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "libc",
  "tokio",
@@ -2654,7 +2654,7 @@ dependencies = [
 
 [[package]]
 name = "lume-layout"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "lume-codegen",
@@ -2669,7 +2669,7 @@ dependencies = [
 
 [[package]]
 name = "lume-logic-wasm"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lume-layout",
  "lume-proto",
@@ -2679,7 +2679,7 @@ dependencies = [
 
 [[package]]
 name = "lume-plugin"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "flate2",
  "lume-config",
@@ -2695,7 +2695,7 @@ dependencies = [
 
 [[package]]
 name = "lume-plugin-api"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lume-codegen",
  "lume-config",
@@ -2706,7 +2706,7 @@ dependencies = [
 
 [[package]]
 name = "lume-plugin-runtime"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lume-plugin-api",
  "rquickjs",
@@ -2716,7 +2716,7 @@ dependencies = [
 
 [[package]]
 name = "lume-proto"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "proptest",
  "schemars 1.2.3",
@@ -2728,7 +2728,7 @@ dependencies = [
 
 [[package]]
 name = "lume-pty"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "libc",
  "portable-pty",
@@ -2738,7 +2738,7 @@ dependencies = [
 
 [[package]]
 name = "lume-rex"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "data-encoding",
@@ -2763,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "lume-services"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "keyring",
  "keyring-core",
@@ -2780,7 +2780,7 @@ dependencies = [
 
 [[package]]
 name = "lume-session"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "libc",
@@ -2797,7 +2797,7 @@ dependencies = [
 
 [[package]]
 name = "lume-vt"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lume-vt-sys",
  "serde",
@@ -2806,7 +2806,7 @@ dependencies = [
 
 [[package]]
 name = "lume-vt-sys"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bindgen",
 ]
@@ -6682,7 +6682,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "lume-config",
