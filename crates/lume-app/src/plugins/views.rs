@@ -8,7 +8,7 @@
 //! belongs to is what the page said when it opened it, from the application's own list
 //! of views; a frame never names itself.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use lume_layout::{
@@ -122,12 +122,21 @@ impl Place {
     }
 }
 
+/// A view that was open when its window's page stopped answering: the window, the
+/// plugin, the view, and the pane or panel it was shown in.
+type Held = (String, String, String, String);
+
+/// The code a held-back view is refused with when a page opens it.
+pub const HELD_CODE: &str = "stopped";
+
 /// The open views, by window and the instance the page gave each.
 #[derive(Default)]
 pub struct Views {
     open: Mutex<HashMap<(String, String), Open>>,
     /// The grants to streams that views hold, by the grant.
     grants: Mutex<HashMap<String, Granted>>,
+    /// The views held back since their window's page stopped answering.
+    held: Mutex<HashSet<Held>>,
 }
 
 impl Views {
@@ -137,6 +146,50 @@ impl Views {
 
     fn grants(&self) -> std::sync::MutexGuard<'_, HashMap<String, Granted>> {
         self.grants.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn held(&self) -> std::sync::MutexGuard<'_, HashSet<Held>> {
+        self.held.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Holds back those of a window's views that were `gone` whose pane or panel the
+    /// window still has, as `still_shown` says, in place of what was held back for the
+    /// window before. Gives how many are held back.
+    fn hold(
+        &self,
+        window: &str,
+        gone: &[(String, Open)],
+        still_shown: impl Fn(&str) -> bool,
+    ) -> usize {
+        let mut held = self.held();
+        held.retain(|held| held.0 != window);
+        for (_, open) in gone {
+            if let Some(host) = open.host.as_deref().filter(|host| still_shown(host)) {
+                held.insert((
+                    window.to_owned(),
+                    open.local.clone(),
+                    open.view.clone(),
+                    host.to_owned(),
+                ));
+            }
+        }
+        held.iter().filter(|held| held.0 == window).count()
+    }
+
+    /// Whether a view shown in `host` was held back. It is not any more once asked.
+    fn take_held(&self, window: &str, local: &str, view: &str, host: &str) -> bool {
+        let held = (
+            window.to_owned(),
+            local.to_owned(),
+            view.to_owned(),
+            host.to_owned(),
+        );
+        self.held().remove(&held)
+    }
+
+    /// Lets go of what was held back for a window that is gone.
+    fn forget_held(&self, window: &str) {
+        self.held().retain(|held| held.0 != window);
     }
 }
 
@@ -260,6 +313,16 @@ impl Plugins {
         }
         // The settings window shows a view where nothing is kept for it.
         let host = host.filter(|_| place != Place::Settings);
+        // A view that was open when its window's page stopped answering is not opened
+        // again by itself: it is shown stopped, and opened when the user asks again.
+        if let Some(host) = &host
+            && self.views.take_held(window, local, view, host)
+        {
+            return Err(CommandError::new(
+                HELD_CODE,
+                "the window stopped answering while it was open",
+            ));
+        }
         let open = Open {
             local: local.to_owned(),
             view: view.to_owned(),
@@ -647,6 +710,30 @@ impl Plugins {
 
     /// A window went: its views went with it.
     pub fn views_of_window_gone(&self, window: &str) {
+        let gone = self.take_views_of_window(window);
+        self.views.forget_held(window);
+        for (page, open) in gone {
+            self.tell_views(&open.local, "close", &described(window, &page, &open));
+        }
+    }
+
+    /// A window's page stopped answering, and is ended and loaded again: the views that
+    /// were open in it are closed, as the page would have closed them. Which of them
+    /// stopped it cannot be told, so each whose pane or panel the window still has, as
+    /// `still_shown` says, is held back: the next page does not open it by itself. Gives
+    /// how many are held back.
+    pub fn views_of_page_stopped(&self, window: &str, still_shown: impl Fn(&str) -> bool) -> usize {
+        let gone = self.take_views_of_window(window);
+        let held = self.views.hold(window, &gone, still_shown);
+        for (page, open) in gone {
+            self.tell_views(&open.local, "close", &described(window, &page, &open));
+        }
+        held
+    }
+
+    /// Takes a window's views off the list, and the grants they held. Gives each with the
+    /// page's name for it.
+    fn take_views_of_window(&self, window: &str) -> Vec<(String, Open)> {
         let gone: Vec<(String, Open)> = {
             let mut views = self.views.open();
             let keys: Vec<(String, String)> = views
@@ -659,9 +746,7 @@ impl Plugins {
                 .collect()
         };
         self.drop_grants(|granted| granted.window == window);
-        for (page, open) in gone {
-            self.tell_views(&open.local, "close", &described(window, &page, &open));
-        }
+        gone
     }
 
     /// Tells a running plugin a view of its opened or closed.
@@ -847,5 +932,45 @@ mod tests {
         assert_eq!(Place::parse("pane"), Some(Place::Pane));
         assert_eq!(Place::parse("settings"), Some(Place::Settings));
         assert_eq!(Place::parse("window"), None);
+    }
+
+    #[test]
+    fn a_view_open_when_its_page_stopped_is_held_back_once_where_it_is_still_shown() {
+        let open = |view: &str, place, host: Option<&str>| Open {
+            local: "acme.tools".to_owned(),
+            view: view.to_owned(),
+            place,
+            host: host.map(str::to_owned),
+        };
+        let gone = vec![
+            (
+                "v1".to_owned(),
+                open("board", Place::Panel, Some("acme.tools.board")),
+            ),
+            ("v2".to_owned(), open("diff", Place::Pane, Some("p4"))),
+            // Its pane was closed before the page stopped: nothing holds it back.
+            ("v3".to_owned(), open("log", Place::Pane, Some("p9"))),
+            ("v4".to_owned(), open("about", Place::Settings, None)),
+        ];
+        let views = Views::default();
+        let held = views.hold("w-1", &gone, |host| host != "p9");
+        assert_eq!(held, 2);
+
+        // The next page opens it by itself and is refused; the user's next try is not.
+        assert!(views.take_held("w-1", "acme.tools", "diff", "p4"));
+        assert!(!views.take_held("w-1", "acme.tools", "diff", "p4"));
+        // Only that view, in that place, of that window, was held back.
+        assert!(!views.take_held("w-2", "acme.tools", "board", "acme.tools.board"));
+        assert!(!views.take_held("w-1", "acme.tools", "board", "p4"));
+        assert!(!views.take_held("w-1", "acme.tools", "log", "p9"));
+
+        // Another stop of the window holds back what was open then, and nothing before.
+        views.hold("w-1", &[], |_| true);
+        assert!(!views.take_held("w-1", "acme.tools", "board", "acme.tools.board"));
+
+        // A window that is gone has nothing held back for it.
+        views.hold("w-1", &gone, |_| true);
+        views.forget_held("w-1");
+        assert!(!views.take_held("w-1", "acme.tools", "board", "acme.tools.board"));
     }
 }

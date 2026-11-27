@@ -774,6 +774,8 @@ pub enum AppReplyBody {
     Secret {
         secret: Option<Secret>,
     },
+    /// The page is there and its code runs. Only a page answers this.
+    Alive {},
 }
 
 /// A request from the application to a window's page. It travels to the page as a
@@ -855,6 +857,9 @@ pub enum PageRequestBody {
         /// Whether the same was asked before and answered.
         again: bool,
     },
+    /// Whether the page is still there. It is answered with [`AppReplyBody::Alive`] as
+    /// soon as the page's code runs; a page that does not answer has stopped.
+    Ping {},
 }
 
 /// What the SSH client wants to know.
@@ -1339,6 +1344,7 @@ mod tests {
                 },
                 r#"{"type":"command","id":"lume.terminal.copy"}"#,
             ),
+            (PageRequestBody::Ping {}, r#"{"type":"ping"}"#),
         ];
         for (body, json) in cases {
             assert_eq!(serde_json::to_string(&body).unwrap(), json);
@@ -1357,6 +1363,8 @@ mod tests {
                 size: TermSize::new(90, 20).unwrap()
             })
         );
+        let alive: PageResult = serde_json::from_str(r#"{"ok":{"type":"alive"}}"#).unwrap();
+        assert_eq!(Result::from(alive), Ok(AppReplyBody::Alive {}));
         let err: PageResult =
             serde_json::from_str(r#"{"err":{"code":"not_shown","message":"m"}}"#).unwrap();
         assert_eq!(Result::from(err), Err(AppError::new(codes::NOT_SHOWN, "m")));

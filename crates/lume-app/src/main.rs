@@ -51,6 +51,7 @@ mod error;
 mod fonts;
 mod frame_token;
 mod frames;
+mod freeze;
 mod harness;
 mod host;
 mod host_probe;

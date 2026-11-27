@@ -91,6 +91,13 @@ describe("a request from the core", () => {
     expect(target.calls).toEqual([["estimate", intent]]);
   });
 
+  it("says the page is there when asked, and asks nothing of the page for it", async () => {
+    const target = new FakeTarget();
+    const answer = await answerRequest(target, request(9, { type: "ping" }));
+    expect(answer).toEqual({ id: 9, result: { ok: { type: "alive" } } });
+    expect(target.calls).toEqual([]);
+  });
+
   it("runs a command with the arguments it was given, or with none", async () => {
     const target = new FakeTarget();
     const answer = await answerRequest(

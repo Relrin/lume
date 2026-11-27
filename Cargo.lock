@@ -2566,6 +2566,7 @@ dependencies = [
  "lume-services",
  "lume-session",
  "notify",
+ "objc2",
  "rcgen",
  "rustls",
  "serde",
@@ -2581,6 +2582,9 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "webkit2gtk",
+ "webview2-com",
+ "windows-core",
  "windows-sys 0.61.2",
  "zeroize",
 ]

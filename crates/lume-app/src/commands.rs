@@ -198,8 +198,11 @@ pub async fn carrier_open(
     channel: Channel<InvokeResponseBody>,
 ) -> Result<Opened, CommandError> {
     let carrier = Arc::new(TauriChannelCarrier(channel));
+    let opened = state.open(webview.label(), carrier).await;
+    // A page whose code stops running is noticed, and its window brought back.
+    crate::freeze::watch(webview.app_handle(), webview.label(), opened);
     Ok(Opened {
-        carrier: state.open(webview.label(), carrier).await,
+        carrier: opened,
         limits: Limits {
             max_payload: MAX_PAYLOAD,
             max_control_message: MAX_CONTROL_MESSAGE,

@@ -587,6 +587,227 @@ impl WindowShell {
         lock(&self.told).remove(label);
         lock(&self.confirmed).remove(label);
     }
+
+    /// Whether a window's page is expected to answer at once: the window is there, on
+    /// show and not minimised, and nobody has stopped its code to look at it. A webview
+    /// may hold back the page of a window that is not seen.
+    pub fn page_expected_to_answer(&self, label: &str) -> bool {
+        let Some(window) = self.app.get_webview_window(label) else {
+            return false;
+        };
+        #[cfg(debug_assertions)]
+        if window.is_devtools_open() {
+            return false;
+        }
+        window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(true)
+    }
+
+    /// Ends a window's page, which has stopped answering, and loads it afresh. Its code
+    /// cannot be stopped from within, and a webview does not load a page whose process
+    /// does not answer: the process that runs the page is ended first, and the page is
+    /// loaded in another.
+    pub fn restart_page(&self, label: &str) {
+        let Some(window) = self.app.get_webview_window(label) else {
+            return;
+        };
+        // The page is loaded again from the windows' own turn, never from inside a call
+        // the webview is making.
+        let reloading = window.clone();
+        let reload = move || {
+            if let Err(error) = reloading.reload() {
+                tracing::warn!(%error, "a page that stopped answering could not be loaded again");
+            }
+        };
+        if let Err(error) = window.with_webview(move |webview| end_page(webview, reload)) {
+            tracing::warn!(%error, label, "a page that stopped answering could not be ended");
+        }
+    }
+}
+
+/// Ends the process of a webview's page, then has `reload` load the page in a new one.
+/// WebView2 does not load a page whose process does not answer when it is asked to: the
+/// process that runs the window's own page, not one of its frames', is found and ended
+/// first. Called on the thread the windows live on.
+#[cfg(windows)]
+fn end_page(webview: tauri::webview::PlatformWebview, reload: impl FnOnce() + 'static) {
+    use webview2_com::GetProcessExtendedInfosCompletedHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_20, ICoreWebView2Environment13,
+    };
+    use windows_core::Interface as _;
+
+    // SAFETY: every WebView2 call here is made on the thread the windows live on, which
+    // is the one WebView2 was started on, with interfaces it handed out; what a call
+    // writes to outlives it.
+    let main_frame = unsafe { webview.controller().CoreWebView2() }
+        .ok()
+        .and_then(|core| core.cast::<ICoreWebView2_20>().ok())
+        .and_then(|core| {
+            let mut id = 0;
+            // SAFETY: as above.
+            unsafe { core.FrameId(&mut id) }.ok().map(|()| id)
+        });
+    let environment = webview
+        .environment()
+        .cast::<ICoreWebView2Environment13>()
+        .ok();
+    // A runtime too old to say which process runs what can only be asked to load it.
+    let (Some(main_frame), Some(environment)) = (main_frame, environment) else {
+        reload();
+        return;
+    };
+    let reload = std::rc::Rc::new(std::cell::Cell::new(Some(reload)));
+    let answered = std::rc::Rc::clone(&reload);
+    tracing::debug!(
+        main_frame,
+        "asking which process runs a page that stopped answering"
+    );
+    let handler =
+        GetProcessExtendedInfosCompletedHandler::create(Box::new(move |result, infos| {
+            if let (Ok(()), Some(infos)) = (result, infos)
+                && let Some(process) = renderer_of(&infos, main_frame)
+            {
+                tracing::debug!(
+                    process,
+                    "ending the process of a page that stopped answering"
+                );
+                end_process(process);
+            }
+            if let Some(reload) = answered.take() {
+                tracing::debug!("loading a page that stopped answering again");
+                reload();
+            }
+            Ok(())
+        }));
+    // SAFETY: as above.
+    if unsafe { environment.GetProcessExtendedInfos(&handler) }.is_err()
+        && let Some(reload) = reload.take()
+    {
+        reload();
+    }
+}
+
+/// The process that runs the frame `frame`, among a WebView2's.
+#[cfg(windows)]
+fn renderer_of(
+    infos: &webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2ProcessExtendedInfoCollection,
+    frame: u32,
+) -> Option<u32> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PROCESS_KIND, COREWEBVIEW2_PROCESS_KIND_RENDERER, ICoreWebView2FrameInfo2,
+    };
+    use windows_core::{BOOL, Interface as _};
+
+    // SAFETY: every call is made on the thread the windows live on, with interfaces
+    // WebView2 handed out, and the values they write to outlive the calls.
+    unsafe {
+        let mut count = 0;
+        infos.Count(&mut count).ok()?;
+        for index in 0..count {
+            let info = infos.GetValueAtIndex(index).ok()?;
+            let process = info.ProcessInfo().ok()?;
+            let mut kind = COREWEBVIEW2_PROCESS_KIND::default();
+            process.Kind(&mut kind).ok()?;
+            if kind != COREWEBVIEW2_PROCESS_KIND_RENDERER {
+                continue;
+            }
+            // The iterator does not keep its collection: the collection is kept here for
+            // as long as the iterator is used, or what it reads has been freed.
+            let collection = info.AssociatedFrameInfos().ok()?;
+            let frames = collection.GetIterator().ok()?;
+            loop {
+                let mut has = BOOL::default();
+                frames.HasCurrent(&mut has).ok()?;
+                if !has.as_bool() {
+                    break;
+                }
+                let current = frames.GetCurrent().ok()?;
+                if let Ok(current) = current.cast::<ICoreWebView2FrameInfo2>() {
+                    let mut id = 0;
+                    if current.FrameId(&mut id).is_ok() && id == frame {
+                        let mut pid = 0;
+                        process.ProcessId(&mut pid).ok()?;
+                        return u32::try_from(pid).ok();
+                    }
+                }
+                let mut moved = BOOL::default();
+                frames.MoveNext(&mut moved).ok()?;
+            }
+        }
+    }
+    None
+}
+
+/// Ends a process, and waits a moment for it to be gone.
+#[cfg(windows)]
+fn end_process(id: u32) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    };
+
+    /// How long the process is given to be gone before the page is loaded again.
+    const GONE_WAIT_MS: u32 = 2000;
+
+    // SAFETY: takes no pointers; a null handle is checked for before it is used.
+    let process = unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, id) };
+    if process.is_null() {
+        tracing::warn!(
+            id,
+            "the process of a page that stopped answering could not be opened"
+        );
+        return;
+    }
+    // SAFETY: `process` is a handle this opened with the rights these calls need, and
+    // it is closed once, last.
+    unsafe {
+        if TerminateProcess(process, 1) != 0 {
+            WaitForSingleObject(process, GONE_WAIT_MS);
+        }
+        CloseHandle(process);
+    }
+}
+
+/// Ends the process of a webview's page, then has `reload` load the page in a new one.
+/// Called on the thread the windows live on.
+#[cfg(target_os = "linux")]
+fn end_page(webview: tauri::webview::PlatformWebview, reload: impl FnOnce() + 'static) {
+    use webkit2gtk::WebViewExt as _;
+    webview.inner().terminate_web_process();
+    reload();
+}
+
+/// Ends the process of a webview's page. The webview says that it ended, and Tauri loads
+/// the page again in a new one; `reload` is for a webview that cannot end it. Called on
+/// the thread the windows live on.
+#[cfg(target_os = "macos")]
+fn end_page(webview: tauri::webview::PlatformWebview, reload: impl FnOnce() + 'static) {
+    use objc2::runtime::AnyObject;
+    use objc2::{msg_send, sel};
+
+    // SAFETY: on the thread the windows live on, where this is called, the pointer is
+    // the window's `WKWebView`, which lives as long as its window does.
+    let Some(view) = (unsafe { webview.inner().cast::<AnyObject>().as_ref() }) else {
+        reload();
+        return;
+    };
+    // Ending the process is not part of WebKit's published interface, so whether the
+    // webview has it is asked first.
+    let end = sel!(_killWebContentProcess);
+    // SAFETY: `respondsToSelector:` is `NSObject`'s, takes a selector and returns a BOOL.
+    let can_end: bool = unsafe { msg_send![view, respondsToSelector: end] };
+    if can_end {
+        // SAFETY: the webview answers the selector, which takes nothing and returns
+        // nothing.
+        let () = unsafe { msg_send![view, _killWebContentProcess] };
+    } else {
+        reload();
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+fn end_page(_webview: tauri::webview::PlatformWebview, reload: impl FnOnce() + 'static) {
+    reload();
 }
 
 impl Shell for WindowShell {

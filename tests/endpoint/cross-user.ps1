@@ -199,3 +199,7 @@ finally {
     foreach ($path in $handed) { Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue }
     Remove-LocalUser -Name $other
 }
+
+# Every check passed. The last program run was refused on purpose, and a runner that
+# ends the script with the last program's exit code would take that for a failure.
+exit 0

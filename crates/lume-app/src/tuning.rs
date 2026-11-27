@@ -47,6 +47,13 @@ pub const PAGE_ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
 /// slow part, and a slow one must not look like a page that has stopped answering.
 pub const PAGE_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How often a window's page is asked whether it is still there, and how long it may
+/// take to say so before it is taken to have stopped. It answers as soon as its code
+/// runs, so only a page whose code no longer gets to run stays silent that long; a busy
+/// machine slows a page down for far less.
+pub const PAGE_PING_EVERY: Duration = Duration::from_secs(2);
+pub const PAGE_STOPPED_AFTER: Duration = Duration::from_secs(10);
+
 /// How much longer than a wait's own limit the core waits for the page to say the wait
 /// has run out, before it says so itself.
 pub const WAIT_SLACK: Duration = Duration::from_secs(2);

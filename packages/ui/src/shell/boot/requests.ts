@@ -108,6 +108,10 @@ export function remoteTarget(deps: RequestDeps): RemoteTarget {
       return gridFor(rect, area.chrome(beside, floating), metrics, dpr);
     },
     command: (id, args) => {
+      // A command held while the page started is carried out as the page goes live,
+      // just after the layout's copy was taken in and before the views have followed
+      // it: they follow it now, so the pane it acts on has its view.
+      views.reconcile();
       commands.runInPage(id, args);
       return Promise.resolve();
     },

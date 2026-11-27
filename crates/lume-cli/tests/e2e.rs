@@ -66,6 +66,28 @@ fn until_gone(pid: u32, limit: Duration, what: &str) {
     }
 }
 
+/// Waits until the application whose state is in `home` has written a workspace that
+/// names `session`.
+fn until_saved(home: &Path, session: &str) {
+    let folder = home.join("state").join("workspaces");
+    let deadline = Instant::now() + START;
+    loop {
+        let saved = std::fs::read_dir(&folder).into_iter().flatten().flatten();
+        if saved
+            .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+            .any(|text| text.contains(session))
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no workspace in {} names session {session}",
+            folder.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 /// Whether a process with this id is running.
 fn process_alive(pid: u32) -> bool {
     if cfg!(windows) {
@@ -1321,7 +1343,10 @@ fn the_shells_outlive_the_application_and_come_back_with_it() {
     assert_eq!(status["sessions"], 2, "{status}");
     let host_pid = status["pid"].clone();
 
-    // The application is ended as a crash would end it. The shells carry on.
+    // The application is ended as a crash would end it, once it has written which
+    // session the new pane shows: it does so as soon as it has followed the change, which
+    // is a moment after the pane was made. The shells carry on.
+    until_saved(&home, &session);
     app.kill();
     std::thread::sleep(Duration::from_secs(1));
     assert!(
@@ -3166,7 +3191,9 @@ fn a_view_that_gets_in_the_way_is_stopped_or_left_to_itself() {
         .ok("show the view");
         plugin_log_until(&home, "test.hostile", at, &format!("abuse {mode} started"));
         if mode == "spin" {
-            // A view that only keeps its own processor busy is left to it.
+            // A view that only keeps its own processor busy is left to it. Where the
+            // webview runs a frame on its page's thread, as WebKit does, it stops the
+            // page too, and the window is brought back without it a while later.
             std::thread::sleep(Duration::from_secs(1));
         } else {
             // One that sends more than it may is taken down, and its plugin told.
@@ -3192,6 +3219,71 @@ fn a_view_that_gets_in_the_way_is_stopped_or_left_to_itself() {
             plugin_log_until(&home, "test.hostile", at, "view closed abuse");
         }
     }
+    app.quit();
+}
+
+/// WebKit runs a view's frame on its page's thread: a view that never lets go of it
+/// stops the window's page with it. WebView2 runs the frame apart, and the page goes on,
+/// so there is nothing to bring back there.
+#[cfg(not(windows))]
+#[test]
+#[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
+fn a_window_whose_page_a_view_stopped_comes_back_without_the_view() {
+    let home = home_with_plugins(&["hostile"]);
+    let config = home.join("config").join("config.toml");
+    let mut written = std::fs::read_to_string(&config).unwrap();
+    written.push_str("\n[plugins.\"test.hostile\"]\nabuse = \"spin\"\n");
+    std::fs::write(&config, &written).unwrap();
+    let app = App::start_in(home.clone(), false);
+    app.status_with_session();
+    app.until_plugin("test.hostile", "the plugin to be read", |plugin| {
+        plugin["state"] == "ready"
+    });
+    app.ctl(&[
+        "command",
+        "lume.panel.show",
+        r#"{"panel":"test.hostile.abuse"}"#,
+    ])
+    .ok("show the view");
+    let started = plugin_log_until(&home, "test.hostile", 0, "abuse spin started").len();
+
+    // Its panel is left where it is. Once the page is found to have stopped, the view is
+    // closed for its plugin, as the page would have closed it.
+    plugin_log_until(&home, "test.hostile", started, "view closed abuse");
+    let closed = plugin_log_len(&home, "test.hostile");
+
+    // The window's page answers again: a command it carries out itself runs.
+    let deadline = Instant::now() + START;
+    loop {
+        let ran = app.ctl(&["command", "lume.view.zoom-reset"]);
+        if ran.status == 0 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the window's page never answered again: {}",
+            ran.json
+        );
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    // The terminal is shown again, and takes what is typed.
+    app.type_line("echo back-again");
+    app.wait_text("back-again");
+
+    // The panel is still there, and the new page did not open the view again by itself:
+    // that waits for the user.
+    std::thread::sleep(Duration::from_secs(2));
+    let since = std::fs::read_to_string(home.join("state/plugins/logs/test.hostile.log"))
+        .unwrap_or_default();
+    assert!(
+        !since[closed..].contains("view opened abuse"),
+        "the view was opened again by itself:\n{since}"
+    );
+    let layout = app.layout();
+    assert!(
+        layout.to_string().contains("test.hostile.abuse"),
+        "the view's panel went: {layout}"
+    );
     app.quit();
 }
 

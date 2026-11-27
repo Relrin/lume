@@ -264,6 +264,10 @@ async function carryOut(target: RemoteTarget, body: Fields): Promise<Record<stri
     }
     case "sign_in":
       return { type: "secret", secret: await target.signIn(readSignIn(body)) };
+    // The core asks now and then whether the page is still there: that it is asked and
+    // answers is the answer.
+    case "ping":
+      return { type: "alive" };
     default:
       throw badRequest(`the page knows no request called ${String(body["type"])}`);
   }
