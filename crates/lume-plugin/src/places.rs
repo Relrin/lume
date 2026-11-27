@@ -71,8 +71,9 @@ pub const MOTION_SLOTS: [&str; 9] = [
 ];
 
 /// The kinds of cursor effect a plugin's shader can draw: a trail when the cursor
-/// jumps, or a pulse when it changes shape or lands in another pane.
-pub const CURSOR_EFFECT_KINDS: [&str; 2] = ["trail", "pulse"];
+/// jumps, a motion that draws the cursor itself on its way each time it moves, or a
+/// pulse when it changes shape or lands in another pane.
+pub const CURSOR_EFFECT_KINDS: [&str; 3] = ["trail", "motion", "pulse"];
 
 /// What one of the application's own nodes is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

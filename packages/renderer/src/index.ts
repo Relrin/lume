@@ -9,7 +9,7 @@
  * A window creates one `RenderHost` and asks it for a renderer per pane.
  */
 
-export { TIER_ORDER, WEBGL2_CONTEXTS_MAX } from "./constants.ts";
+export { CURSOR_BAR_WIDTH_RATIO, TIER_ORDER, WEBGL2_CONTEXTS_MAX } from "./constants.ts";
 export {
   CellFlag,
   CursorShape,
@@ -33,7 +33,7 @@ export {
   type FxMakers,
   type FxSurface,
 } from "./fx/effects.ts";
-export type { FxRect, PulseKind, TrailKind } from "./fx/geometry.ts";
+export type { FxRect, MotionKind, PulseKind, TrailKind } from "./fx/geometry.ts";
 export {
   CustomEffectError,
   customFragment,

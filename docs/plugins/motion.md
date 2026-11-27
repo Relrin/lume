@@ -217,16 +217,36 @@ duration = 300
 reach = 32
 ```
 
-| Key        | Value                                                                                                   |
-| ---------- | ------------------------------------------------------------------------------------------------------- |
-| `kind`     | `trail`, drawn when the cursor jumps, or `pulse`, drawn when it changes shape or lands in another pane. |
-| `shader`   | A `.glsl` file in the package.                                                                          |
-| `duration` | How long the effect lasts, in milliseconds: from 1 to 1500. 400 if not given.                           |
-| `reach`    | How far from the cursor's cells it may draw, in pixels: 256 at most. 48 if not given.                   |
+| Key        | Value                                                                                                                                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kind`     | `trail`, drawn when the cursor jumps; `motion`, which draws the cursor itself on its way each time it moves; or `pulse`, drawn when it changes shape or lands in another pane. |
+| `shader`   | A `.glsl` file in the package.                                                                                                                                                 |
+| `duration` | How long the effect lasts, in milliseconds: from 1 to 1500. 400 if not given.                                                                                                  |
+| `reach`    | How far from the cursor's cells it may draw, in pixels: 256 at most. 48 if not given.                                                                                          |
 
-An installed effect joins the choices of the cursor trail or the cursor pulse setting, by its
-`kind`, under its `title`. The user's setting for how long effects last is applied on top of
+An installed effect joins the choices of the cursor trail, cursor motion or cursor pulse setting,
+by its `kind`, under its `title`. The user's setting for how long effects last is applied on top of
 `duration`.
+
+### Motions
+
+A `motion` draws the cursor as it goes from one place to the next: a cursor that glides as one
+types, deletes or moves it. It differs from a trail in three ways:
+
+- It plays on every move, a step of one cell as much as a jump, and when the keyboard goes to
+  another pane.
+- While it plays, the pane leaves its own cursor out. The shader draws the cursor; in the frame the
+  effect ends in, the pane draws it again in its place. A motion that ends with the cursor where
+  `lume_to` is hands over without a jump.
+- `lume_from` and `lume_to` are what the cursor covers, not its cells: the whole cell for a block,
+  the thin line for a bar or an underline, two cells over a wide character.
+
+A motion plays beside a trail, so the two settings can both be on. A motion that starts while
+another plays leaves from where the cursor was before this move. Lume has two motions of its own,
+"Glide" and "Glide, slow"; a plugin's are offered beside them. A plugin's motion whose shader is
+still being built, or where the window has no WebGL2, leaves the cursor to move at once.
+
+A short `duration` suits a motion best: the cursor should be where it belongs before the next key.
 
 ### The shader
 
@@ -255,6 +275,8 @@ What the function can read:
 | `lume_from`       | `vec4`  | The cell the cursor left: left, top, width, height, in device pixels. |
 | `lume_to`         | `vec4`  | The cell the cursor reached, written the same way.                    |
 | `lume_color`      | `vec3`  | The cursor's colour, each part from 0 to 1.                           |
+
+For a motion, `lume_from` and `lume_to` are what the cursor covers in those cells, as said above.
 
 The function can read nothing else. There is no texture to sample, so a shader never sees what a
 terminal shows, and what it draws goes only to the screen.

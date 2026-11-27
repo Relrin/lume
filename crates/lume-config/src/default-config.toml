@@ -138,6 +138,10 @@
 # written "<plugin>/<effect>". Both are off while the system asks for less motion. How long they last against their own length, from 0.25
 # to 3.
 # cursor-trail = "none"
+# How the cursor itself moves as one types or moves it: "none" (at once), "glide" or
+# "glide-slow" (it slides to its new place), or a plugin's effect, "<plugin>/<effect>".
+# Off while the system asks for less motion.
+# cursor-motion = "none"
 # cursor-pulse = "none"
 # cursor-effect-length = 1.0
 # The space between a pane's edge and its text, in pixels. Left out, the theme decides.

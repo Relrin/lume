@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { easeOutCirc, easeOutCubic, fadeOutQuad, smoothstep } from "../src/fx/easing.ts";
-import { CustomEffectError } from "../src/fx/custom.ts";
+import { CustomEffectError, type CustomDraw } from "../src/fx/custom.ts";
 import { CursorEffects, type FxSurface } from "../src/fx/effects.ts";
 import {
   convexHull,
@@ -20,6 +20,8 @@ import {
   FX_EDGE,
   FX_FIRST_FRAME_MS,
   FX_POLYGON_MAX,
+  GLIDE_MS,
+  GLIDE_SLOW_MS,
   PULSE_MS,
   WARP_TRAIL_SIZE,
 } from "../src/fx/tuning.ts";
@@ -210,8 +212,10 @@ class FakeFx implements FxBackend {
     if (state !== "built") throw new CustomEffectError(state);
     return true;
   }
-  drawCustom(id: string) {
+  customDraws: CustomDraw[] = [];
+  drawCustom(id: string, draw: CustomDraw) {
     this.customs.push(id);
+    this.customDraws.push(draw);
   }
   forgetCustom(id: string) {
     this.built.delete(id);
@@ -415,6 +419,60 @@ describe("the cursor's effects", () => {
   });
 });
 
+describe("the cursor's own motion", () => {
+  it("draws the cursor as a box sliding from its old place to its new, then gives it back", () => {
+    const { effects, last } = setup();
+    effects.configure({ trail: "none", pulse: "none", motion: "glide" });
+    expect(effects.cursorDrawnUntil).toBe(-Infinity);
+    // A bar one cell on, as when a key is typed: drawn in device pixels, twice CSS ones.
+    const bar = (col: number): FxRect => ({ x: col * 10, y: 20, width: 2, height: 20 });
+    expect(effects.glide(bar(3), bar(4), MINT, 100)).toBe(true);
+    const until = 100 - FX_FIRST_FRAME_MS + GLIDE_MS;
+    expect(effects.cursorDrawnUntil).toBe(until);
+    effects.frame(100);
+    const box = last().draws.at(-1)![0]!;
+    expect(box.kind).toBe(ShapeKind.Box);
+    expect(box.halfWidth).toBe(2);
+    expect(box.halfHeight).toBe(20);
+    // Quick to leave: a little way in, more than that share of the way is behind it.
+    expect(box.centreX).toBeGreaterThan(62 + 20 * (FX_FIRST_FRAME_MS / GLIDE_MS));
+    expect(box.centreX).toBeLessThan(82);
+    expect(box.holeRight).toBe(0);
+    effects.frame(until - 0.001);
+    expect(last().draws.at(-1)![0]!.centreX).toBeCloseTo(82, 1);
+    // The frame that reaches the end draws nothing: the pane draws the cursor again.
+    effects.frame(until);
+    expect(effects.cursorDrawnUntil).toBe(-Infinity);
+    expect(effects.playing).toBe(false);
+  });
+
+  it("plays where WebGL2 cannot be had, takes the settings' length, and stops when turned off", () => {
+    const { effects, last } = setup({ webgl2: "none" });
+    effects.configure({ trail: "none", pulse: "none", motion: "glide-slow", length: 2 });
+    expect(last().kind).toBe("canvas2d");
+    expect(effects.glide(cell(0, 0), cell(1, 0), MINT, 0)).toBe(true);
+    expect(effects.cursorDrawnUntil).toBe(-FX_FIRST_FRAME_MS + GLIDE_SLOW_MS * 2);
+    effects.configure({ trail: "none", pulse: "none" });
+    expect(effects.cursorDrawnUntil).toBe(-Infinity);
+    expect(effects.glide(cell(0, 0), cell(1, 0), MINT, 10)).toBe(false);
+  });
+
+  it("gives way to a plugin's motion once that is ready", () => {
+    const { effects, last } = setup();
+    const glow = { id: "acme/glide", source: "x", duration: 300, reach: 8 };
+    effects.configure({ trail: "none", pulse: "none", motion: "glide", customMotion: glow });
+    // Still being built: Lume's own plays meanwhile.
+    expect(effects.glide(cell(0, 0), cell(1, 0), MINT, 0)).toBe(true);
+    effects.frame(5);
+    expect(last().customs).toEqual([]);
+    last().built.set("acme/glide", "built");
+    expect(effects.glide(cell(1, 0), cell(2, 0), MINT, 20)).toBe(true);
+    effects.frame(25);
+    expect(last().customs).toEqual(["acme/glide"]);
+    expect(last().draws.at(-1)).toHaveLength(0);
+  });
+});
+
 describe("a plugin's cursor effect", () => {
   const glow = { id: "acme/glow", source: "x", duration: 300, reach: 32 };
 
@@ -432,6 +490,43 @@ describe("a plugin's cursor effect", () => {
     expect(effects.move(cell(0, 0), cell(50, 30), MINT, 100)).toBe(true);
     effects.frame(110);
     expect(last().customs).toEqual(["acme/glow"]);
+  });
+
+  it("as the cursor's motion, plays on every step, over the cursor's place, until it says", () => {
+    const { effects, last } = setup();
+    effects.configure({ trail: "none", pulse: "none", customMotion: glow });
+    last().built.set("acme/glow", "built");
+    expect(effects.cursorDrawnUntil).toBe(-Infinity);
+    // A step of one cell, which no trail would play for.
+    expect(effects.glide(cell(3, 2), cell(4, 2), MINT, 100)).toBe(true);
+    const until = 100 - FX_FIRST_FRAME_MS + 300;
+    expect(effects.cursorDrawnUntil).toBe(until);
+    effects.frame(110);
+    expect(last().customs).toEqual(["acme/glow"]);
+    const draw = last().customDraws[0]!;
+    // In device pixels, and nothing is left clear: the motion draws the cursor itself.
+    expect(draw.from).toEqual([60, 80, 20, 40]);
+    expect(draw.to).toEqual([80, 80, 20, 40]);
+    expect(draw.hole).toEqual([0, 0, 0, 0]);
+    // The frame that reaches the end draws it no more, and the pane draws the cursor.
+    effects.frame(until);
+    expect(last().customs).toEqual(["acme/glow"]);
+    expect(effects.cursorDrawnUntil).toBe(-Infinity);
+    expect(effects.playing).toBe(false);
+  });
+
+  it("as the cursor's motion, plays beside a trail, and ends when it is no longer chosen", () => {
+    const { effects, last } = setup();
+    effects.configure({ trail: "comet", pulse: "none", customMotion: glow });
+    last().built.set("acme/glow", "built");
+    expect(effects.move(cell(0, 0), cell(50, 30), MINT, 0)).toBe(true);
+    expect(effects.glide(cell(0, 0), cell(50, 30), MINT, 0)).toBe(true);
+    effects.frame(10);
+    expect(last().draws.at(-1)).toHaveLength(1);
+    expect(last().customs).toEqual(["acme/glow"]);
+    effects.configure({ trail: "comet", pulse: "none" });
+    expect(effects.cursorDrawnUntil).toBe(-Infinity);
+    expect(effects.glide(cell(0, 0), cell(1, 0), MINT, 20)).toBe(false);
   });
 
   it("is given up and said once when its shader cannot be built", () => {

@@ -15,7 +15,15 @@
  * never held up and the screen is there the moment the tab is shown again.
  */
 
-import type { CellRenderer, FrameView, FxRect, RenderHost } from "@lume/renderer";
+import {
+  CellFlag,
+  CURSOR_BAR_WIDTH_RATIO,
+  CursorShape,
+  type CellRenderer,
+  type FrameView,
+  type FxRect,
+  type RenderHost,
+} from "@lume/renderer";
 import {
   clearSelection,
   encodeColorScheme,
@@ -35,6 +43,7 @@ import {
   type Autoscroll,
   type CursorStyle,
   type FrameCursor,
+  type RenderFrame,
   type KeyEncoder,
   type KeyInput,
   type MouseButton,
@@ -367,6 +376,11 @@ export class TerminalView implements FrameView {
   /** The cursor's own colour in the look the view has, and that look. */
   #cursorColor = 0;
   #cursorLook: Appearance | undefined;
+  /**
+   * Until when, in the time of the frames, the cursor's effects draw the cursor in the
+   * view's place: `-Infinity` while they do not.
+   */
+  #cursorGivenUntil = -Infinity;
 
   /** Keys whose press was sent, so their release is sent too and no other. */
   readonly #pressed = new Set<string>();
@@ -473,6 +487,7 @@ export class TerminalView implements FrameView {
     if (!this.#elements) return;
     this.#services.host.loop.remove(this);
     this.#services.cursor?.forget(this);
+    this.#cursorGivenUntil = -Infinity;
     this.#remeasured = true;
     for (const stop of this.#stopListening) stop();
     this.#stopListening = [];
@@ -1093,7 +1108,13 @@ export class TerminalView implements FrameView {
 
   needsFrame(): boolean {
     const session = this.#session;
-    if (!this.#dirty || this.#renderer === undefined || session === undefined) return false;
+    if (this.#renderer === undefined || session === undefined) return false;
+    // The cursor the effects drew is drawn here again in the frame its effect ends in.
+    if (this.#cursorGivenUntil > -Infinity) {
+      const over = performance.now() >= this.#cursorGivenUntil;
+      if (over || !this.#services.cursor?.holds(this)) return true;
+    }
+    if (!this.#dirty) return false;
     // An empty screen in place of the one on its way would only flash.
     if (session.restoring && performance.now() < this.#restoreUntil) return false;
     // Nor is the half of a screen a program is still drawing shown.
@@ -1151,12 +1172,13 @@ export class TerminalView implements FrameView {
     // Cleared here, not before: finding the link again asks for a frame, which is this one.
     this.#dirty = false;
     this.#syncBlink(frame.cursor);
+    // The cursor's effects read where the pane is laid out: asked before anything of the
+    // pane's own is moved, so that reading it does not make the page lay itself out again,
+    // and before drawing, as an effect that draws the cursor leaves this frame without it.
+    this.#tellCursor(frame, now);
     renderer.draw(frame);
     startDrawn();
     session.state.markDrawn();
-    // The cursor's effects read where the pane is laid out: asked before anything of the
-    // pane's own is moved, so that reading it does not make the page lay itself out again.
-    this.#tellCursor(frame.cursor, `${frame.cols}x${frame.rows}`, now);
     this.#placeInput(frame.cursor);
     this.#updateScrollbar();
     this.#watchHistory(session);
@@ -1246,10 +1268,63 @@ export class TerminalView implements FrameView {
     };
   }
 
-  /** Tells the cursor's effects where the cursor was drawn, while any effect is on. */
-  #tellCursor(cursor: FrameCursor, grid: string, now: number): void {
+  /**
+   * What the cursor covers in a cell, in CSS pixels of the window, drawn as the
+   * renderer draws it in `shape`: for an effect that draws the cursor in the view's place.
+   */
+  cursorRect(col: number, row: number, shape: number, wide: boolean): FxRect | undefined {
+    const cell = this.cellRect(col, row);
+    const renderer = this.#renderer;
+    if (!cell || !renderer) return cell;
+    const width = wide ? cell.width * 2 : cell.width;
+    const m = renderer.metrics;
+    switch (shape) {
+      case CursorShape.Bar: {
+        const bar = Math.max(1, Math.round(m.cellWidth * CURSOR_BAR_WIDTH_RATIO)) / this.#dpr;
+        return { ...cell, width: bar };
+      }
+      case CursorShape.Underline: {
+        const line = m.lineThickness / this.#dpr;
+        return { x: cell.x, y: cell.y + cell.height - line, width, height: line };
+      }
+      default:
+        return { ...cell, width };
+    }
+  }
+
+  cursorReleased(): void {
+    this.#giveCursorBack();
+  }
+
+  #giveCursorBack(): void {
+    if (this.#cursorGivenUntil === -Infinity) return;
+    this.#cursorGivenUntil = -Infinity;
+    this.#showCursor();
+    this.#markDirty();
+  }
+
+  /** Draws the cursor unless it blinks off or the effects draw it in the view's place. */
+  #showCursor(): void {
+    this.#renderer?.setCursorVisible(this.#blinkOn && this.#cursorGivenUntil === -Infinity);
+  }
+
+  /**
+   * Tells the cursor's effects where the cursor is, while any effect is on, and leaves
+   * the cursor out of the frame while they draw it in the view's place.
+   */
+  #tellCursor(frame: RenderFrame, now: number): void {
+    const given = this.#cursorTold(frame, now);
+    const until = given > now ? given : -Infinity;
+    if (until === this.#cursorGivenUntil) return;
+    this.#cursorGivenUntil = until;
+    this.#showCursor();
+  }
+
+  #cursorTold(frame: RenderFrame, now: number): number {
+    const cursor = frame.cursor;
+    const grid = `${frame.cols}x${frame.rows}`;
     const watch = this.#services.cursor;
-    if (!watch?.watching) return;
+    if (!watch?.watching) return -Infinity;
     const terminal = this.#session?.terminal;
     // A screen scrolled back shows an older part of the output: the cursor is not on it.
     const bar = terminal && this.#bar(terminal);
@@ -1261,13 +1336,19 @@ export class TerminalView implements FrameView {
       this.#cursorLook = this.#appearance;
       this.#cursorColor = rendererTheme(this.#appearance, this.#fontSizePx).cursor;
     }
-    watch.report(
+    // The second half of a wide character is drawn from its first.
+    const col = cursor.wideTail ? Math.max(0, cursor.x - 1) : cursor.x;
+    const cell = cursor.y * frame.cols + col;
+    const wide =
+      cursor.wideTail ||
+      (cursor.y < frame.rows && col < frame.cols && (frame.flags[cell]! & CellFlag.Wide) !== 0);
+    return watch.report(
       this,
       {
-        // The second half of a wide character is drawn from its first.
-        col: cursor.wideTail ? Math.max(0, cursor.x - 1) : cursor.x,
+        col,
         row: cursor.y,
         shape: cursor.shape,
+        wide,
         visible: cursor.visible && atBottom,
         focused: this.#focused,
         reflowed,
@@ -1454,7 +1535,7 @@ export class TerminalView implements FrameView {
     if (blink && this.#blinkTimer === undefined) {
       this.#blinkTimer = window.setInterval(() => {
         this.#blinkOn = !this.#blinkOn;
-        this.#renderer?.setCursorVisible(this.#blinkOn);
+        this.#showCursor();
         this.#markDirty();
       }, CURSOR_BLINK_INTERVAL_MS);
     } else if (!blink && this.#blinkTimer !== undefined) {
@@ -1466,7 +1547,7 @@ export class TerminalView implements FrameView {
     if (this.#blinkTimer !== undefined) window.clearInterval(this.#blinkTimer);
     this.#blinkTimer = undefined;
     this.#blinkOn = true;
-    this.#renderer?.setCursorVisible(true);
+    this.#showCursor();
   }
 
   /** Shows the cursor and starts its period again: it does not vanish while one types. */

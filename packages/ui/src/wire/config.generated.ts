@@ -61,6 +61,7 @@
     "cursor-style": "block",
     "cursor-blink": true,
     "cursor-trail": "none",
+    "cursor-motion": "none",
     "cursor-pulse": "none",
     "cursor-effect-length": 1.0,
     "close-on-exit": "clean",
@@ -402,6 +403,23 @@ export type Confirm =
 export type Contributed = `${string}/${string}`;
 
 /**
+ * How the cursor itself goes from one place to the next, typing included.
+ */
+export type CursorMotion =
+  /**
+   * The cursor is simply in its new place.
+   */
+  | "none"
+  /**
+   * The cursor slides to its new place, quick to leave and gentle to arrive.
+   */
+  | "glide"
+  /**
+   * The same slide, slower, with a longer and softer landing.
+   */
+  | "glide-slow";
+
+/**
  * What the cursor gives off when it changes shape or lands in another pane.
  */
 export type CursorPulse =
@@ -731,7 +749,12 @@ export type OrPlugin2 = CursorTrail | Contributed;
 /**
  * One of Lume's own choices, or one a plugin brings.
  */
-export type OrPlugin3 = CursorPulse | Contributed;
+export type OrPlugin3 = CursorMotion | Contributed;
+
+/**
+ * One of Lume's own choices, or one a plugin brings.
+ */
+export type OrPlugin4 = CursorPulse | Contributed;
 
 /**
  * When a pane shows its header.
@@ -1690,15 +1713,21 @@ export interface TerminalConfig {
    */
   readonly "cursor-blink": boolean;
   /**
-   * How long the cursor's trail and pulse last, as a share of each effect's own
-   * length: 1 is as designed, 2 twice as long.
+   * How long the cursor's trail, motion and pulse last, as a share of each effect's
+   * own length: 1 is as designed, 2 twice as long.
    */
   readonly "cursor-effect-length": number;
+  /**
+   * How the cursor itself moves from one place to the next, typing included: at once,
+   * or drawn on its way, by Lume or by a plugin's effect. Off while the system asks
+   * for less motion.
+   */
+  readonly "cursor-motion": OrPlugin3;
   /**
    * What the cursor gives off when it changes shape or moves to another pane. Off
    * while the system asks for less motion.
    */
-  readonly "cursor-pulse": OrPlugin3;
+  readonly "cursor-pulse": OrPlugin4;
   /**
    * The cursor's shape, until a program chooses another.
    */

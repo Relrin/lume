@@ -41,6 +41,9 @@ export type Corners = [Point, Point, Point, Point];
 /** What the cursor leaves behind when it jumps. */
 export type TrailKind = "none" | "warp" | "sweep" | "comet";
 
+/** How the cursor itself goes to its new place: at once, or drawn on its way. */
+export type MotionKind = "none" | "glide" | "glide-slow";
+
 /** What the cursor gives off when it changes shape or lands in another pane. */
 export type PulseKind = "none" | "burst" | "ripple" | "box-burst" | "box-ripple";
 

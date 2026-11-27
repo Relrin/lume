@@ -1003,6 +1003,19 @@ pub enum CursorTrail {
     Comet,
 }
 
+/// How the cursor itself goes from one place to the next, typing included.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum CursorMotion {
+    /// The cursor is simply in its new place.
+    #[default]
+    None,
+    /// The cursor slides to its new place, quick to leave and gentle to arrive.
+    Glide,
+    /// The same slide, slower, with a longer and softer landing.
+    GlideSlow,
+}
+
 /// What the cursor gives off when it changes shape or lands in another pane.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -1102,6 +1115,17 @@ pub struct TerminalConfig {
             ("comet", "Comet"),
         ])))]
     pub cursor_trail: OrPlugin<CursorTrail>,
+    /// How the cursor itself moves from one place to the next, typing included: at once,
+    /// or drawn on its way, by Lume or by a plugin's effect. Off while the system asks
+    /// for less motion.
+    #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Cursor", 35, "Cursor motion")
+        .help("How the cursor moves as you type, delete, or move it")
+        .options(&[
+            ("none", "None"),
+            ("glide", "Glide"),
+            ("glide-slow", "Glide, slow"),
+        ])))]
+    pub cursor_motion: OrPlugin<CursorMotion>,
     /// What the cursor gives off when it changes shape or moves to another pane. Off
     /// while the system asks for less motion.
     #[schemars(extend("x-lume-settings" = Shown::select("terminal", "Cursor", 40, "Cursor pulse")
@@ -1114,11 +1138,11 @@ pub struct TerminalConfig {
             ("box-ripple", "Box ripple"),
         ])))]
     pub cursor_pulse: OrPlugin<CursorPulse>,
-    /// How long the cursor's trail and pulse last, as a share of each effect's own
-    /// length: 1 is as designed, 2 twice as long.
+    /// How long the cursor's trail, motion and pulse last, as a share of each effect's
+    /// own length: 1 is as designed, 2 twice as long.
     #[schemars(range(min = CURSOR_EFFECT_LENGTH_MIN, max = CURSOR_EFFECT_LENGTH_MAX))]
     #[schemars(extend("x-lume-settings" = Shown::number("terminal", "Cursor", 50, "Effect length", SETTINGS_STEP_EFFECT_LENGTH)
-        .help("How long the trail and the pulse last, against their own length")
+        .help("How long the trail, the motion and the pulse last, against their own length")
         .percent()))]
     pub cursor_effect_length: f64,
     /// The space between a pane's edge and its text, in pixels. Left out, the theme's.
@@ -1174,6 +1198,7 @@ impl Default for TerminalConfig {
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
             cursor_trail: OrPlugin::Own(CursorTrail::None),
+            cursor_motion: OrPlugin::Own(CursorMotion::None),
             cursor_pulse: OrPlugin::Own(CursorPulse::None),
             cursor_effect_length: 1.0,
             padding: None,

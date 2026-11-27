@@ -268,7 +268,11 @@ export interface CursorEffectDef {
   readonly id: string;
   readonly plugin: string;
   readonly title: string;
-  readonly kind: "trail" | "pulse";
+  /**
+   * A trail when the cursor jumps, a motion that draws the cursor itself on its way
+   * each time it moves, or a pulse when it changes shape or lands in another pane.
+   */
+  readonly kind: "trail" | "motion" | "pulse";
   readonly duration: number;
   readonly reach: number;
   /**

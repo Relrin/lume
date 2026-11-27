@@ -163,6 +163,12 @@
             }
           },
           {
+            "role": "combobox",
+            "state": {
+              "expanded": "false"
+            }
+          },
+          {
             "role": "spinbutton"
           },
           {

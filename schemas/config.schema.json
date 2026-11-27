@@ -2286,6 +2286,7 @@
         "copy-on-select": false,
         "cursor-blink": true,
         "cursor-effect-length": 1.0,
+        "cursor-motion": "none",
         "cursor-pulse": "none",
         "cursor-style": "block",
         "cursor-trail": "none",
@@ -2405,7 +2406,7 @@
         },
         "cursor-effect-length": {
           "default": 1.0,
-          "description": "How long the cursor's trail and pulse last, as a share of each effect's own\nlength: 1 is as designed, 2 twice as long.",
+          "description": "How long the cursor's trail, motion and pulse last, as a share of each effect's\nown length: 1 is as designed, 2 twice as long.",
           "format": "double",
           "maximum": 3.0,
           "minimum": 0.25,
@@ -2413,13 +2414,66 @@
           "x-lume-settings": {
             "control": "number",
             "group": "Cursor",
-            "help": "How long the trail and the pulse last, against their own length",
+            "help": "How long the trail, the motion and the pulse last, against their own length",
             "label": "Effect length",
             "order": 50,
             "page": "terminal",
             "scale": 100.0,
             "step": 5.0,
             "unit": "%"
+          }
+        },
+        "cursor-motion": {
+          "anyOf": [
+            {
+              "description": "How the cursor itself goes from one place to the next, typing included.",
+              "oneOf": [
+                {
+                  "const": "none",
+                  "description": "The cursor is simply in its new place.",
+                  "type": "string"
+                },
+                {
+                  "const": "glide",
+                  "description": "The cursor slides to its new place, quick to leave and gentle to arrive.",
+                  "type": "string"
+                },
+                {
+                  "const": "glide-slow",
+                  "description": "The same slide, slower, with a longer and softer landing.",
+                  "type": "string"
+                }
+              ]
+            },
+            {
+              "description": "Something a plugin brings, as <plugin>/<name>",
+              "type": "string",
+              "x-lume-format": "contributed"
+            }
+          ],
+          "default": "none",
+          "description": "How the cursor itself moves from one place to the next, typing included: at once,\nor drawn on its way, by Lume or by a plugin's effect. Off while the system asks\nfor less motion.",
+          "x-lume-settings": {
+            "control": "select",
+            "group": "Cursor",
+            "help": "How the cursor moves as you type, delete, or move it",
+            "label": "Cursor motion",
+            "options": [
+              {
+                "label": "None",
+                "value": "none"
+              },
+              {
+                "label": "Glide",
+                "value": "glide"
+              },
+              {
+                "label": "Glide, slow",
+                "value": "glide-slow"
+              }
+            ],
+            "order": 35,
+            "page": "terminal"
           }
         },
         "cursor-pulse": {

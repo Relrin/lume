@@ -592,6 +592,33 @@ describe("plugins' effects chosen in the settings", () => {
     expect(settings.customPulse).toBeUndefined();
   });
 
+  it("draw a plugin's motion for the cursor, only as the motion it was written as", () => {
+    const glide = {
+      id: "acme/glide",
+      plugin: "acme",
+      title: "Glide",
+      duration: 120,
+      reach: 8,
+      hash: "glide-shader",
+    };
+    const shown: UiContributions = {
+      ...EMPTY,
+      cursor_effects: [
+        { ...glide, kind: "motion" },
+        { ...glide, id: "acme/smear", kind: "trail", hash: "smear-shader" },
+      ],
+    };
+    const view = {
+      config: { terminal: { "cursor-motion": "acme/glide", "cursor-trail": "acme/glide" } },
+    } as unknown as ConfigView;
+    expect(cursorFxShaders(view, shown)).toEqual(["glide-shader"]);
+    assets.put("glide-shader", "y");
+    const settings = cursorFxSettings(view, shown);
+    expect(settings.customMotion?.id).toBe("acme/glide");
+    // A motion named as the trail is not a trail.
+    expect(settings.customTrail).toBeUndefined();
+  });
+
   it("move the tab's mark with a plugin's springs, drawn as the window's style of its shape", () => {
     const motion: MotionDef = {
       id: "acme/bouncy",

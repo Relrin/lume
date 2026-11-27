@@ -690,8 +690,9 @@ pub struct CursorEffect {
     pub id: String,
     /// What the settings call it.
     pub title: String,
-    /// `trail`, drawn when the cursor jumps, or `pulse`, drawn when it changes shape or
-    /// lands in another pane.
+    /// `trail`, drawn when the cursor jumps; `motion`, which draws the cursor itself on
+    /// its way each time it moves; or `pulse`, drawn when it changes shape or lands in
+    /// another pane.
     pub kind: String,
     /// A GLSL file in the package that defines `vec4 lume_effect(vec2 pixel)`.
     pub shader: String,

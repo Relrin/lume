@@ -1590,9 +1590,10 @@ fn settings(installs: &[Install<'_>], out: &mut Contributions) {
 
 /// The paths of the application's settings whose choices plugins add to, and the place
 /// or kind of effect their choices come from.
-const CHOICES: [(&str, &str); 3] = [
+const CHOICES: [(&str, &str); 4] = [
     ("appearance.tab-highlight", "tab.highlight"),
     ("terminal.cursor-trail", "cursor:trail"),
+    ("terminal.cursor-motion", "cursor:motion"),
     ("terminal.cursor-pulse", "cursor:pulse"),
 ];
 
@@ -2245,6 +2246,13 @@ title = "Bad"
 kind = "trail"
 shader = "fx/bad.glsl"
 
+[[contributes.cursor-effects]]
+id = "glide"
+title = "Glide"
+kind = "motion"
+shader = "fx/glow.glsl"
+duration = 120
+
 [[contributes.motions]]
 id = "pop"
 title = "Pop"
@@ -2260,9 +2268,11 @@ file = "themes/night.toml"
         let bound = BTreeMap::new();
         let installs = [install("acme.fx", &one, &dir, 0, &bound)];
         let out = build(&installs, &Known, &mut Read::default());
-        assert_eq!(out.cursor_effects.len(), 1);
+        assert_eq!(out.cursor_effects.len(), 2);
         assert_eq!(out.cursor_effects[0].id, "acme.fx/glow");
         assert_eq!(out.cursor_effects[0].duration, 400);
+        assert_eq!(out.cursor_effects[1].id, "acme.fx/glide");
+        assert_eq!(out.cursor_effects[1].kind, "motion");
         assert!(
             out.warnings
                 .iter()
@@ -2283,6 +2293,29 @@ file = "themes/night.toml"
                 .iter()
                 .any(|option| option["value"] == "acme.fx/glow")
         );
+        // A motion is offered as the cursor's motion, after Lume's own, and nowhere else.
+        let motions = composed
+            .pointer("/properties/terminal/properties/cursor-motion/x-lume-settings/options")
+            .unwrap();
+        assert_eq!(motions[0]["value"], "none");
+        assert_eq!(motions[1]["value"], "glide");
+        assert_eq!(motions[2]["value"], "glide-slow");
+        assert_eq!(motions[3]["value"], "acme.fx/glide");
+        assert_eq!(motions[3]["label"], "Glide");
+        for other in ["cursor-trail", "cursor-pulse"] {
+            let options = composed
+                .pointer(&format!(
+                    "/properties/terminal/properties/{other}/x-lume-settings/options"
+                ))
+                .unwrap();
+            assert!(
+                !options
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|option| option["value"] == "acme.fx/glide")
+            );
+        }
         let menus = composed
             .pointer(
                 "/properties/appearance/properties/motion/properties/menu-enter/x-lume-settings",

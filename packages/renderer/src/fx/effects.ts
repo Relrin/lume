@@ -1,6 +1,7 @@
 /**
  * The cursor's effects for one window: a trail when the cursor jumps, a pulse when it
- * changes shape or lands in another pane.
+ * changes shape or lands in another pane, and a motion that draws the cursor itself on
+ * its way each time it moves.
  *
  * They are drawn on one transparent canvas over the whole window rather than by each
  * pane's renderer, so a trail can fly from one pane to another. The canvas is hidden
@@ -12,6 +13,7 @@
 import type { FrameView } from "../loop.ts";
 import type { Size } from "../types.ts";
 import { CustomEffectError, type CustomEffect } from "./custom.ts";
+import { easeOutCubic, easeOutQuint, type Easing } from "./easing.ts";
 import {
   cornersOf,
   farEnough,
@@ -20,6 +22,7 @@ import {
   trailShape,
   type Corners,
   type FxRect,
+  type MotionKind,
   type Pulse,
   type PulseKind,
   type Trail,
@@ -33,6 +36,8 @@ import {
   COMET_MS,
   FX_EDGE,
   FX_FIRST_FRAME_MS,
+  GLIDE_MS,
+  GLIDE_SLOW_MS,
   PULSE_ALPHA,
   PULSE_MS,
   SWEEP_MS,
@@ -43,12 +48,30 @@ import {
 export interface CursorEffectSettings {
   readonly trail: TrailKind;
   readonly pulse: PulseKind;
+  /** How the cursor itself moves to its new place. Left out, at once. */
+  readonly motion?: MotionKind | undefined;
   /** How long each lasts against its own length: 2 is twice as long. Left out, 1. */
   readonly length?: number | undefined;
   /** A plugin's shader drawn as the trail, in place of the built-in one. */
   readonly customTrail?: CustomEffect | undefined;
   /** A plugin's shader drawn as the pulse, in place of the built-in one. */
   readonly customPulse?: CustomEffect | undefined;
+  /**
+   * A plugin's shader that draws the cursor itself on its way each time it moves,
+   * however short the step, in place of the built-in motion. The pane leaves its own
+   * cursor out while it plays.
+   */
+  readonly customMotion?: CustomEffect | undefined;
+}
+
+/** The cursor on its way: what it covered, what it covers now, and since when. */
+interface Motion {
+  readonly from: FxRect;
+  readonly to: FxRect;
+  readonly start: number;
+  readonly duration: number;
+  readonly ease: Easing;
+  readonly color: number;
 }
 
 /** A plugin's effect that is playing: what it is, where, and since when. */
@@ -93,6 +116,11 @@ export interface FxMakers<Canvas> {
 
 const NO_EFFECTS: CursorEffectSettings = { trail: "none", pulse: "none" };
 
+const MOTIONS: Readonly<Record<Exclude<MotionKind, "none">, { ms: number; ease: Easing }>> = {
+  glide: { ms: GLIDE_MS, ease: easeOutCubic },
+  "glide-slow": { ms: GLIDE_SLOW_MS, ease: easeOutQuint },
+};
+
 const TRAIL_MS: Readonly<Record<Exclude<TrailKind, "none">, number>> = {
   warp: WARP_MS,
   sweep: SWEEP_MS,
@@ -125,11 +153,13 @@ export class CursorEffects<Canvas> implements FrameView {
   #trailing: Corners | undefined;
   #pulse: Pulse | undefined;
   #pulseColor = 0;
-  readonly #shapes = [new FxShape(), new FxShape()];
+  #motion: Motion | undefined;
+  readonly #shapes = [new FxShape(), new FxShape(), new FxShape()];
   readonly #played = { trails: 0, pulses: 0 };
   #disposed = false;
   #customTrail: PlayingCustom | undefined;
   #customPulse: PlayingCustom | undefined;
+  #customMotion: PlayingCustom | undefined;
   /** The plugins' effects that could not be drawn with, which are not tried again. */
   readonly #failed = new Set<string>();
   /** When a plugin's effect last played. */
@@ -176,9 +206,23 @@ export class CursorEffects<Canvas> implements FrameView {
     return (
       this.#trail !== undefined ||
       this.#pulse !== undefined ||
+      this.#motion !== undefined ||
       this.#customTrail !== undefined ||
-      this.#customPulse !== undefined
+      this.#customPulse !== undefined ||
+      this.#customMotion !== undefined
     );
+  }
+
+  /**
+   * Until when the motion playing draws the cursor in place of its pane, in the time of
+   * the frames: `-Infinity` while none does. The pane leaves its own cursor out until
+   * then, and the frame that reaches it draws the cursor there again as the motion ends.
+   */
+  get cursorDrawnUntil(): number {
+    const custom = this.#customMotion;
+    if (custom && !this.#failed.has(custom.effect.id)) return custom.start + custom.duration;
+    const motion = this.#motion;
+    return motion ? motion.start + motion.duration : -Infinity;
   }
 
   /** Told when a plugin's effect cannot be drawn: its id and why. It is not tried again. */
@@ -218,10 +262,18 @@ export class CursorEffects<Canvas> implements FrameView {
   #watch(id: string, looks = 0): void {
     if (looks >= BUILD_LOOKS_MAX) return;
     setTimeout(() => {
-      const chosen = this.#settings.customTrail?.id === id || this.#settings.customPulse?.id === id;
+      const chosen = this.#chosen().some((effect) => effect.id === id);
       if (this.#disposed || !chosen || this.#failed.has(id) || !this.#backend) return;
       if (!this.#built(id) && !this.#failed.has(id)) this.#watch(id, looks + 1);
     }, BUILD_LOOK_MS);
+  }
+
+  /** The plugins' effects the settings choose. */
+  #chosen(): CustomEffect[] {
+    const { customTrail, customPulse, customMotion } = this.#settings;
+    return [customTrail, customPulse, customMotion].filter(
+      (effect): effect is CustomEffect => effect !== undefined,
+    );
   }
 
   #fail(id: string, message: string): void {
@@ -241,13 +293,19 @@ export class CursorEffects<Canvas> implements FrameView {
     this.#settings = settings;
     if (settings.trail === "none") this.#endTrail();
     if (settings.pulse === "none") this.#pulse = undefined;
+    if ((settings.motion ?? "none") === "none") this.#motion = undefined;
     if (settings.customTrail?.id !== this.#customTrail?.effect.id) this.#customTrail = undefined;
     if (settings.customPulse?.id !== this.#customPulse?.effect.id) this.#customPulse = undefined;
+    if (settings.customMotion?.id !== this.#customMotion?.effect.id) {
+      this.#customMotion = undefined;
+    }
     const wanted =
       settings.trail !== "none" ||
       settings.pulse !== "none" ||
+      (settings.motion ?? "none") !== "none" ||
       settings.customTrail !== undefined ||
-      settings.customPulse !== undefined;
+      settings.customPulse !== undefined ||
+      settings.customMotion !== undefined;
     if (wanted && !this.#backend) this.#start();
     if (!wanted && this.#backend) this.#stop();
     this.#prepareCustoms();
@@ -260,8 +318,8 @@ export class CursorEffects<Canvas> implements FrameView {
   #prepareCustoms(): void {
     const backend = this.#backend;
     if (!backend?.prepareCustom) return;
-    for (const effect of [this.#settings.customTrail, this.#settings.customPulse]) {
-      if (!effect || this.#failed.has(effect.id)) continue;
+    for (const effect of this.#chosen()) {
+      if (this.#failed.has(effect.id)) continue;
       try {
         backend.prepareCustom(effect.id, effect.source);
       } catch (error) {
@@ -327,6 +385,43 @@ export class CursorEffects<Canvas> implements FrameView {
     return true;
   }
 
+  /**
+   * The cursor moved from `from` to `to`, the rectangles it covers in CSS pixels of the
+   * window, however short the step. The motion chosen, a plugin's if its shader is
+   * ready or else Lume's own, draws it on its way from where it was; the pane leaves its
+   * own cursor out until `cursorDrawnUntil`. Says whether one started.
+   */
+  glide(from: FxRect, to: FxRect, color: number, now: number): boolean {
+    const custom = this.#settings.customMotion;
+    if (!this.#usable(custom)) {
+      const kind = this.#settings.motion ?? "none";
+      if (kind === "none" || !this.#backend) return false;
+      const { ms, ease } = MOTIONS[kind];
+      this.#motion = {
+        from,
+        to,
+        start: now - FX_FIRST_FRAME_MS,
+        duration: ms * this.#length(),
+        ease,
+        color,
+      };
+      this.#requestFrame();
+      return true;
+    }
+    this.#motion = undefined;
+    this.#customMotion = {
+      effect: custom,
+      from,
+      to,
+      start: now - FX_FIRST_FRAME_MS,
+      duration: custom.duration * this.#length(),
+      color,
+      hole: false,
+    };
+    this.#requestFrame();
+    return true;
+  }
+
   /** The cursor changed shape, or landed in another pane, at `at`. */
   pulse(at: FxRect, color: number, now: number): boolean {
     const custom = this.#settings.customPulse;
@@ -362,8 +457,10 @@ export class CursorEffects<Canvas> implements FrameView {
   cancel(): void {
     this.#endTrail();
     this.#pulse = undefined;
+    this.#motion = undefined;
     this.#customTrail = undefined;
     this.#customPulse = undefined;
+    this.#customMotion = undefined;
     this.#hide();
   }
 
@@ -382,6 +479,11 @@ export class CursorEffects<Canvas> implements FrameView {
     if (this.#pulse) {
       const shape = this.#shapes[count] as FxShape;
       if (this.#fillPulse(shape, this.#pulse, now)) count++;
+    }
+    // The cursor on its way lies over a trail or a pulse.
+    if (this.#motion) {
+      const shape = this.#shapes[count] as FxShape;
+      if (this.#fillMotion(shape, this.#motion, now)) count++;
     }
     const customs = this.#playingCustoms(now);
     if (count === 0 && customs.length === 0) {
@@ -412,15 +514,15 @@ export class CursorEffects<Canvas> implements FrameView {
   /** The plugins' effects still playing at `now`. Those that are over end. */
   #playingCustoms(now: number): PlayingCustom[] {
     const playing: PlayingCustom[] = [];
-    for (const which of ["#customTrail", "#customPulse"] as const) {
-      const custom = which === "#customTrail" ? this.#customTrail : this.#customPulse;
-      if (!custom) continue;
-      if (now - custom.start >= custom.duration || this.#failed.has(custom.effect.id)) {
-        if (which === "#customTrail") this.#customTrail = undefined;
-        else this.#customPulse = undefined;
-        continue;
-      }
-      playing.push(custom);
+    const over = (custom: PlayingCustom | undefined): custom is PlayingCustom =>
+      custom !== undefined &&
+      (now - custom.start >= custom.duration || this.#failed.has(custom.effect.id));
+    if (over(this.#customTrail)) this.#customTrail = undefined;
+    if (over(this.#customPulse)) this.#customPulse = undefined;
+    if (over(this.#customMotion)) this.#customMotion = undefined;
+    // The motion is drawn last: the cursor on its way lies over a trail or a pulse.
+    for (const custom of [this.#customTrail, this.#customPulse, this.#customMotion]) {
+      if (custom) playing.push(custom);
     }
     return playing;
   }
@@ -519,23 +621,32 @@ export class CursorEffects<Canvas> implements FrameView {
     if (this.#disposed) return;
     // A plugin's shader that played just before is taken to have cost the window it.
     if (performance.now() - this.#customAt < CUSTOM_BLAME_MS) {
-      for (const custom of [this.#settings.customTrail, this.#settings.customPulse]) {
-        if (custom) this.#fail(custom.id, "the graphics card stopped while it drew");
+      for (const custom of this.#chosen()) {
+        this.#fail(custom.id, "the graphics card stopped while it drew");
       }
     }
     this.#customTrail = undefined;
     this.#customPulse = undefined;
+    this.#customMotion = undefined;
     this.#webgl2Lost = true;
+    const motion = this.#motion;
     this.#stop();
-    if (this.#settings.trail !== "none" || this.#settings.pulse !== "none") this.#start();
+    const { trail, pulse } = this.#settings;
+    if (trail !== "none" || pulse !== "none" || (this.#settings.motion ?? "none") !== "none") {
+      this.#start();
+      // A cursor on its way keeps going: its pane is still leaving it out.
+      this.#motion = motion;
+    }
     if (this.playing) this.#requestFrame();
   }
 
   #stop(): void {
     this.#endTrail();
     this.#pulse = undefined;
+    this.#motion = undefined;
     this.#customTrail = undefined;
     this.#customPulse = undefined;
+    this.#customMotion = undefined;
     this.#backend?.dispose();
     this.#backend = undefined;
     if (this.#canvas !== undefined) this.#surface.remove(this.#canvas);
@@ -659,6 +770,50 @@ export class CursorEffects<Canvas> implements FrameView {
       shape.centreY - reachY,
       shape.centreX + reachX,
       shape.centreY + reachY,
+    );
+    return true;
+  }
+
+  /**
+   * Fills `shape` with the cursor on its way at `now`: what it covered grown or shrunk
+   * into what it covers, eased from the one place to the other. At the end it is what
+   * the cursor covers exactly, where its pane draws it again. Says whether there is
+   * anything to draw.
+   */
+  #fillMotion(shape: FxShape, motion: Motion, now: number): boolean {
+    if (now - motion.start >= motion.duration) {
+      this.#motion = undefined;
+      return false;
+    }
+    const along = motion.ease((now - motion.start) / motion.duration);
+    const { from, to } = motion;
+    const mix = (a: number, b: number): number => a + (b - a) * along;
+    const dpr = this.#dpr;
+    const width = mix(from.width, to.width);
+    const height = mix(from.height, to.height);
+    shape.kind = ShapeKind.Box;
+    shape.count = 0;
+    shape.centreX = (mix(from.x, to.x) + width / 2) * dpr;
+    shape.centreY = (mix(from.y, to.y) + height / 2) * dpr;
+    shape.halfWidth = (width / 2) * dpr;
+    shape.halfHeight = (height / 2) * dpr;
+    shape.radius = 0;
+    shape.ring = 0;
+    shape.color = motion.color;
+    shape.alpha = 1;
+    shape.fadePower = 0;
+    shape.haloRadius = 0;
+    shape.haloStrength = 0;
+    shape.holeLeft = 0;
+    shape.holeTop = 0;
+    shape.holeRight = 0;
+    shape.holeBottom = 0;
+    this.#bound(
+      shape,
+      shape.centreX - shape.halfWidth,
+      shape.centreY - shape.halfHeight,
+      shape.centreX + shape.halfWidth,
+      shape.centreY + shape.halfHeight,
     );
     return true;
   }

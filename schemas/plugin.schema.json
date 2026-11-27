@@ -217,7 +217,7 @@
           "type": "string"
         },
         "kind": {
-          "description": "`trail`, drawn when the cursor jumps, or `pulse`, drawn when it changes shape or\nlands in another pane.",
+          "description": "`trail`, drawn when the cursor jumps; `motion`, which draws the cursor itself on\nits way each time it moves; or `pulse`, drawn when it changes shape or lands in\nanother pane.",
           "type": "string"
         },
         "reach": {

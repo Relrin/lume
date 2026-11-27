@@ -28,8 +28,17 @@ class FakeEffects implements EffectsLike {
     this.pulses.push(at);
     return true;
   }
+  glides: { from: FxRect; to: FxRect }[] = [];
+  cursorDrawnUntil = -Infinity;
+  glide(from: FxRect, to: FxRect, _color: number, now: number) {
+    if (!this.settings?.customMotion && (this.settings?.motion ?? "none") === "none") return false;
+    this.glides.push({ from, to });
+    this.cursorDrawnUntil = now + 120;
+    return true;
+  }
   cancel() {
     this.cancelled++;
+    this.cursorDrawnUntil = -Infinity;
   }
   dispose() {
     this.disposed = true;
@@ -165,6 +174,65 @@ describe("the cursor's effects in a window", () => {
     expect(effects.disposed).toBe(true);
   });
 
+  it("give the cursor to a motion on every step, from shape to shape, and back after", () => {
+    const effects = new FakeEffects();
+    const fx = new CursorFx(() => effects, { matches: false });
+    const glide = { id: "acme/glide", source: "x", duration: 120, reach: 8 };
+    fx.configure({ trail: "none", pulse: "none", customMotion: glide });
+    fx.attach({} as HTMLElement);
+    let released = 0;
+    // A pane whose cursor is a bar two pixels wide.
+    const bar = (left: number): CursorSource => ({
+      ...pane(left),
+      cursorRect: (col, row) => ({ x: left + col * 10, y: row * 20, width: 2, height: 20 }),
+      cursorReleased: () => void released++,
+    });
+    const left = bar(0);
+    const right = bar(600);
+    expect(fx.report(left, at(3, 1, { shape: 0 }), 0)).toBe(-Infinity);
+    // One cell on, as when a key is typed.
+    expect(fx.report(left, at(4, 1, { shape: 0 }), 16)).toBe(136);
+    expect(effects.glides).toEqual([
+      { from: { x: 30, y: 20, width: 2, height: 20 }, to: { x: 40, y: 20, width: 2, height: 20 } },
+    ]);
+    expect(effects.moves).toEqual([
+      {
+        from: { x: 30, y: 20, width: 10, height: 20 },
+        to: { x: 40, y: 20, width: 10, height: 20 },
+      },
+    ]);
+    expect(fx.holds(left)).toBe(true);
+    // Frames while it plays still say until when.
+    expect(fx.report(left, at(4, 1, { shape: 0 }), 32)).toBe(136);
+    // The keyboard goes to the other pane: the motion goes there, and draws its cursor.
+    fx.report(left, at(4, 1, { shape: 0, focused: false }), 48);
+    expect(fx.holds(left)).toBe(false);
+    expect(fx.report(right, at(0, 0, { shape: 0 }), 48)).toBe(168);
+    expect(effects.glides.at(-1)).toEqual({
+      from: { x: 40, y: 20, width: 2, height: 20 },
+      to: { x: 600, y: 0, width: 2, height: 20 },
+    });
+    expect(fx.holds(right)).toBe(true);
+    // The motion is turned off while it plays: the pane gets its cursor back at once.
+    effects.cursorDrawnUntil = -Infinity;
+    fx.configure({ trail: "none", pulse: "none" });
+    expect(released).toBe(1);
+    expect(fx.holds(right)).toBe(false);
+  });
+
+  it("glide with Lume's own motion, with no plugin at all", () => {
+    const effects = new FakeEffects();
+    const fx = new CursorFx(() => effects, { matches: false });
+    fx.configure({ trail: "none", pulse: "none", motion: "glide" });
+    fx.attach({} as HTMLElement);
+    expect(fx.watching).toBe(true);
+    const only = pane(0);
+    fx.report(only, at(0, 0), 0);
+    expect(fx.report(only, at(1, 0), 16)).toBe(136);
+    expect(effects.glides).toHaveLength(1);
+    expect(fx.holds(only)).toBe(true);
+  });
+
   it("read what the configuration asks for, and nothing from a core that does not say", () => {
     expect(cursorFxSettings(null)).toEqual({ trail: "none", pulse: "none" });
     const asked = view();
@@ -179,5 +247,9 @@ describe("the cursor's effects in a window", () => {
       pulse: "box-burst",
       length: 1.5,
     });
+    const gliding = { ...terminal, "cursor-motion": "glide-slow" as const };
+    expect(
+      cursorFxSettings({ ...asked, config: { ...asked.config, terminal: gliding } }).motion,
+    ).toBe("glide-slow");
   });
 });

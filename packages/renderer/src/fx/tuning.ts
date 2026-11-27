@@ -9,6 +9,13 @@ export const WARP_MS = 200;
 export const SWEEP_MS = 200;
 export const COMET_MS = 160;
 
+/**
+ * How long each motion of the cursor takes unless the settings say otherwise: short,
+ * so the cursor is in its place before the next key.
+ */
+export const GLIDE_MS = 120;
+export const GLIDE_SLOW_MS = 220;
+
 /** How long each pulse lasts unless the settings say otherwise. */
 export const PULSE_MS = 150;
 

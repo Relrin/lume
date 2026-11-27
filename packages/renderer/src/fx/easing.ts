@@ -19,6 +19,12 @@ export const easeOutCubic: Easing = (t) => {
   return 1 - x * x * x;
 };
 
+/** Fast at first, then settling longer than a cubic: most of the way is gone at once. */
+export const easeOutQuint: Easing = (t) => {
+  const x = 1 - clamp01(t);
+  return 1 - x * x * x * x * x;
+};
+
 /** How a pulse fades: fully there at the start, gone at the end, quickest at first. */
 export const fadeOutQuad: Easing = (t) => {
   const x = 1 - clamp01(t);
