@@ -63,8 +63,9 @@ function Invoke-AsOther([string] $Script) {
 }
 
 # A script that tries to open a pipe. It exits with 0 when the pipe could not be opened
-# for want of permission, 1 when it was opened, 2 for anything else.
-function Open-Script([string] $Pipe) {
+# for want of permission, 1 when it was opened, 2 for anything else; what that was is
+# written to $Report, which every user may write to.
+function Open-Script([string] $Pipe, [string] $Report) {
     return @"
 try {
     `$pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', '$Pipe', 'InOut')
@@ -73,21 +74,46 @@ try {
 } catch [System.UnauthorizedAccessException] {
     exit 0
 } catch {
+    Set-Content -LiteralPath '$Report' -Value (`$_.Exception.GetType().FullName + ': ' + `$_.Exception.Message)
     exit 2
 }
 "@
 }
 
-# A script that creates a pipe under a name, open to everyone, and keeps it a while.
+# Runs Open-Script as the other user against a pipe, and returns its exit code with what
+# it reported.
+function Open-AsOther([string] $Pipe) {
+    $report = Join-Path $env:PUBLIC "lume-xuser-$PID-$($handed.Count).txt"
+    $handed.Add($report)
+    $code = Invoke-AsOther (Open-Script $Pipe $report)
+    $said = if (Test-Path -LiteralPath $report) { (Get-Content -LiteralPath $report -Raw).Trim() } else { '' }
+    return $code, $said
+}
+
+# A script that creates a pipe under a name, open to everyone, and keeps it until it is
+# ended. An instance that a client has connected to is not given to another until its
+# server lets go of it, which this one never does: every client that is to find the pipe
+# needs an instance of its own, so there are as many as the name may have.
 function Squat-Script([string] $Pipe) {
     return @"
 `$everyone = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
 `$rule = New-Object System.IO.Pipes.PipeAccessRule(`$everyone, 'FullControl', 'Allow')
 `$security = New-Object System.IO.Pipes.PipeSecurity
 `$security.AddAccessRule(`$rule)
-`$pipe = New-Object System.IO.Pipes.NamedPipeServerStream('$Pipe', 'InOut', 4, 'Byte', 'None', 4096, 4096, `$security)
-Start-Sleep -Seconds 30
+`$pipes = foreach (`$n in 1..4) {
+    New-Object System.IO.Pipes.NamedPipeServerStream('$Pipe', 'InOut', 4, 'Byte', 'None', 4096, 4096, `$security)
+}
+Start-Sleep -Seconds 600
 "@
+}
+
+# Waits for a pipe to be gone.
+function Wait-NoPipe([string] $Pipe) {
+    foreach ($try in 1..100) {
+        if (-not ([System.IO.Directory]::GetFiles('\\.\pipe\') -contains "\\.\pipe\$Pipe")) { return $true }
+        Start-Sleep -Milliseconds 100
+    }
+    return $false
 }
 
 # Waits for a pipe to exist.
@@ -114,9 +140,9 @@ try {
     }
     if (-not $started) { Fail 'the application did not start' }
 
-    $code = Invoke-AsOther (Open-Script "lume-$name-$sid")
+    $code, $said = Open-AsOther "lume-$name-$sid"
     if ($code -eq 1) { Fail 'another user opened the pipe' }
-    if ($code -ne 0) { Fail "the attempt to open the pipe ended unexpectedly ($code)" }
+    if ($code -ne 0) { Fail "the attempt to open the pipe ended unexpectedly ($code): $said" }
     Write-Output 'cross-user: another user cannot open the pipe'
 
     & $Lume ctl --endpoint $name quit | Out-Null
@@ -126,9 +152,9 @@ try {
     & $Lume host --endpoint $name start | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail 'the session host did not start' }
     $hostStarted = $true
-    $code = Invoke-AsOther (Open-Script "lume-$name-host-$sid")
+    $code, $said = Open-AsOther "lume-$name-host-$sid"
     if ($code -eq 1) { Fail 'another user opened the session host''s pipe' }
-    if ($code -ne 0) { Fail "the attempt to open the session host's pipe ended unexpectedly ($code)" }
+    if ($code -ne 0) { Fail "the attempt to open the session host's pipe ended unexpectedly ($code): $said" }
     Write-Output 'cross-user: another user cannot open the session host''s pipe'
     & $Lume host --endpoint $name stop --end-sessions | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail 'the session host did not stop' }
@@ -144,6 +170,11 @@ try {
     if ($LASTEXITCODE -eq 0) { Fail "the console command talked to another user's pipe: $answer" }
     if ($answer -notmatch 'another user') { Fail "the console command did not say why it refused: $answer" }
     Write-Output 'cross-user: the console command refuses a pipe another user made'
+
+    # Gone again, so that `lume ctl` below finds no application and turns to the session
+    # host, which is what is checked there.
+    $squatter.Kill()
+    if (-not (Wait-NoPipe "lume-$planted-$sid")) { Fail 'the other user''s pipe did not go' }
 
     # The same under the name the session host's would have: neither `lume host` nor
     # `lume ctl`, which turns to the session host when no application runs, talks to it.

@@ -320,6 +320,40 @@ fn runs_go_beside_each_other_and_each_has_its_own_answer() {
 }
 
 #[test]
+fn a_run_taken_in_while_another_answers_does_not_break_into_the_answer() {
+    for door in doors() {
+        let shell = Arc::new(Shell::new(door));
+        // Long answers, and short runs taken in one after another all the while: one is
+        // taken in while a long answer is still on its way.
+        let long: Vec<_> = (0..2)
+            .map(|n| {
+                let shell = Arc::clone(&shell);
+                std::thread::spawn(move || {
+                    for _ in 0..3 {
+                        let line = format!("head -c 12000000 /dev/zero | tr '\\000' {n}");
+                        let answer = text(&shell, &line);
+                        assert!(answer == n.to_string().repeat(12_000_000), "{n}");
+                    }
+                })
+            })
+            .collect();
+        let short: Vec<_> = (2..6)
+            .map(|n| {
+                let shell = Arc::clone(&shell);
+                std::thread::spawn(move || {
+                    for _ in 0..40 {
+                        assert_eq!(text(&shell, &format!("echo {n}")), format!("{n}\n"));
+                    }
+                })
+            })
+            .collect();
+        for run in long.into_iter().chain(short) {
+            run.join().unwrap();
+        }
+    }
+}
+
+#[test]
 fn a_program_past_its_time_or_no_longer_wanted_is_ended_with_what_it_started() {
     for door in doors() {
         let shell = Arc::new(Shell::new(door.clone()));

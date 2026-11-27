@@ -84,6 +84,10 @@ const PIPE: &str = "trap : PIPE";
 /// The loop. `kill -s KILL --` is the one spelling every shell takes: dash answers
 /// `kill -9 --` with an error that ends the script. A script that waits for its turn to
 /// answer looks whether the folder is still there, or it would wait for ever.
+///
+/// Everything written on the output goes out under the folder's lock, the loop's own
+/// `taken` too: a run's answer is long and is written in pieces, and a line between two
+/// of them would be read as part of it, which ends the connection and every run on it.
 fn looping() -> String {
     [
         "d=$(mktemp -d \"${TMPDIR:-/tmp}/lume.XXXXXXXX\") || exit 120",
@@ -95,7 +99,9 @@ fn looping() -> String {
         "export G d",
         &format!("echo \"{GREETING} $(uname -n)\""),
         "while read -r w i n t; do case $w in \
-         run) head -c \"$t\" > \"$d/$i.all\"; echo \"taken $i\"; \
+         run) head -c \"$t\" > \"$d/$i.all\"; \
+         until mkdir \"$d/lock\" 2>/dev/null; do [ -d \"$d\" ] || exit 120; sleep 0.01; done; \
+         echo \"taken $i\"; rmdir \"$d/lock\"; \
          dd if=\"$d/$i.all\" of=\"$d/$i.sh\" bs=\"$n\" count=1 2>/dev/null; \
          tail -c \"+$((n + 1))\" \"$d/$i.all\" > \"$d/$i.in\"; rm -f \"$d/$i.all\"; \
          sh \"$d/$i.sh\" < /dev/null & ;; \
@@ -323,7 +329,9 @@ fn run_script(id: u64, asked: &Asked, max: usize) -> String {
         asked.exec()
     );
     format!(
-        "mkfifo \"$d/{id}.pipe\" || {{ echo \"done {id} 1 0 0 failed\"; exit 1; }}\n\
+        "mkfifo \"$d/{id}.pipe\" || {{ \
+         until mkdir \"$d/lock\" 2>/dev/null; do [ -d \"$d\" ] || exit 0; sleep 0.01; done; \
+         echo \"done {id} 1 0 0 failed\"; rmdir \"$d/lock\"; exit 1; }}\n\
          {{ (ulimit -f {blocks}; exec cat > \"$d/{id}.out\"); cat > /dev/null; \
          : > \"$d/{id}.read\"; }} < \"$d/{id}.pipe\" 2> /dev/null &\n\
          $G sh -c {} < \"$d/{id}.in\" > \"$d/{id}.pipe\" 2> \"$d/{id}.err\"\n\

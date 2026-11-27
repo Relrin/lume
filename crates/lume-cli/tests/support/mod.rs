@@ -352,14 +352,39 @@ impl App {
     /// what it wrote to its standard error, and the end of its log. Its home goes with the
     /// test, and the log is not kept by whoever runs the tests elsewhere.
     fn ended_badly(&self, status: std::process::ExitStatus) -> String {
+        format!(
+            "the application ended with {status}\n--- its errors\n{}\n--- the end of its log\n{}",
+            self.errors().trim_end(),
+            self.log_tail()
+        )
+    }
+
+    /// The last lines of the application's log.
+    fn log_tail(&self) -> String {
         const LOG_LINES: usize = 40;
         let log = std::fs::read_to_string(&self.log).unwrap_or_default();
         let lines: Vec<&str> = log.lines().collect();
-        let tail = lines[lines.len().saturating_sub(LOG_LINES)..].join("\n");
-        format!(
-            "the application ended with {status}\n--- its errors\n{}\n--- the end of its log\n{tail}",
-            self.errors().trim_end()
-        )
+        lines[lines.len().saturating_sub(LOG_LINES)..].join("\n")
+    }
+
+    /// Keeps the application's log and what it wrote to its standard error where the
+    /// runner of the tests keeps what the suites produced, under the name of the test
+    /// that failed. Both are otherwise lost with the machine the tests ran on.
+    fn keep_for_failure(&self) {
+        let Some(target) = lume().parent().and_then(Path::parent) else {
+            return;
+        };
+        let folder = target.join("harness").join("e2e");
+        if std::fs::create_dir_all(&folder).is_err() {
+            return;
+        }
+        let test = std::thread::current()
+            .name()
+            .unwrap_or("unnamed")
+            .replace(|c: char| !c.is_ascii_alphanumeric() && c != '_', "-");
+        let base = folder.join(format!("{test}-{}", self.endpoint));
+        let _ = std::fs::copy(&self.log, base.with_extension("log"));
+        let _ = std::fs::write(base.with_extension("errors.txt"), self.errors());
     }
 
     /// Ends the application's process at once, as a crash would.
@@ -385,7 +410,15 @@ impl App {
                 assert!(status.success(), "{}", self.ended_badly(status));
                 break;
             }
-            assert!(Instant::now() < deadline, "the application did not close");
+            if Instant::now() >= deadline {
+                // Not left running into the tests after this one: it is ended as the
+                // test fails, and what it logged is kept.
+                self.child = Some(child);
+                panic!(
+                    "the application did not close\n--- the end of its log\n{}",
+                    self.log_tail()
+                );
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
         if !self.keep_home {
@@ -399,19 +432,26 @@ impl Drop for App {
     fn drop(&mut self) {
         // Reached with the application still running only when a test failed. It is asked
         // to close, so that its shells are ended with it, and killed only if it will not.
-        let Some(mut child) = self.child.take() else {
-            return;
-        };
-        let _ = self.ctl(&["quit"]);
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline {
-            if matches!(child.try_wait(), Ok(Some(_))) {
-                return;
+        if let Some(mut child) = self.child.take() {
+            let _ = self.ctl(&["quit"]);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut ended = false;
+            while Instant::now() < deadline {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    ended = true;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
             }
-            std::thread::sleep(Duration::from_millis(50));
+            if !ended {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
         }
-        let _ = child.kill();
-        let _ = child.wait();
+        // Kept once the application has ended, so that the log holds all it wrote.
+        if std::thread::panicking() {
+            self.keep_for_failure();
+        }
     }
 }
 

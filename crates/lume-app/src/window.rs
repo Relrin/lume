@@ -637,6 +637,13 @@ impl Shell for WindowShell {
         }
         if let Err(error) = self.build(window, bounds) {
             tracing::error!(%window, %error, "a window could not be opened");
+            return;
+        }
+        // Where a new window is, is kept as where a moved one is. Not every system says
+        // that a window it has just put somewhere moved there: macOS says nothing until
+        // the user moves it, and the layout would not know where the window is till then.
+        if let Some(shell) = self.app.try_state::<Arc<Self>>() {
+            shell.inner().moved(&label_of(window));
         }
     }
 
