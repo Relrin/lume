@@ -266,7 +266,7 @@ export function Menu({
                         key={swatch.key}
                         role="menuitemradio"
                         className="menu-swatch"
-                        size={16}
+                        size={14}
                         color={swatch.color}
                         onChoose={(element, event) => swatch.choose(element, event)}
                       />

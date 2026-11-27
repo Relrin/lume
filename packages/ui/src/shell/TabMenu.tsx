@@ -39,7 +39,7 @@ import {
 import type { Anchor } from "./tab-ui.ts";
 
 /** How wide the menu is. */
-const TAB_MENU_WIDTH = 290;
+const TAB_MENU_WIDTH = 300;
 
 /** A dot of a colour, for a row that names a group or a tab. */
 function Dot({ color }: { color: string | null }) {
