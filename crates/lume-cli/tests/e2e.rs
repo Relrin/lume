@@ -1963,11 +1963,14 @@ fn a_plugin_that_runs_away_is_stopped_while_the_terminal_keeps_up() {
     // Installed while the application runs: it follows the lock file.
     install_plugin(&app.home, &fixture("runaway-loop"));
     install_plugin(&app.home, &fixture("runaway-alloc"));
-    app.until_plugin(
-        "test.runaway-loop",
-        "the plugin installed while running to be read",
-        |plugin| plugin["state"] == "ready",
-    );
+    // Each install is read on its own: the second may come a moment after the first.
+    for id in ["test.runaway-loop", "test.runaway-alloc"] {
+        app.until_plugin(
+            id,
+            "the plugins installed while running to be read",
+            |plugin| plugin["state"] == "ready",
+        );
+    }
 
     // Memory without end stops the plugin; the terminal answers all along.
     let grow = app.ctl(&["command", "test.runaway-alloc.grow"]);
@@ -3416,12 +3419,14 @@ fn a_linked_plugin_is_loaded_again_within_a_second_of_a_change() {
     let at = plugin_log_len(&home, "test.work");
     change("plugin.toml", "0.1.0", "0.2.0");
     let manifest = plugin_log_within(&home, "test.work", at, "host three");
-    let plugin = app.until_plugin("test.work", "the new version to be read", |plugin| {
-        plugin["version"] == "0.2.0"
-    });
-    assert!(
-        plugin["reloaded"]["times"].as_u64().unwrap_or(0) >= 4,
-        "{plugin}"
+    // The new version is there as soon as the manifest is read; the loading is counted
+    // once the code has started again and the windows were told.
+    app.until_plugin(
+        "test.work",
+        "the new version to be read and its loading counted",
+        |plugin| {
+            plugin["version"] == "0.2.0" && plugin["reloaded"]["times"].as_u64().unwrap_or(0) >= 4
+        },
     );
     println!(
         "linked plugin loaded again: code {} ms, page {} ms, both {} ms, manifest {} ms",
