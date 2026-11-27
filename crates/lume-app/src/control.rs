@@ -29,8 +29,11 @@ use lume_proto::{
     HydratePayload, Message, Palette, Responder, Role, Secret, SessionEvent, SessionId, TermSize,
     encode, encode_bytes, negotiate,
 };
-use lume_session::{Attachment, Hydrate, InputSink, OutputFrame, SessionBackend, SessionError};
+use lume_session::{
+    Attachment, Hydrate, InputSink, OutputFrame, SessionBackend, SessionError, SessionState,
+};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 use zeroize::Zeroizing;
 
@@ -108,7 +111,7 @@ enum Then {
     /// The application was asked to close; it does once the client has its answer.
     Quit,
     /// The client asked to follow sessions; their reports are sent to it from here on.
-    Follow(Followed),
+    Follow(Box<Following>),
     /// The client asked to be shown a session; the connection carries the attachment
     /// from here on.
     Attach(Box<Attachment>),
@@ -130,6 +133,14 @@ struct VerbRun {
 struct Followed {
     pane: Option<PaneId>,
     session: Option<SessionId>,
+}
+
+/// A client that follows sessions: which ones, and what they had reported and report
+/// from the moment before the client was told it follows them.
+struct Following {
+    followed: Followed,
+    so_far: Vec<(SessionKey, SessionState)>,
+    news: broadcast::Receiver<News>,
 }
 
 fn reply(effect: impl Into<String>, body: AppReplyBody) -> Result<AppReply, AppError> {
@@ -400,10 +411,20 @@ impl Control {
         }
         if let AppRequestBody::Events { pane, session } = &body {
             return match self.followed(pane.as_deref(), *session).await {
-                Ok(followed) => (
-                    reply("following what sessions report", AppReplyBody::Following {}),
-                    Then::Follow(followed),
-                ),
+                Ok(followed) => {
+                    // Followed before the client is told so: a report made the moment
+                    // after it hears it is not lost.
+                    let (so_far, news) = self.services.state.reports().follow();
+                    let following = Following {
+                        followed,
+                        so_far,
+                        news,
+                    };
+                    (
+                        reply("following what sessions report", AppReplyBody::Following {}),
+                        Then::Follow(Box::new(following)),
+                    )
+                }
                 Err(error) => (Err(error), Then::Carry),
             };
         }
@@ -671,12 +692,16 @@ impl Control {
 
     /// Sends a client what the sessions it follows report, beginning with how each
     /// stands, until the client goes.
-    async fn follow<S>(&self, io: &mut S, followed: Followed) -> io::Result<()>
+    async fn follow<S>(&self, io: &mut S, following: Following) -> io::Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
         let reports = self.services.state.reports();
-        let (mut so_far, mut news) = reports.follow();
+        let Following {
+            followed,
+            mut so_far,
+            mut news,
+        } = following;
         let mut chunk = vec![0; READ_CHUNK];
         loop {
             // First, and again whenever the client fell too far behind to be sent

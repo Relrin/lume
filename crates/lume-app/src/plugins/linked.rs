@@ -52,6 +52,10 @@ impl Changed {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Folder {
     dir: PathBuf,
+    /// The folder as the system finally finds it, past any link on the way, where that
+    /// is another path. A watcher may tell of changes there: macOS does for a folder
+    /// under `/var`, which is a link to `/private/var`.
+    real: Option<PathBuf>,
     /// The plugin's code, as a path in the folder written with `/`.
     main: Option<String>,
     /// The folders its pages are in, each ending in `/`; an empty one is the folder
@@ -76,8 +80,10 @@ fn same_name(one: &str, other: &str) -> bool {
 
 impl Folder {
     pub(super) fn new(dir: PathBuf, manifest: Option<&Manifest>) -> Self {
+        let real = std::fs::canonicalize(&dir).ok().filter(|real| *real != dir);
         let mut folder = Self {
             dir,
+            real,
             main: None,
             pages: BTreeSet::new(),
             named: BTreeSet::new(),
@@ -151,8 +157,16 @@ impl Folder {
 
     /// What the change of the file at `path` is to the plugin, if the file is in its
     /// folder and is one that matters.
+    /// Whether `path` is the folder itself, by either of its names.
+    fn is(&self, path: &Path) -> bool {
+        path == self.dir || self.real.as_deref() == Some(path)
+    }
+
     pub(super) fn changed(&self, path: &Path) -> Option<Changed> {
-        let relative = path.strip_prefix(&self.dir).ok()?;
+        let relative = path
+            .strip_prefix(&self.dir)
+            .ok()
+            .or_else(|| path.strip_prefix(self.real.as_deref()?).ok())?;
         let parts: Vec<String> = relative
             .components()
             .map(|part| part.as_os_str().to_string_lossy().into_owned())
@@ -360,7 +374,10 @@ impl Plugins {
                 // watched from now on.
                 if let Some(watcher) = lock(&self.linked.watcher).as_mut() {
                     for folder in folders.values() {
-                        if paths.iter().any(|path| path.parent() == Some(&folder.dir)) {
+                        if paths
+                            .iter()
+                            .any(|path| path.parent().is_some_and(|parent| folder.is(parent)))
+                        {
                             watch(watcher, &folder.dir);
                         }
                     }
@@ -533,6 +550,41 @@ mod tests {
             only(true, false, false, false)
         );
         assert_eq!(folder.changed(&dir.join("host.js")), None);
+    }
+
+    /// A folder linked by a path that goes through a link is told of by the path the
+    /// system finds it at, as macOS tells of one under `/var`.
+    #[test]
+    fn a_change_told_of_past_a_link_on_the_way_is_the_folders() {
+        let temp = crate::testing::TempDir::new("linked-through");
+        let real = temp.path().join("real");
+        std::fs::create_dir_all(real.join("dist")).unwrap();
+        let through = temp.path().join("through");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &through).unwrap();
+        // A junction, which needs no right to make links.
+        #[cfg(windows)]
+        assert!(
+            std::process::Command::new("cmd")
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(&through)
+                .arg(&real)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        let folder = Folder::new(through, Some(&manifest("")));
+        let told = std::fs::canonicalize(&real).unwrap();
+        assert_eq!(
+            folder.changed(&told.join("dist").join("host.js")),
+            Some(Changed {
+                code: true,
+                ..Changed::default()
+            })
+        );
+        assert!(folder.is(&told));
+        assert_eq!(folder.changed(&temp.path().join("other")), None);
     }
 
     fn manifest_with_top_page() -> Manifest {

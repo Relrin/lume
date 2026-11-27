@@ -327,7 +327,7 @@ where
                 control.services.shell.quit();
                 return Ok(());
             }
-            Then::Follow(followed) => return control.follow(&mut io, followed).await,
+            Then::Follow(following) => return control.follow(&mut io, *following).await,
             Then::Verb(run) => return control.run_verb(&mut io, *run).await,
             Then::Attach(attachment) => {
                 let rest = std::mem::take(&mut decoder).into_rest();

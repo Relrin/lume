@@ -31,7 +31,7 @@ use unix as platform;
 #[cfg(windows)]
 use windows as platform;
 
-pub use detach::{not_served, spawn_detached, start_and_connect};
+pub use detach::{keep_standard_handles, not_served, spawn_detached, start_and_connect};
 
 /// The current user's security identifier in its textual form, `S-1-5-21-…`. Servers
 /// that keep an endpoint per user on Windows name it after this.

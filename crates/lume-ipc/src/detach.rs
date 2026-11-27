@@ -83,7 +83,42 @@ pub fn spawn_detached(command: &mut Command) -> io::Result<Child> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    keep_standard_handles();
     platform(command)
+}
+
+/// Keeps a program started from here from holding this process's own standard input,
+/// output and error.
+///
+/// On Windows a child is handed every handle of its parent that may be inherited, and
+/// not only those it is given as its own. A caller that reads what this process prints
+/// through a pipe waits for the pipe's end, which does not come while a program started
+/// from here holds a copy of it: a server started this way kept `lume host start | ...`
+/// waiting for as long as it ran. Nothing is lost by it: a child that is to share them
+/// is given copies of its own, as `Stdio::inherit` makes. Elsewhere a child's standard
+/// streams are replaced, and this does nothing.
+pub fn keep_standard_handles() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{
+            HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
+        };
+        use windows_sys::Win32::System::Console::{
+            GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+        };
+
+        for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            // SAFETY: `GetStdHandle` only reads this process's table of standard handles.
+            let handle = unsafe { GetStdHandle(which) };
+            if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+                continue;
+            }
+            // SAFETY: `handle` is one of this process's standard handles, open for as
+            // long as the process runs; only whether children inherit it is changed. A
+            // failure leaves it as it was, which is no worse than before.
+            unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) };
+        }
+    }
 }
 
 #[cfg(windows)]

@@ -111,6 +111,9 @@ fn spawn_detached(start: &Start, cwd: Option<&str>) -> io::Result<()> {
         // A group of its own: the terminal's signals for our group pass it by.
         command.process_group(0);
     }
+    // Nor does it keep a copy of what this process prints into: whoever reads that
+    // would wait for the application to end.
+    lume_ipc::keep_standard_handles();
     // The child is not waited for: it is the application, and outlives this process.
     command.spawn().map(drop)
 }
