@@ -13,7 +13,7 @@
 //! compares them, since two machines never draw a window quite alike.
 
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -53,12 +53,45 @@ impl Drop for Driver {
     }
 }
 
+/// Where what the smoke test leaves is kept: the pictures, and what the driver and the
+/// application said, which are all there is to go by when a session does not start.
+fn out_dir() -> PathBuf {
+    paths::root().join("target").join("smoke")
+}
+
+/// What the driver writes, and what the application it starts logs.
+fn driver_log() -> PathBuf {
+    out_dir().join("tauri-driver.log")
+}
+
+fn app_log() -> PathBuf {
+    out_dir().join("lume-gui.log")
+}
+
+/// The last lines of a file, or a word that there is none.
+fn tail(path: &Path) -> String {
+    const LINES: usize = 30;
+    match std::fs::read_to_string(path) {
+        Ok(text) => {
+            let lines: Vec<&str> = text.lines().collect();
+            lines[lines.len().saturating_sub(LINES)..].join("\n")
+        }
+        Err(_) => format!("({} is not there)", path.display()),
+    }
+}
+
 fn start_driver() -> Result<(Driver, PrivateDirs)> {
     let mut command = Command::new("tauri-driver");
     // The application is started by the driver and takes the driver's environment: it
-    // is given folders of its own, so the test touches nothing of the user's.
+    // is given folders of its own, so the test touches nothing of the user's, and a log.
     let dirs = PrivateDirs::fresh("smoke")?;
     dirs.apply(&mut command);
+    std::fs::create_dir_all(out_dir())
+        .with_context(|| format!("creating {}", out_dir().display()))?;
+    let _ = std::fs::remove_file(app_log());
+    command
+        .env("LUME_LOG", "debug")
+        .env("LUME_LOG_FILE", app_log());
     // On Windows the webview's driver is found through the variable the runner images
     // set, when it is not on the search path.
     if let Some(dir) = std::env::var_os("EdgeWebDriver") {
@@ -66,9 +99,11 @@ fn start_driver() -> Result<(Driver, PrivateDirs)> {
             .arg("--native-driver")
             .arg(Path::new(&dir).join("msedgedriver.exe"));
     }
+    let said = std::fs::File::create(driver_log())
+        .with_context(|| format!("creating {}", driver_log().display()))?;
     let child = command
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(said.try_clone()?)
+        .stderr(said)
         .spawn()
         .context("starting tauri-driver (install it with `cargo install tauri-driver`)")?;
     let driver = Driver(child);
@@ -198,7 +233,7 @@ fn photograph(
     beside.extend(shell.iter().skip(1));
     ctl(lume, endpoint, &beside)?;
 
-    let out = paths::root().join("target").join("smoke");
+    let out = out_dir();
     std::fs::create_dir_all(&out).with_context(|| format!("creating {}", out.display()))?;
     let mut pictures = Vec::new();
     for (look, theme) in LOOKS {
@@ -266,7 +301,14 @@ pub fn run() -> Result<()> {
                 },
             },
         }),
-    )?;
+    )
+    .with_context(|| {
+        format!(
+            "--- what the driver said\n{}\n--- what the application logged\n{}",
+            tail(&driver_log()),
+            tail(&app_log())
+        )
+    })?;
     let id = session["sessionId"]
         .as_str()
         .ok_or_else(|| anyhow!("WebDriver started no session: {session}"))?

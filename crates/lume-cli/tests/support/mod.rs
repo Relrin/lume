@@ -29,6 +29,12 @@ const ERRORS: &str = "errors.txt";
 
 pub static NEXT: AtomicU32 = AtomicU32::new(1);
 
+thread_local! {
+    /// The logs of the applications the test on this thread started, in order.
+    static STARTED_LOGS: std::cell::RefCell<Vec<PathBuf>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// The answer of one `lume ctl` command.
 pub struct Answer {
     pub status: i32,
@@ -152,8 +158,12 @@ impl App {
         environment: &[(&str, String)],
         arguments: &[&str],
     ) -> Self {
-        let log = std::env::temp_dir().join(format!("lume-{endpoint}.log"));
+        // A log of its own for each start: an application started again on the same
+        // endpoint keeps what the one before it logged, for a test that fails after both.
+        let start = NEXT.fetch_add(1, Ordering::Relaxed);
+        let log = std::env::temp_dir().join(format!("lume-{endpoint}-{start}.log"));
         let _ = std::fs::remove_file(&log);
+        STARTED_LOGS.with(|logs| logs.borrow_mut().push(log.clone()));
         let errors = std::fs::File::create(home.join(ERRORS)).expect("a file for its errors");
         let child = Command::new(application())
             .args(["--endpoint", &endpoint])
@@ -367,9 +377,10 @@ impl App {
         lines[lines.len().saturating_sub(LOG_LINES)..].join("\n")
     }
 
-    /// Keeps the application's log and what it wrote to its standard error where the
-    /// runner of the tests keeps what the suites produced, under the name of the test
-    /// that failed. Both are otherwise lost with the machine the tests ran on.
+    /// Keeps the logs of every application the failed test started, and what this one
+    /// wrote to its standard error, where the runner of the tests keeps what the suites
+    /// produced, under the test's name. They are otherwise lost with the machine the
+    /// tests ran on.
     fn keep_for_failure(&self) {
         let Some(target) = lume().parent().and_then(Path::parent) else {
             return;
@@ -382,9 +393,18 @@ impl App {
             .name()
             .unwrap_or("unnamed")
             .replace(|c: char| !c.is_ascii_alphanumeric() && c != '_', "-");
-        let base = folder.join(format!("{test}-{}", self.endpoint));
-        let _ = std::fs::copy(&self.log, base.with_extension("log"));
-        let _ = std::fs::write(base.with_extension("errors.txt"), self.errors());
+        let mut logs = STARTED_LOGS.with(|logs| logs.borrow().clone());
+        if !logs.contains(&self.log) {
+            logs.push(self.log.clone());
+        }
+        for log in &logs {
+            if let Some(name) = log.file_name() {
+                let kept = folder.join(format!("{test}-{}", name.to_string_lossy()));
+                let _ = std::fs::copy(log, kept);
+            }
+        }
+        let errors = folder.join(format!("{test}-{}.errors.txt", self.endpoint));
+        let _ = std::fs::write(errors, self.errors());
     }
 
     /// Ends the application's process at once, as a crash would.

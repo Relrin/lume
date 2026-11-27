@@ -44,6 +44,9 @@ const CHATTER_MAX: usize = 64 * 1024;
 /// How long a line of the loop's own may be.
 const LINE_MAX: u64 = 1024;
 
+/// How much of a line that is not an answer is told, when it ends a connection.
+const ODD_SHOWN: usize = 80;
+
 /// How much of what the connection says on its error output is kept.
 const SAID_MAX: usize = 4 * 1024;
 
@@ -391,6 +394,9 @@ struct Shared {
     said: Mutex<Vec<u8>>,
     /// Whether all of it has been read.
     said_all: AtomicBool,
+    /// Why the answers stopped being read, when the other side said something that is
+    /// not an answer, rather than ending.
+    broke: Mutex<Option<String>>,
 }
 
 /// One connection to the loop.
@@ -417,22 +423,35 @@ impl Drop for Line {
     }
 }
 
-/// Reads the loop's answers until the connection ends.
-fn read_answers(mut out: BufReader<ChildStdout>, shared: &Shared, taken: &mpsc::Sender<u64>) {
+/// Reads the loop's answers until the connection ends. Gives why it stopped when the
+/// other side said something that does not fit, which ends the connection all the same.
+fn read_answers(
+    mut out: BufReader<impl Read>,
+    shared: &Shared,
+    taken: &mpsc::Sender<u64>,
+) -> Option<String> {
+    // What is said of a line that is no answer: its beginning, as it came.
+    let odd = |line: &str| {
+        let start: String = line.chars().take(ODD_SHOWN).collect();
+        format!("it said {start:?}, which is not an answer")
+    };
     let mut line = String::new();
     loop {
         line.clear();
         match (&mut out).take(LINE_MAX).read_line(&mut line) {
-            Ok(0) | Err(_) => return,
-            Ok(_) if !line.ends_with('\n') => return,
+            Ok(0) => return None,
+            Err(error) => return Some(format!("its answers could not be read: {error}")),
+            Ok(_) if !line.ends_with('\n') => return Some(odd(&line)),
             Ok(_) => {}
         }
         let words: Vec<&str> = line.split_whitespace().collect();
         match words[..] {
             ["taken", id] => {
-                let Ok(id) = id.parse() else { return };
+                let Ok(id) = id.parse() else {
+                    return Some(odd(&line));
+                };
                 if taken.send(id).is_err() {
-                    return;
+                    return None;
                 }
             }
             ["done", id, code, out_len, err_len, why] => {
@@ -442,17 +461,19 @@ fn read_answers(mut out: BufReader<ChildStdout>, shared: &Shared, taken: &mpsc::
                     out_len.parse::<usize>(),
                     err_len.parse::<usize>(),
                 ) else {
-                    return;
+                    return Some(odd(&line));
                 };
                 let Some(waiting) = lock(&shared.runs)
                     .as_mut()
                     .and_then(|runs| runs.remove(&id))
                 else {
-                    return;
+                    return Some(format!("it answered run {id}, which nobody waits for"));
                 };
                 let most = waiting.max.saturating_add(1);
                 if out_len > most || err_len > most {
-                    return;
+                    return Some(format!(
+                        "its answer to run {id} is longer than was asked for"
+                    ));
                 }
                 let mut answer = Answer {
                     code,
@@ -463,12 +484,12 @@ fn read_answers(mut out: BufReader<ChildStdout>, shared: &Shared, taken: &mpsc::
                 if out.read_exact(&mut answer.out).is_err()
                     || out.read_exact(&mut answer.err).is_err()
                 {
-                    return;
+                    return Some(format!("its answer to run {id} was cut short"));
                 }
                 // Whoever waited may have given up.
                 let _ = waiting.answer.send(answer);
             }
-            _ => return,
+            _ => return Some(odd(&line)),
         }
     }
 }
@@ -631,7 +652,8 @@ impl Line {
         let (tell, taken) = mpsc::channel();
         let reading = Arc::clone(&shared);
         thread::spawn(move || {
-            read_answers(BufReader::new(out), &reading, &tell);
+            let broke = read_answers(BufReader::new(out), &reading, &tell);
+            *lock(&reading.broke) = broke;
             // Everyone who waits hears that there is nothing more to wait for.
             lock(&reading.runs).take();
         });
@@ -652,6 +674,12 @@ impl Line {
     }
 
     fn lost(&self) -> ServiceError {
+        if let Some(broke) = lock(&self.shared.broke).clone() {
+            return ServiceError::unavailable(format!(
+                "the connection to {} broke: {broke}",
+                self.label
+            ));
+        }
         ServiceError::unavailable(match last_said(&lock(&self.shared.said)) {
             Some(said) => format!("the connection to {} was lost: {said}", self.label),
             None => format!("the connection to {} was lost", self.label),
@@ -1188,6 +1216,61 @@ mod tests {
         assert_eq!((line.as_str(), from), ("lume-there box", &b"rest"[..]));
         let endless = std::iter::repeat_n(b'x', CHATTER_MAX * 2).collect::<Vec<_>>();
         assert_eq!(first_line(&mut endless.as_slice(), &[GREETING]), None);
+    }
+
+    #[test]
+    fn what_ends_the_reading_of_answers_is_told() {
+        // What the other side said, read as answers to runs 1 and 2, of a few bytes each.
+        let read = |said: &[u8]| {
+            let shared = Shared::default();
+            let (answers, heard) = mpsc::channel();
+            let waiting = |answer: &mpsc::Sender<Answer>| Waiting {
+                max: 8,
+                answer: answer.clone(),
+            };
+            *lock(&shared.runs) = Some(HashMap::from([
+                (1, waiting(&answers)),
+                (2, waiting(&answers)),
+            ]));
+            let (taken, _waiting_to_be_taken) = mpsc::channel();
+            let broke = read_answers(BufReader::new(said), &shared, &taken);
+            (
+                broke,
+                heard
+                    .try_iter()
+                    .map(|answer| answer.out)
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        // A whole answer, and then the end: nothing broke.
+        assert_eq!(
+            read(b"done 1 0 2 0 ran\n3\n"),
+            (None, vec![b"3\n".to_vec()])
+        );
+        // An answer's header where its output should have been.
+        let (broke, heard) = read(b"done 1 0 2 0 ran\ndone 2 0 2 0 ran\n3\n4\n");
+        assert_eq!(heard, vec![b"do".to_vec()]);
+        assert_eq!(
+            broke.as_deref(),
+            Some(r#"it said "ne 2 0 2 0 ran\n", which is not an answer"#)
+        );
+        assert_eq!(
+            read(b"done 7 0 0 0 ran\n").0.as_deref(),
+            Some("it answered run 7, which nobody waits for")
+        );
+        assert_eq!(
+            read(b"done 1 0 99 0 ran\n").0.as_deref(),
+            Some("its answer to run 1 is longer than was asked for")
+        );
+        assert_eq!(
+            read(b"done 1 0 4 0 ran\nab").0.as_deref(),
+            Some("its answer to run 1 was cut short")
+        );
+        assert_eq!(
+            read(b"taken 1\nno end").0.as_deref(),
+            Some(r#"it said "no end", which is not an answer"#)
+        );
     }
 
     #[test]
