@@ -32,14 +32,16 @@ __lume_ps0='${__lume_none[__lume_ran=1]-}$(__lume_preexec)'
 
 # Writes $1 into __lume_encoded with every byte outside the unreserved set as %XX.
 __lume_urlencode() {
-    local LC_ALL=C text=$1 safe hex
+    local LC_ALL=C text=$1 safe code hex
     __lume_encoded=
     while [[ -n $text ]]; do
         safe=${text%%[!a-zA-Z0-9/:._~-]*}
         __lume_encoded+=$safe
         text=${text#"$safe"}
         if [[ -n $text ]]; then
-            printf -v hex '%%%02X' "'${text:0:1}"
+            # A byte above 127 is a negative number to bash 3.2, the one macOS has.
+            printf -v code '%d' "'${text:0:1}"
+            printf -v hex '%%%02X' "$((code & 255))"
             __lume_encoded+=$hex
             text=${text:1}
         fi

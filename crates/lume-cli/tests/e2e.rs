@@ -1084,6 +1084,23 @@ fn bash() -> Option<String> {
     }
 }
 
+/// Whether `bash` says which command line runs and how it ended. That takes PS0, which
+/// bash has since 4.4; the one macOS has is 3.2, and says only where it is.
+fn bash_marks_commands(bash: &str) -> bool {
+    let Ok(output) = Command::new(bash)
+        .args(["-c", "echo ${BASH_VERSINFO[0]} ${BASH_VERSINFO[1]}"])
+        .output()
+    else {
+        return false;
+    };
+    let version = String::from_utf8_lossy(&output.stdout);
+    let mut parts = version.split_whitespace().map(|part| part.parse::<u32>());
+    match (parts.next(), parts.next()) {
+        (Some(Ok(major)), Some(Ok(minor))) => (major, minor) >= (4, 4),
+        _ => false,
+    }
+}
+
 #[test]
 #[ignore = "needs a display and the built application; run with `cargo xtask e2e`"]
 fn a_shell_reports_where_it_is_and_what_it_runs_and_keeps_its_own_prompt() {
@@ -1133,16 +1150,19 @@ fn a_shell_reports_where_it_is_and_what_it_runs_and_keeps_its_own_prompt() {
     let url = follower.directory_ending(escaped);
     assert!(url.starts_with("file://"), "{url}");
 
-    // A command that fails is reported with its line and its exit code.
-    app.type_line_in(&pane, "(exit 3)");
-    follower.until("the command starting", |report| {
-        let event = &report["event"];
-        (event["type"] == "command_started" && event["command"] == "(exit 3)").then_some(())
-    });
-    follower.until("the command ending with its exit code", |report| {
-        let event = &report["event"];
-        (event["type"] == "command_finished" && event["exit"] == 3).then_some(())
-    });
+    // A command that fails is reported with its line and its exit code, by a bash that
+    // can say so.
+    if bash_marks_commands(&bash) {
+        app.type_line_in(&pane, "(exit 3)");
+        follower.until("the command starting", |report| {
+            let event = &report["event"];
+            (event["type"] == "command_started" && event["command"] == "(exit 3)").then_some(())
+        });
+        follower.until("the command ending with its exit code", |report| {
+            let event = &report["event"];
+            (event["type"] == "command_finished" && event["exit"] == 3).then_some(())
+        });
+    }
 
     // The program that has the terminal is the shell.
     assert_eq!(follower.foreground(), "bash");
@@ -1252,9 +1272,12 @@ fn a_shell_at_its_prompt_runs_nothing_and_a_program_it_runs_is_something() {
     // A program it runs is something, until it ends.
     app.type_line_in(&pane, "sleep 4");
     app.until_busy(&pane, true, "the program to be seen");
-    follower.until("the command ending", |report| {
-        (report["event"]["type"] == "command_finished").then_some(())
-    });
+    // A bash that cannot say a command ended is seen at its prompt again all the same.
+    if bash_marks_commands(&bash) {
+        follower.until("the command ending", |report| {
+            (report["event"]["type"] == "command_finished").then_some(())
+        });
+    }
     app.until_busy(&pane, false, "the program to end");
     app.quit();
 }
@@ -2698,8 +2721,14 @@ fn a_plugin_signs_in_to_the_machine_of_an_ssh_profile_on_a_press_and_runs_progra
     assert_eq!(seen["machines"][0]["signIn"], false, "{seen}");
 
     let done = run("work", id);
+    // The stand-in's `sh` is this machine's own, or on Windows a Linux distribution's.
+    let system = if cfg!(target_os = "macos") {
+        "0 Darwin"
+    } else {
+        "0 Linux"
+    };
     for (what, expected) in [
-        ("uname", "0 Linux"),
+        ("uname", system),
         ("input", "0 åäö 'quoted' $HOME"),
         ("folder", "3 /tmp err"),
         ("nowhere", "folder_missing"),

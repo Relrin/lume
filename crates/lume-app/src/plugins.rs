@@ -498,9 +498,11 @@ impl Plugins {
             {
                 tokio::spawn(Arc::clone(&this).follow_samples(sampled));
             }
+            // Watched before it is first read: a plugin installed while it is read is
+            // read again after, and not missed between the reading and the watching.
+            this.watch_lock();
             this.reload().await;
             this.state.marks().plugins();
-            this.watch_lock();
             let again = Arc::clone(&this);
             tokio::spawn(async move {
                 loop {
@@ -2146,28 +2148,52 @@ impl Plugins {
         // The sessions that were there before anything followed them have said what
         // they had to say already: a terminal that came back with the window reported
         // its program before the plugins were read. What each adds up to is told as
-        // its whole state, so that a plugin that waits for sessions hears of them.
-        let (so_far, mut news) = reports.follow();
-        self.sessions_so_far(so_far).await;
+        // its whole state, so that a plugin that waits for sessions hears of them. One
+        // that was there but had said nothing yet, as a shell at its prompt has not
+        // before its program is first looked up, is told so when it first says something.
+        let (so_far, mut news) = reports.follow_all();
+        let mut quiet = so_far.quiet;
+        self.sessions_so_far(so_far.states).await;
         loop {
             match news.recv().await {
-                Ok(news) => self.session_news(news).await,
+                Ok(news) => {
+                    let was_quiet = quiet.remove(&news.key).then(|| news.key.clone());
+                    let ended = matches!(news.what, SessionNews::Exit(_));
+                    self.session_news(news).await;
+                    if let Some(key) = was_quiet
+                        && !ended
+                    {
+                        match reports.state(&key) {
+                            // As with any report, nothing is made of it with nobody
+                            // to hear it.
+                            Some(state) if !state.is_empty() => {
+                                if self.anyone_hears_sessions() {
+                                    self.sessions_so_far(vec![(key, state)]).await;
+                                }
+                            }
+                            // A bell adds nothing to a state: the session is still quiet.
+                            Some(_) => {
+                                quiet.insert(key);
+                            }
+                            None => {}
+                        }
+                    }
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
                     tracing::debug!(missed, "session reports were missed by plugins");
                     let so_far;
-                    (so_far, news) = reports.follow();
-                    self.sessions_so_far(so_far).await;
+                    (so_far, news) = reports.follow_all();
+                    quiet = so_far.quiet;
+                    self.sessions_so_far(so_far.states).await;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             }
         }
     }
 
-    /// Passes a session's report to the plugins that hear such reports, starting those
-    /// whose activation events name it.
-    async fn session_news(self: &Arc<Self>, news: News) {
-        // Sessions report often; with nobody to hear them nothing is made of it.
-        let anyone = self.inner().loaded.values().any(|loaded| {
+    /// Whether a plugin hears the sessions' reports, or would be started by one.
+    fn anyone_hears_sessions(&self) -> bool {
+        self.inner().loaded.values().any(|loaded| {
             loaded.is_ready()
                 && match &loaded.running {
                     Some(running) => running.started && loaded.topics.contains(&Topic::Session),
@@ -2178,8 +2204,14 @@ impl Plugins {
                             .any(|event| matches!(event, Activation::SessionEvent(_)))
                     }),
                 }
-        });
-        if !anyone {
+        })
+    }
+
+    /// Passes a session's report to the plugins that hear such reports, starting those
+    /// whose activation events name it.
+    async fn session_news(self: &Arc<Self>, news: News) {
+        // Sessions report often; with nobody to hear them nothing is made of it.
+        if !self.anyone_hears_sessions() {
             return;
         }
         for (kind, details) in self.reports_of(&news) {

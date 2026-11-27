@@ -124,6 +124,15 @@ pub struct Launched {
     pub profile: Option<String>,
 }
 
+/// The sessions as they were when someone began to follow them.
+#[derive(Debug, Default)]
+pub struct SoFar {
+    /// Every session that has reported something, with its state.
+    pub states: Vec<(SessionKey, SessionState)>,
+    /// The sessions that are shown but have reported nothing yet.
+    pub quiet: HashSet<SessionKey>,
+}
+
 pub struct SessionStates {
     sessions: Mutex<HashMap<SessionKey, Known>>,
     news: broadcast::Sender<News>,
@@ -256,14 +265,23 @@ impl SessionStates {
     /// Every session that has reported something, with its state, and the reports
     /// from now on. The two are taken together, so no report falls between them.
     pub fn follow(&self) -> (Vec<(SessionKey, SessionState)>, broadcast::Receiver<News>) {
+        let (so_far, news) = self.follow_all();
+        (so_far.states, news)
+    }
+
+    /// The same, with the sessions that are shown but have reported nothing yet.
+    pub fn follow_all(&self) -> (SoFar, broadcast::Receiver<News>) {
         let sessions = self.sessions();
         let news = self.news.subscribe();
-        let states = sessions
-            .iter()
-            .filter(|(_, known)| !known.state.is_empty())
-            .map(|(key, known)| (key.clone(), known.state.clone()))
-            .collect();
-        (states, news)
+        let mut so_far = SoFar::default();
+        for (key, known) in sessions.iter() {
+            if known.state.is_empty() {
+                so_far.quiet.insert(key.clone());
+            } else {
+                so_far.states.push((key.clone(), known.state.clone()));
+            }
+        }
+        (so_far, news)
     }
 
     /// How many sessions are known.
@@ -591,5 +609,17 @@ mod tests {
         assert_eq!(second.what, SessionNews::Exit(ExitStatus::Code(3)));
         // The end of the program does not take what it reported with it.
         assert!(states.state(&key(1)).is_some());
+    }
+
+    #[test]
+    fn a_follower_is_told_which_shown_sessions_have_said_nothing_yet() {
+        let states = states(&[1, 2, 3]);
+        states.on_event(&key(1), &cwd("file://box/a"));
+        states.on_event(&key(2), &SessionEvent::Bell);
+        let (so_far, _news) = states.follow_all();
+        assert_eq!(so_far.states.len(), 1);
+        assert_eq!(so_far.states[0].0, key(1));
+        // A bell is not a state: that session is as quiet as one that said nothing.
+        assert_eq!(so_far.quiet, HashSet::from([key(2), key(3)]));
     }
 }
