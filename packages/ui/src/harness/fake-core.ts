@@ -23,6 +23,7 @@ import type {
   Machine,
   Notice,
   PanelRowData,
+  Profile,
   Scheme,
   ProfileList,
   RexAddress,
@@ -1033,6 +1034,31 @@ export class FakeCore implements Carrier {
       case "ssh_profile_put":
         this.written.push({ name, args });
         return answer(args["id"] ?? "written");
+      // A profile for a distribution is listed at once, as the core does once it is written.
+      case "wsl_profile_put": {
+        this.written.push({ name, args });
+        const called = String(args["name"]);
+        const wsl = args["wsl"] as { distro: string; user: string | null; cwd: string | null };
+        const id =
+          typeof args["id"] === "string"
+            ? args["id"]
+            : called.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        const profile: Profile = {
+          id,
+          name: called,
+          launcher: {
+            type: "wsl",
+            distro: wsl.distro,
+            ...(wsl.user === null ? {} : { user: wsl.user }),
+          },
+          ...(wsl.cwd === null ? {} : { cwd: wsl.cwd }),
+          hidden: false,
+          origin: "user",
+        };
+        const others = this.#profiles.profiles.filter((one) => one.id !== id);
+        this.profilesChanged({ ...this.#profiles, profiles: [profile, ...others] });
+        return answer(id);
+      }
       case "profile_remove":
       case "profiles_listed":
         this.written.push({ name, args });

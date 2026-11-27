@@ -337,7 +337,52 @@ impl ConfigStore {
         id: Option<&str>,
         profile: &SshProfile,
     ) -> Result<String, ConfigError> {
-        let name = profile.name.trim();
+        let entry = ProfileEntry {
+            launcher: Some(LauncherKind::Ssh),
+            host: Some(profile.host.trim().to_owned()),
+            user: profile.user.clone().filter(|user| !user.is_empty()),
+            port: profile.port,
+            extra_args: (!profile.extra_args.is_empty()).then(|| profile.extra_args.clone()),
+            ..ProfileEntry::default()
+        };
+        self.put_own_profile(id, &profile.name, entry, &SSH_PROFILE_KEYS)
+    }
+
+    /// Writes a profile that opens a shell in a Linux distribution into the user's file,
+    /// in place of the one whose id is `id` if one is given, and reads the files again.
+    /// What else the file says of that one stays. Gives the profile's id.
+    pub fn put_wsl_profile(
+        &self,
+        id: Option<&str>,
+        profile: &WslProfile,
+    ) -> Result<String, ConfigError> {
+        let given = |word: &Option<String>| {
+            word.as_deref()
+                .map(str::trim)
+                .filter(|word| !word.is_empty())
+                .map(str::to_owned)
+        };
+        let entry = ProfileEntry {
+            launcher: Some(LauncherKind::Wsl),
+            distro: Some(profile.distro.trim().to_owned()),
+            user: given(&profile.user),
+            cwd: given(&profile.cwd),
+            ..ProfileEntry::default()
+        };
+        self.put_own_profile(id, &profile.name, entry, &WSL_PROFILE_KEYS)
+    }
+
+    /// Writes one of the user's own profiles, called `name`, that starts the way `entry`
+    /// says, in place of the one whose id is `id` if one is given. Only `keys` are
+    /// written; what else the file says of the profile stays. Gives its id.
+    fn put_own_profile(
+        &self,
+        id: Option<&str>,
+        name: &str,
+        entry: ProfileEntry,
+        keys: &[&str],
+    ) -> Result<String, ConfigError> {
+        let name = name.trim();
         if name.is_empty() || name.chars().any(char::is_control) {
             return Err(ConfigError::BadEntry("a profile needs a name".to_owned()));
         }
@@ -364,20 +409,16 @@ impl ConfigStore {
             )));
         }
         let entry = ProfileEntry {
+            id: id.clone(),
             name: Some(name.to_owned()),
-            launcher: Some(LauncherKind::Ssh),
-            host: Some(profile.host.trim().to_owned()),
-            user: profile.user.clone().filter(|user| !user.is_empty()),
-            port: profile.port,
-            extra_args: (!profile.extra_args.is_empty()).then(|| profile.extra_args.clone()),
-            ..ProfileEntry::named(id.clone())
+            ..entry
         };
         entry.check().map_err(ConfigError::BadEntry)?;
         let written = serde_json::to_value(&entry)
             .map_err(|error| ConfigError::BadEntry(error.to_string()))?;
-        let fields: Vec<listed::Field<'_>> = SSH_PROFILE_KEYS
-            .into_iter()
-            .map(|key| (key, written.get(key).cloned()))
+        let fields: Vec<listed::Field<'_>> = keys
+            .iter()
+            .map(|&key| (key, written.get(key).cloned()))
             .collect();
         self.edit(|text| {
             if fresh {
@@ -467,6 +508,19 @@ const SSH_PROFILE_KEYS: [&str; 7] = [
     "port",
     "extra-args",
 ];
+
+/// What is written of a profile that opens a shell in a Linux distribution.
+const WSL_PROFILE_KEYS: [&str; 6] = ["id", "name", "launcher", "distro", "user", "cwd"];
+
+/// A shell in a Linux distribution, as a person describes it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WslProfile {
+    pub name: String,
+    pub distro: String,
+    pub user: Option<String>,
+    /// Where its terminals start; none is the user's home there.
+    pub cwd: Option<String>,
+}
 
 /// A shell on another machine, as a person describes it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -896,6 +950,71 @@ mod tests {
         assert!(store.put_ssh_profile(Some("auto.ssh.x"), &profile).is_err());
 
         store.remove_profile("build-box-2").unwrap();
+        assert_eq!(store.remove_profile(&id).unwrap().config.profiles, []);
+    }
+
+    #[test]
+    fn wsl_profiles_are_written_and_keep_what_else_is_said_of_them() {
+        let dir = TempDir::new("store-wsl");
+        let store = ConfigStore::load(dir.dirs(), None);
+        let mut profile = WslProfile {
+            name: "Ubuntu work".to_owned(),
+            distro: "Ubuntu".to_owned(),
+            user: Some(" me ".to_owned()),
+            cwd: Some("~/src".to_owned()),
+        };
+        let id = store.put_wsl_profile(None, &profile).unwrap();
+        assert_eq!(id, "ubuntu-work");
+        assert_eq!(
+            store.put_wsl_profile(None, &profile).unwrap(),
+            "ubuntu-work-2"
+        );
+        let now = store.current();
+        let written = &now.config.profiles[0];
+        assert_eq!(written.launcher, Some(LauncherKind::Wsl));
+        assert_eq!(written.distro.as_deref(), Some("Ubuntu"));
+        assert_eq!(written.user.as_deref(), Some("me"));
+        assert_eq!(written.cwd.as_deref(), Some("~/src"));
+
+        let file = dir.dirs().config_file();
+        let text = std::fs::read_to_string(&file).unwrap();
+        let text = text.replacen(
+            "cwd = \"~/src\"",
+            "cwd = \"~/src\"\ntheme = \"lume-dark\"",
+            1,
+        );
+        std::fs::write(&file, text).unwrap();
+        store.reload().unwrap();
+        profile.user = None;
+        profile.cwd = Some("  ".to_owned());
+        profile.name = "Ubuntu".to_owned();
+        assert_eq!(store.put_wsl_profile(Some(&id), &profile).unwrap(), id);
+        let now = store.current();
+        let written = &now.config.profiles[0];
+        assert_eq!(written.name.as_deref(), Some("Ubuntu"));
+        assert_eq!((&written.user, &written.cwd), (&None, &None));
+        assert_eq!(written.theme.as_deref(), Some("lume-dark"));
+
+        for (name, distro) in [
+            ("", "Ubuntu"),
+            ("x", ""),
+            ("x", "--exec"),
+            ("x\u{7}", "Ubuntu"),
+        ] {
+            let wrong = WslProfile {
+                name: name.to_owned(),
+                distro: distro.to_owned(),
+                ..WslProfile::default()
+            };
+            assert!(store.put_wsl_profile(None, &wrong).is_err(), "{wrong:?}");
+        }
+        assert!(
+            store
+                .put_wsl_profile(Some("auto.wsl.Ubuntu"), &profile)
+                .is_err()
+        );
+
+        store.remove_profile("ubuntu-work-2").unwrap();
         assert_eq!(store.remove_profile(&id).unwrap().config.profiles, []);
     }
 

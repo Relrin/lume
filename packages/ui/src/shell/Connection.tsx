@@ -1,7 +1,8 @@
 /**
  * The dialog that adds or changes a connection, over a window of terminals. A Rex server
  * that was added is shown in the selector, where it can be connected to; a machine
- * reached over SSH in the Connect palette, which lists the profiles.
+ * reached over SSH or a Linux distribution in the Connect palette, which lists the
+ * profiles.
  */
 
 import { useStore } from "zustand";
@@ -20,7 +21,7 @@ export function Connection() {
   if (asked === null) return null;
   const done = (what: ConnectionDone) => {
     if (what.kind === "rex") selectorDoor.getState().open(what.label);
-    else if (what.kind === "ssh") app.connect.getState().open("ssh");
+    else app.connect.getState().open(what.kind);
   };
   return (
     <AddConnection

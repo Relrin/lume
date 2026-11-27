@@ -1,13 +1,13 @@
 //! The commands a page calls to add, change and take out what terminals can be opened
-//! on: the profiles that reach another machine over SSH, and the Linux distributions
-//! that were found. Rex servers are in [`crate::rex::commands`].
+//! on: the profiles that reach another machine over SSH or open a Linux distribution,
+//! and the distributions that were found. Rex servers are in [`crate::rex::commands`].
 //!
 //! Everything is written to the user's own file, which stays as it is otherwise, and
 //! reaches every page the way a change made in an editor would.
 
 use std::sync::Arc;
 
-use lume_config::{ConfigError, ListedProfile, SshProfile};
+use lume_config::{ConfigError, ListedProfile, SshProfile, WslProfile};
 use lume_session::Launcher;
 use serde::Deserialize;
 use serde_json::Value;
@@ -115,6 +115,37 @@ pub async fn ssh_profile_put(
     };
     write(&services, move |config| {
         config.put_ssh_profile(id.as_deref(), &profile)
+    })
+    .await
+}
+
+/// A shell in a Linux distribution, as it is typed.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WslShell {
+    distro: String,
+    user: Option<String>,
+    /// Where its terminals start; none is the user's home there.
+    cwd: Option<String>,
+}
+
+/// Writes a profile that opens a shell in a Linux distribution: a new one, or one of the
+/// user's own in place of what it was. Gives its id.
+#[tauri::command]
+pub async fn wsl_profile_put(
+    services: Shared<'_>,
+    id: Option<String>,
+    name: String,
+    wsl: WslShell,
+) -> Result<String, CommandError> {
+    let profile = WslProfile {
+        name,
+        distro: wsl.distro,
+        user: wsl.user,
+        cwd: wsl.cwd,
+    };
+    write(&services, move |config| {
+        config.put_wsl_profile(id.as_deref(), &profile)
     })
     .await
 }

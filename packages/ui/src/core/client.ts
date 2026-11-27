@@ -35,6 +35,7 @@ import type {
   WindowAction,
   WindowState,
   WorkspaceList,
+  WslShell,
 } from "./types.ts";
 import type {
   InstalledPlugin,
@@ -242,6 +243,12 @@ export class CoreClient {
    *  given if any. Gives its id. */
   sshProfilePut(id: string | null, name: string, host: SshHost): Promise<string> {
     return this.transport.command("ssh_profile_put", { id, name, host });
+  }
+
+  /** Writes a profile for a Linux distribution, in place of the one whose id is given
+   *  if any. Gives its id. */
+  wslProfilePut(id: string | null, name: string, wsl: WslShell): Promise<string> {
+    return this.transport.command("wsl_profile_put", { id, name, wsl });
   }
 
   /** Takes a profile of the user's own out of their file. */

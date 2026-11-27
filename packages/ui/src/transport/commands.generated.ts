@@ -58,6 +58,7 @@ export type CommandName =
   | "ssh_try"
   | "try_end"
   | "ssh_profile_put"
+  | "wsl_profile_put"
   | "profile_remove"
   | "profiles_listed"
   | "ui_contributions"

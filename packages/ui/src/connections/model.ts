@@ -1,7 +1,7 @@
 /**
  * What the dialog that adds a connection works with: how an address is read, what a
- * test of one goes through, the profile a machine reached over SSH becomes, and which
- * Linux distributions are listed.
+ * test of one goes through, the profile a machine reached over SSH or a Linux
+ * distribution becomes, and which of the distributions found are listed.
  *
  * Nothing here touches the page, so all of it is tested with plain objects.
  */
@@ -13,6 +13,7 @@ import type {
   RexHost,
   RexTried,
   SshHost,
+  WslShell,
 } from "../core/types.ts";
 import { lookup } from "../lookup.ts";
 import { sshAdvice, systemName } from "../rex/model.ts";
@@ -23,7 +24,8 @@ export type ConnectionKind = "rex" | "ssh" | "wsl";
 /** What is changed, in place of something new. */
 export type EditedConnection =
   | { readonly kind: "rex"; readonly label: string; readonly address: string }
-  | { readonly kind: "ssh"; readonly profile: Profile };
+  | { readonly kind: "ssh"; readonly profile: Profile }
+  | { readonly kind: "wsl"; readonly profile: Profile };
 
 /** What an address came out as: how the core reads it, or why it cannot. */
 export type AddressRead =
@@ -444,6 +446,52 @@ export function ownSshProfiles(profiles: readonly Profile[]): readonly Profile[]
       profile.launcher.type === "ssh" &&
       !profile.id.startsWith("auto."),
   );
+}
+
+/** A profile of the user's own that opens a shell in a Linux distribution. */
+export function ownWslProfiles(profiles: readonly Profile[]): readonly Profile[] {
+  return profiles.filter(
+    (profile) =>
+      profile.origin === "user" &&
+      profile.launcher.type === "wsl" &&
+      !profile.id.startsWith("auto."),
+  );
+}
+
+/** What is typed of a shell in a Linux distribution. */
+export interface WslForm {
+  readonly distro: string;
+  readonly user: string;
+  /** Where its terminals start. Empty is the user's home there. */
+  readonly cwd: string;
+}
+
+/** An empty form. */
+export const EMPTY_WSL: WslForm = { distro: "", user: "", cwd: "" };
+
+/** The form a profile is changed in. */
+export function wslForm(profile: Profile): WslForm {
+  const launcher = profile.launcher;
+  if (launcher.type !== "wsl") return EMPTY_WSL;
+  return { distro: launcher.distro, user: launcher.user ?? "", cwd: profile.cwd ?? "" };
+}
+
+/** The shell a form describes, or why it describes none. */
+export function wslShell(form: WslForm): WslShell | string {
+  const distro = form.distro.trim();
+  const user = form.user.trim();
+  const cwd = form.cwd.trim();
+  if (distro === "") return "A distro is needed";
+  if (/[\s\p{Cc}]/u.test(distro) || distro.startsWith("-")) return "That is not a distro's name";
+  if (/[\s\p{Cc}]/u.test(user) || user.startsWith("-")) return "That is not a user's name";
+  if (/\p{Cc}/u.test(cwd)) return "That is not a folder";
+  return { distro, user: user === "" ? null : user, cwd: cwd === "" ? null : cwd };
+}
+
+/** Whether a form says enough to be written: a distro, whose name the profile takes
+ *  when it is given none. */
+export function wslReady(form: WslForm): boolean {
+  return typeof wslShell(form) !== "string";
 }
 
 /** A Linux distribution as the dialog lists it. */

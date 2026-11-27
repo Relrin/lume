@@ -28,8 +28,8 @@ use lume_config::source::split_path;
 use lume_config::{
     ColorScheme, ConfigBody, ConfigError, ConfigStore, Dirs, Dropped, Keymap, KeymapView,
     LayoutEntry, ListedProfile, Platform, PluginBinding, Problem, Resolved, RexHostEntry,
-    SshProfile, Theme, ThemeChoice, Themes, TokenValue, WatchEvent, Watcher, check_value,
-    plugin_setting_problems, resolve_keymap_with, resolve_tokens,
+    SshProfile, Theme, ThemeChoice, Themes, TokenValue, WatchEvent, Watcher, WslProfile,
+    check_value, plugin_setting_problems, resolve_keymap_with, resolve_tokens,
 };
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -423,6 +423,18 @@ impl ConfigService {
         profile: &SshProfile,
     ) -> Result<String, ConfigError> {
         let id = self.store.put_ssh_profile(id, profile)?;
+        self.announce();
+        Ok(id)
+    }
+
+    /// Writes a profile for a Linux distribution into the user's file, in place of the
+    /// one called `id` if one is named. Gives its id.
+    pub fn put_wsl_profile(
+        &self,
+        id: Option<&str>,
+        profile: &WslProfile,
+    ) -> Result<String, ConfigError> {
+        let id = self.store.put_wsl_profile(id, profile)?;
         self.announce();
         Ok(id)
     }

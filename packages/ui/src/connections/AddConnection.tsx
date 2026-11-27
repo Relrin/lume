@@ -1,6 +1,7 @@
 /**
  * The dialog that adds a connection or changes one: a Rex server, a machine reached over
- * SSH, or which Linux distributions of this machine are listed.
+ * SSH, or a Linux distribution of this machine. Which of the distributions found are
+ * listed, and where they start, is said there too.
  *
  * An address is read as it is typed, and what it means is said under it. Testing is
  * optional: it goes through what connecting would, step by step, and says where it
@@ -26,6 +27,7 @@ import {
   distroRows,
   distroWords,
   EMPTY_SSH,
+  EMPTY_WSL,
   failedStep,
   knownHosts,
   labelTaken,
@@ -40,11 +42,14 @@ import {
   testGoesOn,
   testWords,
   triedWords,
+  wslForm,
+  wslShell,
   type AddressRead,
   type ConnectionKind,
   type ConnectionTest,
   type DistroRow,
   type SshForm,
+  type WslForm,
 } from "./model.ts";
 import type { ConnectionAsked } from "./store.ts";
 
@@ -52,7 +57,8 @@ import type { ConnectionAsked } from "./store.ts";
 export type ConnectionDone =
   | { readonly kind: "rex"; readonly label: string }
   | { readonly kind: "ssh"; readonly profile: string }
-  | { readonly kind: "wsl" };
+  /** The profile that was written, if one was rather than only the distributions found. */
+  | { readonly kind: "wsl"; readonly profile: string | null };
 
 /** What the dialog works with. */
 export interface ConnectionServices {
@@ -138,6 +144,9 @@ export function AddConnection({
   const [ssh, setSsh] = useState<SshForm>(() =>
     edit?.kind === "ssh" ? sshForm(edit.profile) : EMPTY_SSH,
   );
+  const [wsl, setWsl] = useState<WslForm>(() =>
+    edit?.kind === "wsl" ? wslForm(edit.profile) : EMPTY_WSL,
+  );
   const [name, setName] = useState(
     edit === null ? "" : edit.kind === "rex" ? edit.label : edit.profile.name,
   );
@@ -155,13 +164,13 @@ export function AddConnection({
   const before = distroRows(profiles);
 
   // The profiles may be known only after the dialog is up.
-  const found = before.map((row) => row.id).join(" ");
+  const foundIds = before.map((row) => row.id).join(" ");
   useEffect(() => {
     setDistros((held) =>
       distroRows(profiles).map((row) => held.find((one) => one.id === row.id) ?? row),
     );
     // Only which there are matters: what is ticked stays while a row's words change.
-  }, [found]);
+  }, [foundIds]);
 
   useEffect(() => {
     const turn = ++asking.current;
@@ -229,23 +238,34 @@ export function AddConnection({
     forget();
     setSsh((held) => ({ ...held, ...patch }));
   };
+  const typeWsl = (patch: Partial<WslForm>) => {
+    setProblem(null);
+    setWsl((held) => ({ ...held, ...patch }));
+  };
 
   const read = answer?.read ?? null;
   const machine = sshHost(ssh);
-  const byDefault = kind === "rex" ? defaultName(read) : kind === "ssh" ? nameOfHost(ssh.host) : "";
+  const shell = wslShell(wsl);
+  const byDefault =
+    kind === "rex" ? defaultName(read) : kind === "ssh" ? nameOfHost(ssh.host) : wsl.distro.trim();
   const label = name.trim() === "" ? byDefault : name.trim();
   const clash = kind === "rex" && label !== "" ? labelTaken(label, hosts, was) : null;
   const words = addressWords(address, read);
   // What was typed since is not known yet to be an address.
   const usable = answer?.typed === address && read?.ok === true && read.address.taken === null;
-  const changes = distroChanges(before, distros);
+  // The distributions found are listed here only while a connection is added.
+  const changes = edit === null ? distroChanges(before, distros) : [];
+  // Whether a WSL connection is written, rather than only what is said of those found.
+  const adds = edit !== null || wsl.distro.trim() !== "";
   const ready =
     !writing &&
     (kind === "rex"
       ? usable && label !== "" && clash === null && test?.failure?.final !== true
       : kind === "ssh"
         ? typeof machine !== "string" && label !== ""
-        : changes.length > 0);
+        : adds
+          ? typeof shell !== "string" && label !== ""
+          : changes.length > 0);
 
   const runRex = (agreed: boolean) => {
     if (read?.ok !== true) return;
@@ -343,7 +363,14 @@ export function AddConnection({
           ? client
               .sshProfilePut(edit?.kind === "ssh" ? edit.profile.id : null, label, machine)
               .then((profile) => ({ kind, profile }))
-          : client.profilesListed(changes).then(() => ({ kind: "wsl" }));
+          : (changes.length > 0 ? client.profilesListed(changes) : Promise.resolve()).then(
+              (): Promise<ConnectionDone> | ConnectionDone =>
+                adds && typeof shell !== "string"
+                  ? client
+                      .wslProfilePut(edit?.kind === "wsl" ? edit.profile.id : null, label, shell)
+                      .then((profile) => ({ kind: "wsl", profile }))
+                  : { kind: "wsl", profile: null },
+            );
     writes.then(
       (what) => {
         close();
@@ -411,8 +438,18 @@ export function AddConnection({
     edit === null
       ? "Add connection"
       : `Edit ${edit.kind === "rex" ? edit.label : edit.profile.name}`;
-  const status = problem ?? (kind === "wsl" ? distroWords(distros) : testWords(test));
-  const addLabel = edit !== null || kind === "wsl" ? "Save" : "Add connection";
+  const status =
+    problem ??
+    (kind !== "wsl"
+      ? testWords(test)
+      : adds && typeof shell === "string" && wsl.distro.trim() !== ""
+        ? shell
+        : edit === null
+          ? distroWords(distros)
+          : "");
+  const addLabel = edit !== null || (kind === "wsl" && !adds) ? "Save" : "Add connection";
+  // The distributions found, offered to pick from; another can be typed.
+  const distroNames = before.map((row) => row.name);
   const failure = test?.failure ?? null;
 
   return (
@@ -593,33 +630,86 @@ export function AddConnection({
               </div>
             </div>
           )}
-          {kind !== "wsl" && (
-            <Field id="connection-name" label="Name" problem={clash}>
-              <input
-                id="connection-name"
-                className="connection-input"
-                value={name}
-                placeholder={byDefault === "" ? "build" : byDefault}
-                autoComplete="off"
-                spellCheck={false}
-                aria-invalid={clash !== null}
-                aria-describedby={clash === null ? undefined : "connection-name-problem"}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </Field>
+          {kind === "wsl" && (
+            <>
+              <div className="connection-two">
+                <Field id="connection-distro" label="Distro">
+                  <input
+                    id="connection-distro"
+                    className="connection-input"
+                    data-first
+                    data-mono
+                    list="connection-distro-list"
+                    value={wsl.distro}
+                    placeholder={distroNames[0] ?? "Ubuntu"}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(event) => typeWsl({ distro: event.target.value })}
+                  />
+                  <datalist id="connection-distro-list">
+                    {distroNames.map((distro) => (
+                      <option key={distro} value={distro} />
+                    ))}
+                  </datalist>
+                </Field>
+                <Field id="connection-wsl-user" label="User">
+                  <input
+                    id="connection-wsl-user"
+                    className="connection-input"
+                    data-mono
+                    value={wsl.user}
+                    placeholder="the distro's default"
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(event) => typeWsl({ user: event.target.value })}
+                  />
+                </Field>
+              </div>
+              <Field id="connection-cwd" label="Start in">
+                <input
+                  id="connection-cwd"
+                  className="connection-input"
+                  data-mono
+                  value={wsl.cwd}
+                  placeholder="~"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => typeWsl({ cwd: event.target.value })}
+                />
+              </Field>
+            </>
           )}
+          <Field id="connection-name" label="Name" problem={clash}>
+            <input
+              id="connection-name"
+              className="connection-input"
+              value={name}
+              placeholder={
+                byDefault !== ""
+                  ? byDefault
+                  : kind === "wsl"
+                    ? (distroNames[0] ?? "Ubuntu")
+                    : "build"
+              }
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={clash !== null}
+              aria-describedby={clash === null ? undefined : "connection-name-problem"}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </Field>
           {kind === "ssh" && (
             <p className="connection-note">
               Plain SSH sessions end when the connection drops. Add the machine as a Rex host to
               keep them running.
             </p>
           )}
-          {kind === "wsl" && (
+          {kind === "wsl" && edit === null && (
             <>
               <div className="connection-field">
-                <span className="connection-label">Distros on this PC</span>
+                <span className="connection-label">Distros found on this PC</span>
                 <div className="connection-distros">
-                  {distros.map((row, index) => {
+                  {distros.map((row) => {
                     const set = (patch: Partial<DistroRow>) =>
                       setDistros((held) =>
                         held.map((one) => (one.id === row.id ? { ...one, ...patch } : one)),
@@ -648,7 +738,6 @@ export function AddConnection({
                         />
                         <input
                           type="checkbox"
-                          data-first={index === 0 || undefined}
                           aria-label={`List ${row.name}`}
                           aria-checked={row.listed}
                           checked={row.listed}
@@ -663,7 +752,8 @@ export function AddConnection({
                 </div>
               </div>
               <p className="connection-note">
-                Found with <code>wsl --list</code>. Stopped distros start when you open a session.
+                Found with <code>wsl --list</code>. Untick one to leave it out of lists. Stopped
+                distros start when you open a session.
               </p>
             </>
           )}

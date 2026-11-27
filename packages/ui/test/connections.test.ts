@@ -7,11 +7,13 @@ import {
   distroRows,
   distroWords,
   EMPTY_SSH,
+  EMPTY_WSL,
   failedStep,
   knownHosts,
   labelTaken,
   nameOfHost,
   ownSshProfiles,
+  ownWslProfiles,
   rexSteps,
   sshForm,
   sshHost,
@@ -20,6 +22,9 @@ import {
   testFailure,
   testGoesOn,
   testWords,
+  wslForm,
+  wslReady,
+  wslShell,
   type AddressRead,
 } from "../src/connections/model.ts";
 import type { Profile, RexAddress } from "../src/core/types.ts";
@@ -194,6 +199,46 @@ describe("a machine reached over SSH", () => {
       profile("shell", { type: "shell", program: "", args: [], login: false }, { origin: "user" }),
     ]);
     expect(own.map((one) => one.id)).toEqual(["mine"]);
+  });
+});
+
+describe("a shell in a Linux distribution", () => {
+  it("is read from what is typed", () => {
+    expect(wslReady(EMPTY_WSL)).toBe(false);
+    expect(wslShell(EMPTY_WSL)).toBe("A distro is needed");
+    const form = { distro: " Ubuntu ", user: "", cwd: "" };
+    expect(wslReady(form)).toBe(true);
+    expect(wslShell(form)).toEqual({ distro: "Ubuntu", user: null, cwd: null });
+    expect(wslShell({ distro: "Ubuntu", user: " me ", cwd: " ~/code " })).toEqual({
+      distro: "Ubuntu",
+      user: "me",
+      cwd: "~/code",
+    });
+    for (const wrong of [
+      { distro: "--exec", user: "", cwd: "" },
+      { distro: "Ubuntu 22", user: "", cwd: "" },
+      { distro: "Ubuntu", user: "-r", cwd: "" },
+      { distro: "Ubuntu", user: "", cwd: "~/a" },
+    ]) {
+      expect(wslReady(wrong), JSON.stringify(wrong)).toBe(false);
+    }
+  });
+
+  it("is read from a profile, and only the user’s own are changed", () => {
+    const own = profile(
+      "work",
+      { type: "wsl", distro: "Ubuntu", user: "me" },
+      { origin: "user", cwd: "~/code" },
+    );
+    expect(wslForm(own)).toEqual({ distro: "Ubuntu", user: "me", cwd: "~/code" });
+    expect(wslForm(profile("ssh", { type: "ssh", host: "x" }))).toEqual(EMPTY_WSL);
+    const mine = ownWslProfiles([
+      own,
+      profile("auto.wsl.Ubuntu", { type: "wsl", distro: "Ubuntu" }),
+      profile("auto.wsl.Debian", { type: "wsl", distro: "Debian" }, { origin: "user" }),
+      profile("box", { type: "ssh", host: "x" }, { origin: "user" }),
+    ]);
+    expect(mine.map((one) => one.id)).toEqual(["work"]);
   });
 });
 

@@ -154,6 +154,20 @@ async function addRex(app: ShellApp, address: string): Promise<void> {
   );
 }
 
+/** Opens the dialog on WSL through its command, and picks a distribution and a folder. */
+async function addWsl(app: ShellApp): Promise<void> {
+  await until("the profiles arriving", () => app.profiles.getState().list);
+  app.commands.run("lume.connection.add", { kind: "wsl" });
+  const distro = await until("the dialog opening", () =>
+    document.querySelector<HTMLInputElement>("#connection-distro"),
+  );
+  typeInto(distro, "Ubuntu");
+  const cwd = await until("the folder field", () =>
+    document.querySelector<HTMLInputElement>("#connection-cwd"),
+  );
+  typeInto(cwd, "~/code");
+}
+
 function tested(state: "ok" | "bad"): Promise<Element> {
   return until("the test ending", () =>
     state === "ok"
@@ -266,24 +280,59 @@ export const CONNECTION_SCENES: readonly Scene[] = [
     ],
   },
   {
+    // A distribution picked and a folder to start in: the name is the distribution's.
     name: "connection-wsl",
     window: WINDOW,
     prepare: async (app, core) => {
-      await until("the profiles arriving", () => app.profiles.getState().list);
-      app.commands.run("lume.connection.add", { kind: "wsl" });
-      const field = await until("the distributions being listed", () =>
-        document.querySelector<HTMLInputElement>('[aria-label="Start Ubuntu in"]'),
-      );
-      typeInto(field, "~/code");
-      await until("it being something to save", () => button("Save")?.disabled === false);
-      if (core.written.length > 0) throw new Error("it was written before it was saved");
+      await addWsl(app);
+      await until("it being something to add", () => button("Add connection")?.disabled === false);
+      if (core.written.length > 0) throw new Error("it was written before it was added");
     },
     check: (page) => [
-      ...wanted("the distributions", texts(page, ".connection-distro-name"), [
+      ...wanted(
+        "the distributions offered",
+        [...page.querySelectorAll("#connection-distro-list option")].map(
+          (one) => (one as HTMLOptionElement).value,
+        ),
+        ["Ubuntu", "Debian"],
+      ),
+      ...wanted(
+        "what it is called by default",
+        page.querySelector<HTMLInputElement>("#connection-name")?.placeholder,
+        "Ubuntu",
+      ),
+      ...wanted("the distributions found", texts(page, ".connection-distro-name"), [
         "UbuntuWSL 2 · running",
         "DebianWSL 2 · stopped",
       ]),
       ...wanted("beside the buttons", texts(page, ".connection-status"), ["1 of 2 listed"]),
+    ],
+  },
+  {
+    // An added distribution is what the Connect palette shows next, among those of WSL.
+    name: "connection-wsl-added",
+    window: WINDOW,
+    prepare: async (app, core) => {
+      await addWsl(app);
+      await pressButton("Add connection");
+      await until("the dialog going", () => !document.querySelector(".connection"));
+      const wrote = JSON.stringify(core.written);
+      const should =
+        '"id":null,"name":"Ubuntu","wsl":{"distro":"Ubuntu","user":null,"cwd":"~/code"}';
+      if (core.written.length !== 1 || !wrote.includes(should)) {
+        throw new Error(`what was written: ${wrote}`);
+      }
+      await until("the palette listing it", () =>
+        [...document.querySelectorAll(".connect-row-line")].find(
+          (line) => line.textContent === "WSL · Ubuntu",
+        ),
+      );
+    },
+    check: (page) => [
+      ...wanted("the palette listing", texts(page, ".connect-row-line"), [
+        "WSL · Ubuntu",
+        "WSL 2 · running",
+      ]),
     ],
   },
   {

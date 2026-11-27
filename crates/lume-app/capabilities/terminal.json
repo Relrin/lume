@@ -50,6 +50,7 @@
     "allow-ssh-try",
     "allow-try-end",
     "allow-ssh-profile-put",
+    "allow-wsl-profile-put",
     "allow-profile-remove",
     "allow-profiles-listed",
     "allow-ui-contributions",

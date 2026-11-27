@@ -1,7 +1,7 @@
 /**
- * The page about the machines sessions can be opened on: the Rex servers and the
- * profiles reached over SSH that the user added, each with a way to change it and to
- * take it out, and the way to add another.
+ * The page about the machines sessions can be opened on: the Rex servers, and the
+ * profiles reached over SSH or opening a Linux distribution that the user added, each
+ * with a way to change it and to take it out, and the way to add another.
  *
  * A server's row says how it stands. Nothing is connected to from here: this window
  * shows no session, and cannot be asked what connecting may ask.
@@ -12,7 +12,7 @@ import { useStore } from "zustand";
 
 import { describeRun } from "../connect/model.ts";
 import { AddConnection } from "../connections/AddConnection.tsx";
-import { ownSshProfiles } from "../connections/model.ts";
+import { ownSshProfiles, ownWslProfiles } from "../connections/model.ts";
 import { connectionDialog } from "../connections/store.ts";
 import type { RexHost } from "../core/types.ts";
 import { LinkDot } from "../rex/LinkDot.tsx";
@@ -127,6 +127,19 @@ export function HostsPage({ app }: { app: SettingsApp }) {
             badge="SSH"
             edit={(keyboard) =>
               connectionDialog.getState().edit({ kind: "ssh", profile }, keyboard)
+            }
+            remove={() => act(app.client.profileRemove(profile.id))}
+          />
+        ))}
+        {ownWslProfiles(profiles).map((profile) => (
+          <Row
+            key={profile.id}
+            name={profile.name}
+            line={describeRun(profile) + (profile.cwd ? ` · ${profile.cwd}` : "")}
+            dot={<LinkDot link="down" className="switcher-dot" />}
+            badge="WSL"
+            edit={(keyboard) =>
+              connectionDialog.getState().edit({ kind: "wsl", profile }, keyboard)
             }
             remove={() => act(app.client.profileRemove(profile.id))}
           />

@@ -229,6 +229,18 @@
             ]
           },
           {
+            "role": "textbox"
+          },
+          {
+            "role": "textbox"
+          },
+          {
+            "role": "textbox"
+          },
+          {
+            "role": "textbox"
+          },
+          {
             "role": "textbox",
             "name": "Start Ubuntu in"
           },
@@ -260,7 +272,7 @@
           },
           {
             "role": "button",
-            "name": "Save"
+            "name": "Add connection"
           }
         ]
       }

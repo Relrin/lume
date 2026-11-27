@@ -69,7 +69,7 @@ pub use schema::{
     default_config_text,
 };
 pub use source::{Problem, ProblemKind, Source};
-pub use store::{ConfigStore, ListedProfile, Resolved, SshProfile, check_setting};
+pub use store::{ConfigStore, ListedProfile, Resolved, SshProfile, WslProfile, check_setting};
 pub use theme::{
     Theme, Themes, default_tokens, is_builtin, light_tokens, parse_theme, resolve_tokens,
     theme_schema,

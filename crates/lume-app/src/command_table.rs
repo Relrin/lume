@@ -70,6 +70,7 @@ commands! {
     commands_connections::ssh_try          => [terminal, settings];
     commands_connections::try_end          => [terminal, settings];
     commands_connections::ssh_profile_put  => [terminal, settings];
+    commands_connections::wsl_profile_put  => [terminal, settings];
     commands_connections::profile_remove   => [terminal, settings];
     commands_connections::profiles_listed  => [terminal, settings];
     commands_plugins::ui_contributions     => [terminal];

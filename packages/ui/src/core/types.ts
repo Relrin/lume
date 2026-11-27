@@ -494,6 +494,14 @@ export interface SshHost {
   readonly args: readonly string[];
 }
 
+/** A shell in a Linux distribution, as it is typed. */
+export interface WslShell {
+  readonly distro: string;
+  readonly user: string | null;
+  /** Where its terminals start; null is the user's home there. */
+  readonly cwd: string | null;
+}
+
 /** Whether a profile that was found is listed, and where its terminals start. */
 export interface ListedProfile {
   readonly id: string;
