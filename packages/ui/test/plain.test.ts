@@ -27,6 +27,12 @@ const RULE = JSON.parse(
 
 const bytes = (text: string) => new TextEncoder().encode(text).length;
 
+/**
+ * How long going through every character may take. It is two to five seconds on the
+ * machines the tests run on, and the runner's default limit is five.
+ */
+const EVERY_CHARACTER_MS = 30_000;
+
 /** The characters of some ranges, by number. */
 function points(ranges: readonly Range[]): Set<number> {
   const found = new Set<number>();
@@ -45,7 +51,7 @@ describe("a text from outside, as it is shown", () => {
     }
   });
 
-  it("holds each character there is to the rule", () => {
+  it("holds each character there is to the rule", { timeout: EVERY_CHARACTER_MS }, () => {
     const spaces = points(RULE.spaces);
     const dropped = points(RULE.dropped);
     const piled = points(RULE.piled);

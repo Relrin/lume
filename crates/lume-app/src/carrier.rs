@@ -413,6 +413,10 @@ impl Link {
             if !state.retired {
                 // The state to start from goes first, ahead of anything the pump sends.
                 if let Some(start) = payload_of(hydrate) {
+                    // What the program wrote before the page attached comes in this
+                    // copy, not as output: a shell that printed its prompt and waits
+                    // sends nothing more.
+                    self.marks.output();
                     let _ = self
                         .outgoing
                         .send(Queued::Frame(Message::new(stream, Body::Hydrate(start))));

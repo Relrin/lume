@@ -149,6 +149,10 @@ export class WebGl2Fx implements FxBackend {
     this.#lost = listener;
   }
 
+  ready(): boolean {
+    return !this.#gl.isContextLost() && this.#ready();
+  }
+
   prepareCustom(id: string, source: string): void {
     if (this.#custom.has(id)) return;
     const gl = this.#gl;

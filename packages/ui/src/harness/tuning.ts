@@ -187,5 +187,10 @@ export const CURSOR_FX_MS = 4000;
 export const FX_SNAPSHOT_WIDTH_PX = 360;
 export const FX_SNAPSHOT_HEIGHT_PX = 180;
 export const FX_SNAPSHOT_MS = 60;
+/**
+ * How long the snapshot suite waits for the browser to build the effects' program
+ * beside the page before it says it was never built.
+ */
+export const FX_SNAPSHOT_BUILD_MS = 10_000;
 export const CURSOR_FX_JUMP_MS = 50;
 export const CURSOR_FX_FOCUS_MS = 300;

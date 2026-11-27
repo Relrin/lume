@@ -91,17 +91,21 @@ describe("a server with as many sessions as there may be, called as much as may 
     rexHost(`big${at}`, `server ${at}`, { state: UP, sessions }),
   );
   const list = rexList(...servers);
+  const queries = ["a", "ab", "abababababab", "b".repeat(64), "ab-".repeat(40), "zzzz"];
+  /** The most a query may take, on the slowest machine the tests run on. */
+  const QUERY_MS = 1500;
 
-  it("is typed into without waiting", () => {
+  // Held to its own measure, not to the runner's default limit: that is shorter than
+  // the queries are allowed together, and a slow machine reached it.
+  it("is typed into without waiting", { timeout: QUERY_MS * queries.length * 2 }, () => {
     const targets = rexTargets(list, null);
-    const queries = ["a", "ab", "abababababab", "b".repeat(64), "ab-".repeat(40), "zzzz"];
     const started = performance.now();
     for (const query of queries) {
       hostEntries(list, query, "all");
       rank(targets, query, (target) => target.text);
     }
     // Eight thousand names for each query. With the square of the text it took minutes.
-    expect((performance.now() - started) / queries.length).toBeLessThan(1500);
+    expect((performance.now() - started) / queries.length).toBeLessThan(QUERY_MS);
   });
 });
 

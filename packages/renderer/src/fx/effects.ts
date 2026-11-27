@@ -157,6 +157,15 @@ export class CursorEffects<Canvas> implements FrameView {
     return this.#backend?.kind;
   }
 
+  /**
+   * Whether a frame draws what is playing: false while what draws the effects is still
+   * being built beside the page, when frames draw nothing. Nothing waits for it.
+   */
+  get ready(): boolean {
+    const backend = this.#backend;
+    return backend !== undefined && (backend.ready?.() ?? true);
+  }
+
   /** How many trails and pulses have started, for measurements to check. */
   get played(): { readonly trails: number; readonly pulses: number } {
     return { ...this.#played };

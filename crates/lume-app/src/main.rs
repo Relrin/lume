@@ -788,8 +788,12 @@ fn main() -> ExitCode {
                 // Its servers go on running; only the connections to them end, and the
                 // programs that carry those before this process does.
                 services.rex.shutdown();
-                let ended = tokio::time::timeout(tuning::REX_END_WAIT, rex::Hosts::ended());
-                if tauri::async_runtime::block_on(ended).is_err() {
+                // The timeout is made inside the runtime: its timer needs one, and the
+                // event loop's thread is not in it.
+                let ended = tauri::async_runtime::block_on(async {
+                    tokio::time::timeout(tuning::REX_END_WAIT, rex::Hosts::ended()).await
+                });
+                if ended.is_err() {
                     tracing::warn!("a connection to a Rex server did not end in time");
                 }
             }

@@ -260,7 +260,7 @@ export async function runSnapshots(
   stage.remove();
 
   progress("drawing the cursor's effects");
-  for (const effect of drawCursorFx(SNAPSHOT_PIXEL_RATIO)) {
+  for (const effect of await drawCursorFx(SNAPSHOT_PIXEL_RATIO)) {
     const problems = [...effect.problems];
     // The WebGL2 picture is the one a reference is kept of; Canvas 2D draws its glow
     // otherwise, and is held only to the checks made as it was drawn.

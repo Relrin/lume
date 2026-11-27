@@ -292,7 +292,19 @@ async function probe(config) {
   const fn = await attempt(() => new Function("return 2")());
   record("A8.function", !fn.threw, fn.value);
   record("A8.inline-script", window.inlineRan === true, String(window.inlineRan));
-  const worker = await attempt(() => new Worker(`${listener}/worker.js`));
+  // Chromium refuses a worker from elsewhere as it is made; WebKit makes it and then
+  // refuses its script, which it says with an `error`. Only a worker that runs reached
+  // anything, and whether its script was fetched is told by the listener.
+  let elsewhere;
+  const worker = await attempt(
+    () =>
+      new Promise((resolve, reject) => {
+        elsewhere = new Worker(`${listener}/worker.js`);
+        elsewhere.addEventListener("error", () => reject(new Error("its script was refused")));
+        elsewhere.addEventListener("message", () => resolve("it ran"));
+      }),
+  );
+  elsewhere?.terminate();
   record("A8.worker-elsewhere", !worker.threw, worker.value);
 
   // A9: storage.

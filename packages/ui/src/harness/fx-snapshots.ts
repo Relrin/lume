@@ -19,7 +19,13 @@ import {
 } from "@lume/renderer";
 
 import { readPixels } from "./pixels.ts";
-import { FX_SNAPSHOT_HEIGHT_PX, FX_SNAPSHOT_MS, FX_SNAPSHOT_WIDTH_PX } from "./tuning.ts";
+import { nextFrame } from "./timing.ts";
+import {
+  FX_SNAPSHOT_BUILD_MS,
+  FX_SNAPSHOT_HEIGHT_PX,
+  FX_SNAPSHOT_MS,
+  FX_SNAPSHOT_WIDTH_PX,
+} from "./tuning.ts";
 
 /** An effect, frozen. */
 export interface FxPicture {
@@ -65,13 +71,29 @@ function inked(picture: ImageData, rect: FxRect, dpr: number): { all: number; in
   return { all, inside };
 }
 
+/**
+ * Waits until what draws the effects is built. Where the browser builds programs beside
+ * the page, frames draw nothing until then. False if it was not built in time.
+ */
+async function built(effects: CursorEffects<HTMLCanvasElement>): Promise<boolean> {
+  const until = performance.now() + FX_SNAPSHOT_BUILD_MS;
+  while (!effects.ready) {
+    if (performance.now() > until) return false;
+    await nextFrame();
+  }
+  return true;
+}
+
+/** One effect drawn with one backend, or why it could not be. */
+type Drawn = { readonly picture: ImageData } | { readonly problem: string };
+
 /** Draws one effect with one backend, frozen; nothing if the backend is not there. */
-function draw(
+async function draw(
   parent: HTMLElement,
   kind: "webgl2" | "canvas2d",
   settings: CursorEffectSettings,
   dpr: number,
-): ImageData | undefined {
+): Promise<Drawn | undefined> {
   let canvas: HTMLCanvasElement | undefined;
   const surface: FxSurface<HTMLCanvasElement> = {
     createCanvas: () => document.createElement("canvas"),
@@ -97,31 +119,42 @@ function draw(
   try {
     effects.resize({ width: FX_SNAPSHOT_WIDTH_PX, height: FX_SNAPSHOT_HEIGHT_PX }, dpr);
     effects.configure(settings);
+    if (effects.backend !== kind) return undefined;
+    if (!(await built(effects))) {
+      return { problem: `${kind}'s program was not built in ${FX_SNAPSHOT_BUILD_MS} ms` };
+    }
+    // A context lost while waiting is replaced by another backend, on another canvas.
     if (effects.backend !== kind || !canvas) return undefined;
     if (settings.trail !== "none") effects.move(FROM, TO, COLOR, 0);
     else effects.pulse(TO, COLOR, 0);
     effects.frame(FX_SNAPSHOT_MS);
     // Read in the task that drew: a GPU canvas keeps its picture only until then.
-    return readPixels(canvas);
+    return { picture: readPixels(canvas) };
   } finally {
     effects.dispose();
   }
 }
 
 /** Every effect, frozen, with both backends. */
-export function drawCursorFx(dpr: number): FxPicture[] {
+export async function drawCursorFx(dpr: number): Promise<FxPicture[]> {
   const parent = document.createElement("div");
   parent.className = "harness-surface";
   document.body.append(parent);
+  const frozen: FxPicture[] = [];
   try {
-    return EFFECTS.map((settings) => {
+    for (const settings of EFFECTS) {
       const trail = settings.trail !== "none";
       const name = `fx: ${trail ? settings.trail : settings.pulse}`;
       const pictures = new Map<string, ImageData>();
       const problems: string[] = [];
       for (const kind of ["webgl2", "canvas2d"] as const) {
-        const picture = draw(parent, kind, settings, dpr);
-        if (!picture) continue;
+        const drawn = await draw(parent, kind, settings, dpr);
+        if (!drawn) continue;
+        if ("problem" in drawn) {
+          problems.push(drawn.problem);
+          continue;
+        }
+        const { picture } = drawn;
         pictures.set(kind, picture);
         const { all, inside } = inked(picture, TO, dpr);
         if (all === 0) problems.push(`${kind} drew nothing`);
@@ -129,9 +162,10 @@ export function drawCursorFx(dpr: number): FxPicture[] {
         if (trail && inside > 0) problems.push(`${kind} drew over the cursor's cell`);
       }
       if (!pictures.has("canvas2d")) problems.push("Canvas 2D could not draw the effects");
-      return { name, pictures, problems };
-    });
+      frozen.push({ name, pictures, problems });
+    }
   } finally {
     parent.remove();
   }
+  return frozen;
 }

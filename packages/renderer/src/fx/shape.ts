@@ -69,6 +69,11 @@ export interface FxBackend {
   onLost(listener: () => void): void;
   dispose(): void;
   /**
+   * Whether `draw` draws now: false while the backend's own program is still being
+   * built beside the page, without waiting for it. A backend without one is ready.
+   */
+  ready?(): boolean;
+  /**
    * Begins building a plugin's shader to be drawn with. Only WebGL2 has these; with
    * Canvas 2D a plugin's effect is not drawn. The building goes on beside the page
    * where the browser can do that, and `customReady` says when it is over.
