@@ -24,6 +24,7 @@ use lume_layout::{
     Applied, Area, ChangeStream, Intent, LayoutAuthority, LayoutChange, LayoutEvent,
     LayoutSnapshot, LocalLayout, NewContent, Pane, PaneContent, PaneId, PanelContent, PanelId,
     SpawnFailure, SpawnRequest, Spawner, Started, Store, UNITS, WindowId, Workspace, needs,
+    put_back,
 };
 use lume_proto::app::{AppReplyBody, PageRequestBody};
 use lume_session::start_dir_from_report;
@@ -384,6 +385,21 @@ fn shows_a_session(change: &LayoutChange) -> bool {
     }
 }
 
+/// The tab of a workspace that was last on show: one a window shows, the window the
+/// user works in first. `None` names the workspace whose file holds the layout.
+pub(crate) fn shown_of(layout: &Workspace, belongs: Option<&str>) -> Option<lume_layout::TabId> {
+    let focused = layout.focused_window;
+    let mut windows: Vec<&lume_layout::Window> = layout.windows.iter().collect();
+    windows.sort_by_key(|window| Some(window.id) != focused);
+    windows.into_iter().find_map(|window| {
+        window
+            .centre
+            .active_tab()
+            .filter(|tab| tab.workspace.as_deref() == belongs)
+            .map(|tab| tab.id)
+    })
+}
+
 /// The terminal a pane shows, if it shows one.
 fn terminal_of(pane: &Pane) -> Option<&lume_layout::TerminalPane> {
     match &pane.content {
@@ -454,12 +470,18 @@ pub struct Panes {
     saving: tokio::sync::Mutex<()>,
     /// Who is told when a pane leaves the layout, whatever it showed.
     closed: Mutex<Vec<PaneListener>>,
+    /// The workspaces open beside the one whose file holds the layout, by name: for
+    /// each, the rest of it as its file had it. Its tabs are in the layout.
+    pub(crate) open: Mutex<HashMap<String, Workspace>>,
+    /// Sessions whose panes leave the layout with the program left running, as those of
+    /// a workspace that is closed while its programs are to be kept.
+    pub(crate) kept_running: Mutex<HashSet<SessionKey>>,
 }
 
 /// Something that is told of a pane, by its id.
 type PaneListener = Box<dyn Fn(PaneId) + Send + Sync>;
 
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -511,6 +533,8 @@ impl Panes {
             served: Mutex::new(None),
             saving: tokio::sync::Mutex::new(()),
             closed: Mutex::new(Vec::new()),
+            open: Mutex::new(HashMap::new()),
+            kept_running: Mutex::new(HashSet::new()),
         });
         panes.sync_tab_panel().await;
         (panes, opened.fresh)
@@ -1146,6 +1170,7 @@ impl Panes {
                         self.act_on(&state, change, shell.as_ref()).await;
                     }
                     names_a_session = changes.iter().any(shows_a_session);
+                    self.follow_current_workspace();
                 }
                 LayoutEvent::Reset(snapshot) => {
                     // Another workspace is on show. The windows it has are opened
@@ -1218,6 +1243,10 @@ impl Panes {
                 };
                 if self.pane_of(&key).is_some() {
                     // Another pane still shows it.
+                    return;
+                }
+                if lock(&self.kept_running).remove(&key) {
+                    // Its workspace was closed with its programs kept running.
                     return;
                 }
                 // A pane that leaves a server's layout may only have been moved out of
@@ -1346,7 +1375,22 @@ impl Panes {
         workspace
     }
 
-    /// Writes the workspace to its file.
+    /// What is written for the layout: the file of the workspace that holds it, with
+    /// its own tabs, and the file of each workspace open beside it, with its tabs back
+    /// in its own first window.
+    pub(crate) fn files(layout: Workspace, open: HashMap<String, Workspace>) -> Vec<Workspace> {
+        let mut home = layout.clone();
+        let mut files = Vec::with_capacity(open.len() + 1);
+        for (name, mut rest) in open {
+            let (tabs, groups) = lume_layout::split_off(&mut home, Some(&name));
+            put_back(&mut rest, tabs, groups, shown_of(&layout, Some(&name)));
+            files.push(rest);
+        }
+        files.insert(0, home);
+        files
+    }
+
+    /// Writes the workspace to its file, and each workspace open beside it to its own.
     pub(crate) async fn save(&self) {
         let _one_at_a_time = self.saving.lock().await;
         let workspace = self.workspace();
@@ -1355,10 +1399,13 @@ impl Panes {
             return;
         }
         let live = self.live_dirs();
+        let open = lock(&self.open).clone();
         let store = Arc::clone(&self.store);
         let written = tokio::task::spawn_blocking(move || {
             let workspace = Self::to_save(workspace, live);
-            store.save(&workspace, env!("CARGO_PKG_VERSION"), now_unix_ms())
+            Self::files(workspace, open)
+                .iter()
+                .try_for_each(|file| store.save(file, env!("CARGO_PKG_VERSION"), now_unix_ms()))
         })
         .await;
         let failed = match written {
@@ -1383,11 +1430,14 @@ impl Panes {
             return;
         }
         let workspace = Self::to_save(self.workspace(), self.live_dirs());
-        let saved = self
-            .store
-            .save(&workspace, env!("CARGO_PKG_VERSION"), now_unix_ms());
-        if let Err(error) = saved {
-            tracing::error!(%error, "the workspace could not be saved");
+        let open = lock(&self.open).clone();
+        for file in Self::files(workspace, open) {
+            let saved = self
+                .store
+                .save(&file, env!("CARGO_PKG_VERSION"), now_unix_ms());
+            if let Err(error) = saved {
+                tracing::error!(%error, workspace = file.name, "a workspace could not be saved");
+            }
         }
     }
 

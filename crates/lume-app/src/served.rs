@@ -214,6 +214,9 @@ impl Panes {
         self.save().await;
         // The settings of a workspace of this application do not apply to a server's.
         self.config.set_workspace(None);
+        // The workspaces open beside the one put away are put away with it; they are
+        // opened again when it is shown again.
+        lock(&self.open).clear();
         self.layout.replace(made);
         if let Some(left) = left {
             self.forget_unshown(&left);

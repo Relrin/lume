@@ -51,6 +51,10 @@ pub enum LayoutChange {
         /// The layout file the tab was opened from. Left out while there is none.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         origin: Option<String>,
+        /// The open workspace the tab belongs to. Left out for the one whose file holds
+        /// the layout.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
     },
     /// The groups of a window's tabs changed: which there are, their order, or how
     /// one looks.

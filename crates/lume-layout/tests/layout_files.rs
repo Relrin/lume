@@ -45,6 +45,7 @@ fn made(root: Node, origin: &str) -> Tab {
         muted: false,
         group: None,
         origin: Some(origin.to_owned()),
+        workspace: None,
     }
 }
 

@@ -527,6 +527,41 @@ export type Intent =
       readonly keys?: readonly (readonly [PaneId, string])[];
       readonly origin?: string | null;
       readonly tab: TabId;
+    }
+  /**
+   * Puts the tabs of a workspace, as its file has them, after the last tab of a
+   * window, belonging to that workspace, and shows the first of them. No workspace
+   * is the one whose file holds the layout. Their parts are numbered anew here;
+   * their panes keep the sessions they name.
+   */
+  | {
+      readonly type: "tabs_adopt";
+      readonly groups?: readonly Group[];
+      readonly tabs: readonly Tab[];
+      readonly window: WindowId;
+      readonly workspace?: string | null;
+    }
+  /**
+   * Takes every tab that belongs to a workspace out of every window, locked or not.
+   */
+  | { readonly type: "tabs_take"; readonly workspace: string; }
+  /**
+   * Says that the tabs that belong to one workspace belong to another from now on.
+   * No workspace is the one whose file holds the layout.
+   */
+  | {
+      readonly type: "tabs_retag";
+      readonly from?: string | null;
+      readonly to?: string | null;
+    }
+  /**
+   * Says that a group's tabs belong to a workspace, or to the one whose file holds
+   * the layout.
+   */
+  | {
+      readonly type: "group_retag";
+      readonly group: GroupId;
+      readonly workspace?: string | null;
     };
 
 /**
@@ -631,6 +666,11 @@ export type LayoutChange =
        */
       readonly origin?: string;
       readonly tab: TabId;
+      /**
+       * The open workspace the tab belongs to. Left out for the one whose file holds
+       * the layout.
+       */
+      readonly workspace?: string;
     }
   /**
    * The groups of a window's tabs changed: which there are, their order, or how
@@ -1058,6 +1098,12 @@ export interface Tab {
    * runs in it.
    */
   readonly title: string | null;
+  /**
+   * The workspace the tab belongs to, when that is another than the one whose file
+   * holds the layout. Several workspaces can be open at once, their tabs side by
+   * side; each is written back to its own file.
+   */
+  readonly workspace?: string;
   /**
    * The pane that fills the tab for now, hiding the others.
    */

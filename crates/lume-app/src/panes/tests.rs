@@ -821,7 +821,7 @@ async fn a_window_the_layout_gains_is_opened_and_one_it_loses_is_closed() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn another_workspace_is_put_on_show_and_the_first_ones_sessions_end() {
+async fn another_workspace_opens_beside_the_first_and_both_keep_their_sessions() {
     let dir = TempDir::new("switch");
     plain_shell(&dir, "");
     let dirs = dir.dirs();
@@ -831,33 +831,39 @@ async fn another_workspace_is_put_on_show_and_the_first_ones_sessions_end() {
     start(&app, first).await;
     app.panes.apply(split(first)).await.unwrap();
     assert_eq!(listed(&app).await, 2);
+    let window = app.window;
 
     app.panes.switch("play", Find::New).await.unwrap();
-    let play = app.panes.workspace();
-    assert_eq!(play.name, "play");
-    assert_eq!(play.panes().len(), 1);
-    assert_eq!(app.panes.snapshot().epoch, 2);
+    // Its tab joins the strip of the same window, and nothing was replaced.
+    let layout = app.panes.workspace();
+    assert_eq!(layout.name, WORKSPACE_NAME);
+    assert_eq!(layout.windows.len(), 1);
+    assert_eq!(layout.windows[0].id, window);
+    let tabs = &layout.windows[0].centre.tabs;
+    assert_eq!(tabs.len(), 2);
+    assert_eq!(tabs[1].workspace.as_deref(), Some("play"));
+    assert_eq!(layout.windows[0].centre.active, Some(tabs[1].id));
+    assert_eq!(app.panes.snapshot().epoch, 1);
+    assert_eq!(app.panes.current_workspace(), "play");
     assert_eq!(app.panes.config.workspace().as_deref(), Some("play"));
+    assert!(app.shell.closed().is_empty());
     assert_eq!(
         crate::workspaces::last_workspace(&dirs),
-        Some("play".to_owned())
+        Some(WORKSPACE_NAME.to_owned())
     );
-    // The page is given the new layout whole, and the old sessions are ended.
-    until("the page to be given the layout", || {
-        notices(&carrier, "layout_reset")
-            .iter()
-            .any(|notice| notice["epoch"] == 2 && notice["workspace"]["name"] == "play")
+    assert_eq!(crate::workspaces::open_workspaces(&dirs), vec!["play"]);
+    until("the page to be told of the tab", || {
+        notices(&carrier, "layout_changed").iter().any(|notice| {
+            notice["changes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|change| change["type"] == "tab_added" && change["tab"]["workspace"] == "play")
+        })
     })
     .await;
-    let state = Arc::clone(&app.state);
-    let waiting = async {
-        while !state.list_all().await.unwrap().is_empty() {
-            sleep(Duration::from_millis(20)).await;
-        }
-    };
-    timeout(STEP, waiting)
-        .await
-        .expect("the sessions of the workspace that was put away never ended");
+    // The first workspace's sessions still run.
+    assert_eq!(listed(&app).await, 2);
 
     // There is no such workspace to begin again, and none called `nowhere` to show.
     assert_eq!(
@@ -881,21 +887,79 @@ async fn another_workspace_is_put_on_show_and_the_first_ones_sessions_end() {
         "bad_request"
     );
 
-    // The first workspace comes back as it was left, without its sessions.
+    // Showing the first again shows its tab; it is current again.
     app.panes
         .switch(WORKSPACE_NAME, Find::Existing)
         .await
         .unwrap();
-    let back = app.panes.workspace();
-    assert_eq!(back.name, WORKSPACE_NAME);
-    assert_eq!(back.panes().len(), 2);
-    assert!(back.sessions().is_empty());
-    assert_eq!(app.panes.snapshot().epoch, 3);
-
+    let layout = app.panes.workspace();
+    assert_eq!(
+        layout.windows[0].centre.active,
+        Some(layout.windows[0].centre.tabs[0].id)
+    );
+    assert_eq!(app.panes.current_workspace(), WORKSPACE_NAME);
+    assert_eq!(
+        app.panes.config.workspace().as_deref(),
+        Some(WORKSPACE_NAME)
+    );
     let (active, workspaces) = app.panes.workspaces().unwrap();
     assert_eq!(active, WORKSPACE_NAME);
-    let names: Vec<&str> = workspaces.iter().map(|entry| entry.name.as_str()).collect();
-    assert_eq!(names, vec![WORKSPACE_NAME, "play"]);
+    let listed_names: Vec<(&str, bool)> = workspaces
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.open))
+        .collect();
+    assert_eq!(listed_names, vec![(WORKSPACE_NAME, true), ("play", true)]);
+
+    // Each workspace is written to its own file.
+    app.panes.save().await;
+    let lume_layout::Loaded::Workspace(play) = app.panes.store.load("play", 0).unwrap() else {
+        panic!("the other workspace was not written");
+    };
+    assert_eq!(play.windows[0].centre.tabs.len(), 1);
+    assert!(play.windows[0].centre.tabs[0].workspace.is_none());
+    let lume_layout::Loaded::Workspace(home) = app.panes.store.load(WORKSPACE_NAME, 0).unwrap()
+    else {
+        panic!("the first workspace was not written");
+    };
+    assert_eq!(home.windows[0].centre.tabs.len(), 1);
+    assert_eq!(home.panes().len(), 2);
+
+    // The one that holds the windows is not closed; the other is, and its tab goes.
+    assert_eq!(
+        app.panes
+            .close_workspace(Some(WORKSPACE_NAME))
+            .await
+            .unwrap_err()
+            .code,
+        "bad_request"
+    );
+    app.panes.close_workspace(Some("play")).await.unwrap();
+    let layout = app.panes.workspace();
+    assert_eq!(layout.windows[0].centre.tabs.len(), 1);
+    assert!(crate::workspaces::open_workspaces(&dirs).is_empty());
+    assert_eq!(
+        app.panes
+            .close_workspace(Some("play"))
+            .await
+            .unwrap_err()
+            .code,
+        "not_found"
+    );
+    // Opened again, its tab comes back.
+    app.panes.switch("play", Find::Existing).await.unwrap();
+    assert_eq!(app.panes.workspace().windows[0].centre.tabs.len(), 2);
+    assert_eq!(app.panes.current_workspace(), "play");
+
+    // A start opens again what was open: here, after it was closed behind its back.
+    app.panes.close_workspace(None).await.unwrap();
+    assert_eq!(app.panes.workspace().windows[0].centre.tabs.len(), 1);
+    app.panes
+        .reopen(vec!["play".to_owned(), "nowhere".to_owned()])
+        .await;
+    let layout = app.panes.workspace();
+    assert_eq!(layout.windows[0].centre.tabs.len(), 2);
+    assert_eq!(app.panes.open_beside(), vec!["play"]);
+    assert_eq!(crate::workspaces::open_workspaces(&dirs), vec!["play"]);
     app.state.shutdown().await;
 }
 
@@ -905,12 +969,9 @@ async fn a_group_moves_to_another_workspace_and_is_brought_back() {
     plain_shell(&dir, "");
     let app = running_in(dir).await;
     let (carrier, _id) = page(&app).await;
-    // Another workspace to move to, written to its file.
+    // Another workspace to move to, written to its file and closed.
     app.panes.switch("play", Find::New).await.unwrap();
-    app.panes
-        .switch(WORKSPACE_NAME, Find::Existing)
-        .await
-        .unwrap();
+    app.panes.close_workspace(Some("play")).await.unwrap();
     let window = app.panes.focused_window().unwrap();
     let tab = app
         .panes
@@ -1005,6 +1066,21 @@ async fn a_group_moves_to_another_workspace_and_is_brought_back() {
     };
     assert!(play.windows[0].centre.groups.is_empty());
     assert_eq!(play.windows[0].centre.tabs.len(), 1);
+
+    // Moved to a workspace that is open, the group stays in the strip and belongs to
+    // that workspace.
+    app.panes.switch("play", Find::Existing).await.unwrap();
+    let group = app.panes.workspace().windows[0].centre.groups[0].id;
+    app.panes.move_group(group, "play").await.unwrap();
+    let here = app.panes.workspace();
+    let members: Vec<&lume_layout::Tab> = here.windows[0]
+        .centre
+        .tabs
+        .iter()
+        .filter(|tab| tab.group == Some(group))
+        .collect();
+    assert_eq!(members.len(), 1);
+    assert_eq!(members[0].workspace.as_deref(), Some("play"));
     app.state.shutdown().await;
 }
 
@@ -1063,13 +1139,24 @@ async fn a_workspace_is_renamed_given_a_folder_and_deleted_with_both_its_files()
     app.panes.switch("play", Find::New).await.unwrap();
     // A name another workspace has is not taken.
     assert_eq!(app.panes.rename("Site").await.unwrap_err().code, "exists");
-    assert_eq!(app.panes.workspace().name, "play");
-
-    app.panes.delete("site").await.unwrap();
-    assert!(!dirs.state_workspace_file("site").exists());
-    assert!(!dirs.workspace_file("site").exists());
+    assert_eq!(app.panes.current_workspace(), "play");
+    // The current workspace is renamed, here one open beside the first.
+    app.panes.rename("games").await.unwrap();
+    assert_eq!(app.panes.current_workspace(), "games");
+    assert_eq!(app.panes.workspace().name, "site");
+    assert!(dirs.state_workspace_file("games").is_file());
+    assert!(!dirs.state_workspace_file("play").exists());
+    // An open workspace is not deleted.
     assert_eq!(
-        app.panes.delete("site").await.unwrap_err().code,
+        app.panes.delete("games").await.unwrap_err().code,
+        "bad_request"
+    );
+
+    app.panes.close_workspace(None).await.unwrap();
+    app.panes.delete("games").await.unwrap();
+    assert!(!dirs.state_workspace_file("games").exists());
+    assert_eq!(
+        app.panes.delete("games").await.unwrap_err().code,
         "not_found"
     );
     app.state.shutdown().await;

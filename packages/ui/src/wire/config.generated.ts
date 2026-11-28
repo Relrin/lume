@@ -723,7 +723,8 @@ export type NewPaneCwd =
   | "home";
 
 /**
- * What happens to a workspace's programs when another workspace is opened.
+ * What happens to a workspace's programs when it is closed, or put away while a
+ * server's layout is shown.
  */
 export type OnSwitch =
   /**
@@ -1892,7 +1893,9 @@ export type WindowCorners =
  */
 export interface WorkspaceConfig {
   /**
-   * What happens to a workspace's programs when another workspace is opened.
+   * What happens to a workspace's programs when it is closed, or put away while a
+   * server's layout is shown. Opening another workspace leaves them running: its
+   * tabs join the others.
    */
   readonly "on-switch": OnSwitch;
 }

@@ -743,10 +743,19 @@ async fn a_second_start_shows_a_workspace_and_runs_a_program_in_a_new_tab() {
     assert_eq!(workspace, "play");
     assert_eq!(app.shell.activations(), 1);
 
-    // The workspace was begun with a window of its own, and the program has a tab.
+    // The workspace was opened beside the first in its window, and the program has a
+    // tab of its own, which belongs to it.
     let on_show = app.services.panes.workspace();
-    assert_eq!(on_show.name, "play");
-    assert_eq!(on_show.windows[0].centre.tabs.len(), 2);
+    assert_eq!(on_show.name, WORKSPACE_NAME);
+    assert_eq!(on_show.windows.len(), 1);
+    let tabs = &on_show.windows[0].centre.tabs;
+    assert_eq!(tabs.len(), 3);
+    assert_eq!(tabs[0].workspace, None);
+    assert!(
+        tabs[1..]
+            .iter()
+            .all(|tab| tab.workspace.as_deref() == Some("play"))
+    );
     let pane: PaneId = pane.unwrap().parse().unwrap();
     let lume_layout::PaneContent::Terminal(terminal) = &on_show.pane(pane).unwrap().content else {
         panic!("the program's pane is not a terminal");

@@ -594,6 +594,12 @@ pub struct WorkspaceEntry {
     pub name: String,
     /// The folder the workspace's new terminals start in, if it has one.
     pub root: Option<String>,
+    /// Whether its tabs are in the layout.
+    #[serde(default)]
+    pub open: bool,
+    /// Whether it is the one whose file holds the layout: it is closed with the windows.
+    #[serde(default)]
+    pub holds: bool,
 }
 
 /// The pane that has the keyboard in the window the user is working in.

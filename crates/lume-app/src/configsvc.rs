@@ -381,7 +381,6 @@ impl ConfigService {
     }
 
     /// The workspace whose file is laid over the user's.
-    #[cfg(test)]
     pub fn workspace(&self) -> Option<String> {
         self.store.workspace()
     }

@@ -269,6 +269,11 @@ pub struct Tab {
     /// applied to the tab again while this is set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
+    /// The workspace the tab belongs to, when that is another than the one whose file
+    /// holds the layout. Several workspaces can be open at once, their tabs side by
+    /// side; each is written back to its own file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 pub(crate) fn is_false(value: &bool) -> bool {

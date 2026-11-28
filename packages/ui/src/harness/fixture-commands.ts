@@ -79,7 +79,7 @@ export const HOST_COMMANDS: readonly CommandSpec[] = [
     runs: "page",
     palette: true,
   },
-  ...["switch", "new", "rename", "delete", "open-folder", "set-root"].map((verb) => ({
+  ...["switch", "new", "rename", "delete", "open-folder", "set-root", "close"].map((verb) => ({
     id: `lume.workspace.${verb}`,
     title: `Workspace ${verb}`,
     category: "Workspace",

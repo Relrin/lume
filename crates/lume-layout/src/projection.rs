@@ -101,6 +101,7 @@ impl Projection {
                 muted,
                 group,
                 origin,
+                workspace: belongs,
             } => {
                 if let Some(tab) = tab_mut(workspace, *tab) {
                     tab.color = *color;
@@ -108,6 +109,7 @@ impl Projection {
                     tab.muted = *muted;
                     tab.group = *group;
                     tab.origin = origin.clone();
+                    tab.workspace = belongs.clone();
                 }
             }
             LayoutChange::Groups { window, groups } => {

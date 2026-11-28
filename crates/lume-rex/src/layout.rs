@@ -336,6 +336,7 @@ impl Maker<'_> {
             muted: false,
             group: None,
             origin: None,
+            workspace: None,
         })
     }
 

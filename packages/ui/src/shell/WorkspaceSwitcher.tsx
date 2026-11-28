@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 
+import { selectCurrentWorkspace } from "../layout/selectors.ts";
 import { hostOnShow } from "../rex/model.ts";
 import { useShell } from "./context.ts";
 import { selectorDoor, selectorLabel } from "./host-selector.ts";
@@ -20,7 +21,7 @@ import { Overlay } from "./Part.tsx";
 /** The button that names what is on show, and the selector under it. */
 export function WorkspaceSwitcher() {
   const app = useShell();
-  const name = useStore(app.layout, (state) => state.name);
+  const name = useStore(app.layout, (state) => selectCurrentWorkspace(state));
   const backend = useStore(app.layout, (state) => state.backend);
   const server = useStore(app.rex, (state) => hostOnShow(state.list, backend));
   const connected = useStore(app.hostLink, (state) => state.connected);

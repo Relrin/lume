@@ -608,6 +608,13 @@ const COMMANDS: &[Row] = &[
         true,
     ),
     (
+        "lume.workspace.close",
+        "Close Workspace",
+        "Workspace",
+        Runs::Core,
+        true,
+    ),
+    (
         "lume.workspace.save",
         "Save Workspace",
         "Workspace",
@@ -1049,6 +1056,14 @@ fn arguments(id: &str) -> Option<Value> {
                 "x-lume-choices": "workspaces",
             } }),
             &["name"],
+        )),
+        "lume.workspace.close" => Some(object(
+            json!({ "name": {
+                "type": "string",
+                "description": "The open workspace to close; without one, the current workspace",
+                "x-lume-choices": "workspaces",
+            } }),
+            &[],
         )),
         "lume.workspace.new" => Some(object(
             json!({
@@ -2044,11 +2059,12 @@ pub async fn run(context: &Context<'_>, id: &str, args: &Value) -> Result<(), Co
             return panes.show_served(&lume_proto::BackendId(backend)).await;
         }
         "lume.workspace.new" => {
-            panes.switch(&name(args)?, Find::New).await?;
-            return match argument::<String>(args, "root")? {
-                Some(root) if !root.trim().is_empty() => panes.set_root(Some(&root)).await,
-                _ => Ok(()),
-            };
+            let root = argument::<String>(args, "root")?.filter(|root| !root.trim().is_empty());
+            return panes.begin(&name(args)?, root.as_deref()).await;
+        }
+        "lume.workspace.close" => {
+            let name = argument::<String>(args, "name")?.filter(|name| !name.trim().is_empty());
+            return panes.close_workspace(name.as_deref()).await;
         }
         "lume.workspace.rename" => return panes.rename(&name(args)?).await,
         "lume.workspace.delete" => return panes.delete(&name(args)?).await,

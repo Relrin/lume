@@ -73,6 +73,7 @@ fn a_tab_is_given_a_colour_and_locked() {
             muted: false,
             group: None,
             origin: None,
+            workspace: None,
         }]
     );
     must(&mut workspace, Intent::TabLock { tab, on: true });

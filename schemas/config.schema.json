@@ -3008,7 +3008,7 @@
       "properties": {
         "on-switch": {
           "default": "close",
-          "description": "What happens to a workspace's programs when another workspace is opened.",
+          "description": "What happens to a workspace's programs when it is closed, or put away while a\nserver's layout is shown. Opening another workspace leaves them running: its\ntabs join the others.",
           "oneOf": [
             {
               "const": "close",

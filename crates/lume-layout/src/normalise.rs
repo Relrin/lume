@@ -193,6 +193,19 @@ fn mend_groups(centre: &mut TabGroup) {
             }
         }
     }
+    // A group's tabs belong to one workspace: the one of its first tab.
+    for group in &order {
+        let mut tabs = centre
+            .tabs
+            .iter_mut()
+            .filter(|tab| tab.group == Some(*group));
+        if let Some(first) = tabs.next() {
+            let belongs = first.workspace.clone();
+            for tab in tabs {
+                tab.workspace.clone_from(&belongs);
+            }
+        }
+    }
     let groups = std::mem::take(&mut centre.groups);
     centre.groups = order
         .into_iter()

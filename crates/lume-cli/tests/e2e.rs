@@ -764,8 +764,9 @@ fn a_second_start_runs_a_program_in_a_tab_and_shows_a_workspace() {
     app.until_sessions(2, "the program was not started");
     assert_eq!(app.ctl(&["status"]).ok("status")["pid"], pid);
 
-    // Started again with a workspace's name, it shows that workspace, begun on the
-    // spot, and what ran in the first one is ended.
+    // Started again with a workspace's name, it opens that workspace, begun on the
+    // spot, beside the first: its tab joins the same window, and what ran in the
+    // first one keeps running.
     let shown = Command::new(lume())
         .args(["--endpoint", &app.endpoint, "--workspace", "other place"])
         .status()
@@ -773,22 +774,33 @@ fn a_second_start_runs_a_program_in_a_tab_and_shows_a_workspace() {
     assert!(shown.success(), "lume ended with {shown}");
     let workspaces = app.workspaces();
     assert_eq!(workspaces["active"], "other place");
-    assert_eq!(
-        workspaces["workspaces"]
-            .as_array()
-            .expect("a list of workspaces")
-            .len(),
-        2,
+    let listed = workspaces["workspaces"]
+        .as_array()
+        .expect("a list of workspaces");
+    assert_eq!(listed.len(), 2, "{workspaces}");
+    assert!(
+        listed.iter().all(|entry| entry["open"] == true),
         "{workspaces}"
     );
-    assert_eq!(tabs_of(&app.layout()).len(), 1);
-    app.until_sessions(1, "the first workspace's sessions were not ended");
+    let layout = app.layout();
+    assert_eq!(tabs_of(&layout).len(), 3, "{layout}");
+    app.until_sessions(3, "the new workspace's shell was not started");
 
-    // The first workspace is as it was left.
+    // Showing the first again shows its tabs as they were left.
     app.ctl(&["command", "lume.workspace.switch", r#"{"name":"default"}"#])
         .ok("showing the first workspace");
     assert_eq!(app.workspaces()["active"], "default");
+    assert_eq!(tabs_of(&app.layout())[..2], tabs[..]);
+
+    // Closed, the other workspace's tab leaves and its shell ends.
+    app.ctl(&[
+        "command",
+        "lume.workspace.close",
+        r#"{"name":"other place"}"#,
+    ])
+    .ok("closing the other workspace");
     assert_eq!(tabs_of(&app.layout()), tabs);
+    app.until_sessions(2, "the closed workspace's shell was not ended");
     app.quit();
 }
 

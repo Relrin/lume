@@ -194,10 +194,14 @@ export class PlainFollower {
         delete tab.locked;
         delete tab.muted;
         delete tab.group;
+        delete tab.workspace;
         if (change.color !== null) tab.color = change.color;
         if (change.locked) tab.locked = true;
         if (change.muted) tab.muted = true;
         if (change.group !== null) tab.group = change.group;
+        if (change.workspace !== undefined && change.workspace !== null) {
+          tab.workspace = change.workspace;
+        }
         return;
       }
       case "groups": {

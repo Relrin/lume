@@ -13,6 +13,7 @@ import { createLayoutStore, toWorkspace } from "../src/layout/store.ts";
 import type { Group, LayoutChange, Shelved, Tab, Workspace } from "../src/layout/types.ts";
 import { panesClosedBy } from "../src/shell/closing.ts";
 import { Menu, type MenuItem } from "../src/shell/Menu.tsx";
+import { tabWorkspace } from "../src/shell/TabStrip.tsx";
 import { oneTab, pane, PlainFollower, viewOf } from "./layout-support.ts";
 
 const BILLING: Group = { id: "g9", name: "Billing", color: "teal", icon: "bug" };
@@ -95,6 +96,22 @@ describe("a layout store with groups of tabs", () => {
     expect(selectGroups(state)[0]?.collapsed).toBe(true);
     expect(selectShelf(state)).toEqual([SHELVED]);
     expect(toWorkspace(state)).toEqual(plain.workspace);
+  });
+
+  it("follows the workspace a tab belongs to, and names it in the tooltip", () => {
+    const store = started();
+    expect(tabWorkspace(store.getState(), "t1")).toBeNull();
+    const changes: LayoutChange[] = [
+      { type: "tab_state", tab: "t4", color: null, locked: true, group: null, workspace: "site" },
+    ];
+    const plain = new PlainFollower(grouped());
+    for (const change of changes) plain.apply(change);
+    expect(store.getState().apply(1, 2, changes)).toBe("applied");
+    const state = store.getState();
+    expect(state.tabs["t4"]?.workspace).toBe("site");
+    expect(toWorkspace(state)).toEqual(plain.workspace);
+    expect(tabWorkspace(state, "t4")).toBe("site on This PC");
+    expect(tabWorkspace(state, "t1")).toBe(`${state.name} on This PC`);
   });
 
   it("keeps an entry that a change leaves as it was", () => {

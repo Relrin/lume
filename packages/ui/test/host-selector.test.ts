@@ -147,6 +147,31 @@ describe("what can be done with a host of the selector", () => {
     expect(labels(SERVED, THIS_PC)).toEqual(["Open folder…", "New workspace…"]);
   });
 
+  it("is closing the current workspace when it is open beside the one with the windows", () => {
+    const both: SelectorSources = {
+      ...OWN,
+      workspaces: {
+        active: "acme",
+        workspaces: [
+          { name: "acme", root: null, open: true },
+          { name: "lume", root: "D:\\Code\\lume", open: true, holds: true },
+          { name: "site", root: null },
+        ],
+      },
+    };
+    expect(labels(both, THIS_PC)).toContain("Close workspace");
+    // The one with the windows is not closed on its own.
+    const home = { ...both, workspaces: { ...both.workspaces!, active: "lume" } };
+    expect(labels(home, THIS_PC)).not.toContain("Close workspace");
+    // An open workspace says so and is not deleted; one that is not open is.
+    const rows = selectorRows(home, host(home, THIS_PC), "");
+    expect(rows.map(({ name, hint, takes }) => [name, hint, takes])).toEqual([
+      ["acme", "open", null],
+      ["lume", "lume", null],
+      ["site", "", "delete"],
+    ]);
+  });
+
   it("is making a session, and letting go of the server", () => {
     expect(labels(OWN, DEVBOX.id)).toEqual(["New session on devbox", "Disconnect"]);
     const edit = "Edit connection…";

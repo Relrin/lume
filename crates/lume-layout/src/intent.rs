@@ -10,7 +10,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::ids::{GroupId, PaneId, PanelId, SplitId, TabId, WindowId};
-use crate::model::{Area, Bounds, GroupIcon, PanelContent, Shelved, Tab, TabColor, UnitRect};
+use crate::model::{
+    Area, Bounds, Group, GroupIcon, PanelContent, Shelved, Tab, TabColor, UnitRect,
+};
 
 /// A direction on the screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -297,6 +299,35 @@ pub enum Intent {
         #[serde(default)]
         keys: Vec<(PaneId, String)>,
     },
+    /// Puts the tabs of a workspace, as its file has them, after the last tab of a
+    /// window, belonging to that workspace, and shows the first of them. No workspace
+    /// is the one whose file holds the layout. Their parts are numbered anew here;
+    /// their panes keep the sessions they name.
+    TabsAdopt {
+        window: WindowId,
+        #[serde(default)]
+        workspace: Option<String>,
+        tabs: Vec<Tab>,
+        #[serde(default)]
+        groups: Vec<Group>,
+    },
+    /// Takes every tab that belongs to a workspace out of every window, locked or not.
+    TabsTake { workspace: String },
+    /// Says that the tabs that belong to one workspace belong to another from now on.
+    /// No workspace is the one whose file holds the layout.
+    TabsRetag {
+        #[serde(default)]
+        from: Option<String>,
+        #[serde(default)]
+        to: Option<String>,
+    },
+    /// Says that a group's tabs belong to a workspace, or to the one whose file holds
+    /// the layout.
+    GroupRetag {
+        group: GroupId,
+        #[serde(default)]
+        workspace: Option<String>,
+    },
 }
 
 fn yes() -> bool {
@@ -329,6 +360,10 @@ impl Intent {
                 | Intent::TabGraft { .. }
                 | Intent::TabReshape { .. }
                 | Intent::TabOrigin { .. }
+                | Intent::TabsAdopt { .. }
+                | Intent::TabsTake { .. }
+                | Intent::TabsRetag { .. }
+                | Intent::GroupRetag { .. }
         )
     }
 

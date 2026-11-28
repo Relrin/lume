@@ -38,6 +38,7 @@ import {
   stripItems,
   type StripItem,
 } from "../layout/selectors.ts";
+import type { LayoutState } from "../layout/store.ts";
 import type { Group, GroupId, TabId } from "../layout/types.ts";
 import { DRAG_SETTLE_TIMEOUT_MS, DRAG_START_PX } from "../tuning.ts";
 import { tabStyle } from "../motion/tab.ts";
@@ -280,6 +281,19 @@ function useRowDrag(
 }
 
 /**
+ * Where a tab belongs, as its tooltip says it: "{workspace} on This PC" while tabs of
+ * more than one workspace are in the layout, and nothing otherwise.
+ */
+export function tabWorkspace(state: LayoutState, tab: TabId): string | null {
+  if (state.backend !== null) return null;
+  const entry = state.tabs[tab];
+  if (!entry) return null;
+  const several = Object.values(state.tabs).some((other) => other.workspace !== undefined);
+  if (!several) return null;
+  return `${entry.workspace ?? state.name} on This PC`;
+}
+
+/**
  * Keeps a tab's label and what its panes have gathered up to date, without rendering,
  * and returns the pictures of its programs, which render when they change.
  */
@@ -291,23 +305,25 @@ function useTabMarks(
 ) {
   const label = useRef<HTMLSpanElement>(null);
   const lit = useRef<HTMLSpanElement>(null);
+  const belongs = useStore(app.layout, (state) => tabWorkspace(state, tab));
   useLayoutEffect(() => {
     // The label is another element once a rename is over.
     if (renaming) return undefined;
     let shown: string | undefined;
     return followTab(app, tab, (description) => {
       const element = label.current;
-      if (element && description.label !== shown) {
-        shown = description.label;
+      const title = belongs === null ? description.label : `${description.label} · ${belongs}`;
+      if (element && title !== shown) {
+        shown = title;
         // Set as text: a label comes from a program and is never markup.
         element.textContent = description.label;
         if (lit.current) lit.current.textContent = description.label;
-        element.parentElement?.setAttribute("title", description.label);
+        element.parentElement?.setAttribute("title", title);
       }
       const tabElement = holder.current;
       if (tabElement) mark(tabElement, "activity", description.activity, "idle");
     });
-  }, [app, tab, holder, renaming]);
+  }, [app, tab, holder, renaming, belongs]);
   const icons = useSyncExternalStore(
     useCallback((changed) => followTab(app, tab, changed), [app, tab]),
     () => describeTabNow(app, tab).icons.join(" "),

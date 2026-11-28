@@ -87,6 +87,11 @@ export interface TabEntry {
   readonly group: GroupId | null;
   /** The layout file the tab was opened from, as `<layout>#<tab>`, while it follows one. */
   readonly origin?: string | undefined;
+  /**
+   * The open workspace the tab belongs to, when that is not the one whose file holds
+   * the layout.
+   */
+  readonly workspace?: string | undefined;
 }
 
 /** One split's direction and its children's shares. */
@@ -326,16 +331,19 @@ function dropTree(draft: Draft, tab: TabId, old: TreeNode, kept: TreeNode | unde
 }
 
 /** What a tab entry holds besides its name and its tree. */
-type TabFacts = Pick<TabEntry, "color" | "locked" | "muted" | "group" | "origin">;
+type TabFacts = Pick<TabEntry, "color" | "locked" | "muted" | "group" | "origin" | "workspace">;
 
 /** A tab's facts, with what the core leaves out when it says nothing of it. */
-function factsOf(tab: Pick<Tab, "color" | "locked" | "muted" | "group" | "origin">): TabFacts {
+function factsOf(
+  tab: Pick<Tab, "color" | "locked" | "muted" | "group" | "origin" | "workspace">,
+): TabFacts {
   return {
     color: tab.color ?? null,
     locked: tab.locked ?? false,
     muted: tab.muted ?? false,
     group: tab.group ?? null,
     origin: tab.origin ?? undefined,
+    workspace: tab.workspace ?? undefined,
   };
 }
 
@@ -360,6 +368,7 @@ function setTree(
     before.muted === facts.muted &&
     before.group === facts.group &&
     before.origin === facts.origin &&
+    before.workspace === facts.workspace &&
     before.root === root;
   if (!same) {
     draft.set("tabs", tab.id, {
@@ -373,6 +382,7 @@ function setTree(
       muted: facts.muted,
       group: facts.group,
       ...(facts.origin === undefined ? {} : { origin: facts.origin }),
+      ...(facts.workspace === undefined ? {} : { workspace: facts.workspace }),
     });
   }
 }
@@ -523,20 +533,25 @@ function follow(draft: Draft, change: LayoutChange): void {
       if (!tab) return;
       const muted = change.muted ?? false;
       const origin = change.origin ?? undefined;
+      const workspace = change.workspace ?? undefined;
       const same =
         tab.color === change.color &&
         tab.locked === change.locked &&
         tab.muted === muted &&
         tab.group === change.group &&
-        tab.origin === origin;
+        tab.origin === origin &&
+        tab.workspace === workspace;
       if (!same) {
+        const rest: TabEntry = { ...tab };
+        delete (rest as { workspace?: string }).workspace;
         draft.set("tabs", tab.id, {
-          ...tab,
+          ...rest,
           color: change.color,
           locked: change.locked,
           muted,
           group: change.group,
           origin,
+          ...(workspace === undefined ? {} : { workspace }),
         });
       }
       return;
@@ -704,6 +719,7 @@ export function toWorkspace(state: LayoutState): Workspace {
           ...(tab.locked ? { locked: true } : {}),
           ...(tab.muted ? { muted: true } : {}),
           ...(tab.group === null ? {} : { group: tab.group }),
+          ...(tab.workspace === undefined ? {} : { workspace: tab.workspace }),
         },
       ];
     });

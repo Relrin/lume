@@ -573,8 +573,13 @@ impl Plugins {
             .iter()
             .map(|window| window.centre.tabs.len())
             .sum::<usize>();
+        let name = if workspace.backend.is_some() {
+            workspace.name.clone()
+        } else {
+            services.panes.current_workspace()
+        };
         Ok(WorkspaceInfo {
-            name: workspace.name.clone(),
+            name,
             root: self.config.current().workspace.root.clone(),
             windows: u32::try_from(workspace.windows.len()).unwrap_or(u32::MAX),
             tabs: u32::try_from(tabs).unwrap_or(u32::MAX),

@@ -33,7 +33,11 @@ impl Control {
                     .services
                     .launch(workspace.as_deref(), &exec, cwd, self.page_wait)
                     .await?;
-                let on_show = panes.workspace().name;
+                let on_show = if panes.served_by().is_some() {
+                    panes.workspace().name
+                } else {
+                    panes.current_workspace()
+                };
                 let mut effect = "brought the window to the front".to_owned();
                 if workspace.is_some() {
                     effect.push_str(&format!(", showing the workspace {on_show}"));

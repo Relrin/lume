@@ -58,6 +58,15 @@ export function selectActiveTab(state: LayoutState, window?: WindowId): TabId | 
   return selectWindow(state, window)?.active ?? null;
 }
 
+/**
+ * The workspace a window works in: the one of the tab it shows, or the one whose file
+ * holds the layout.
+ */
+export function selectCurrentWorkspace(state: LayoutState, window?: WindowId): string {
+  const tab = selectActiveTab(state, window);
+  return (tab === null ? undefined : state.tabs[tab]?.workspace) ?? state.name;
+}
+
 /** The pane of a window that has the keyboard. */
 export function selectFocus(state: LayoutState, window?: WindowId): PaneId | null {
   return selectWindow(state, window)?.focus ?? null;

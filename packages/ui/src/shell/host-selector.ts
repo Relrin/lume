@@ -100,15 +100,19 @@ function everyRow(sources: SelectorSources, host: string): SelectorRow[] {
       // A server's session may be called what a workspace is: while a server's layout is
       // on show no workspace is.
       const on = backend === null && workspace.name === workspaces?.active;
+      // Open beside the current one: its tabs are in the strip.
+      const open = backend === null && workspace.open === true;
+      const folder = workspace.root === null ? "" : folderName(workspace.root);
       return {
         key: `workspace:${workspace.name}`,
         id: workspace.name,
         name: workspace.name,
-        hint: workspace.root === null ? "" : folderName(workspace.root),
+        hint: open && !on ? (folder === "" ? "open" : `${folder} · open`) : folder,
         on,
-        // Only the workspace on show is renamed, and only another is deleted.
+        // Only the current workspace is renamed, and only one that is not open is
+        // deleted.
         renames: on,
-        takes: on ? null : "delete",
+        takes: on || open ? null : "delete",
       };
     });
   }
@@ -220,10 +224,18 @@ const WORKSPACE_COMMANDS: readonly { readonly command: string; readonly label: s
   { command: "lume.workspace.open-folder", label: "Open folder…" },
   { command: "lume.workspace.new", label: "New workspace…" },
   { command: "lume.workspace.set-root", label: "Set workspace folder…" },
+  { command: "lume.workspace.close", label: "Close workspace" },
 ];
 
 /** The commands that are about the workspace on show, and mean nothing without one. */
-const OF_THE_SHOWN: readonly string[] = ["lume.workspace.set-root"];
+const OF_THE_SHOWN: readonly string[] = ["lume.workspace.set-root", "lume.workspace.close"];
+
+/** Whether the current workspace is one open beside the one that holds the windows. */
+function closesCurrent(sources: SelectorSources): boolean {
+  const list = sources.workspaces;
+  const current = list?.workspaces.find((workspace) => workspace.name === list.active);
+  return current?.open === true && current.holds !== true;
+}
 
 /**
  * What can be done with a host. `known` is which commands there are.
@@ -243,6 +255,7 @@ export function selectorActs(
     for (const { command, label } of WORKSPACE_COMMANDS) {
       if (!known(command)) continue;
       if (sources.backend !== null && OF_THE_SHOWN.includes(command)) continue;
+      if (command === "lume.workspace.close" && !closesCurrent(sources)) continue;
       acts.push({ kind: "command", label, command });
     }
     return acts;

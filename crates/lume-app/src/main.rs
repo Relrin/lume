@@ -284,7 +284,15 @@ fn terminals(
         &name,
         first,
     ));
-    workspaces::remember_workspace(&dirs, &panes.workspace().name);
+    // The workspaces that were open beside this one are opened again with it.
+    let held = panes.workspace().name;
+    let reopen = if workspaces::last_workspace(&dirs).as_deref() == Some(held.as_str()) {
+        workspaces::open_workspaces(&dirs)
+    } else {
+        Vec::new()
+    };
+    workspaces::remember_workspace(&dirs, &held);
+    tauri::async_runtime::block_on(panes.reopen(reopen));
     state.set_panes(Arc::clone(&panes));
     let exec =
         (!fresh && !launch.exec.is_empty()).then(|| (launch.exec.clone(), launch.cwd.clone()));

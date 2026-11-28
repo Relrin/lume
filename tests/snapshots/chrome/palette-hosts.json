@@ -211,14 +211,14 @@
             "parts": [
               {
                 "role": "button",
-                "name": "All, 24",
+                "name": "All, 25",
                 "state": {
                   "pressed": "false"
                 }
               },
               {
                 "role": "button",
-                "name": "Commands, 13",
+                "name": "Commands, 14",
                 "state": {
                   "pressed": "false"
                 }

@@ -227,7 +227,8 @@ impl WindowConfig {
     }
 }
 
-/// What happens to a workspace's programs when another workspace is opened.
+/// What happens to a workspace's programs when it is closed, or put away while a
+/// server's layout is shown.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum OnSwitch {
@@ -283,7 +284,9 @@ impl Default for HostSettings {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct WorkspaceConfig {
-    /// What happens to a workspace's programs when another workspace is opened.
+    /// What happens to a workspace's programs when it is closed, or put away while a
+    /// server's layout is shown. Opening another workspace leaves them running: its
+    /// tabs join the others.
     pub on_switch: OnSwitch,
 }
 

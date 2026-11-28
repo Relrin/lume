@@ -736,6 +736,7 @@ fn read_tab(
         muted: false,
         group: None,
         origin: Some(format!("{layout}{ORIGIN_SEPARATOR}{tab_key}")),
+        workspace: None,
     })
 }
 

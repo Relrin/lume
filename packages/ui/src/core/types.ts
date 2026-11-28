@@ -80,12 +80,16 @@ export type WindowAction = "minimise" | "maximise" | "close";
 
 /** The workspaces there are, as `workspaces_list` returns them. */
 export interface WorkspaceList {
-  /** The name of the workspace on show. */
+  /** The name of the current workspace: the one of the tab on show. */
   readonly active: string;
   readonly workspaces: readonly {
     readonly name: string;
     /** The folder new terminals of the workspace start in, if it has one. */
     readonly root: string | null;
+    /** Whether its tabs are in the tab strip. */
+    readonly open?: boolean;
+    /** Whether it holds the windows, and so is closed with them. */
+    readonly holds?: boolean;
   }[];
 }
 

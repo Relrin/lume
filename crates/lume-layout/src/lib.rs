@@ -30,6 +30,7 @@ mod intent;
 mod mirror;
 mod model;
 mod normalise;
+mod open;
 mod persist;
 mod projection;
 mod steps;
@@ -50,6 +51,7 @@ pub use model::{
     PaneContent, Panel, PanelContent, Scratch, Shelved, Slot, Split, Tab, TabColor, TabGroup,
     TerminalPane, UnitRect, Window, Workspace,
 };
+pub use open::{all_tabs, keep_window_ids, put_back, split_off};
 pub use persist::{Loaded, Store, StoreError, WorkspaceFile, valid_name};
 pub use projection::Projection;
 pub use steps::{group_add, group_remove, group_step, tab_step, tabs_beside};

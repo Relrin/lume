@@ -360,6 +360,39 @@ fn renumber(node: &mut Node, workspace: &mut Workspace, panes: &mut HashMap<Pane
     }
 }
 
+/// A tab from elsewhere, numbered anew from a workspace's counter, its panes keeping
+/// their sessions.
+pub(crate) fn renumbered(workspace: &mut Workspace, tab: Tab) -> Tab {
+    adopt_tab(workspace, tab, true)
+}
+
+/// A tab from elsewhere, numbered anew from a workspace's counter. Its panes keep the
+/// sessions they name only when `keep_sessions` says so.
+fn adopt_tab(workspace: &mut Workspace, mut tab: Tab, keep_sessions: bool) -> Tab {
+    tab.id = TabId::new(workspace.fresh());
+    let mut panes = HashMap::new();
+    renumber(&mut tab.root, workspace, &mut panes);
+    if !keep_sessions {
+        forget_sessions(&mut tab.root);
+    }
+    tab.zoomed = tab.zoomed.and_then(|pane| panes.get(&pane).copied());
+    tab.last_focus = tab.last_focus.and_then(|pane| panes.get(&pane).copied());
+    tab
+}
+
+/// The workspace a tab made in a window belongs to: the one of the tab the window
+/// shows, or, in a window with no tab, the one of the tab the window the user works in
+/// shows.
+fn joining(workspace: &Workspace, window: usize) -> Option<String> {
+    let shown = |window: &Window| window.centre.active_tab().map(|tab| tab.workspace.clone());
+    shown(&workspace.windows[window])
+        .or_else(|| {
+            let focused = workspace.focused_window?;
+            shown(workspace.window(focused)?)
+        })
+        .flatten()
+}
+
 /// Puts tabs after the last tab of a window, in a group, and shows the first of them.
 fn put_group(window: &mut Window, group: Group, tabs: Vec<Tab>) {
     let first = window.centre.tabs.len();
@@ -526,6 +559,7 @@ fn open_tab(
     };
     let id = TabId::new(workspace.fresh());
     let pane_id = pane.id;
+    let joins = joining(workspace, window);
     let window = &mut workspace.windows[window];
     window.centre.tabs.insert(
         at,
@@ -540,6 +574,7 @@ fn open_tab(
             muted: false,
             group: None,
             origin: None,
+            workspace: joins,
         },
     );
     if activate || window.centre.active.is_none() {
@@ -1411,18 +1446,89 @@ fn change(
             let Shelved { mut group, tabs } = *group;
             group.id = GroupId::new(workspace.fresh());
             group.collapsed = false;
+            let joins = joining(workspace, window);
             let mut grafted = Vec::with_capacity(tabs.len());
-            for mut tab in tabs {
-                tab.id = TabId::new(workspace.fresh());
-                let mut panes = HashMap::new();
-                renumber(&mut tab.root, workspace, &mut panes);
-                forget_sessions(&mut tab.root);
-                tab.zoomed = tab.zoomed.and_then(|pane| panes.get(&pane).copied());
-                tab.last_focus = tab.last_focus.and_then(|pane| panes.get(&pane).copied());
+            for tab in tabs {
+                let mut tab = adopt_tab(workspace, tab, false);
+                tab.workspace = joins.clone();
                 grafted.push(tab);
             }
             created.group = Some(group.id);
             put_group(&mut workspace.windows[window], group, grafted);
+        }
+        Intent::TabsAdopt {
+            window,
+            workspace: belongs,
+            tabs,
+            groups,
+        } => {
+            let window = window_index(workspace, window)?;
+            if let Some(name) = &belongs
+                && !valid_name(name)
+            {
+                return Err(IntentError::BadName(name.clone()));
+            }
+            let mut renamed: HashMap<GroupId, GroupId> = HashMap::new();
+            let mut adopted_groups = Vec::with_capacity(groups.len());
+            for mut group in groups {
+                let id = GroupId::new(workspace.fresh());
+                renamed.insert(group.id, id);
+                group.id = id;
+                adopted_groups.push(group);
+            }
+            let first = workspace.windows[window].centre.tabs.len();
+            let mut adopted = Vec::with_capacity(tabs.len());
+            for tab in tabs {
+                let mut tab = adopt_tab(workspace, tab, true);
+                tab.group = tab.group.and_then(|group| renamed.get(&group).copied());
+                tab.workspace.clone_from(&belongs);
+                adopted.push(tab);
+            }
+            let here = &mut workspace.windows[window];
+            here.centre.groups.extend(adopted_groups);
+            here.centre.tabs.extend(adopted);
+            if first < here.centre.tabs.len() {
+                created.tab = Some(here.centre.tabs[first].id);
+                if let Some(group) = here.centre.tabs[first].group
+                    && let Some(group) = here.centre.group_mut(group)
+                {
+                    group.collapsed = false;
+                }
+                show_tab(here, first);
+            }
+        }
+        Intent::TabsTake { workspace: belongs } => {
+            for here in &mut workspace.windows {
+                let members: Vec<usize> = here
+                    .centre
+                    .tabs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, tab)| tab.workspace.as_deref() == Some(belongs.as_str()))
+                    .map(|(index, _)| index)
+                    .collect();
+                remove_tabs(here, members);
+            }
+        }
+        Intent::TabsRetag { from, to } => {
+            for here in &mut workspace.windows {
+                for tab in &mut here.centre.tabs {
+                    if tab.workspace == from {
+                        tab.workspace = to.clone();
+                    }
+                }
+            }
+        }
+        Intent::GroupRetag {
+            group,
+            workspace: belongs,
+        } => {
+            let window = group_window(workspace, group)?;
+            for tab in &mut workspace.windows[window].centre.tabs {
+                if tab.group == Some(group) {
+                    tab.workspace = belongs.clone();
+                }
+            }
         }
         Intent::TabGraft { window, tab, index } => {
             let window = window_index(workspace, window)?;
@@ -1434,14 +1540,10 @@ fn change(
                 Some(index) => index as usize,
                 None => len,
             };
-            let mut tab = *tab;
-            tab.id = TabId::new(workspace.fresh());
+            let joins = joining(workspace, window);
+            let mut tab = adopt_tab(workspace, *tab, false);
             tab.group = None;
-            let mut panes = HashMap::new();
-            renumber(&mut tab.root, workspace, &mut panes);
-            forget_sessions(&mut tab.root);
-            tab.zoomed = tab.zoomed.and_then(|pane| panes.get(&pane).copied());
-            tab.last_focus = tab.last_focus.and_then(|pane| panes.get(&pane).copied());
+            tab.workspace = joins;
             let shown = tab.last_focus.unwrap_or_else(|| tab.first_pane());
             created.tab = Some(tab.id);
             let window = &mut workspace.windows[window];
